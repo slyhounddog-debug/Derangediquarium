@@ -22,11 +22,14 @@ export const SEABED_FLOOR_Y = SEABED_ROW_START * TILE_SIZE; // world-y of the wa
 // reachable from build mode). Absolute indexing (not seabed-relative) keeps
 // every row/col calc a single division by TILE_SIZE, no offset to remember.
 export const TILE_EMPTY = 'empty'; // passable — items fall straight through
-export const TILE_WALL = 'wall'; // solid — items land and rest on top
+export const TILE_PLATFORM = 'platform'; // solid — items land and rest on top. The structural anchor: every other building must be placed adjacent to a Platform (or directly on the world's bottom row) — see BUILDING_TYPES' anchoring rule and Grid.js's canPlaceTile.
 export const TILE_RAMP_LEFT = 'ramp_left'; // solid — items land then slide down-left
 export const TILE_RAMP_RIGHT = 'ramp_right'; // solid — items land then slide down-right
 export const TILE_COLLECTOR = 'collector'; // solid — items landing here are immediately consumed (coins auto-banked)
-export const TILE_BLASTER = 'blaster'; // solid — items land here and immediately relaunch straight up into the water column instead of resting (see BLASTER_LAUNCH_* below)
+export const TILE_FAN_T2 = 'fan_t2'; // solid — Rudimentary Fan (Tier 2, free, short reach/low force)
+export const TILE_FAN_T3 = 'fan_t3'; // solid — Electric Fan (Tier 3, draws power, medium reach/force)
+export const TILE_FAN_T4 = 'fan_t4'; // solid — Turbo Fan (Tier 4, draws power, long reach/extreme force)
+export const TILE_AUTO_FEEDER = 'auto_feeder'; // solid — absorbs Waste pushed into its intake side, dispenses Food from the opposite side
 
 // Fish stay clear of the outer edges of the water column when spawning —
 // both the random spawn position on a shop purchase in UI.js, and (for
@@ -92,32 +95,52 @@ export const GRID_SWEEP_SUBSTEP = TILE_SIZE / 4; // px — every swept move is w
 // read as a sticky conveyor belt rather than something that just deflects
 // what's already moving through it). Instead: an item's vy is left
 // completely alone — falling through keeps falling, rising through (e.g. off
-// a Blaster) keeps rising — and crossing into a Ramp tile's row applies a
+// a Fan's push) keeps rising — and crossing into a Ramp tile's row applies a
 // single one-tile-width horizontal shift in that ramp's direction, exactly
 // once per row (RAMP_NUDGE_DISTANCE, tracked via item.rampNudgedRow so it
 // doesn't re-trigger every tick while still passing through the same row).
 export const RAMP_NUDGE_DISTANCE = TILE_SIZE;
-// A Blaster relaunches whatever lands on it back up into the water column.
-// Launch height is a fraction of the water column's height (SEABED_FLOOR_Y):
-// BLASTER_LAUNCH_MIN_FRACTION at the shallowest possible placement (right at
-// the top of the seabed), rising toward BLASTER_LAUNCH_MIN_FRACTION +
-// BLASTER_LAUNCH_MAX_DEPTH_BONUS as the Blaster is placed deeper into the
-// city, maxing out at the very bottom row (0.5 + 0.15 = 0.65 — i.e. even a
-// Blaster at the literal bottom of the city still only reaches 65% of the
-// tank's height, comfortably inside it). The launch velocity needed to reach
-// that height (v = sqrt(2 * gravity * height)) is computed per-item in
-// Grid.js since it depends on that item's own gravity constant (a coin and a
-// waste blob don't fall at the same rate). The shot isn't purely vertical:
-// BLASTER_LAUNCH_ANGLE_MAX_DEG splits that speed into a small sideways
-// component based on exactly where across the tile the item landed — dead
-// center launches straight up, landing at the tile's left/right edge tilts
-// the shot up to this many degrees off vertical in that direction — so a
-// stream of coins landing slightly differently across the tile fans out a
-// little instead of every shot retracing the exact same vertical line.
-export const BLASTER_LAUNCH_MIN_FRACTION = 0.5;
-export const BLASTER_LAUNCH_MAX_DEPTH_BONUS = 0.15;
-export const BLASTER_LAUNCH_ANGLE_MAX_DEG = 7;
-export const BLASTER_TOP_CORNER_RADIUS_FRACTION = 0.28; // fraction of TILE_SIZE — how rounded the Blaster's top two corners render (bottom stays square, it's still sitting flush on the tile below it)
+// ---- Directional Fans (Seabed Platform architecture) ----
+// A Fan is a directional force emitter, not a landing-triggered launcher —
+// see CLAUDE.md's "Directional Fans" section. Its aim angle is captured once
+// at placement time (locked toward wherever the cursor was within the tile
+// when it was placed — see Grid.js's placeTile/UI build-drag flow) and
+// stored per-instance in state.level.buildingData, since a plain grid-cell
+// id string has nowhere to hold it. Every tick, Grid.js's computeFanForce
+// sums a force vector from every powered fan whose cone currently contains a
+// given item — this applies everywhere, not just the seabed band, since a
+// fan's whole point is launching items back up into open water where fish
+// are. The cone is a fixed-direction blow (uniform along the fan's aim
+// angle, not radiating outward from its center like an explosion), narrowing
+// force linearly to 0 at max range.
+export const FAN_CONE_HALF_ANGLE_DEG = 15; // total cone width = 2x this = 30°
+// Placeholder balance per tier, same as every other economy/physics constant
+// in this file — tune once real playtesting exists. Power cost is only
+// tracked into state.level.powerDemand for now (Systems.js's real power
+// grid/supply is Phase 3 scope, not yet implemented — see its module
+// header), so an Electric/Turbo Fan still runs unconditionally today, same
+// as every other not-yet-power-gated Electric building in the codebase.
+export const FAN_T2_MAX_FORCE = 260; // Rudimentary Fan — force magnitude at the emitter (see Grid.js's a = F/mass integration)
+export const FAN_T2_MAX_RANGE = 160; // px — 5 tiles (was 3; +2 tiles per direct request to extend all Fans' reach)
+export const FAN_T2_POWER_COST = 0;
+export const FAN_T3_MAX_FORCE = 520; // Electric Fan
+export const FAN_T3_MAX_RANGE = 272; // px — 8.5 tiles (was 5.5; +3 tiles)
+export const FAN_T3_POWER_COST = 5;
+export const FAN_T4_MAX_FORCE = 1100; // Turbo Fan — extreme thrust, enough to clear a heavy coin across a ledge on its own
+export const FAN_T4_MAX_RANGE = 416; // px — 13 tiles (was 10; +3 tiles)
+export const FAN_T4_POWER_COST = 14;
+
+// ---- Auto-Feeder ----
+// Placed and aimed the same way as a Fan (angle locked at placement) — its
+// aim is the OUTPUT direction; the intake sits directly opposite. Grid.js's
+// updateBuildings absorbs any Waste item that drifts within
+// AUTO_FEEDER_INTAKE_RADIUS of the intake point (typically pushed there by a
+// Fan) and, after AUTO_FEEDER_PROCESS_DURATION_MS, dispenses one Food item
+// at the output point with zero velocity — a Fan can then pick it back up
+// and launch it into the water column, same as any other item.
+export const AUTO_FEEDER_INTAKE_RADIUS = TILE_SIZE * 0.6;
+export const AUTO_FEEDER_PROCESS_DURATION_MS = 2000;
+export const AUTO_FEEDER_PORT_OFFSET_FRACTION = 0.5; // fraction of TILE_SIZE — how far outside the tile's center the intake/output points sit, along the aim axis
 
 // A Collector doesn't bank an item the instant it lands any more — it visibly
 // draws it in toward the tile's center and holds it there for a full
@@ -349,39 +372,47 @@ export const EYE_PUPIL_OFFSET_RATIO = 0.5; // how far the pupil can travel from 
 export const TANK_POINT_PER_ADULT_FISH = 1;
 export const TANK_POINT_COLOR = '#ffcc4d'; // floating "+1 Tank Point!" text color, and the panel's accent
 
-// All upgrade trees are simple linear ladders bought with Tank Points,
-// index 0 = cost of level 1 (must already be at level N-1 to buy level N —
-// UI.js enforces this, not Config.js), sharing one much steeper 5-level cost
-// curve (was a flat [1,2,3,4] 4-level ladder — bumped up and extended a
-// level per direct request that upgrades felt too cheap/fast to max out).
-// Placeholder balance otherwise, same as every other economy constant here —
-// tune once real playtesting exists.
-export const TANK_UPGRADE_COSTS = [2, 5, 15, 30, 50]; // Tank Points
-
-export const FISH_MOVEMENT_UPGRADE_COSTS = TANK_UPGRADE_COSTS;
-export const FISH_MOVEMENT_UPGRADE_MAX_LEVEL = FISH_MOVEMENT_UPGRADE_COSTS.length;
-// Every SPECIES row's swimSpeed below is already reduced by exactly this
-// much from its originally-tuned value — buying Level 1 restores the
-// original speed; Level 2-5 push past it. Applied live (not baked into a
-// fish at spawn time) so buying a level speeds up every fish already in the
-// tank immediately, not just future spawns — see Entities.js's
-// effectiveSwimSpeed().
-export const FISH_MOVEMENT_UPGRADE_SPEED_BONUS = 5; // px/sec per level
-
-export const FOOD_QUALITY_UPGRADE_COSTS = TANK_UPGRADE_COSTS;
+// Food Quality's own 5-level cost ladder — unchanged (was a flat [1,2,3,4]
+// 4-level ladder — bumped up and extended a level per direct request that
+// upgrades felt too cheap/fast to max out). Placeholder balance, same as
+// every other economy constant here — tune once real playtesting exists.
+export const FOOD_QUALITY_UPGRADE_COSTS = [2, 5, 15, 30, 50]; // Tank Points
 export const FOOD_QUALITY_UPGRADE_MAX_LEVEL = FOOD_QUALITY_UPGRADE_COSTS.length;
 export const FOOD_QUALITY_SINK_SPEED_REDUCTION_PER_LEVEL = 0.10; // 10% slower fall per level (both FOOD_GRAVITY and FOOD_MAX_FALL_SPEED scale down) — doubled from 5%, part of the same slower-pacing pass as FOOD_GRAVITY/FOOD_MAX_FALL_SPEED above; applied live in Entities.js's updateFood
 // FOOD_HUNGER_RELIEF_BY_LEVEL above is the other half of Food Quality.
+
+// Fish Movement and Food Capacity share a separate, much longer and cheaper
+// 9-level ladder — per direct request, several more levels than Food
+// Quality's 5 but far cheaper per level, so these two read as a steady
+// trickle of small wins rather than Food Quality's steeper climb. Index 0 =
+// cost of level 1 (must already be at level N-1 to buy level N — UI.js
+// enforces this, not Config.js). Placeholder balance, same as every other
+// economy constant here — tune once real playtesting exists.
+export const FISH_MOVEMENT_FOOD_CAPACITY_UPGRADE_COSTS = [1, 3, 6, 10, 15, 20, 25, 30, 35]; // Tank Points
+
+export const FISH_MOVEMENT_UPGRADE_COSTS = FISH_MOVEMENT_FOOD_CAPACITY_UPGRADE_COSTS;
+export const FISH_MOVEMENT_UPGRADE_MAX_LEVEL = FISH_MOVEMENT_UPGRADE_COSTS.length;
+// Every SPECIES row's swimSpeed below is already reduced by exactly this
+// much from its originally-tuned value — buying Level 1 restores the
+// original speed; every level after pushes past it. Applied live (not baked
+// into a fish at spawn time) so buying a level speeds up every fish already
+// in the tank immediately, not just future spawns — see Entities.js's
+// effectiveSwimSpeed(). Left as a flat px/sec bonus per level (not a
+// percentage) per direct request to leave this mechanic's formula alone.
+export const FISH_MOVEMENT_UPGRADE_SPEED_BONUS = 5; // px/sec per level
 
 // Food Capacity: how many food pellets can exist in state.level.items at
 // once (checked in Entities.js's trySpawnFood — spawning is refused past
 // this, regardless of money, same as any other affordability gate). Starts
 // deliberately tight (FOOD_MAX_ON_SCREEN_BASE) so early-game feeding is a
 // real constraint the player has to work around, not just spam; each
-// purchased level raises the cap by FOOD_CAPACITY_UPGRADE_INCREMENT.
+// purchased level raises the cap by FOOD_CAPACITY_UPGRADE_INCREMENT — cut
+// from 2 to 1 per level now that there are 9 levels instead of 5, so the cap
+// still tops out at a comparable place (2 -> 11 at max level) rather than
+// nearly doubling.
 export const FOOD_MAX_ON_SCREEN_BASE = 2;
-export const FOOD_CAPACITY_UPGRADE_INCREMENT = 2; // per level — base 2 -> 4 -> 6 -> 8 -> 10 -> 12 at max level
-export const FOOD_CAPACITY_UPGRADE_COSTS = TANK_UPGRADE_COSTS;
+export const FOOD_CAPACITY_UPGRADE_INCREMENT = 1; // per level — base 2 -> 3 -> 4 -> ... -> 11 at max level (9 levels)
+export const FOOD_CAPACITY_UPGRADE_COSTS = FISH_MOVEMENT_FOOD_CAPACITY_UPGRADE_COSTS;
 export const FOOD_CAPACITY_UPGRADE_MAX_LEVEL = FOOD_CAPACITY_UPGRADE_COSTS.length;
 
 // Defensive Capabilities (click damage/offense vs invading aliens) has no
@@ -601,22 +632,33 @@ export const SPECIES = {
 
 export const SPECIES_LIST = Object.values(SPECIES);
 
-// ---- Buildings (Phase 2) ----
+// ---- Buildings (Phase 2, Seabed Platform architecture) ----
 // Every placeable seabed tile is a data row here, same pattern as SPECIES —
 // adding a building means adding a row, not new placement code. `cost` is
 // spent from state.level.money on placement (UI.js); removing a tile refunds
 // cost * TILE_REFUND_FRACTION. `color` drives both the build-palette icon and
 // the placed tile's render (Grid.js) and ghost-preview (main.js).
-// unlockedByDefault is false across the board now — nothing is available at
-// level start any more. All 6 unlock together when the Mound cracks to Tier
-// 2 (see CLAUDE.md's Tier Progression & The Mound section, TIER_UNLOCKS
-// below, and Mound.js) instead of the old "available from square one."
-export const TILE_REFUND_FRACTION = 0.5;
+// unlockedByDefault is false across the board — nothing is available at
+// level start. See TIER_UNLOCKS below for what the Mound grants at each
+// tier, and Mound.js.
+//
+// Placement Constraint: nothing here can float freely in open water. Every
+// building except Platform itself must be placed adjacent (up/down/left/
+// right) to a Platform tile, or directly on the world's absolute bottom row
+// (the true seabed floor) — enforced by Grid.js's canPlaceTile. Platform is
+// the one exception: it places freely anywhere in the seabed band, same as
+// the old Wall did, since it's the thing everything else anchors to.
+// Full refund on removal (100%, not a fraction any more) — per direct
+// request, since removal is now a deliberate Demolish-tool action (see
+// UI.js's tool-demolish-btn) rather than an always-available right-click,
+// there's no risk of it being used as a free item-conveyor exploit the way
+// a partial-refund policy was originally hedging against.
+export const TILE_REFUND_FRACTION = 1.0;
 export const BUILDING_TYPES = {
-  [TILE_WALL]: {
-    id: TILE_WALL, name: 'Wall', icon: '🧱', cost: 5,
-    description: 'Solid floor. Items land and rest on top — collect them by hand until something routes them onward.',
-    color: '#dba36f', unlockedByDefault: false, // warm terracotta, not the muddy gray-brown this used to be — that read as "disabled" against the pastel palette
+  [TILE_PLATFORM]: {
+    id: TILE_PLATFORM, name: 'Platform', icon: '🧱', cost: 5,
+    description: 'Solid structural floor. Items land and rest on top. Every other building must be anchored to a Platform (or the seabed floor) to be placed.',
+    color: '#dba36f', unlockedByDefault: true, // available from level start — every other building needs one to anchor to, so it can't be gated behind any Mound tier
   },
   [TILE_RAMP_LEFT]: {
     id: TILE_RAMP_LEFT, name: 'Ramp Left', icon: '↙️', cost: 8,
@@ -633,10 +675,25 @@ export const BUILDING_TYPES = {
     description: 'Auto-banks any coin that reaches it — no clicking required. Unpowered, so it leaves a little waste behind each time.',
     color: '#8fe0b8', unlockedByDefault: false,
   },
-  [TILE_BLASTER]: {
-    id: TILE_BLASTER, name: 'Blaster', icon: '🚀', cost: 25,
-    description: 'Launches whatever lands on it back up toward the surface, angled slightly by where it landed — deeper placements reach higher, up to 65% of the tank.',
-    color: '#ff8a65', unlockedByDefault: false,
+  [TILE_FAN_T2]: {
+    id: TILE_FAN_T2, name: 'Rudimentary Fan', icon: '🌀', cost: 15,
+    description: `Blows a narrow cone of force in whatever direction you aim it at placement. Free to run, but short reach (${FAN_T2_MAX_RANGE}px) and low force — struggles to lift a coin.`,
+    color: '#9fd8ff', unlockedByDefault: false,
+  },
+  [TILE_FAN_T3]: {
+    id: TILE_FAN_T3, name: 'Electric Fan', icon: '💨', cost: 45,
+    description: `Draws a little power from the grid for medium reach (${FAN_T3_MAX_RANGE}px) and force — enough to route most coins.`,
+    color: '#5fb8ff', unlockedByDefault: false,
+  },
+  [TILE_FAN_T4]: {
+    id: TILE_FAN_T4, name: 'Turbo Fan', icon: '🌪️', cost: 120,
+    description: `Extreme thrust and long reach (${FAN_T4_MAX_RANGE}px) — clears even a heavy coin over a ledge on its own. Draws moderate power.`,
+    color: '#2f7fd6', unlockedByDefault: false,
+  },
+  [TILE_AUTO_FEEDER]: {
+    id: TILE_AUTO_FEEDER, name: 'Auto-Feeder', icon: '♻️', cost: 35,
+    description: 'Absorbs Waste pushed into its intake side and dispenses Food from the opposite side — aim it the same way as a Fan.',
+    color: '#c9e88f', unlockedByDefault: false,
   },
 };
 export const BUILDING_LIST = Object.values(BUILDING_TYPES);
@@ -649,33 +706,110 @@ export const BUILDING_LIST = Object.values(BUILDING_TYPES);
 // state.level.moundTeased). MOUND_CRACK_COST[tier] is the $ spent to
 // actually crack FROM that tier to the next, once teased (placeholder
 // balance, same as every other economy constant here — tune once real
-// playtesting exists; Tier 3->4 in particular is priced as though it needs
-// "a whole system" behind it, not just a bigger number). TIER_UNLOCKS[tier]
+// playtesting exists; Tier 4->5 in particular is priced steeply (50000) as
+// though it needs "a whole system" behind it, not just a bigger number).
+// TIER_UNLOCKS[tier]
 // is what gets permanently granted into state.meta the first time that tier
 // is reached.
-export const MOUND_MAX_TIER = 4; // reaching this shatters the Mound completely (Tier 4 reveal) instead of cracking further
-export const MOUND_TEASE_COST = 150;
-export const MOUND_CRACK_COST = { 1: 1000, 2: 5000, 3: 25000 };
+export const MOUND_MAX_TIER = 5; // reaching this shatters the Mound completely (Tier 5 reveal) instead of cracking further — shifted from 4 to make room for the new Tier 2 (Economy Fish Combining) below
+export const MOUND_TEASE_COST = 150; // unchanged — the tease is still a Tier 1 no-op regardless of how many tiers exist above it
+// Crack costs 1/2/3 are unchanged from before the tier shift (1000/5000/25000
+// for 1->2, 2->3, 3->4); 4 (2->3... — see TIER_UNLOCKS below for exactly what
+// each transition now grants) is new, priced at the explicitly requested
+// 50000 for the final crack into Tier 5 (Hybridization).
+export const MOUND_CRACK_COST = { 1: 1000, 2: 5000, 3: 25000, 4: 50000 };
 export const MOUND_WIDTH_TILES = 4.4; // how many seabed tiles wide its clickable footprint is — 10% bigger than the original 4
 export const MOUND_HEIGHT_PX = 62; // how far it mounds up above the seabed surface — 10% bigger than the original 56
+// All tiers shifted up by +1 from their original numbering (old T2->new T3,
+// old T3->new T4, old T4->new T5) to make room for a new Tier 2 dedicated to
+// Economy Fish Combining/Splicing and dynamic economy-fish pricing (both
+// mechanics, not unlocks — gated on state.level.tier >= 2 wherever they're
+// read, see ECONOMY_SPECIES_IDS/FISH_STAR_TIER_MAX below). Platform itself
+// is NOT tier-gated at all any more — see BUILDING_TYPES' unlockedByDefault
+// above — since every other building needs one to anchor to, per direct
+// request it's available from level start rather than waiting on any crack.
+// Collector and Auto-Feeder moved to Tier 3 (alongside the Ramps and
+// Suckerfish) per the same request. The Rudimentary Fan isn't granted by a
+// TIER_UNLOCKS entry at all any more — it moved even earlier, to the Mound's
+// first "throw money" tease itself (the informal "Tier 1.5" step, before
+// state.level.tier even reaches 2) — see Mound.js's crackMound.
 export const TIER_UNLOCKS = {
-  2: { species: ['suckerfish'], buildings: [TILE_WALL, TILE_RAMP_LEFT, TILE_RAMP_RIGHT, TILE_COLLECTOR, TILE_BLASTER] },
-  // Tier 3/4 species are listed even though their buildings/mechanics aren't
+  2: {
+    species: [],
+    buildings: [], // Rudimentary Fan already granted by the Tier 1.5 tease — this crack's only effect is flipping state.level.tier to 2, which is what gates Economy Fish Combining
+  },
+  3: {
+    species: ['suckerfish'],
+    buildings: [TILE_RAMP_LEFT, TILE_RAMP_RIGHT, TILE_COLLECTOR, TILE_AUTO_FEEDER],
+  },
+  // Tier 4/5 species are listed even though some of their mechanics aren't
   // built yet (Phase 3/4 alignment, not Phase 2 coding scope) — reaching
   // them today just makes these purchasable early with no real
   // Generator/Researcher/splicing behavior behind them yet, same inert-
-  // scaffold situation every not-yet-behavior-wired species has been in.
-  3: { species: ['electric_eel'], buildings: [] },
-  4: {
+  // scaffold situation every not-yet-behavior-wired species has been in. The
+  // Electric/Turbo Fans ARE fully functional the moment they unlock, unlike
+  // those still-scaffolded species/behaviors.
+  4: { species: ['electric_eel'], buildings: [TILE_FAN_T3] },
+  5: {
     species: [
       'octopus', 'scrub_guppy', 'volt_guppy', 'scholar_guppy',
       'scrub_dartfin', 'volt_dartfin', 'scholar_dartfin',
       'scrub_blimpfish', 'volt_blimpfish', 'scholar_blimpfish',
       'scrub_eel', 'scrub_topus', 'volt_topus',
     ],
-    buildings: [],
+    buildings: [TILE_FAN_T4],
   },
 };
 
+// ---- Economy Fish Combining/Splicing (Tier 2) ----
+// The 3 base feeder species — the only ones dynamic pricing and star-tier
+// combining apply to. Named "economy fish" in the design spec to
+// distinguish them from the utility species (Suckerfish/Electric Eel/
+// Science Octopus) and their hybrids, which are priced/handled normally.
+export const ECONOMY_SPECIES_IDS = ['guppy', 'dartfin', 'blimpfish'];
+// Current_Cost = species.cost * (ECONOMY_FISH_COST_GROWTH_RATE ^ N), where N
+// is how many living fish of that exact species (any star tier) are
+// currently in state.level.entities — see Entities.js's
+// getEconomyFishCost(). Buying one immediately raises the cost of the next;
+// one dying, starving, or being consumed by a combine lowers N (and so the
+// cost) again, since N is always computed live off the current entity list
+// rather than tracked as a running counter.
+export const ECONOMY_FISH_COST_GROWTH_RATE = 1.4;
+
+// Two Adult economy fish of the exact same species AND exact same star tier
+// can be combined (dragged onto each other) into one Adult fish of the next
+// tier — see Entities.js's canCombineFish/combineFish and main.js's drag
+// handling. Tier 1 is the standard, freshly-purchased fish (no visual
+// change); each combine step multiplies the adult coin dropValue by
+// FISH_STAR_TIER_VALUE_MULTIPLIER over the previous tier's, capped at
+// FISH_STAR_TIER_MAX (a Tier-4 pair can no longer be combined further).
+// FISH_STAR_COUNT_BY_TIER is the number of stars FishRenderer.js overlays on
+// the adult sprite per tier — deliberately NOT a plain tier-1 count (Tier 2
+// jumps straight to 2 stars, not 1), per the design spec's exact table.
+export const FISH_STAR_TIER_MAX = 4;
+export const FISH_STAR_TIER_VALUE_MULTIPLIER = 1.5;
+export const FISH_STAR_COUNT_BY_TIER = { 1: 0, 2: 2, 3: 3, 4: 4 };
+export const FISH_STAR_COLOR = '#ffd700';
+export const FISH_STAR_OUTER_RADIUS_RATIO = 0.09; // fraction of the fish's current size
+export const FISH_STAR_INNER_RADIUS_FRACTION = 0.45; // fraction of a star's own outer radius
+export const FISH_STAR_SPACING_RATIO = 2.4; // fraction of a star's outer radius, between star centers
+export const FISH_STAR_Y_OFFSET_RATIO = 0.55; // how far above the fish's center the star row sits, relative to size
+// Hit-test radius (as a fraction of the fish's current on-screen size) used
+// by main.js's drag-to-combine mousedown/mouseup and the live hover-target
+// check — generous enough to grab a fish without needing pixel precision,
+// same spirit as COIN_CLICK_RADIUS_MULTIPLIER above.
+export const FISH_DRAG_HIT_RADIUS_FRACTION = 0.6;
+
 // ---- Rolling notification log ----
 export const NOTIFICATION_LOG_MAX = 50; // oldest entries drop off past this many
+
+// ---- Story triggers (Systems.js/Entities.js/UI.js/Grid.js/main.js) ----
+// A grab-bag of one-time and periodic narrative beats layered on top of the
+// Rolling Notification Log — see CLAUDE.md's "Story & Tutorial
+// Notifications" for the full list and rationale. Grouped here since they're
+// all placeholder-balance/timing numbers in the same spirit as everything
+// else in this file, even though their triggers live in several modules.
+export const BANKRUPTCY_BAILOUT_AMOUNT = 100; // $ granted the first time the player has no fish left AND can't afford anything in the shop — see Systems.js's updateStoryTriggers
+export const MONEY_MILESTONE_1K = 1000; // lifetime money EARNED (not current balance) that triggers the one-time "save some for the fishes" notification — see Entities.js's bankMoney
+export const ESCAPE_DARE_DELAY_MS = 120000; // 2 minutes of state.level.elapsed with Escape never pressed before the "press escape, I dare you" notification fires
+export const FISH_VANISH_DURATION_MS = 2500; // ms every fish freezes (position/hunger/coin-timer all frozen, not just hidden) and stops rendering, the first time the notification log is ever expanded

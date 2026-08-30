@@ -1,5 +1,6 @@
-// Grid.js — seabed tile array, gravity/slope physics for items once they
-// reach the seabed, ramp/blaster/collector routing. Owns state.level.grid.
+// Grid.js — seabed tile array, gravity/fan-force physics for items once they
+// reach the seabed, ramp/collector/auto-feeder routing, platform anchoring.
+// Owns state.level.grid and state.level.buildingData.
 // Forbidden: no fish logic, no camera math.
 
 import {
@@ -8,21 +9,19 @@ import {
   WORLD_TILES_H,
   WORLD_H,
   SEABED_ROW_START,
-  SEABED_FLOOR_Y,
   TILE_EMPTY,
-  TILE_WALL,
+  TILE_PLATFORM,
   TILE_RAMP_LEFT,
   TILE_RAMP_RIGHT,
   TILE_COLLECTOR,
-  TILE_BLASTER,
+  TILE_FAN_T2,
+  TILE_FAN_T3,
+  TILE_FAN_T4,
+  TILE_AUTO_FEEDER,
   BUILDING_TYPES,
   TILE_REFUND_FRACTION,
   GRID_SWEEP_SUBSTEP,
   RAMP_NUDGE_DISTANCE,
-  BLASTER_LAUNCH_MIN_FRACTION,
-  BLASTER_LAUNCH_MAX_DEPTH_BONUS,
-  BLASTER_LAUNCH_ANGLE_MAX_DEG,
-  BLASTER_TOP_CORNER_RADIUS_FRACTION,
   ITEM_LOST_BELOW_WORLD_MARGIN_PX,
   ITEM_HORIZONTAL_DAMPING,
   ITEM_COLLISION_ITERATIONS,
@@ -35,14 +34,43 @@ import {
   COLLECTOR_PULL_STRENGTH,
   COLLECTOR_PROCESSING_MASS,
   COLLECTOR_CIRCLE_RADIUS_FRACTION,
+  FAN_CONE_HALF_ANGLE_DEG,
+  FAN_T2_MAX_FORCE, FAN_T2_MAX_RANGE, FAN_T2_POWER_COST,
+  FAN_T3_MAX_FORCE, FAN_T3_MAX_RANGE, FAN_T3_POWER_COST,
+  FAN_T4_MAX_FORCE, FAN_T4_MAX_RANGE, FAN_T4_POWER_COST,
+  AUTO_FEEDER_INTAKE_RADIUS,
+  AUTO_FEEDER_PROCESS_DURATION_MS,
+  AUTO_FEEDER_PORT_OFFSET_FRACTION,
+  NOTIFICATION_LOG_MAX,
 } from './Config.js';
 import { worldToScreen } from './Engine.js';
+
+// One-time story/tutorial notifications — see state.level.tutorialFlags and
+// CLAUDE.md's "Story & Tutorial Notifications" section.
+const FIRST_BUILDING_PLACED_MESSAGE = "You just placed your first piece of seabed hardware. Welcome to factory brain — there's no swimming back from this now.";
+const FIRST_FAN_PLACED_MESSAGE = 'fancy fan....oooo you fancy';
+
+function pushGridNotification(state, text) {
+  const notifications = state.level.notifications;
+  notifications.push({ id: notifications.length + 1, text, elapsed: state.level.elapsed });
+  if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
+}
 
 // Tiles an item's fall (or rise) is arrested by. Ramps are deliberately NOT
 // solid — see RAMP_NUDGE_DISTANCE's comment in Config.js: they're a
 // pass-through nudge, not a surface anything lands or rests on.
-const SOLID_TILES = new Set([TILE_WALL, TILE_COLLECTOR, TILE_BLASTER]);
+const SOLID_TILES = new Set([TILE_PLATFORM, TILE_COLLECTOR, TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4, TILE_AUTO_FEEDER]);
 const RAMP_TILES = new Set([TILE_RAMP_LEFT, TILE_RAMP_RIGHT]);
+const FAN_TILES = new Set([TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4]);
+
+// Per-tier fan stats, keyed by tile id — Grid.js's own lookup table (not
+// duplicated onto BUILDING_TYPES, which is presentation/shop data).
+const FAN_STATS = {
+  [TILE_FAN_T2]: { maxForce: FAN_T2_MAX_FORCE, maxRange: FAN_T2_MAX_RANGE, powerCost: FAN_T2_POWER_COST },
+  [TILE_FAN_T3]: { maxForce: FAN_T3_MAX_FORCE, maxRange: FAN_T3_MAX_RANGE, powerCost: FAN_T3_POWER_COST },
+  [TILE_FAN_T4]: { maxForce: FAN_T4_MAX_FORCE, maxRange: FAN_T4_MAX_RANGE, powerCost: FAN_T4_POWER_COST },
+};
+const FAN_CONE_HALF_ANGLE_RAD = (FAN_CONE_HALF_ANGLE_DEG * Math.PI) / 180;
 
 export function createGrid() {
   const grid = [];
@@ -56,21 +84,30 @@ function colAt(x) {
 function rowAt(y) {
   return Math.floor(y / TILE_SIZE);
 }
+function buildingKey(col, row) {
+  return `${row},${col}`;
+}
 
-// Past the world's side/top edges reads as TILE_WALL (nothing needs to fall
-// off the sides). Past the *bottom* edge reads as TILE_EMPTY instead — there
-// is deliberately no floor down there any more: an item that reaches it just
-// keeps falling, and stepItemOnGrid deletes it once it's fallen
-// ITEM_LOST_BELOW_WORLD_MARGIN_PX past WORLD_H (see that function). An
-// unbuilt level doesn't catch anything for free any more; the player has to
-// build something to actually keep an item.
+// Past the world's side/top edges reads as TILE_PLATFORM-equivalent solid
+// (nothing needs to fall off the sides — reuses the same "wall" behavior via
+// SOLID_TILES.has check below returning true for this sentinel). Past the
+// *bottom* edge reads as TILE_EMPTY instead — there is deliberately no floor
+// down there any more: an item that reaches it just keeps falling, and
+// stepItemOnGrid deletes it once it's fallen ITEM_LOST_BELOW_WORLD_MARGIN_PX
+// past WORLD_H (see that function). An unbuilt level doesn't catch anything
+// for free any more; the player has to build something to actually keep an
+// item.
+const BOUNDARY_WALL = '__boundary_wall__'; // not a real BUILDING_TYPES entry — only ever compared against via SOLID_TILES.has below, which is checked with a manual `|| tile === BOUNDARY_WALL` at each call site that needs it
 function tileAt(grid, x, y) {
   const row = rowAt(y);
   const col = colAt(x);
-  if (col < 0 || col >= WORLD_TILES_W) return TILE_WALL;
-  if (row < 0) return TILE_WALL;
+  if (col < 0 || col >= WORLD_TILES_W) return BOUNDARY_WALL;
+  if (row < 0) return BOUNDARY_WALL;
   if (row >= WORLD_TILES_H) return TILE_EMPTY;
   return grid[row][col];
+}
+function isSolid(tile) {
+  return tile === BOUNDARY_WALL || SOLID_TILES.has(tile);
 }
 
 // col/row here are tile indices, not world px — used by build-mode UI/main.js.
@@ -83,6 +120,22 @@ export function worldToTile(x, y) {
   return { col: colAt(x), row: rowAt(y) };
 }
 
+// A non-Platform building must be adjacent (up/down/left/right) to a
+// Platform tile, or sit directly on the world's absolute bottom row (the
+// true seabed floor, resting on solid ground with nothing needed to anchor
+// to). Platform itself is exempt — it's what everything else anchors to, so
+// it has to be placeable on its own.
+function isAnchored(grid, col, row, buildingId) {
+  if (buildingId === TILE_PLATFORM) return true;
+  if (row === WORLD_TILES_H - 1) return true; // resting on the literal seabed floor
+  const neighbors = [[row - 1, col], [row + 1, col], [row, col - 1], [row, col + 1]];
+  for (const [r, c] of neighbors) {
+    if (r < 0 || r >= WORLD_TILES_H || c < 0 || c >= WORLD_TILES_W) continue;
+    if (grid[r][c] === TILE_PLATFORM) return true;
+  }
+  return false;
+}
+
 // Returns { ok, reason } rather than a bare bool so the build-mode UI can
 // show *why* a placement is invalid (ghost preview tint, tooltip, etc).
 export function canPlaceTile(state, col, row, buildingId) {
@@ -93,14 +146,35 @@ export function canPlaceTile(state, col, row, buildingId) {
   const building = BUILDING_TYPES[buildingId];
   if (!building) return { ok: false, reason: 'unknown building' };
   if (state.level.money < building.cost) return { ok: false, reason: 'cannot afford' };
+  if (!isAnchored(state.level.grid, col, row, buildingId)) {
+    return { ok: false, reason: 'must be anchored to a Platform or the seabed floor' };
+  }
   return { ok: true, reason: null };
 }
 
-export function placeTile(state, col, row, buildingId) {
+// `angle` (radians, atan2 convention: 0 = +x/right, +y is down) is only
+// meaningful for Fans and the Auto-Feeder — it's the direction locked in at
+// placement (see UI/main.js's build-drag, which derives it from the cursor's
+// exact sub-tile position). Stored in state.level.buildingData, keyed by
+// "row,col", since the grid array itself only holds a bare type id string.
+export function placeTile(state, col, row, buildingId, angle = 0) {
   const check = canPlaceTile(state, col, row, buildingId);
   if (!check.ok) return false;
   state.level.money -= BUILDING_TYPES[buildingId].cost;
   state.level.grid[row][col] = buildingId;
+  if (FAN_TILES.has(buildingId)) {
+    state.level.buildingData[buildingKey(col, row)] = { type: buildingId, angle };
+  } else if (buildingId === TILE_AUTO_FEEDER) {
+    state.level.buildingData[buildingKey(col, row)] = { type: buildingId, angle, absorbing: false, progressMs: 0 };
+  }
+  if (!state.level.tutorialFlags.firstBuildingPlaced) {
+    state.level.tutorialFlags.firstBuildingPlaced = true;
+    pushGridNotification(state, FIRST_BUILDING_PLACED_MESSAGE);
+  }
+  if (FAN_TILES.has(buildingId) && !state.level.tutorialFlags.firstFanPlaced) {
+    state.level.tutorialFlags.firstFanPlaced = true;
+    pushGridNotification(state, FIRST_FAN_PLACED_MESSAGE);
+  }
   return true;
 }
 
@@ -113,23 +187,96 @@ export function removeTile(state, col, row) {
   if (existing === TILE_EMPTY) return false;
   const building = BUILDING_TYPES[existing];
   state.level.grid[row][col] = TILE_EMPTY;
+  delete state.level.buildingData[buildingKey(col, row)];
   if (building) state.level.money += Math.floor(building.cost * TILE_REFUND_FRACTION);
   return true;
 }
 
 // T debug key — cycles the tile under the cursor through every building type
-// (plus empty) for free, ignoring cost/occupancy. A quick way to lay out a
-// test course without spending the level's money.
-const CHEAT_CYCLE = [TILE_EMPTY, TILE_WALL, TILE_RAMP_LEFT, TILE_RAMP_RIGHT, TILE_COLLECTOR, TILE_BLASTER];
+// (plus empty) for free, ignoring cost/occupancy/anchoring. Fans/Auto-Feeder
+// default to pointing straight up (toward the water column) since that's the
+// most useful direction to test filtration with.
+const CHEAT_CYCLE = [
+  TILE_EMPTY, TILE_PLATFORM, TILE_RAMP_LEFT, TILE_RAMP_RIGHT, TILE_COLLECTOR,
+  TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4, TILE_AUTO_FEEDER,
+];
+const CHEAT_DEFAULT_ANGLE = -Math.PI / 2; // straight up
 export function cycleTileCheat(state, worldX, worldY) {
   const { col, row } = worldToTile(worldX, worldY);
   if (row < SEABED_ROW_START || row >= WORLD_TILES_H || col < 0 || col >= WORLD_TILES_W) return;
   const current = state.level.grid[row][col];
   const idx = CHEAT_CYCLE.indexOf(current);
-  state.level.grid[row][col] = CHEAT_CYCLE[(idx + 1) % CHEAT_CYCLE.length];
+  const next = CHEAT_CYCLE[(idx + 1) % CHEAT_CYCLE.length];
+  state.level.grid[row][col] = next;
+  delete state.level.buildingData[buildingKey(col, row)];
+  if (FAN_TILES.has(next)) {
+    state.level.buildingData[buildingKey(col, row)] = { type: next, angle: CHEAT_DEFAULT_ANGLE };
+  } else if (next === TILE_AUTO_FEEDER) {
+    state.level.buildingData[buildingKey(col, row)] = { type: next, angle: CHEAT_DEFAULT_ANGLE, absorbing: false, progressMs: 0 };
+  }
 }
 
-// ---- Item physics — swept fall, ramps, blasters, collectors ----
+// ---- Directional Fan force field ----
+// Sums a force vector from every Fan whose cone currently contains `item`,
+// regardless of whether the item is in open water or the seabed band — a
+// Fan's whole purpose is launching things back up into the water column, so
+// its influence isn't confined to seabed-band physics. The cone blows in a
+// FIXED direction (the fan's own aim angle), uniformly across its width —
+// not radiating outward from the fan's position like an explosion — with
+// force decaying linearly to 0 at maxRange. No occlusion: a Platform or
+// another building between the fan and the item doesn't block the cone
+// (a deliberate simplification, not an oversight).
+export function computeFanForce(state, item) {
+  let fx = 0;
+  let fy = 0;
+  for (const key in state.level.buildingData) {
+    const data = state.level.buildingData[key];
+    const stats = FAN_STATS[data.type];
+    if (!stats) continue; // not a fan (e.g. the Auto-Feeder's own buildingData entry)
+    const [row, col] = key.split(',').map(Number);
+    const fanX = col * TILE_SIZE + TILE_SIZE / 2;
+    const fanY = row * TILE_SIZE + TILE_SIZE / 2;
+    const dx = item.x - fanX;
+    const dy = item.y - fanY;
+    const dist = Math.hypot(dx, dy);
+    if (dist > stats.maxRange) continue;
+    const angleToItem = Math.atan2(dy, dx);
+    let angleDiff = angleToItem - data.angle;
+    angleDiff = Math.atan2(Math.sin(angleDiff), Math.cos(angleDiff)); // normalize to [-PI, PI]
+    if (Math.abs(angleDiff) > FAN_CONE_HALF_ANGLE_RAD) continue;
+    const magnitude = stats.maxForce * (1 - dist / stats.maxRange);
+    fx += Math.cos(data.angle) * magnitude;
+    fy += Math.sin(data.angle) * magnitude;
+  }
+  return { fx, fy };
+}
+
+// Unified force integrator used for BOTH open-water motion (called from
+// Entities.js) and seabed-band motion (called below, inside
+// stepItemOnGrid) — the same physics apply everywhere so a Fan's push
+// doesn't behave differently depending which side of SEABED_FLOOR_Y an item
+// happens to be on.
+//
+// Gravity is F_gravity = mass * g, so a_gravity = F_gravity / mass = g —
+// mass-independent, same as real gravity, same as this game's fall behavior
+// always was. Fan thrust IS mass-dependent (a_fan = F_fan / mass), which is
+// the whole point of the Mass Hierarchy: a heavy coin barely accelerates
+// under a given fan force while a light food pellet leaps away.
+//
+// Drag is linear (a_drag = -drag * v), derived per item type from its own
+// existing gravity/maxFallSpeed ratio so an un-pushed item's fall still
+// converges to exactly the same terminal velocity as before this system
+// existed — physics.gravity/physics.maxFallSpeed already encodes that ratio
+// (e.g. GRAVITY/MAX_FALL_SPEED for a coin), reused here rather than adding a
+// separate drag constant per item type.
+export function integrateItemForces(item, dt, physics, fanForce) {
+  const drag = physics.gravity / physics.maxFallSpeed;
+  const ax = fanForce.fx / item.mass - drag * (item.vx || 0);
+  const ay = fanForce.fy / item.mass + physics.gravity - drag * (item.vy || 0);
+  item.vx = (item.vx || 0) + ax * dt;
+  item.vy = (item.vy || 0) + ay * dt;
+}
+
 // A Ramp doesn't arrest vertical motion at all — see RAMP_NUDGE_DISTANCE's
 // comment in Config.js. Whatever row of the grid an item's center currently
 // sits in, if that's a Ramp tile, it gets shoved sideways by exactly one
@@ -157,7 +304,7 @@ function applyRampNudge(item, grid) {
   if (item.rampNudgedRow === row) return; // already nudged for this row — don't repeat every tick while still passing through it
   const dir = tile === TILE_RAMP_LEFT ? -1 : 1;
   const targetX = item.x + dir * RAMP_NUDGE_DISTANCE;
-  if (!SOLID_TILES.has(tileAt(grid, targetX, item.y))) item.x = targetX; // don't shove it into a wall — it'll just keep moving through this row untouched instead
+  if (!isSolid(tileAt(grid, targetX, item.y))) item.x = targetX; // don't shove it into a wall — it'll just keep moving through this row untouched instead
   item.rampNudgedRow = row;
 }
 
@@ -173,7 +320,7 @@ function sweepVertical(item, grid, dy) {
   for (let i = 0; i < steps; i++) {
     const nextBottom = item.y + stepY + item.radius;
     const tile = tileAt(grid, item.x, nextBottom);
-    if (SOLID_TILES.has(tile)) {
+    if (isSolid(tile)) {
       const row = rowAt(nextBottom);
       item.y = row * TILE_SIZE - item.radius; // rest exactly on top of the tile, not overshot into it
       item.vy = 0;
@@ -185,50 +332,15 @@ function sweepVertical(item, grid, dy) {
   return { landed: false };
 }
 
-// Fires an item back up into the water column. Launch height is a fraction
-// of the tank's height (SEABED_FLOOR_Y): BLASTER_LAUNCH_MIN_FRACTION at the
-// shallowest possible placement, rising toward + BLASTER_LAUNCH_MAX_DEPTH_BONUS
-// the deeper into the city the Blaster sits, maxing out at the very bottom
-// row (0.5 + 0.15 = 0.65 — see Config.js). The speed needed to reach that
-// apex under this item's own gravity is the standard v = sqrt(2 * g * h) —
-// once set, the existing gravity integration in both this file and
-// Entities.js's open-water branch decelerates it through the arc with no
-// special-casing needed either way.
-//
-// The shot isn't purely vertical: `col`'s tile spans world-x
-// [col*TILE_SIZE, (col+1)*TILE_SIZE), and item.x's position within that
-// range (relative to the tile's center) at the moment of landing linearly
-// maps to an angle up to BLASTER_LAUNCH_ANGLE_MAX_DEG off vertical, in the
-// direction of that offset — dead-center hits launch straight up, an item
-// that landed near the tile's left/right edge tilts that far toward that
-// side instead.
-function launchFromBlaster(item, row, col, physics) {
-  const depthIntoCity = row * TILE_SIZE - SEABED_FLOOR_Y;
-  const maxDepth = (WORLD_TILES_H - 1) * TILE_SIZE - SEABED_FLOOR_Y; // depth of the very bottom row
-  const depthRatio = maxDepth > 0 ? Math.max(0, Math.min(1, depthIntoCity / maxDepth)) : 0;
-  const launchFraction = BLASTER_LAUNCH_MIN_FRACTION + BLASTER_LAUNCH_MAX_DEPTH_BONUS * depthRatio;
-  const launchHeight = launchFraction * SEABED_FLOOR_Y;
-  const speed = Math.sqrt(2 * physics.gravity * launchHeight);
-
-  const tileCenterX = col * TILE_SIZE + TILE_SIZE / 2;
-  const offsetFraction = Math.max(-1, Math.min(1, (item.x - tileCenterX) / (TILE_SIZE / 2)));
-  const angleRad = offsetFraction * BLASTER_LAUNCH_ANGLE_MAX_DEG * (Math.PI / 180);
-
-  item.vy = -speed * Math.cos(angleRad);
-  item.vx = speed * Math.sin(angleRad);
-}
-
 // A Collector doesn't bank an item the instant it lands — it starts a
 // COLLECTOR_PROCESS_DURATION_MS hold (see stepCollectorProcessing), visibly
-// drawing the item in toward the tile's center first. A Wall just holds it.
-// Ramps never reach here — they're not in SOLID_TILES, so sweepVertical
-// never reports a "landing" on one (see applyRampNudge instead). A Blaster
-// relaunches it upward.
-function handleLanding(item, grid, tile, row, col, physics) {
-  if (tile === TILE_BLASTER) {
-    launchFromBlaster(item, row, col, physics);
-    return 'falling'; // rising now, not resting — see launchFromBlaster
-  }
+// drawing the item in toward the tile's center first. A Platform/Fan/
+// Auto-Feeder just holds it (a Fan pointed away from vertical will actively
+// blow it back off, since the force field still applies to anything resting
+// in its cone). Ramps never reach here — they're not in SOLID_TILES, so
+// sweepVertical never reports a "landing" on one (see applyRampNudge
+// instead).
+function handleLanding(item, grid, tile, row, col) {
   if (tile === TILE_COLLECTOR) {
     item.collectorCenterX = col * TILE_SIZE + TILE_SIZE / 2;
     item.collectorCenterY = row * TILE_SIZE + TILE_SIZE / 2;
@@ -237,7 +349,7 @@ function handleLanding(item, grid, tile, row, col, physics) {
     item.mass = COLLECTOR_PROCESSING_MASS; // barely budges if something else piles into it mid-process — see Config.js's comment
     return 'processing';
   }
-  return 'resting'; // TILE_WALL, or the implicit world-boundary wall
+  return 'resting'; // TILE_PLATFORM, a Fan, the Auto-Feeder, or the implicit world-boundary wall
 }
 
 // Runs every tick an item is mid-collection instead of the normal
@@ -266,17 +378,17 @@ function stepCollectorProcessing(item, grid, dt) {
 
 // Called by Entities.js's updateFood/updateCoin/updateWaste every tick an
 // item's y has crossed SEABED_FLOOR_Y — this is the "physics for items once
-// they reach the seabed" Grid.js owns per the module split. `physics` is
-// the item's own { gravity, maxFallSpeed } (FOOD_*/WASTE_*/coin constants),
-// so this stays item-type-agnostic. Unlike the tile-landing side of this
-// (which is event-driven — you only *land* once), this runs unconditionally
-// every tick for every seabed item, resting or not: there's no "settled,
-// stop simulating" state any more, because a resting item still needs
-// gravity to keep testing whether its support is still there, and still
-// needs to react if resolveItemCollisions shoves it sideways off of it —
-// see CLAUDE.md's "Items can't stack, and can fall off the bottom" for why.
-// The caller interprets the returned status:
-//   'falling'    — still in motion (includes rising off a Blaster), no change needed
+// they reach the seabed" Grid.js owns per the module split. `physics` is the
+// item's own { gravity, maxFallSpeed } (FOOD_*/WASTE_*/coin constants), so
+// this stays item-type-agnostic. Unlike the tile-landing side of this (which
+// is event-driven — you only *land* once), this runs unconditionally every
+// tick for every seabed item, resting or not: there's no "settled, stop
+// simulating" state any more, because a resting item still needs gravity
+// (and any active fan force) to keep testing whether its support is still
+// there, and still needs to react if resolveItemCollisions shoves it
+// sideways off of it — see CLAUDE.md's "Items can't stack, and can fall off
+// the bottom" for why. The caller interprets the returned status:
+//   'falling'    — still in motion (includes rising off a fan's push), no change needed
 //   'resting'    — has support directly beneath it *this tick* (re-evaluated every tick, not a one-way flip)
 //   'processing' — being drawn into a Collector's center, not yet consumed — caller leaves it alone
 //   'consumed'   — a Collector finished processing it; caller removes it from the array
@@ -288,26 +400,80 @@ export function stepItemOnGrid(item, state, dt, physics) {
 
   if (item.collectorProgressMs != null) return stepCollectorProcessing(item, grid, dt);
 
-  // Horizontal: damped drift from any recent item-item pushes (resolveItemCollisions
-  // below is what actually sets vx — this just integrates and decays it, and
-  // stops it dead against a solid tile rather than letting it tunnel sideways).
-  item.vx = (item.vx || 0) * ITEM_HORIZONTAL_DAMPING;
+  const fanForce = computeFanForce(state, item);
+  integrateItemForces(item, dt, physics, fanForce);
+
+  // Horizontal: swept against solid tiles so it can't tunnel sideways into one.
   const nextX = item.x + item.vx * dt;
-  if (SOLID_TILES.has(tileAt(grid, nextX, item.y))) item.vx = 0;
+  if (isSolid(tileAt(grid, nextX, item.y))) item.vx = 0;
   else item.x = nextX;
 
-  // Vertical: gravity + swept tile landing, unchanged from before.
-  item.vy = Math.min((item.vy || 0) + physics.gravity * dt, physics.maxFallSpeed);
+  // Vertical: swept tile landing, same as before.
   const result = sweepVertical(item, grid, item.vy * dt);
-  if (result.landed) return handleLanding(item, grid, result.tile, result.row, result.col, physics);
+  if (result.landed) return handleLanding(item, grid, result.tile, result.row, result.col);
 
   return 'falling';
 }
 
-// ---- Item-item collision (seabed band only) — continuous, not one-shot.
-// Every seabed item is checked against every other one, every tick,
-// regardless of whether either was "resting" — nothing is ever permanently
-// anchored just because it came to rest once. Dropping an item onto a pile
+// ---- Auto-Feeder ----
+// Ticked once per frame from Entities.js's updateEntities (alongside
+// resolveItemCollisions) — separate from the event-driven Collector because
+// this needs to actively scan for nearby Waste rather than wait for
+// something to land on it. Directly removes absorbed Waste from
+// state.level.items (an exception to the usual "Grid.js returns a status,
+// Entities.js mutates the array" split — justified the same way
+// resolveItemCollisions already directly mutates item positions/velocities
+// in place). Newly-dispensed Food is NOT created here, to avoid a circular
+// import with Entities.js's createFood — instead this returns an array of
+// spawn points `{ x, y }` for the caller to actually construct.
+export function updateBuildings(state, dtMs) {
+  const spawnPoints = [];
+  for (const key in state.level.buildingData) {
+    const data = state.level.buildingData[key];
+    if (data.type !== TILE_AUTO_FEEDER) continue;
+    const [row, col] = key.split(',').map(Number);
+    const centerX = col * TILE_SIZE + TILE_SIZE / 2;
+    const centerY = row * TILE_SIZE + TILE_SIZE / 2;
+    const intakeX = centerX - Math.cos(data.angle) * TILE_SIZE * AUTO_FEEDER_PORT_OFFSET_FRACTION;
+    const intakeY = centerY - Math.sin(data.angle) * TILE_SIZE * AUTO_FEEDER_PORT_OFFSET_FRACTION;
+    const outputX = centerX + Math.cos(data.angle) * TILE_SIZE * AUTO_FEEDER_PORT_OFFSET_FRACTION;
+    const outputY = centerY + Math.sin(data.angle) * TILE_SIZE * AUTO_FEEDER_PORT_OFFSET_FRACTION;
+
+    if (!data.absorbing) {
+      const items = state.level.items;
+      for (let i = 0; i < items.length; i++) {
+        const it = items[i];
+        if (it.type !== 'waste') continue;
+        const d = Math.hypot(it.x - intakeX, it.y - intakeY);
+        if (d <= AUTO_FEEDER_INTAKE_RADIUS) {
+          items.splice(i, 1);
+          data.absorbing = true;
+          data.progressMs = 0;
+          break;
+        }
+      }
+    } else {
+      data.progressMs += dtMs;
+      if (data.progressMs >= AUTO_FEEDER_PROCESS_DURATION_MS) {
+        data.absorbing = false;
+        data.progressMs = 0;
+        spawnPoints.push({ x: outputX, y: outputY });
+      }
+    }
+  }
+  return spawnPoints;
+}
+
+// ---- Item-item collision (everywhere, not just the seabed band) —
+// continuous, not one-shot. Originally scoped to the seabed band only (open
+// water had nothing to collide with there before Fans existed), but a Fan
+// can now hold items suspended in open water indefinitely (see "Directional
+// Fans" in CLAUDE.md) — without collision there too, a stream of coins held
+// at the same point in a Fan's cone just overlapped infinitely instead of
+// spreading out, since nothing ever pushed them apart. Every item is
+// checked against every other one, every tick, regardless of whether either
+// was "resting" — nothing is ever permanently anchored just because it came
+// to rest once. Dropping an item onto a pile
 // pushes the whole pile (weighted by relative mass — ITEM_MASS_BY_TYPE in
 // Config.js, not radius; food is much lighter than a coin on purpose, so a
 // coin barely notices bumping a food pellet while shoving it well clear),
@@ -347,7 +513,7 @@ export function stepItemOnGrid(item, state, dt, physics) {
 function applyItemPush(grid, item, dx, dy, massFraction, rawOverlap) {
   const nx = item.x + dx;
   const ny = item.y + dy;
-  if (SOLID_TILES.has(tileAt(grid, nx, ny))) return; // don't tunnel the correction into a wall — it'll get another chance next tick/iteration
+  if (isSolid(tileAt(grid, nx, ny))) return; // don't tunnel the correction into a wall — it'll get another chance next tick/iteration
   item.x = nx;
   item.y = ny;
   // Landed on top of another item — clamp (not zero) its fall speed so it
@@ -390,16 +556,18 @@ function pushDirection(a, b, dx, dy, dist) {
 // Called once per tick from Entities.js's updateEntities, after every
 // item's individual tile-physics step (including any Waste just spawned
 // this tick) — a separate whole-array pass since resolving overlaps needs
-// to compare each item against every other one, not just tiles.
+// to compare each item against every other one, not just tiles. Runs over
+// every item in state.level.items, open water or seabed alike — see the
+// module comment above for why this isn't seabed-only any more.
 export function resolveItemCollisions(state) {
   const grid = state.level.grid;
-  const seabedItems = state.level.items.filter((it) => it.y >= SEABED_FLOOR_Y);
+  const items = state.level.items;
 
   for (let iter = 0; iter < ITEM_COLLISION_ITERATIONS; iter++) {
-    for (let i = 0; i < seabedItems.length; i++) {
-      const a = seabedItems[i];
-      for (let j = i + 1; j < seabedItems.length; j++) {
-        const b = seabedItems[j];
+    for (let i = 0; i < items.length; i++) {
+      const a = items[i];
+      for (let j = i + 1; j < items.length; j++) {
+        const b = items[j];
 
         const dx = b.x - a.x;
         const dy = b.y - a.y;
@@ -459,7 +627,11 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
       if (!building) continue;
       const screen = worldToScreen(col * TILE_SIZE, row * TILE_SIZE, camera);
       const size = TILE_SIZE * camera.zoom;
-      renderTileShape(ctx, type, building.color, screen.x, screen.y, size);
+      const data = state.level.buildingData[buildingKey(col, row)];
+      renderTileShape(ctx, type, building.color, screen.x, screen.y, size, data);
+      if (data && (FAN_TILES.has(type) || type === TILE_AUTO_FEEDER)) {
+        renderDirectionIndicator(ctx, type, screen.x, screen.y, size, data.angle, camera.zoom);
+      }
     }
   }
 }
@@ -467,13 +639,11 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
 // A Ramp draws as a triangle pointing the direction it nudges items — a
 // left-pointing wedge for TILE_RAMP_LEFT, right-pointing for
 // TILE_RAMP_RIGHT — instead of a plain square, so its effect on anything
-// passing through reads visually at a glance. A Blaster gets a slightly
-// rounded top (BLASTER_TOP_CORNER_RADIUS_FRACTION of the tile size) — its
-// bottom stays square, since it's still sitting flush on whatever's below
-// it, only the top (the end it fires out of) is rounded. A Collector gets a
-// circle in its center — the point stepCollectorProcessing actually draws
-// items into while it holds them for COLLECTOR_PROCESS_DURATION_MS. Every
-// other building type is still a plain square.
+// passing through reads visually at a glance. A Collector gets a circle in
+// its center — the point stepCollectorProcessing actually draws items into
+// while it holds them for COLLECTOR_PROCESS_DURATION_MS. A Fan/Auto-Feeder
+// is a plain square here (renderDirectionIndicator draws its aim on top).
+// Every other building type is a plain square too.
 function renderTileShape(ctx, type, color, x, y, size) {
   ctx.fillStyle = color;
   ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
@@ -491,11 +661,6 @@ function renderTileShape(ctx, type, color, x, y, size) {
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
-  } else if (type === TILE_BLASTER) {
-    const radius = size * BLASTER_TOP_CORNER_RADIUS_FRACTION;
-    ctx.roundRect(x, y, size, size, [radius, radius, 0, 0]);
-    ctx.fill();
-    ctx.stroke();
   } else if (type === TILE_COLLECTOR) {
     ctx.rect(x, y, size, size);
     ctx.fill();
@@ -511,10 +676,42 @@ function renderTileShape(ctx, type, color, x, y, size) {
   }
 }
 
+// Draws a small arrow (Fan aim) or an intake/output arrow pair (Auto-Feeder)
+// plus, for Fans, a translucent cone showing their live area of effect —
+// makes the invisible force field/routing direction actually visible.
+function renderDirectionIndicator(ctx, type, x, y, size, angle, zoom) {
+  const cx = x + size / 2;
+  const cy = y + size / 2;
+  if (FAN_TILES.has(type)) {
+    const stats = FAN_STATS[type];
+    const range = stats.maxRange * zoom;
+    ctx.save();
+    ctx.globalAlpha = 0.12;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.arc(cx, cy, range, angle - FAN_CONE_HALF_ANGLE_RAD, angle + FAN_CONE_HALF_ANGLE_RAD);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+  ctx.save();
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
+  ctx.lineWidth = Math.max(1, 2 * zoom);
+  ctx.beginPath();
+  const len = size * 0.32;
+  ctx.moveTo(cx - Math.cos(angle) * len * 0.4, cy - Math.sin(angle) * len * 0.4);
+  ctx.lineTo(cx + Math.cos(angle) * len, cy + Math.sin(angle) * len);
+  ctx.stroke();
+  ctx.restore();
+}
+
 // Build-mode cursor preview — a translucent square at the snapped tile under
 // the cursor, tinted green if placing there is currently valid or red if
-// not (occupied, out of bounds, or unaffordable).
-export function renderBuildGhost(ctx, state, worldX, worldY, buildingId) {
+// not (occupied, out of bounds, unaffordable, or unanchored). `angle` (only
+// relevant for Fans/Auto-Feeder) draws the same aim indicator as the placed
+// version, live-following the cursor's exact position within the tile.
+export function renderBuildGhost(ctx, state, worldX, worldY, buildingId, angle) {
   const { col, row } = worldToTile(worldX, worldY);
   const check = canPlaceTile(state, col, row, buildingId);
   const screen = worldToScreen(col * TILE_SIZE, row * TILE_SIZE, state.camera);
@@ -523,4 +720,16 @@ export function renderBuildGhost(ctx, state, worldX, worldY, buildingId) {
   ctx.fillStyle = check.ok ? '#8fe0b8' : '#ff6b6b';
   ctx.fillRect(screen.x, screen.y, size, size);
   ctx.globalAlpha = 1;
+  if (check.ok && (FAN_TILES.has(buildingId) || buildingId === TILE_AUTO_FEEDER)) {
+    renderDirectionIndicator(ctx, buildingId, screen.x, screen.y, size, angle, state.camera.zoom);
+  }
+}
+
+// Angle (atan2 convention) from a tile's center to an arbitrary world point
+// — used by main.js's build-drag flow to derive a Fan/Auto-Feeder's aim from
+// exactly where the cursor is within the tile at the moment of placement.
+export function angleFromTileToPoint(col, row, worldX, worldY) {
+  const cx = col * TILE_SIZE + TILE_SIZE / 2;
+  const cy = row * TILE_SIZE + TILE_SIZE / 2;
+  return Math.atan2(worldY - cy, worldX - cx);
 }

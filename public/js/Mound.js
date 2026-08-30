@@ -21,6 +21,7 @@ import {
   MOUND_HEIGHT_PX,
   TIER_UNLOCKS,
   NOTIFICATION_LOG_MAX,
+  TILE_FAN_T2,
 } from './Config.js';
 import { worldToScreen } from './Engine.js';
 
@@ -40,10 +41,22 @@ export function centerCameraOnMound(camera) {
   camera.x = Math.max(0, Math.min(MOUND_X - camera.viewWidth / 2, maxX));
 }
 
+// The Tier 1.5 "tease" (see getMoundNextCost/crackMound below) used to be a
+// pure joke — spend $150, get nothing. Per direct feedback it now actually
+// grants the Rudimentary Fan, so this needed a real reveal line instead of
+// a punchline about nothing happening.
+const MOUND_TEASE_MESSAGE = "You throw $150 at a suspicious lump of dirt. Something's fishy... and it works! A crack splits open and a Rudimentary Fan flops out, blades already spinning. Turns out bribery works on geology too.";
+
 const TIER_CRACK_MESSAGES = {
-  2: 'The mound splits open with a wet crack. Basic factory tiles unlocked — Wall, Ramp, Collector, Blaster. A Suckerfish scuttles free, already looking for waste to eat.',
-  3: 'Another crack spiderwebs across the mound. A low hum starts underneath — something electrical. Electric Eel unlocked.',
-  4: 'The mound shatters completely. Beneath the rubble: a Science Lab, humming with old machinery. Science Octopus unlocked, and Gene-Splicing research is now available.',
+  // Tier 2 no longer grants a building (the Rudimentary Fan moved to the
+  // tease/"Tier 1.5" above) — this crack's only real effect is flipping
+  // state.level.tier to 2, which is what gates the whole Economy Fish
+  // Combining system on. Still gets its own reveal line since that's a real
+  // (if invisible) unlock, not nothing.
+  2: "Something shifts in the local fish economy. Guppies are suddenly very aware of their own market value, and the going rate climbs every time you buy another. You can now splice two full-grown feeder fish of the same size together into one bigger, pricier fish. Don't think about it too hard.",
+  3: 'Another crack spreads wider. A Ramp, a Collector, and an Auto-Feeder tumble out, closely followed by a Suckerfish that looks personally offended by the mess.',
+  4: "A low hum starts underneath the rubble. Shockingly, it's an Electric Eel — here for the Electric Fan, and to remind everyone who's really in charge of this power grid.",
+  5: 'The mound stops cracking and just gives up, shattering completely. Underneath: a Science Lab that has apparently been there the whole time. A Science Octopus climbs out already holding a beaker like it owns the place. Gene-Splicing research is open now — may cod have mercy on your fish.',
 };
 
 function pushNotification(state, text) {
@@ -51,11 +64,13 @@ function pushNotification(state, text) {
   if (state.level.notifications.length > NOTIFICATION_LOG_MAX) state.level.notifications.shift();
 }
 
-// The very first "throw money" attempt at the Mound is a red herring: it
-// costs MOUND_TEASE_COST but does nothing except set state.level.moundTeased
-// and joke about it — the REAL Tier 1 -> 2 crack only becomes available
-// after that, at MOUND_CRACK_COST[1] (much higher). Every other tier
-// transition is a normal single-cost crack.
+// The very first "throw money" attempt at the Mound — "Tier 1.5" — costs
+// MOUND_TEASE_COST and grants the Rudimentary Fan (state.meta.buildingsUnlocked),
+// but does NOT advance state.level.tier: the REAL Tier 1 -> 2 crack only
+// becomes available after that, at MOUND_CRACK_COST[1] (much higher). This
+// used to be a pure no-op joke — per direct feedback it's now a real, if
+// small, reward, so the player's first click always gets them something.
+// Every other tier transition is a normal single-cost crack.
 export function getMoundNextCost(state) {
   const tier = state.level.tier;
   if (tier === 1 && !state.level.moundTeased) return MOUND_TEASE_COST;
@@ -74,8 +89,9 @@ export function crackMound(state) {
 
   if (state.level.tier === 1 && !state.level.moundTeased) {
     state.level.moundTeased = true;
-    pushNotification(state, "That didn't seem to do anything. Maybe I should try more money.");
-    return true; // money spent, joke happened — but the tier does NOT advance
+    if (!state.meta.buildingsUnlocked.includes(TILE_FAN_T2)) state.meta.buildingsUnlocked.push(TILE_FAN_T2);
+    pushNotification(state, MOUND_TEASE_MESSAGE);
+    return true; // money spent, Fan granted — but the tier does NOT advance
   }
 
   state.level.tier += 1;

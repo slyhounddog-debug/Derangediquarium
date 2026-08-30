@@ -6,6 +6,14 @@
 import { SPECIES_LIST, BUILDING_LIST } from './Config.js';
 import { createGrid } from './Grid.js';
 
+// The very first entry in state.level.notifications, pushed at level load
+// rather than shown as a UI-layer fallback string — this is what makes it
+// survive in the expandable scrollback log (UI.js's updateNotificationTicker)
+// even once real notifications start pushing past it, instead of just
+// vanishing the moment anything else happens. See CLAUDE.md's "Story &
+// Tutorial Notifications" section.
+const WELCOME_MESSAGE = "Welcome to the tank! Let's try to keep the death count low today. No pressure. 🐟";
+
 // winConditions/waveSchedule/rewards are unused until later phases wire up
 // their evaluation — they exist now so a level's shape never has to change
 // later, and Phase 1 still loads through this same real path.
@@ -50,12 +58,33 @@ export function loadLevel(state, levelId) {
     items: [],
     floatingTexts: [], // transient "+$N" pickup readouts — not physics items, never touched by Grid.js routing
     grid: createGrid(), // 2D tile array, all TILE_EMPTY — see Grid.js
+    buildingData: {}, // sparse "row,col" -> { type, angle, ... } map for buildings that need per-instance data the grid's bare type-id strings can't hold (Fans' aim angle, Auto-Feeder's absorb/process state) — see Grid.js's placeTile/removeTile
     gridStats: { itemsRoutedTotal: 0 }, // lifetime count of items consumed by a Collector tile, for the debug overlay's throughput readout
-    tier: 1, // 1-4, Mound-driven progression — see Mound.js and CLAUDE.md's "Tier Progression & The Mound"; level-scoped like everything else here, even though the meta-unlocks a previous crack granted stay permanent
-    moundTeased: false, // has the Mound's first (fake, no-op) "throw money" attempt already happened this level? — see Mound.js's crackMound/getMoundNextCost
-    notifications: [], // rolling log for UI.js's ticker — { id, text, elapsed }, capped at NOTIFICATION_LOG_MAX
+    tier: 1, // 1-5, Mound-driven progression — see Mound.js and CLAUDE.md's "Tier Progression & The Mound"; level-scoped like everything else here, even though the meta-unlocks a previous crack granted stay permanent
+    moundTeased: false, // has the Mound's first "throw money" attempt already happened this level? — see Mound.js's crackMound/getMoundNextCost. No longer a no-op joke — it grants the Rudimentary Fan (the "Tier 1.5" step), still without advancing state.level.tier
+    notifications: [{ id: 1, text: WELCOME_MESSAGE, elapsed: 0 }], // rolling log for UI.js's ticker — { id, text, elapsed }, capped at NOTIFICATION_LOG_MAX. Seeded with the welcome message as a real entry (not a UI fallback) so it survives in the scrollback log
     tankPoints: { total: 0, available: 0 }, // earned by Entities.js on fish adult-growth transitions, spent in UI.js's Tank Upgrades panel — see CLAUDE.md's "Tank Points & Tank Upgrades"
     upgrades: { foodQuality: 0, fishMovement: 0, foodCapacity: 0 }, // purchased Tank Upgrade levels, 0 = not yet bought; read live by Entities.js, not baked into fish/food at creation time
+    // One-time story/tutorial notification gates — see CLAUDE.md's "Story &
+    // Tutorial Notifications". Level-scoped like everything else here, so a
+    // restart replays them (matching moundTeased/the Tank Point tutorial's
+    // own existing one-shot pattern).
+    tutorialFlags: {
+      firstFishBought: false,
+      firstFishDied: false,
+      firstBuildingPlaced: false,
+      firstCombine: false,
+      firstFanPlaced: false,
+      moneyMilestone1k: false,
+      escapePressed: false, // set true the first time Escape is ever pressed, regardless of context — read by the 2-minute dare check and the "made ya look" follow-up
+      escapeDareShown: false,
+      firstChatExpanded: false,
+    },
+    lifetimeMoneyEarned: 0, // real in-play income only (coins banked) — NOT the starting endowment or the bankruptcy bailout gift; see Entities.js's bankMoney and Config.js's MONEY_MILESTONE_1K
+    fishVanishTimer: 0, // ms remaining on the "you found the chat" gag — see Entities.js's updateEntities; every fish freezes in place (not just hidden) and stops rendering while this is > 0
+    bankruptcyActive: false, // true while "no fish + can't afford anything" is CURRENTLY true, so the bailout/game-over response only fires once per fresh occurrence of that condition, not every tick it holds — see Systems.js's updateStoryTriggers
+    bankruptciesTriggered: 0, // 0 = never happened, 1 = the one-time $100 bailout already used, 2+ = game over
+    gameOver: false, // set true on the second bankruptcy — main.js's update() stops simulating while this is true, same as state.ui.paused, but Escape still opens the pause menu so Restart stays reachable
     waveTimer: 0,
     elapsed: 0,
   };

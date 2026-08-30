@@ -5,6 +5,7 @@
 
 import {
   SPECIES,
+  SPECIES_LIST,
   FOOD_RADIUS,
   FOOD_COST,
   FOOD_FLOOR_GRACE_MS,
@@ -49,8 +50,16 @@ import {
   ITEM_MASS_BY_TYPE,
   FOOD_MAX_ON_SCREEN_BASE,
   FOOD_CAPACITY_UPGRADE_INCREMENT,
+  FISH_BASE_SIZE,
+  ECONOMY_SPECIES_IDS,
+  ECONOMY_FISH_COST_GROWTH_RATE,
+  FISH_STAR_TIER_MAX,
+  FISH_STAR_TIER_VALUE_MULTIPLIER,
+  FISH_STAR_COLOR,
+  FISH_DRAG_HIT_RADIUS_FRACTION,
+  MONEY_MILESTONE_1K,
 } from './Config.js';
-import { stepItemOnGrid, resolveItemCollisions } from './Grid.js';
+import { stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemForces, updateBuildings } from './Grid.js';
 
 let _nextId = 1;
 function nextId() {
@@ -161,7 +170,7 @@ function effectiveSwimSpeed(def, state) {
   return def.swimSpeed + FISH_MOVEMENT_UPGRADE_SPEED_BONUS * state.level.upgrades.fishMovement;
 }
 
-export function createFish(speciesId, x, y, state, { grown = false } = {}) {
+export function createFish(speciesId, x, y, state, { grown = false, starTier = 1, dropValueOverride = null } = {}) {
   const def = SPECIES[speciesId];
   const totalFeeds = grown ? def.growthStages[def.growthStages.length - 1].feedsRequired : 0;
   const speed = effectiveSwimSpeed(def, state);
@@ -179,6 +188,18 @@ export function createFish(speciesId, x, y, state, { grown = false } = {}) {
     dropTimer: 0,
     wanderTimer: 0,
     tailPhase: 0, // only rendered once fully grown; advances faster the faster the fish is currently moving
+    // Economy Fish Combining (Tier 2) — see CLAUDE.md's "Economy Fish
+    // Combining/Splicing" section. starTier only ever exceeds 1 on an economy
+    // species fish produced by combineFish() below (always already Adult);
+    // every other fish (freshly bought, cheat-spawned, non-economy species)
+    // stays at the default 1, which is a no-op multiplier everywhere it's read.
+    starTier,
+    // Set only by createHybridFish()'s value-carry-over pipeline — when
+    // present, updateFish uses this directly instead of the species row's
+    // static dropValue (which would otherwise ignore whatever star tier the
+    // economy parent had reached before being spliced). null for every
+    // ordinary fish.
+    dropValueOverride,
   };
 }
 
@@ -200,6 +221,25 @@ export function trySpawnFood(state, x, y) {
   return true;
 }
 
+const MONEY_MILESTONE_1K_MESSAGE = '1k money? Bruh save some for the fishes';
+
+// Routes every real in-play coin gain (click-banked or auto-Collected —
+// NOT the starting endowment, NOT the bankruptcy bailout gift, see
+// Systems.js) through one place so the lifetime-earned milestone check
+// only needs to live in one spot. `state.level.money` itself still just
+// tracks the current spendable balance, same as before — this adds a
+// second, monotonically-increasing counter alongside it.
+function bankMoney(state, amount) {
+  state.level.money += amount;
+  state.level.lifetimeMoneyEarned += amount;
+  if (!state.level.tutorialFlags.moneyMilestone1k && state.level.lifetimeMoneyEarned >= MONEY_MILESTONE_1K) {
+    state.level.tutorialFlags.moneyMilestone1k = true;
+    const notifications = state.level.notifications;
+    notifications.push({ id: notifications.length + 1, text: MONEY_MILESTONE_1K_MESSAGE, elapsed: state.level.elapsed });
+    if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
+  }
+}
+
 export function tryBankCoinAt(state, worldX, worldY) {
   const items = state.level.items;
   for (let i = items.length - 1; i >= 0; i--) {
@@ -209,7 +249,7 @@ export function tryBankCoinAt(state, worldX, worldY) {
     const dy = item.y - worldY;
     const clickRadius = item.radius * COIN_CLICK_RADIUS_MULTIPLIER;
     if (dx * dx + dy * dy <= clickRadius * clickRadius) {
-      state.level.money += item.value;
+      bankMoney(state, item.value);
       const color = getCoinColor(item.value);
       state.level.floatingTexts.push(createPickupText(item.x, item.y, `+$${item.value}`, color));
       items.splice(i, 1);
@@ -224,10 +264,158 @@ export function spawnFishCheat(state, speciesId, x, y, grown) {
   state.level.entities.push(createFish(speciesId, x, y, state, { grown }));
 }
 
-// While item.y < SEABED_FLOOR_Y it's still in open water and falls exactly
-// as before. Once it crosses that boundary, Grid.js's stepItemOnGrid owns
-// its motion for the rest of its life (tile collision, ramps, blasters,
-// collectors, item-item drift) — see Grid.js's module comment for why the
+// ---- Economy Fish Dynamic Purchase Cost (Tier 2) ----
+// Current_Cost = base cost * (ECONOMY_FISH_COST_GROWTH_RATE ^ N), N = how
+// many living fish of that exact species (any star tier) are currently in
+// the tank — see Config.js's ECONOMY_FISH_COST_GROWTH_RATE. N is computed
+// live off state.level.entities every call rather than tracked as a running
+// counter, so a death/combine/purchase is reflected the instant it happens
+// with no separate bookkeeping to keep in sync. Non-economy species (utility
+// fish, hybrids) are unaffected — always their flat SPECIES.cost.
+export function countLivingFishOfSpecies(state, speciesId) {
+  let n = 0;
+  for (const entity of state.level.entities) {
+    if (entity.type === 'fish' && entity.speciesId === speciesId) n++;
+  }
+  return n;
+}
+
+export function getFishPurchaseCost(state, speciesId) {
+  const def = SPECIES[speciesId];
+  if (!ECONOMY_SPECIES_IDS.includes(speciesId)) return def.cost;
+  const n = countLivingFishOfSpecies(state, speciesId);
+  return Math.round(def.cost * Math.pow(ECONOMY_FISH_COST_GROWTH_RATE, n));
+}
+
+// ---- Economy Fish Combining/Splicing (Tier 2) ----
+// Hit-tests state.level.entities for the nearest fish within
+// FISH_DRAG_HIT_RADIUS_FRACTION of the fish's own current on-screen size —
+// used by main.js's drag-to-combine mousedown/mouseup and its live
+// hover-target check. `excludeId`, when given, skips that one fish entirely
+// (the caller's own dragged fish — necessary once that fish's position is
+// being snapped to the cursor each tick, otherwise it would always be its
+// own nearest match and hide whatever it's actually hovering over).
+export function findFishAt(state, worldX, worldY, excludeId = null) {
+  let best = null;
+  let bestDist = Infinity;
+  for (const entity of state.level.entities) {
+    if (entity.type !== 'fish' || entity.id === excludeId) continue;
+    const def = SPECIES[entity.speciesId];
+    const size = FISH_BASE_SIZE * def.growthStages[entity.stage].scale;
+    const hitRadius = size * FISH_DRAG_HIT_RADIUS_FRACTION;
+    const dx = entity.x - worldX;
+    const dy = entity.y - worldY;
+    const d2 = dx * dx + dy * dy;
+    if (d2 <= hitRadius * hitRadius && d2 < bestDist) {
+      bestDist = d2;
+      best = entity;
+    }
+  }
+  return best;
+}
+
+// Whether a fish is a legal SOURCE for starting a combine-drag: an economy
+// species, Adult, and not already at the combining cap (a Tier-4 fish has
+// nothing left to combine into).
+export function isCombinableFish(fish) {
+  if (!fish || fish.type !== 'fish') return false;
+  if (!ECONOMY_SPECIES_IDS.includes(fish.speciesId)) return false;
+  const def = SPECIES[fish.speciesId];
+  if (fish.stage !== def.growthStages.length - 1) return false; // Adult only
+  if ((fish.starTier || 1) >= FISH_STAR_TIER_MAX) return false;
+  return true;
+}
+
+// Whether dropping `a` onto `b` (or vice versa) is a legal combine: both
+// must independently qualify as combinable (see isCombinableFish), be two
+// distinct entities, the exact same species, and the exact same star tier —
+// per the design spec's prerequisite. Symmetric in a/b.
+export function canCombineFish(a, b) {
+  if (!a || !b || a.id === b.id) return false;
+  if (!isCombinableFish(a) || !isCombinableFish(b)) return false;
+  if (a.speciesId !== b.speciesId) return false;
+  if ((a.starTier || 1) !== (b.starTier || 1)) return false;
+  return true;
+}
+
+const FIRST_COMBINE_MESSAGE =
+  "You just smooshed two fish into one bigger, shinier fish. They're fine. Probably. It's basically fusion, and fusion is science, and science is great.";
+
+const FISH_VANISH_REAPPEAR_MESSAGE = 'JK! You should have seen your face tho';
+
+// Consumes both fish and spawns one Adult fish of the next star tier at
+// their midpoint — see Config.js's FISH_STAR_TIER_VALUE_MULTIPLIER for the
+// resulting coin-value scaling (applied live in updateFish, not baked in
+// here, since it's derived from starTier + the species' own adult
+// dropValue every time a coin is dropped). Returns the new fish, or null if
+// the pair isn't actually a legal combine (defensive — callers should
+// already have checked canCombineFish).
+export function combineFish(state, a, b) {
+  if (!canCombineFish(a, b)) return null;
+  const newTier = (a.starTier || 1) + 1;
+  const x = (a.x + b.x) / 2;
+  const y = (a.y + b.y) / 2;
+  const speciesId = a.speciesId;
+
+  const idxA = state.level.entities.indexOf(a);
+  if (idxA !== -1) state.level.entities.splice(idxA, 1);
+  const idxB = state.level.entities.indexOf(b);
+  if (idxB !== -1) state.level.entities.splice(idxB, 1);
+
+  const fish = createFish(speciesId, x, y, state, { grown: true, starTier: newTier });
+  state.level.entities.push(fish);
+  state.level.floatingTexts.push(
+    createPickupText(x, y, `${newTier}★ ${SPECIES[speciesId].name}!`, FISH_STAR_COLOR)
+  );
+  if (!state.level.tutorialFlags.firstCombine) {
+    state.level.tutorialFlags.firstCombine = true;
+    pushStoryNotification(state, FIRST_COMBINE_MESSAGE);
+  }
+  return fish;
+}
+
+// ---- T5 Hybridization value carry-over pipeline ----
+// The actual drag-a-utility-fish-onto-an-economy-fish interaction isn't
+// built yet (Phase 4/5 scope — see CLAUDE.md's Species Roster &
+// Progression). These two functions are the ready-to-call pipeline for when
+// it is: getEconomyAdultDropValue resolves what a specific economy fish
+// instance's coin drop is actually worth right now (its species' base adult
+// dropValue, scaled by its current star tier — the same formula updateFish
+// uses live), and createHybridFish spends an economy fish + a utility
+// species id and produces the correct hybrid with that value carried over
+// into dropValueOverride, rather than the hybrid SPECIES row's static
+// placeholder dropValue.
+export function getEconomyAdultDropValue(speciesId, starTier) {
+  const def = SPECIES[speciesId];
+  const adultDropValue = def.growthStages[def.growthStages.length - 1].dropValue;
+  return adultDropValue * Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, (starTier || 1) - 1);
+}
+
+// Hybrid SPECIES rows store `parents: [utilitySpeciesId, economySpeciesId]`
+// (see Config.js's Gene-Splicing hybrids) — reverse-looked-up here rather
+// than hardcoding a second id map, so a future new hybrid row needs no
+// change here.
+export function getHybridSpeciesId(economySpeciesId, utilitySpeciesId) {
+  for (const s of SPECIES_LIST) {
+    if (s.parents && s.parents[0] === utilitySpeciesId && s.parents[1] === economySpeciesId) return s.id;
+  }
+  return null;
+}
+
+export function createHybridFish(state, economyFish, utilitySpeciesId) {
+  const hybridId = getHybridSpeciesId(economyFish.speciesId, utilitySpeciesId);
+  if (!hybridId) return null;
+  const carriedValue = getEconomyAdultDropValue(economyFish.speciesId, economyFish.starTier || 1);
+  const fish = createFish(hybridId, economyFish.x, economyFish.y, state, { grown: true, dropValueOverride: carriedValue });
+  return fish;
+}
+
+// While item.y < SEABED_FLOOR_Y it's still in open water — gravity plus any
+// active Fan force (Grid.js's computeFanForce/integrateItemForces, which
+// apply everywhere, not just the seabed band). Once it crosses that
+// boundary, Grid.js's stepItemOnGrid owns its motion for the rest of its
+// life (tile collision, ramps, collectors, Auto-Feeder intake, item-item
+// drift) — see Grid.js's module comment for why the
 // split falls there, and CLAUDE.md's "Items can't stack, and can fall off
 // the bottom" for why this now runs every tick forever instead of stopping
 // once an item is first marked resting: resting is re-evaluated fresh every
@@ -249,15 +437,21 @@ function updateFood(item, state, dtMs, spawned) {
   const sinkMultiplier = 1 - FOOD_QUALITY_SINK_SPEED_REDUCTION_PER_LEVEL * state.level.upgrades.foodQuality;
   const gravity = FOOD_GRAVITY * sinkMultiplier;
   const maxFallSpeed = FOOD_MAX_FALL_SPEED * sinkMultiplier;
+  const physics = { gravity, maxFallSpeed };
   if (item.y < SEABED_FLOOR_Y) {
-    item.vy = Math.min(item.vy + gravity * dt, maxFallSpeed);
+    // Fan force applies everywhere, not just the seabed band — see Grid.js's
+    // computeFanForce/integrateItemForces. The scripted sway burst is a
+    // separate flavor effect layered on top of (not replacing) the physics
+    // vx, so a Fan-launched pellet still wavers a little as it rises/falls.
+    const fanForce = computeFanForce(state, item);
+    integrateItemForces(item, dt, physics, fanForce);
     item.fallTime += dt;
-    const vx = currentSwayVx(item);
-    item.x += vx * dt;
+    const swayVx = currentSwayVx(item);
+    item.x += (item.vx + swayVx) * dt;
     item.y += item.vy * dt;
     return true;
   }
-  const status = stepItemOnGrid(item, state, dt, { gravity, maxFallSpeed });
+  const status = stepItemOnGrid(item, state, dt, physics);
   if (status === 'consumed') {
     state.level.gridStats.itemsRoutedTotal += 1;
     spawned.push(createWaste(item.x, item.y)); // a basic Collector is unpowered and dirty — see Config.js's WASTE_* comment
@@ -277,19 +471,20 @@ function updateFood(item, state, dtMs, spawned) {
 
 function updateCoin(item, state, dtMs, spawned) {
   const dt = dtMs / 1000;
+  const physics = { gravity: GRAVITY, maxFallSpeed: MAX_FALL_SPEED };
   if (item.y < SEABED_FLOOR_Y) {
-    item.vy = Math.min(item.vy + GRAVITY * dt, MAX_FALL_SPEED);
+    // Fan force applies everywhere, not just the seabed band — see Grid.js's
+    // computeFanForce/integrateItemForces. A coin's high mass means it needs
+    // strong or overlapping fan coverage to actually clear a ledge.
+    const fanForce = computeFanForce(state, item);
+    integrateItemForces(item, dt, physics, fanForce);
     item.y += item.vy * dt;
-    // vx only ever comes from a Blaster's angled launch (see Grid.js's
-    // launchFromBlaster) or residual seabed item-item drift — open water has
-    // nothing to collide with, so it's just carried through unchanged, a
-    // plain ballistic arc with no horizontal damping.
-    item.x += (item.vx || 0) * dt;
+    item.x += item.vx * dt;
     return true;
   }
-  const status = stepItemOnGrid(item, state, dt, { gravity: GRAVITY, maxFallSpeed: MAX_FALL_SPEED });
+  const status = stepItemOnGrid(item, state, dt, physics);
   if (status === 'consumed') {
-    state.level.money += item.value;
+    bankMoney(state, item.value);
     state.level.floatingTexts.push(createPickupText(item.x, item.y, `+$${item.value}`, getCoinColor(item.value)));
     state.level.gridStats.itemsRoutedTotal += 1;
     spawned.push(createWaste(item.x, item.y)); // a basic Collector is unpowered and dirty — see Config.js's WASTE_* comment
@@ -313,13 +508,15 @@ function updateCoin(item, state, dtMs, spawned) {
 // spawned (no waste-spawns-waste loop).
 function updateWaste(item, state, dtMs) {
   const dt = dtMs / 1000;
+  const physics = { gravity: WASTE_GRAVITY, maxFallSpeed: WASTE_MAX_FALL_SPEED };
   if (item.y < SEABED_FLOOR_Y) {
-    item.vy = Math.min(item.vy + WASTE_GRAVITY * dt, WASTE_MAX_FALL_SPEED);
+    const fanForce = computeFanForce(state, item);
+    integrateItemForces(item, dt, physics, fanForce);
     item.y += item.vy * dt;
-    item.x += (item.vx || 0) * dt; // see updateCoin's comment — same open-water ballistic carry-through
+    item.x += item.vx * dt;
     return true;
   }
-  const status = stepItemOnGrid(item, state, dt, { gravity: WASTE_GRAVITY, maxFallSpeed: WASTE_MAX_FALL_SPEED });
+  const status = stepItemOnGrid(item, state, dt, physics);
   if (status === 'consumed' || status === 'lost') return false;
   item.resting = status === 'resting';
   return true;
@@ -353,7 +550,22 @@ function wander(fish, def, state, dt) {
 }
 
 const TANK_POINT_TUTORIAL_MESSAGE =
-  "A fish just grew up — that's your first Tank Point ⭐! Spend Tank Points in the Tank Upgrades panel (the button below the Shop) on better food, faster fish, and more.";
+  "A fish just grew up — that's your first Tank Point ⭐! Spend it in the Tank Upgrades panel (the button below the Shop) on faster fish, better food, and other things your fish will take completely for granted.";
+
+const FIRST_FISH_DEATH_MESSAGE =
+  "Your fish is now swimming with the fishes. ...Wait, it was already a fish. Nevermind — it just starved. You might want to try feeding your fish.";
+
+// Shared by every one-time story/tutorial notification below (Tank Points,
+// first fish death, etc.) — same push+cap pattern Mound.js's own
+// pushNotification uses. Kept as a duplicated inline helper rather than a
+// shared exported utility per CLAUDE.md's Rolling Notification Log section:
+// "any system can push a { text } onto state.level.notifications... see
+// either writer for the pattern."
+function pushStoryNotification(state, text) {
+  const notifications = state.level.notifications;
+  notifications.push({ id: notifications.length + 1, text, elapsed: state.level.elapsed });
+  if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
+}
 
 // Every subsequent Tank Point just gets the usual small floating text; only
 // the very first one also explains what Tank Points even are, via the
@@ -365,11 +577,7 @@ function awardTankPoint(state, fish) {
   state.level.tankPoints.total += TANK_POINT_PER_ADULT_FISH;
   state.level.tankPoints.available += TANK_POINT_PER_ADULT_FISH;
   state.level.floatingTexts.push(createPickupText(fish.x, fish.y, '+1 Tank Point!', TANK_POINT_COLOR));
-  if (isFirst) {
-    const notifications = state.level.notifications;
-    notifications.push({ id: notifications.length + 1, text: TANK_POINT_TUTORIAL_MESSAGE, elapsed: state.level.elapsed });
-    if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
-  }
+  if (isFirst) pushStoryNotification(state, TANK_POINT_TUTORIAL_MESSAGE);
 }
 
 // Returns false if the fish should be removed (starved).
@@ -378,7 +586,13 @@ function updateFish(fish, state, dtMs) {
   const dt = dtMs / 1000;
 
   fish.hunger = Math.min(HUNGER_MAX, fish.hunger + def.hungerRate * dt);
-  if (fish.hunger >= HUNGER_MAX) return false; // starves if hunger maxes out
+  if (fish.hunger >= HUNGER_MAX) {
+    if (!state.level.tutorialFlags.firstFishDied) {
+      state.level.tutorialFlags.firstFishDied = true;
+      pushStoryNotification(state, FIRST_FISH_DEATH_MESSAGE);
+    }
+    return false; // starves if hunger maxes out
+  }
 
   if (fish.hunger >= HUNGER_SEEK_THRESHOLD) {
     const target = findNearestFood(state.level.items, fish.x, fish.y);
@@ -434,7 +648,17 @@ function updateFish(fish, state, dtMs) {
   fish.dropTimer += dtMs;
   if (fish.dropTimer >= stageDef.dropInterval) {
     fish.dropTimer = 0;
-    state.level.items.push(createCoin(fish.x, fish.y, stageDef.dropValue));
+    // A hybrid's dropValueOverride (T5 value carry-over pipeline) already
+    // reflects its economy parent's tier-scaled value in full — using it
+    // directly, not layering the starTier multiplier on top again, since a
+    // hybrid fish's own starTier is always the unused default (1). Every
+    // other fish scales its species row's stage dropValue by its own star
+    // tier (a no-op ^0 = 1x for the overwhelming majority that never
+    // combined) — see Config.js's FISH_STAR_TIER_VALUE_MULTIPLIER.
+    const dropValue = fish.dropValueOverride != null
+      ? fish.dropValueOverride
+      : stageDef.dropValue * Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, (fish.starTier || 1) - 1);
+    state.level.items.push(createCoin(fish.x, fish.y, dropValue));
   }
 
   return true;
@@ -446,7 +670,21 @@ function updatePickupText(item, dtMs) {
   return item.age < PICKUP_TEXT_LIFETIME_MS;
 }
 
+// "You found the chat" gag (UI.js's notification-log expand handler starts
+// the timer) — every fish freezes exactly as it was (position, hunger,
+// coin-drop timer, everything) for FISH_VANISH_DURATION_MS by simply
+// skipping updateFish entirely while the timer is running, then resumes
+// on its own the tick the timer reaches 0. main.js's render() separately
+// skips drawing any fish for the same duration — this function only owns
+// the freeze/timer, not the "invisible" part.
+function updateFishVanish(state, dtMs) {
+  if (state.level.fishVanishTimer <= 0) return;
+  state.level.fishVanishTimer = Math.max(0, state.level.fishVanishTimer - dtMs);
+  if (state.level.fishVanishTimer === 0) pushStoryNotification(state, FISH_VANISH_REAPPEAR_MESSAGE);
+}
+
 export function updateEntities(state, dtMs) {
+  updateFishVanish(state, dtMs);
   const spawned = []; // Waste items produced this tick — see updateFood/updateCoin's comment for why these can't be pushed straight into state.level.items mid-filter
   state.level.items = state.level.items.filter((item) => {
     if (item.type === 'food') return updateFood(item, state, dtMs, spawned);
@@ -455,12 +693,21 @@ export function updateEntities(state, dtMs) {
     return true;
   });
   if (spawned.length) state.level.items.push(...spawned);
+
+  // Auto-Feeder: absorbs nearby Waste, dispenses Food from its output port
+  // once processed — see Grid.js's updateBuildings. Grid.js returns spawn
+  // points rather than constructing the Food itself, to avoid a circular
+  // import (createFood lives here).
+  for (const point of updateBuildings(state, dtMs)) {
+    state.level.items.push(createFood(point.x, point.y));
+  }
+
   resolveItemCollisions(state); // items in the seabed band can't overlap — see Grid.js's module comment
 
   state.level.floatingTexts = state.level.floatingTexts.filter((ft) => updatePickupText(ft, dtMs));
 
   state.level.entities = state.level.entities.filter((entity) => {
-    if (entity.type === 'fish') return updateFish(entity, state, dtMs);
+    if (entity.type === 'fish') return state.level.fishVanishTimer > 0 ? true : updateFish(entity, state, dtMs);
     return true;
   });
 }

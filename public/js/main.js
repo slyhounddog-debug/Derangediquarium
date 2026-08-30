@@ -7,6 +7,7 @@ import {
   SPECIES,
   SPECIES_LIST,
   BUILDING_LIST,
+  BUILDING_TYPES,
   FISH_BASE_SIZE,
   HUNGER_SEEK_THRESHOLD,
   HUNGER_CRITICAL_THRESHOLD,
@@ -20,11 +21,39 @@ import {
   CAMERA_WATER_COLUMN_FIT_FRACTION,
   PICKUP_TEXT_LIFETIME_MS,
   WASTE_COLOR,
+  TILE_EMPTY,
+  TILE_SIZE,
+  TILE_FAN_T2,
+  TILE_FAN_T3,
+  TILE_FAN_T4,
+  TILE_REFUND_FRACTION,
+  NOTIFICATION_LOG_MAX,
 } from './Config.js';
 import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop } from './Engine.js';
 import { loadLevel, LEVELS } from './Levels.js';
-import { updateEntities, trySpawnFood, tryBankCoinAt, spawnFishCheat, getCoinColor } from './Entities.js';
-import { renderSeabedGrid, renderBuildGhost, placeTile, removeTile, cycleTileCheat, worldToTile } from './Grid.js';
+import { updateStoryTriggers } from './Systems.js';
+import {
+  updateEntities,
+  trySpawnFood,
+  tryBankCoinAt,
+  spawnFishCheat,
+  getCoinColor,
+  findFishAt,
+  isCombinableFish,
+  canCombineFish,
+  combineFish,
+} from './Entities.js';
+import {
+  renderSeabedGrid,
+  renderBuildGhost,
+  placeTile,
+  removeTile,
+  cycleTileCheat,
+  worldToTile,
+  angleFromTileToPoint,
+  canPlaceTile,
+  getTile,
+} from './Grid.js';
 import { isPointOnMound, crackMound, renderMound, centerCameraOnMound } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
 import {
@@ -100,21 +129,109 @@ centerCameraOnMound(state.camera); // one-time — not inside resizeCanvas, so a
 // ---- Input wiring ----
 const input = createInput(canvas);
 
-input.clickHandlers.push((sx, sy) => {
+// Economy Fish Combining (Tier 2) drag state — see Entities.js's
+// isCombinableFish/canCombineFish/combineFish and CLAUDE.md's "Economy Fish
+// Combining/Splicing" section. draggedFishId is set on mousedown if the
+// press landed on a legal combine SOURCE (economy species, Adult, not
+// already at the tier cap); while set, update() below snaps that fish's
+// position to the cursor every tick (freezing its own AI movement in the
+// process, since the override runs after updateEntities) and render()
+// highlights whatever fish is currently under the cursor green/red.
+// fishDragArmed mirrors "a drag started this press" for exactly one
+// browser 'click' event — the native click always fires after mouseup on
+// the same element regardless of how far the mouse moved in between, so
+// without this guard, starting a drag on a fish would ALSO trigger the
+// click handler below (banking a coin / spawning food / opening the Mound
+// menu) at the release point.
+let draggedFishId = null;
+let fishDragArmed = false;
+
+input.mouseDownHandlers.push((sx, sy) => {
+  fishDragArmed = false;
+  if (state.ui.paused) return;
   const world = screenToWorld(sx, sy, state.camera);
+  const fish = findFishAt(state, world.x, world.y);
+  if (fish && isCombinableFish(fish)) {
+    draggedFishId = fish.id;
+    fishDragArmed = true;
+  }
+});
+
+input.mouseUpHandlers.push((sx, sy) => {
+  if (draggedFishId == null) return;
+  const world = screenToWorld(sx, sy, state.camera);
+  const dragged = state.level.entities.find((e) => e.id === draggedFishId);
+  const target = findFishAt(state, world.x, world.y, draggedFishId);
+  if (dragged && target && canCombineFish(dragged, target)) {
+    combineFish(state, dragged, target);
+  }
+  draggedFishId = null;
+});
+
+// Fan placement is a two-click flow, not a single click: click 1 arms
+// aiming at a valid cell (the tile isn't placed yet), then the ghost
+// rotates live with the cursor from that cell's fixed position until click
+// 2 confirms the angle and actually places it — per direct request, so a
+// fan's direction is a deliberate second decision rather than baked into
+// the same click that chose its location. fanAimingCell is self-healing:
+// it's only ever honored while state.ui.selectedTool still matches the
+// building id it was armed for, so switching tools (or the S/P/Escape
+// shortcuts, or clicking a different shop icon) implicitly cancels it
+// without any of those call sites needing to know this state exists.
+const FAN_BUILDING_IDS = [TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4];
+let fanAimingCell = null; // { col, row, buildingId } | null
+
+function isFanAimingActive() {
+  return fanAimingCell != null && state.ui.selectedTool === `build:${fanAimingCell.buildingId}`;
+}
+
+input.clickHandlers.push((sx, sy) => {
+  if (fishDragArmed) { fishDragArmed = false; return; } // this click followed a fish-combine drag gesture — don't also bank/feed/mound-click at the release point
+  const world = screenToWorld(sx, sy, state.camera);
+
+  if (state.ui.selectedTool.startsWith('build:')) {
+    const buildingId = state.ui.selectedTool.slice('build:'.length);
+    if (FAN_BUILDING_IDS.includes(buildingId)) {
+      if (isFanAimingActive()) {
+        // Click 2: confirm the angle (from the armed cell's center to
+        // wherever the cursor is NOW, not necessarily back over that cell)
+        // and actually place the tile.
+        const angle = angleFromTileToPoint(fanAimingCell.col, fanAimingCell.row, world.x, world.y);
+        placeTile(state, fanAimingCell.col, fanAimingCell.row, buildingId, angle);
+        fanAimingCell = null;
+        return;
+      }
+      // Click 1: arm aiming at this cell if it's actually a legal placement —
+      // no tile placed yet, no money spent yet.
+      const { col, row } = worldToTile(world.x, world.y);
+      if (canPlaceTile(state, col, row, buildingId).ok) fanAimingCell = { col, row, buildingId };
+      return; // either way, a fan-tool click never falls through to mound/coin/food
+    }
+  }
+
+  if (state.ui.selectedTool === 'demolish') {
+    const { col, row } = worldToTile(world.x, world.y);
+    removeTile(state, col, row);
+    return;
+  }
+
   if (isPointOnMound(state, world.x, world.y)) { openMoundMenu(state); return; } // opens the "Throw money at it" popup — see UI.js
   if (tryBankCoinAt(state, world.x, world.y)) return; // clicking a coin always banks it, regardless of selected tool
   if (state.ui.selectedTool === 'food') {
     trySpawnFood(state, world.x, world.y);
   }
-  // Build-mode placement doesn't happen here — see the mousedown/drag
-  // handling in update() below, which also covers a single un-dragged click.
+  // Non-fan build-mode placement doesn't happen here — see the mousedown/
+  // drag handling in update() below, which also covers a single un-dragged
+  // click for those building types.
 });
 
-// Right-click always removes whatever tile is under the cursor, regardless
-// of the selected tool — mirrors how clicking a coin always banks it above.
+// Demolishing now requires the Demolish tool to be selected (see UI.js's
+// tool-demolish-btn) — right-click alone no longer removes tiles
+// unconditionally the way it used to. Kept as a convenience alias for
+// left-click while that tool is active, not a separate always-on shortcut.
 input.rightClickHandlers.push((sx, sy) => {
   if (state.ui.paused) return;
+  if (state.ui.selectedTool !== 'demolish') return;
   const world = screenToWorld(sx, sy, state.camera);
   const { col, row } = worldToTile(world.x, world.y);
   removeTile(state, col, row);
@@ -126,9 +243,26 @@ input.rightClickHandlers.push((sx, sy) => {
 // without re-spending money on a cell it's already sitting over.
 let lastBuildCell = null;
 
+// Story trigger: the first time Escape is EVER pressed (tracked ahead of
+// every early-return below, so closing the Mound popup or cancelling a Fan
+// aim both still count) — if the 2-minute dare already fired
+// (tutorialFlags.escapeDareShown, see Systems.js's updateEscapeDare), this
+// is the "gotcha" follow-up. See CLAUDE.md's "Story & Tutorial Notifications".
+const MADE_YA_LOOK_MESSAGE = 'Made ya look. tehe';
+function pushMainNotification(text) {
+  const notifications = state.level.notifications;
+  notifications.push({ id: notifications.length + 1, text, elapsed: state.level.elapsed });
+  if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
+}
+
 input.keydownHandlers.push((e) => {
   if (e.code === 'Escape') { // opens/closes any time, even while paused
+    if (!state.level.tutorialFlags.escapePressed) {
+      state.level.tutorialFlags.escapePressed = true;
+      if (state.level.tutorialFlags.escapeDareShown) pushMainNotification(MADE_YA_LOOK_MESSAGE);
+    }
     if (isMoundMenuOpen()) { closeMoundMenu(); return; } // close whatever's on top first, rather than opening the pause menu behind/over it
+    if (isFanAimingActive()) { fanAimingCell = null; return; } // cancel the pending Fan placement instead of opening the pause menu on top of it
     togglePauseMenu(state);
     return;
   }
@@ -210,22 +344,48 @@ function updateBuildDrag() {
     lastBuildCell = null;
     return;
   }
+  if (draggedFishId != null) return; // a fish-combine drag is in progress — don't also place tiles under it
   if (!input.mouse.inside || !state.ui.selectedTool.startsWith('build:')) return;
   const buildingId = state.ui.selectedTool.slice('build:'.length);
+  if (FAN_BUILDING_IDS.includes(buildingId)) return; // Fans go through the two-click aiming flow in the click handler above, not drag-placement
   const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
   const { col, row } = worldToTile(world.x, world.y);
   const cellKey = `${col},${row}`;
   if (cellKey === lastBuildCell) return;
   lastBuildCell = cellKey;
-  placeTile(state, col, row, buildingId);
+  // Auto-Feeder's aim locks toward wherever the cursor is within the tile
+  // at the moment it's placed — see Grid.js's angleFromTileToPoint. Ignored
+  // for every other building type.
+  const angle = angleFromTileToPoint(col, row, world.x, world.y);
+  placeTile(state, col, row, buildingId, angle);
+}
+
+// Runs every tick a combine-drag is active (after updateEntities, so this
+// unconditionally overrides whatever that tick's normal AI/physics did),
+// snapping the dragged fish's position to the cursor and zeroing its
+// velocity — the visual "you're holding this fish" feedback the drag
+// interaction needs. If the dragged fish stopped existing mid-drag (e.g. it
+// starved the same tick), this just clears the drag rather than erroring.
+function updateFishDrag() {
+  if (draggedFishId == null) return;
+  const dragged = state.level.entities.find((e) => e.id === draggedFishId);
+  if (!dragged) { draggedFishId = null; return; }
+  const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
+  dragged.x = world.x;
+  dragged.y = world.y;
+  dragged.vx = 0;
+  dragged.vy = 0;
 }
 
 function update(dtMs) {
   if (state.ui.paused) return; // frozen behind the pause menu — render() still runs so the tank stays visible
+  if (state.level.gameOver) return; // lost — frozen the same way, but via a separate flag so Escape still reaches the pause menu's Restart without also un-freezing a lost game (see Systems.js's updateBankruptcy)
 
   updateCamera(state.camera, input, canvas, dtMs);
   updateBuildDrag();
   updateEntities(state, dtMs);
+  updateFishDrag();
+  updateStoryTriggers(state);
   state.level.elapsed += dtMs;
 
   stepsCounter++;
@@ -258,9 +418,41 @@ function render() {
   renderSeabedGrid(ctx, state, canvas.width, canvas.height);
   renderMound(ctx, state);
 
-  if (state.ui.selectedTool.startsWith('build:') && input.mouse.inside && !state.ui.paused) {
+  if (isFanAimingActive() && input.mouse.inside && !state.ui.paused) {
+    // Click 1 already happened — the ghost stays fixed at the armed cell
+    // and only its aim rotates with the cursor, until click 2 confirms it.
     const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
-    renderBuildGhost(ctx, state, world.x, world.y, state.ui.selectedTool.slice('build:'.length));
+    const angle = angleFromTileToPoint(fanAimingCell.col, fanAimingCell.row, world.x, world.y);
+    const cellCenterX = fanAimingCell.col * TILE_SIZE + TILE_SIZE / 2;
+    const cellCenterY = fanAimingCell.row * TILE_SIZE + TILE_SIZE / 2;
+    renderBuildGhost(ctx, state, cellCenterX, cellCenterY, fanAimingCell.buildingId, angle);
+  } else if (state.ui.selectedTool.startsWith('build:') && input.mouse.inside && !state.ui.paused) {
+    const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
+    const buildingId = state.ui.selectedTool.slice('build:'.length);
+    const { col, row } = worldToTile(world.x, world.y);
+    const angle = angleFromTileToPoint(col, row, world.x, world.y);
+    renderBuildGhost(ctx, state, world.x, world.y, buildingId, angle);
+  } else if (state.ui.selectedTool === 'demolish' && input.mouse.inside && !state.ui.paused) {
+    // Ghost-mode preview of whatever's under the cursor, plus the refund
+    // it'll pay out — TILE_REFUND_FRACTION is 1.0 (a full refund) per
+    // direct request, since removal now requires deliberately picking this
+    // tool rather than being an always-available right-click.
+    const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
+    const { col, row } = worldToTile(world.x, world.y);
+    const tile = getTile(state.level.grid, col, row);
+    if (tile && tile !== TILE_EMPTY) {
+      const building = BUILDING_TYPES[tile];
+      const screen = worldToScreen(col * TILE_SIZE, row * TILE_SIZE, state.camera);
+      const size = TILE_SIZE * state.camera.zoom;
+      ctx.globalAlpha = 0.5;
+      ctx.fillStyle = '#ff6b6b';
+      ctx.fillRect(screen.x, screen.y, size, size);
+      ctx.globalAlpha = 1;
+      const refund = Math.floor(building.cost * TILE_REFUND_FRACTION);
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 12px sans-serif';
+      ctx.fillText(`+$${refund}`, screen.x + 2, screen.y - 4);
+    }
   }
 
   for (const item of state.level.items) {
@@ -285,7 +477,30 @@ function render() {
 
   const cursorWorld = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
 
-  for (const fish of state.level.entities) {
+  // Economy Fish Combining: while a drag is active, find whatever fish is
+  // currently under the cursor (excluding the dragged fish itself — it's
+  // been snapped to the cursor's exact position by updateFishDrag, so
+  // without excluding it, it would always be its own nearest match) and
+  // check whether dropping here would be a legal combine, for the
+  // green/red highlight drawn in the fish loop below.
+  let combineHoverTargetId = null;
+  let combineHoverValid = false;
+  if (draggedFishId != null) {
+    const dragged = state.level.entities.find((e) => e.id === draggedFishId);
+    if (dragged) {
+      const hoverTarget = findFishAt(state, cursorWorld.x, cursorWorld.y, draggedFishId);
+      if (hoverTarget) {
+        combineHoverTargetId = hoverTarget.id;
+        combineHoverValid = canCombineFish(dragged, hoverTarget);
+      }
+    }
+  }
+
+  // "You found the chat" gag: every fish is frozen (Entities.js's
+  // updateFishVanish/updateEntities) AND hidden for FISH_VANISH_DURATION_MS
+  // — skip the whole draw loop rather than each fish individually, since
+  // nothing about them should be visible, not even the hunger indicator.
+  for (const fish of state.level.fishVanishTimer > 0 ? [] : state.level.entities) {
     const pos = worldToScreen(fish.x, fish.y, state.camera);
     if (pos.x < -60 || pos.x > canvas.width + 60 || pos.y < -60 || pos.y > canvas.height + 60) continue; // cull offscreen
     const def = SPECIES[fish.speciesId];
@@ -314,7 +529,23 @@ function render() {
       eyeDirection = { x: dx / dist, y: dy / dist };
     }
 
-    drawFish(ctx, pos.x, pos.y, fish.speciesId, fish.stage, facing, fish.tailPhase, eyeDirection);
+    drawFish(ctx, pos.x, pos.y, fish.speciesId, fish.stage, facing, fish.tailPhase, eyeDirection, fish.starTier || 1);
+
+    // Economy Fish Combining: a soft ring around the fish currently being
+    // dragged, and a green/red ring around whatever it's hovering over.
+    if (fish.id === draggedFishId) {
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, size * 0.75, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (fish.id === combineHoverTargetId) {
+      ctx.strokeStyle = combineHoverValid ? '#4dff88' : '#ff4d4d';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, size * 0.75, 0, Math.PI * 2);
+      ctx.stroke();
+    }
 
     if (fish.hunger >= HUNGER_CRITICAL_THRESHOLD) {
       ctx.fillStyle = '#ff3b3b';

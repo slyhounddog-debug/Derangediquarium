@@ -208,6 +208,7 @@ html, body {
 .tool-btn.selected { border-color: #ffb84d; background: #fff3d9; }
 .tool-icon { display: block; border-radius: 50%; }
 .tool-icon-food { width: 16px; height: 16px; background: #8bc34a; box-shadow: 0 0 0 4px rgba(139, 195, 74, 0.3); }
+.tool-icon-demolish { width: 16px; height: 16px; background: #ff6b6b; box-shadow: 0 0 0 4px rgba(255, 107, 107, 0.3); } /* red, distinct from Food's green — a destructive action, not a placement one */
 
 #build-tool-grid {
   display: flex; flex-wrap: wrap; gap: 8px;
@@ -233,6 +234,7 @@ html, body {
   display: flex;
   flex-wrap: wrap;
   gap: 14px 12px;
+  margin-bottom: 14px; /* breathing room above the tool-bar below it, now that fish are reordered above food/buildings */
 }
 .species-icon-btn {
   position: relative;

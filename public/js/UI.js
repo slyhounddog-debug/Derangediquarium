@@ -27,9 +27,11 @@ import {
   FOOD_CAPACITY_UPGRADE_MAX_LEVEL,
   FOOD_CAPACITY_UPGRADE_INCREMENT,
   FOOD_MAX_ON_SCREEN_BASE,
+  NOTIFICATION_LOG_MAX,
+  FISH_VANISH_DURATION_MS,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings, loadLevel } from './Levels.js';
-import { spawnFishCheat } from './Entities.js';
+import { spawnFishCheat, getFishPurchaseCost, effectiveFoodCapacity } from './Entities.js';
 import { getTile, worldToTile } from './Grid.js';
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
@@ -37,6 +39,11 @@ import { drawFish } from './FishRenderer.js';
 
 const MOUND_MENU_GAP_PX = 12; // screen px of breathing room between the popup's bottom edge and the Mound's top edge
 const MOUND_MENU_TRANSITION_MS = 220; // must match #mound-menu's CSS transition duration
+
+// One-time story/tutorial notifications — see state.level.tutorialFlags and
+// CLAUDE.md's "Story & Tutorial Notifications" section.
+const FIRST_FISH_BOUGHT_MESSAGE = "You bought your first fish! Please remember to feed it occasionally. It's not a decoration. Probably.";
+const FOUND_THE_CHAT_MESSAGE = 'You found the chat. Curiosity kills the fish.';
 
 let els = null;
 let currentPreviewSpecies = null; // species currently shown in the in-panel preview, if any
@@ -61,6 +68,7 @@ export function initUI(state) {
   els = {
     hud: document.getElementById('hud'),
     money: document.getElementById('hud-money'),
+    food: document.getElementById('hud-food'),
     cleanliness: document.getElementById('hud-cleanliness'),
     shopPanel: document.getElementById('shop-panel'),
     shopCollapseBtn: document.getElementById('shop-collapse-btn'),
@@ -73,6 +81,7 @@ export function initUI(state) {
     previewDesc: document.getElementById('shop-preview-desc'),
     previewBuyBtn: document.getElementById('shop-preview-buy'),
     toolFoodBtn: document.getElementById('tool-food-btn'),
+    toolDemolishBtn: document.getElementById('tool-demolish-btn'),
     buildToolGrid: document.getElementById('build-tool-grid'),
     toolTooltip: document.getElementById('tool-tooltip'),
     pauseOverlay: document.getElementById('pause-overlay'),
@@ -112,10 +121,24 @@ export function initUI(state) {
     notificationLogExpanded = !notificationLogExpanded;
     els.notificationLog.classList.toggle('hidden', !notificationLogExpanded);
     lastRenderedNotificationCount = -1; // force a rebuild next update so it's populated the instant it opens
+    // Story trigger: the first time the log is ever expanded — see
+    // CLAUDE.md's "Story & Tutorial Notifications". Only on the
+    // collapsed->expanded transition, not when collapsing back.
+    if (notificationLogExpanded && !state.level.tutorialFlags.firstChatExpanded) {
+      state.level.tutorialFlags.firstChatExpanded = true;
+      const notifications = state.level.notifications;
+      notifications.push({ id: notifications.length + 1, text: FOUND_THE_CHAT_MESSAGE, elapsed: state.level.elapsed });
+      if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
+      state.level.fishVanishTimer = FISH_VANISH_DURATION_MS; // every fish freezes + hides for a few seconds — see Entities.js's updateFishVanish and main.js's render()
+    }
   });
 
   els.toolFoodBtn.addEventListener('click', () => {
     state.ui.selectedTool = 'food';
+    updateToolbar(state);
+  });
+  els.toolDemolishBtn.addEventListener('click', () => {
+    state.ui.selectedTool = 'demolish';
     updateToolbar(state);
   });
 
@@ -138,12 +161,22 @@ export function initUI(state) {
   els.shopMoney.addEventListener('animationend', clearFlashClass);
 
   els.previewBuyBtn.addEventListener('click', () => {
-    if (!currentPreviewSpecies || state.level.money < currentPreviewSpecies.cost) return;
-    state.level.money -= currentPreviewSpecies.cost;
+    if (!currentPreviewSpecies) return;
+    const cost = getFishPurchaseCost(state, currentPreviewSpecies.id); // dynamic for economy species (Guppy/Dartfin/Blimpfish) — see Config.js's ECONOMY_FISH_COST_GROWTH_RATE
+    if (state.level.money < cost) return;
+    state.level.money -= cost;
     const { x, y } = randomVisibleSpawnPoint(state);
     spawnFishCheat(state, currentPreviewSpecies.id, x, y, false);
+    if (!state.level.tutorialFlags.firstFishBought) {
+      state.level.tutorialFlags.firstFishBought = true;
+      const notifications = state.level.notifications;
+      notifications.push({ id: notifications.length + 1, text: FIRST_FISH_BOUGHT_MESSAGE, elapsed: state.level.elapsed });
+      if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
+    }
     // Stays populated with the same species — buying several in a row
-    // doesn't need re-clicking its icon each time.
+    // doesn't need re-clicking its icon each time. Its price tag/preview
+    // name update on the very next frame (refreshPreviewBuyButton,
+    // refreshShopPrices) since this purchase just changed N.
   });
 
   updateToolbar(state);
@@ -303,15 +336,18 @@ function restartLevel(state) {
   closePauseMenu(state);
 }
 
-// Highlights whichever click-tool is active. Food still gets its own small
-// tooltip (just a price, no separate window needed for one line); buildings
-// show their info in the shared shop-preview window instead (see
+// Highlights whichever click-tool is active. Food/Demolish get their own
+// small tooltip (a one-liner, no separate window needed); buildings show
+// their info in the shared shop-preview window instead (see
 // selectBuildingForPreview) so this only needs to track the selected state.
 function updateToolbar(state) {
   const foodSelected = state.ui.selectedTool === 'food';
+  const demolishSelected = state.ui.selectedTool === 'demolish';
   els.toolFoodBtn.classList.toggle('selected', foodSelected);
-  els.toolTooltip.classList.toggle('hidden', !foodSelected);
+  els.toolDemolishBtn.classList.toggle('selected', demolishSelected);
+  els.toolTooltip.classList.toggle('hidden', !foodSelected && !demolishSelected);
   if (foodSelected) els.toolTooltip.textContent = `Food $${FOOD_COST}`;
+  else if (demolishSelected) els.toolTooltip.textContent = 'Click a building to remove it — full refund';
 
   for (const btn of els.buildToolGrid.children) {
     btn.classList.toggle('selected', state.ui.selectedTool === btn.dataset.tool);
@@ -521,8 +557,10 @@ function selectSpeciesForPreview(state, species) {
   els.previewEmpty.classList.add('hidden');
   els.previewContent.classList.remove('hidden');
   els.previewBuyBtn.classList.remove('hidden');
-  els.previewName.textContent = `${species.name} — $${species.cost}`;
   els.previewDesc.textContent = species.description;
+  // Name/price text is set live in refreshPreviewBuyButton (called both
+  // here and every frame from updateHUD) since an economy species' price is
+  // dynamic — see Config.js's ECONOMY_FISH_COST_GROWTH_RATE.
   refreshPreviewBuyButton(state);
   startPreviewAnimation();
 }
@@ -603,17 +641,27 @@ function renderPreviewCanvas() {
   }
 }
 
-// Re-checked every frame (from updateHUD) so the button live-updates if
-// money changes while a species happens to be previewed.
+// Re-checked every frame (from updateHUD) so the button/name live-update if
+// money changes, or an economy species' dynamic price shifts (buying one
+// raises it, one dying/combining lowers it), while it happens to be
+// previewed — see Config.js's ECONOMY_FISH_COST_GROWTH_RATE.
 function refreshPreviewBuyButton(state) {
   if (!currentPreviewSpecies) return;
-  const affordable = state.level.money >= currentPreviewSpecies.cost;
+  const cost = getFishPurchaseCost(state, currentPreviewSpecies.id);
+  els.previewName.textContent = `${currentPreviewSpecies.name} — $${cost}`;
+  const affordable = state.level.money >= cost;
   els.previewBuyBtn.disabled = !affordable;
   els.previewBuyBtn.textContent = affordable ? 'Buy' : "Can't afford";
 }
 
+// speciesId -> price-tag <span>, populated by buildShopPanel — lets
+// refreshShopPrices update just the price text every frame the shop is
+// open (economy species' dynamic cost) without rebuilding the whole grid.
+let speciesPriceTags = {};
+
 function buildShopPanel(state) {
   els.shopGrid.innerHTML = '';
+  speciesPriceTags = {};
   for (const species of getAvailableSpecies(state)) {
     const btn = document.createElement('button');
     btn.className = 'species-icon-btn';
@@ -623,8 +671,9 @@ function buildShopPanel(state) {
 
     const priceTag = document.createElement('span');
     priceTag.className = 'species-icon-price';
-    priceTag.textContent = `$${species.cost}`;
+    priceTag.textContent = `$${getFishPurchaseCost(state, species.id)}`;
     btn.appendChild(priceTag);
+    speciesPriceTags[species.id] = priceTag;
 
     btn.addEventListener('click', () => {
       for (const b of els.shopGrid.children) b.classList.remove('selected');
@@ -633,6 +682,16 @@ function buildShopPanel(state) {
     });
 
     els.shopGrid.appendChild(btn);
+  }
+}
+
+// Called every frame the shop is open (from updateHUD) — only the 3 economy
+// species' prices actually change over time, but it's cheap enough to just
+// refresh every visible tag's text rather than tracking which ones are
+// dynamic separately.
+function refreshShopPrices(state) {
+  for (const speciesId in speciesPriceTags) {
+    speciesPriceTags[speciesId].textContent = `$${getFishPurchaseCost(state, speciesId)}`;
   }
 }
 
@@ -660,7 +719,10 @@ export function updateHUD(state) {
   els.money.textContent = moneyText;
   els.shopMoney.textContent = moneyText;
   els.cleanliness.textContent = `✨ ${Math.round(state.level.cleanliness)}%`;
+  const currentFoodCount = state.level.items.reduce((n, item) => n + (item.type === 'food' ? 1 : 0), 0);
+  els.food.textContent = `🍽️ ${currentFoodCount}/${effectiveFoodCapacity(state)}`;
   refreshPreviewBuyButton(state);
+  if (!state.ui.shopCollapsed) refreshShopPrices(state);
   if (moundMenuOpen) refreshMoundThrowButton(state);
   if (moundMenuOpen || moundMenuClosing) updateMoundMenuPosition(state); // keeps tracking through the shrink-back so it doesn't jump right as it starts closing
   if (!state.ui.tankPanelCollapsed) refreshTankPanel(state);

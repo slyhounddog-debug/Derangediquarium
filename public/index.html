@@ -11,6 +11,7 @@
 
 <div id="hud">
   <div id="hud-money" title="Money — spend it on fish and food in the shop">💰 $0</div>
+  <div id="hud-food" title="Food on screen — capped by your Food Capacity Tank Upgrade">🍽️ 0/2</div>
   <div id="hud-cleanliness" title="Tank cleanliness — dirty water will stress your fish (not active yet, coming in a later phase)">✨ 100%</div>
 </div>
 
@@ -44,14 +45,18 @@
     </div>
   </div>
 
+  <div id="shop-species-grid"></div>
+
   <div id="tool-bar">
     <button id="tool-food-btn" class="tool-btn" title="Food">
       <span class="tool-icon tool-icon-food"></span>
     </button>
+    <button id="tool-demolish-btn" class="tool-btn" title="Demolish — select this, then click a building to remove it for a full refund">
+      <span class="tool-icon tool-icon-demolish"></span>
+    </button>
     <div id="build-tool-grid"></div>
   </div>
   <div id="tool-tooltip" class="tool-tooltip"></div>
-  <div id="shop-species-grid"></div>
 </div>
 
 <div id="tank-panel" class="collapsed">

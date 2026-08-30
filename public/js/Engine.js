@@ -27,6 +27,8 @@ export function createInput(canvas) {
     mouseDown: false, // left button held — build-mode drag-placement reads this each tick, see main.js
     clickHandlers: [],
     rightClickHandlers: [], // build-mode tile removal; contextmenu is prevented so it never opens the browser menu
+    mouseDownHandlers: [], // fired once, at press — main.js uses this to arm an Economy Fish Combining drag when the press lands on a combinable fish
+    mouseUpHandlers: [], // fired once, at release (screen coords are the last tracked in-canvas mouse position — see the window mouseup listener below) — main.js uses this to resolve a combining drag
     keydownHandlers: [],
     wheelDeltaX: 0, // accumulated scroll since the last updateCamera consumed it
     wheelDeltaY: 0,
@@ -56,12 +58,22 @@ export function createInput(canvas) {
     for (const handler of input.clickHandlers) handler(sx, sy, e);
   });
   canvas.addEventListener('mousedown', (e) => {
-    if (e.button === 0) input.mouseDown = true;
+    if (e.button !== 0) return;
+    input.mouseDown = true;
+    const rect = canvas.getBoundingClientRect();
+    const sx = e.clientX - rect.left;
+    const sy = e.clientY - rect.top;
+    for (const handler of input.mouseDownHandlers) handler(sx, sy, e);
   });
   window.addEventListener('mouseup', (e) => {
     // Listens on window, not the canvas, so a drag that releases outside
     // the canvas still clears mouseDown instead of leaving it stuck true.
-    if (e.button === 0) input.mouseDown = false;
+    // mouseUpHandlers fire with the last tracked in-canvas mouse position
+    // (input.mouse.x/y) rather than this event's own coordinates, since a
+    // release outside the canvas has no canvas-relative position to give.
+    if (e.button !== 0) return;
+    input.mouseDown = false;
+    for (const handler of input.mouseUpHandlers) handler(input.mouse.x, input.mouse.y, e);
   });
   canvas.addEventListener('contextmenu', (e) => {
     e.preventDefault(); // right-click is build-mode tile removal, not the browser menu
