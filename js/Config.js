@@ -113,7 +113,7 @@ export const RAMP_NUDGE_DISTANCE = TILE_SIZE;
 // are. The cone is a fixed-direction blow (uniform along the fan's aim
 // angle, not radiating outward from its center like an explosion), narrowing
 // force linearly to 0 at max range.
-export const FAN_CONE_HALF_ANGLE_DEG = 15; // total cone width = 2x this = 30°
+export const FAN_CONE_HALF_ANGLE_DEG = 20; // total cone width = 2x this = 40° (was 15/30° — widened slightly per direct request)
 // Placeholder balance per tier, same as every other economy/physics constant
 // in this file — tune once real playtesting exists. Power cost is only
 // tracked into state.level.powerDemand for now (Systems.js's real power
@@ -121,13 +121,13 @@ export const FAN_CONE_HALF_ANGLE_DEG = 15; // total cone width = 2x this = 30°
 // header), so an Electric/Turbo Fan still runs unconditionally today, same
 // as every other not-yet-power-gated Electric building in the codebase.
 export const FAN_T2_MAX_FORCE = 260; // Rudimentary Fan — force magnitude at the emitter (see Grid.js's a = F/mass integration)
-export const FAN_T2_MAX_RANGE = 160; // px — 5 tiles (was 3; +2 tiles per direct request to extend all Fans' reach)
+export const FAN_T2_MAX_RANGE = 224; // px — 7 tiles (was 3, then 5, then 6; +1 more tile per direct request, the 5th such increase this session)
 export const FAN_T2_POWER_COST = 0;
 export const FAN_T3_MAX_FORCE = 520; // Electric Fan
-export const FAN_T3_MAX_RANGE = 272; // px — 8.5 tiles (was 5.5; +3 tiles)
+export const FAN_T3_MAX_RANGE = 336; // px — 10.5 tiles (was 5.5, then 8.5, then 9.5; +1 more tile)
 export const FAN_T3_POWER_COST = 5;
 export const FAN_T4_MAX_FORCE = 1100; // Turbo Fan — extreme thrust, enough to clear a heavy coin across a ledge on its own
-export const FAN_T4_MAX_RANGE = 416; // px — 13 tiles (was 10; +3 tiles)
+export const FAN_T4_MAX_RANGE = 480; // px — 15 tiles (was 10, then 13, then 14; +1 more tile)
 export const FAN_T4_POWER_COST = 14;
 
 // ---- Auto-Feeder ----
@@ -288,19 +288,49 @@ export const COIN_TIERS = [
   { maxValue: Infinity, color: '#b9f2ff', sizeMultiplier: 1.15 }, // diamond, 31+, 15% bigger
 ];
 
-// ---- Waste (Tier 2 scaffold — byproduct of basic/unpowered buildings) ----
-// A third item type alongside food/coin. Spawned by Entities.js whenever a
-// basic (currently the only kind that exists) Collector consumes an item —
-// "a basic collector poops out sludge when collecting a coin," per the
-// design update. Falls/routes using the exact same Grid.js tile physics as
-// a coin, but isn't click-bankable and nothing currently consumes it (that's
-// Suckerfish's real Scavenger behavior + real toxicity math, Phase 3) — it
-// just accumulates, which is the intended pressure to reach Tier 3's
-// Electric buildings (they skip producing it entirely).
+// ---- Waste (Phase 3 — two sources) ----
+// A third item type alongside food/coin. Spawned two ways: (1) a basic
+// (unpowered) Collector consuming an item — "a basic collector poops out
+// sludge when collecting a coin," per the design update — and (2) directly
+// by any non-Scavenger fish, on its own periodic timer (`WASTE_POOP_INTERVAL_MS`
+// below), independent of any building — literal fish poop, per direct
+// request. Falls/routes using the exact same Grid.js tile physics as a
+// coin, but isn't click-bankable — Suckerfish (its real Scavenger behavior,
+// see the SPECIES table below) and the Auto-Feeder are what actually
+// consume it, each restoring CLEANLINESS_PER_WASTE_EVENT of cleanliness
+// when they do. Electric buildings (Tier 4+) skip producing the
+// Collector-side of it entirely, once they exist.
 export const WASTE_RADIUS = 5;
 export const WASTE_GRAVITY = GRAVITY; // sinks like a coin, not a drifting food pellet
 export const WASTE_MAX_FALL_SPEED = MAX_FALL_SPEED;
 export const WASTE_COLOR = '#6b8e4e';
+// Flat hunger relief for a Scavenger fish (Suckerfish) eating a Waste item —
+// deliberately NOT tied to the Food Quality Tank Upgrade tree, which is
+// themed around player-bought Food pellets specifically, not scavenged waste.
+export const WASTE_HUNGER_RELIEF = 70;
+// How often a non-Scavenger fish poops out a Waste item directly at its own
+// position, mirroring the existing coin-drop-timer pattern exactly (see
+// Entities.js's updateFish) — a flat rate for every such species regardless
+// of size/species, placeholder balance like every other timing constant
+// here, tune once real playtesting exists. Scavenger fish (Suckerfish)
+// don't poop — they're the one eating this, not producing it.
+export const WASTE_POOP_INTERVAL_MS = 25000;
+
+// ---- Cleanliness (Phase 3) ----
+// state.level.cleanliness (0-100, clamped) is a real, live value now instead
+// of a static placeholder — every Waste item that spawns costs
+// CLEANLINESS_PER_WASTE_EVENT; every Waste item cleaned back up (a
+// Scavenger fish eating it, or an Auto-Feeder absorbing it) restores the
+// same amount, so cleanliness is effectively a running tally of
+// spawned-vs-cleaned waste, scaled into a 0-100 band. UI.js's updateHUD
+// detects which direction it just moved (the same lastValue-comparison
+// pattern already used for the money HUD) and flashes #hud-cleanliness red
+// (dropping) or green (rising) accordingly — see the shared .flash-spend/
+// .flash-pickup classes in style.css. No gameplay effect from a low value
+// yet (fish stress/toxicity is still unbuilt, later Phase 3+ scope) — this
+// is the visible-feedback half of the system.
+export const CLEANLINESS_MAX = 100;
+export const CLEANLINESS_PER_WASTE_EVENT = 4;
 
 // ---- Floating pickup text ----
 export const PICKUP_TEXT_LIFETIME_MS = 900; // how long a "+$N" pickup readout stays on screen after a coin is banked
@@ -499,9 +529,10 @@ export const SPECIES = {
   // they're inert until a later phase's unlock logic adds them.
   suckerfish: {
     id: 'suckerfish', name: 'Suckerfish', tier: 2, unlockPhase: 3, cost: 25,
-    description: 'Eats waste before it decays into toxicity.',
+    description: 'Only eats Waste, never Food — cleans up after the rest of the tank instead of adding to the mess.',
     behavior: ['SCAVENGER'], dropType: 'waste_cleared',
-    swimSpeed: 30, lifespan: 300000, hungerRate: 0.85, // -20%, part of a general de-pacing pass — was 1.06
+    swimSpeed: 30, lifespan: 300000,
+    hungerRate: 1.015, // exactly half of Guppy's 2.03, per direct request — Entities.js's updateFish targets Waste items (never Food) for any species carrying the SCAVENGER tag
     growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 10000, dropValue: 0 }],
     unlockedByDefault: false,
   },
@@ -774,7 +805,7 @@ export const ECONOMY_SPECIES_IDS = ['guppy', 'dartfin', 'blimpfish'];
 // one dying, starving, or being consumed by a combine lowers N (and so the
 // cost) again, since N is always computed live off the current entity list
 // rather than tracked as a running counter.
-export const ECONOMY_FISH_COST_GROWTH_RATE = 1.4;
+export const ECONOMY_FISH_COST_GROWTH_RATE = 1.25; // was 1.4, reduced per direct request for a gentler cost curve
 
 // Two Adult economy fish of the exact same species AND exact same star tier
 // can be combined (dragged onto each other) into one Adult fish of the next
@@ -787,7 +818,16 @@ export const ECONOMY_FISH_COST_GROWTH_RATE = 1.4;
 // the adult sprite per tier — deliberately NOT a plain tier-1 count (Tier 2
 // jumps straight to 2 stars, not 1), per the design spec's exact table.
 export const FISH_STAR_TIER_MAX = 4;
-export const FISH_STAR_TIER_VALUE_MULTIPLIER = 1.5;
+export const FISH_STAR_TIER_VALUE_MULTIPLIER = 1.8; // was 1.5, raised per direct request
+// Each combine step also makes the resulting fish 10% less hungry than the
+// previous tier (compounding, same ^(starTier-1) pattern as the value
+// multiplier above) — see Entities.js's updateFish, applied to def.hungerRate
+// before the per-tick hunger accumulation. Waste production (both the
+// Collector byproduct and the direct fish-poop timer) deliberately does NOT
+// scale with star tier at all — see WASTE_POOP_INTERVAL_MS/Entities.js's
+// poop block — so a Tier-4 fish still only ever poops the same single Waste
+// item per interval as a Tier-1 adult, per direct request.
+export const FISH_STAR_TIER_HUNGER_MULTIPLIER = 0.9;
 export const FISH_STAR_COUNT_BY_TIER = { 1: 0, 2: 2, 3: 3, 4: 4 };
 export const FISH_STAR_COLOR = '#ffd700';
 export const FISH_STAR_OUTER_RADIUS_RATIO = 0.09; // fraction of the fish's current size

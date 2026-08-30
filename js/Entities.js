@@ -55,15 +55,31 @@ import {
   ECONOMY_FISH_COST_GROWTH_RATE,
   FISH_STAR_TIER_MAX,
   FISH_STAR_TIER_VALUE_MULTIPLIER,
+  FISH_STAR_TIER_HUNGER_MULTIPLIER,
   FISH_STAR_COLOR,
   FISH_DRAG_HIT_RADIUS_FRACTION,
   MONEY_MILESTONE_1K,
+  WASTE_HUNGER_RELIEF,
+  WASTE_POOP_INTERVAL_MS,
+  CLEANLINESS_MAX,
+  CLEANLINESS_PER_WASTE_EVENT,
 } from './Config.js';
 import { stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemForces, updateBuildings } from './Grid.js';
 
 let _nextId = 1;
 function nextId() {
   return _nextId++;
+}
+
+// state.level.cleanliness (0-100) — every Waste item that spawns costs
+// CLEANLINESS_PER_WASTE_EVENT, every one cleaned back up (a Scavenger fish
+// eating it here, or an Auto-Feeder absorbing it in Grid.js's
+// updateBuildings) restores the same amount. UI.js's updateHUD detects
+// which direction the value just moved (same pattern already used for the
+// money HUD) and flashes #hud-cleanliness accordingly — no explicit
+// "trigger the flash" call needed here, just changing the value.
+function adjustCleanliness(state, delta) {
+  state.level.cleanliness = Math.max(0, Math.min(CLEANLINESS_MAX, state.level.cleanliness + delta));
 }
 
 // How long a straight drop from startY to the floor would take under food's
@@ -186,6 +202,7 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
     totalFeeds,
     stage: stageIndexForFeeds(def, totalFeeds),
     dropTimer: 0,
+    poopTimer: 0, // WASTE_POOP_INTERVAL_MS — a non-Scavenger fish poops out Waste directly on this timer, see updateFish
     wanderTimer: 0,
     tailPhase: 0, // only rendered once fully grown; advances faster the faster the fish is currently moving
     // Economy Fish Combining (Tier 2) — see CLAUDE.md's "Economy Fish
@@ -212,13 +229,23 @@ export function effectiveFoodCapacity(state) {
   return FOOD_MAX_ON_SCREEN_BASE + FOOD_CAPACITY_UPGRADE_INCREMENT * state.level.upgrades.foodCapacity;
 }
 
+// Returns a reason string rather than a bare bool so callers can react
+// differently to each failure — specifically, main.js flashes the HUD's
+// food readout red only on 'capacity_full' (attempting to place food past
+// the cap), not on 'no_money' or 'in_city'.
 export function trySpawnFood(state, x, y) {
-  if (state.level.money < FOOD_COST) return false;
+  // Food can only be dropped in open water, never directly into the seabed
+  // city — per direct request, after going back and forth on whether to
+  // allow it for city-interaction purposes. Doesn't touch where Food ends
+  // UP once it's fallen there naturally (still routes/rests on tiles as
+  // normal) — only where a fresh pellet can be manually placed.
+  if (y >= SEABED_FLOOR_Y) return 'in_city';
+  if (state.level.money < FOOD_COST) return 'no_money';
   const currentFoodCount = state.level.items.reduce((n, item) => n + (item.type === 'food' ? 1 : 0), 0);
-  if (currentFoodCount >= effectiveFoodCapacity(state)) return false;
+  if (currentFoodCount >= effectiveFoodCapacity(state)) return 'capacity_full';
   state.level.money -= FOOD_COST;
   state.level.items.push(createFood(x, y));
-  return true;
+  return 'spawned';
 }
 
 const MONEY_MILESTONE_1K_MESSAGE = '1k money? Bruh save some for the fishes';
@@ -388,7 +415,9 @@ export function combineFish(state, a, b) {
 export function getEconomyAdultDropValue(speciesId, starTier) {
   const def = SPECIES[speciesId];
   const adultDropValue = def.growthStages[def.growthStages.length - 1].dropValue;
-  return adultDropValue * Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, (starTier || 1) - 1);
+  // Math.ceil — see updateFish's identical rounding for why: a higher star
+  // tier's 1.5^N scaling rarely lands on a whole dollar.
+  return Math.ceil(adultDropValue * Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, (starTier || 1) - 1));
 }
 
 // Hybrid SPECIES rows store `parents: [utilitySpeciesId, economySpeciesId]`
@@ -455,6 +484,7 @@ function updateFood(item, state, dtMs, spawned) {
   if (status === 'consumed') {
     state.level.gridStats.itemsRoutedTotal += 1;
     spawned.push(createWaste(item.x, item.y)); // a basic Collector is unpowered and dirty — see Config.js's WASTE_* comment
+    adjustCleanliness(state, -CLEANLINESS_PER_WASTE_EVENT);
     return false;
   }
   if (status === 'lost') return false; // fell off the bottom of the world — gone silently, same as food already does elsewhere
@@ -488,6 +518,7 @@ function updateCoin(item, state, dtMs, spawned) {
     state.level.floatingTexts.push(createPickupText(item.x, item.y, `+$${item.value}`, getCoinColor(item.value)));
     state.level.gridStats.itemsRoutedTotal += 1;
     spawned.push(createWaste(item.x, item.y)); // a basic Collector is unpowered and dirty — see Config.js's WASTE_* comment
+    adjustCleanliness(state, -CLEANLINESS_PER_WASTE_EVENT);
     return false;
   }
   if (status === 'lost') {
@@ -538,6 +569,28 @@ function findNearestFood(items, x, y) {
   return best;
 }
 
+// Same search, targeting Waste instead — a Scavenger species (Suckerfish;
+// see the SCAVENGER behavior tag) eats ONLY this, never Food, per direct
+// request. Mirrors findNearestFood exactly rather than sharing one
+// parameterized function, since the two are simple enough that a shared
+// abstraction wouldn't save much and would need a type-string param at
+// every call site anyway.
+function findNearestWaste(items, x, y) {
+  let best = null;
+  let bestDist = Infinity;
+  for (const item of items) {
+    if (item.type !== 'waste') continue;
+    const dx = item.x - x;
+    const dy = item.y - y;
+    const d = dx * dx + dy * dy;
+    if (d < bestDist) {
+      bestDist = d;
+      best = item;
+    }
+  }
+  return best;
+}
+
 function wander(fish, def, state, dt) {
   fish.wanderTimer -= dt;
   if (fish.wanderTimer <= 0) {
@@ -553,7 +606,7 @@ const TANK_POINT_TUTORIAL_MESSAGE =
   "A fish just grew up — that's your first Tank Point ⭐! Spend it in the Tank Upgrades panel (the button below the Shop) on faster fish, better food, and other things your fish will take completely for granted.";
 
 const FIRST_FISH_DEATH_MESSAGE =
-  "Your fish is now swimming with the fishes. ...Wait, it was already a fish. Nevermind — it just starved. You might want to try feeding your fish.";
+  'Your fish is now swimming with the fishes. Oh wait...it just starved. You might want to try feeding your fish.';
 
 // Shared by every one-time story/tutorial notification below (Tank Points,
 // first fish death, etc.) — same push+cap pattern Mound.js's own
@@ -585,7 +638,12 @@ function updateFish(fish, state, dtMs) {
   const def = SPECIES[fish.speciesId];
   const dt = dtMs / 1000;
 
-  fish.hunger = Math.min(HUNGER_MAX, fish.hunger + def.hungerRate * dt);
+  // A higher star tier is also less hungry — compounding 10%-per-tier
+  // reduction, same ^(starTier-1) pattern as the coin-value multiplier below.
+  // starTier defaults to 1 (a no-op ^0 = 1x) for every fish that's never been
+  // combined, same as everywhere else star tier is read.
+  const hungerRate = def.hungerRate * Math.pow(FISH_STAR_TIER_HUNGER_MULTIPLIER, (fish.starTier || 1) - 1);
+  fish.hunger = Math.min(HUNGER_MAX, fish.hunger + hungerRate * dt);
   if (fish.hunger >= HUNGER_MAX) {
     if (!state.level.tutorialFlags.firstFishDied) {
       state.level.tutorialFlags.firstFishDied = true;
@@ -594,8 +652,12 @@ function updateFish(fish, state, dtMs) {
     return false; // starves if hunger maxes out
   }
 
+  const isScavenger = def.behavior.includes('SCAVENGER'); // Suckerfish (and any future SCAVENGER species) eats ONLY Waste, never Food
+
   if (fish.hunger >= HUNGER_SEEK_THRESHOLD) {
-    const target = findNearestFood(state.level.items, fish.x, fish.y);
+    const target = isScavenger
+      ? findNearestWaste(state.level.items, fish.x, fish.y)
+      : findNearestFood(state.level.items, fish.x, fish.y);
     if (target) {
       const dx = target.x - fish.x;
       const dy = target.y - fish.y;
@@ -606,12 +668,23 @@ function updateFish(fish, state, dtMs) {
       if (dist <= FISH_EAT_RADIUS) {
         const idx = state.level.items.indexOf(target);
         if (idx !== -1) state.level.items.splice(idx, 1);
-        // Food Quality Tank Upgrade: relief is a flat lookup by purchased
-        // level, no longer clamped to the fish's current hunger — a
-        // higher-quality pellet than the fish actually needed pushes hunger
-        // negative (an "overfed" state; no bonus effect reads it yet).
-        const relief = FOOD_HUNGER_RELIEF_BY_LEVEL[state.level.upgrades.foodQuality];
-        fish.hunger -= relief;
+        if (isScavenger) {
+          // Flat relief, deliberately not tied to the Food Quality Tank
+          // Upgrade tree — that tree is themed around player-bought Food
+          // specifically, not scavenged Waste. Cleaning up a Waste item
+          // also restores cleanliness — the other half of the "buildings
+          // and Suckerfish push cleanliness back up" pairing with the
+          // per-Waste-spawn penalty above.
+          fish.hunger -= WASTE_HUNGER_RELIEF;
+          adjustCleanliness(state, CLEANLINESS_PER_WASTE_EVENT);
+        } else {
+          // Food Quality Tank Upgrade: relief is a flat lookup by purchased
+          // level, no longer clamped to the fish's current hunger — a
+          // higher-quality pellet than the fish actually needed pushes hunger
+          // negative (an "overfed" state; no bonus effect reads it yet).
+          const relief = FOOD_HUNGER_RELIEF_BY_LEVEL[state.level.upgrades.foodQuality];
+          fish.hunger -= relief;
+        }
         // Eating fills the coin-drop timer too, so feeding feels like it's
         // what produces the coins — a 20s cycle fed halfway through jumps
         // straight to a drop and restarts the cycle.
@@ -636,9 +709,12 @@ function updateFish(fish, state, dtMs) {
   if (fish.x < FISH_MIN_X) { fish.x = FISH_MIN_X; fish.vx = Math.abs(fish.vx); }
   if (fish.x > FISH_MAX_X) { fish.x = FISH_MAX_X; fish.vx = -Math.abs(fish.vx); }
   if (fish.y < FISH_MIN_Y) { fish.y = FISH_MIN_Y; fish.vy = Math.abs(fish.vy); }
-  // Bottom bound is the true floor, not FISH_MAX_Y's 5% spawn margin — fish
-  // need to be able to swim all the way down to reach food/coins resting
-  // right on the seabed. Only spawning stays clear of that bottom margin.
+  // Fish can never swim down into the seabed city itself — SEABED_FLOOR_Y
+  // is a hard ceiling on how deep they go, by design: this is the entire
+  // reason Fans exist, to push Food/Waste that's landed deep in a factory
+  // back up into reach. (A brief attempt to let a fish dive to whatever
+  // depth its current target was actually resting at was reverted per
+  // direct correction — that's not a bug, it's the intended loop.)
   if (fish.y > SEABED_FLOOR_Y) { fish.y = SEABED_FLOOR_Y; fish.vy = -Math.abs(fish.vy); }
 
   const speed = Math.hypot(fish.vx, fish.vy);
@@ -655,10 +731,33 @@ function updateFish(fish, state, dtMs) {
     // other fish scales its species row's stage dropValue by its own star
     // tier (a no-op ^0 = 1x for the overwhelming majority that never
     // combined) — see Config.js's FISH_STAR_TIER_VALUE_MULTIPLIER.
+    // Math.ceil: a higher star tier's 1.8^N scaling almost never lands on a
+    // whole dollar (e.g. a Tier-3 fish's 5 * 1.8^2 = 16.2) — round up to
+    // the next whole coin value rather than handing out a fractional
+    // amount, per direct request.
     const dropValue = fish.dropValueOverride != null
       ? fish.dropValueOverride
-      : stageDef.dropValue * Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, (fish.starTier || 1) - 1);
-    state.level.items.push(createCoin(fish.x, fish.y, dropValue));
+      : Math.ceil(stageDef.dropValue * Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, (fish.starTier || 1) - 1));
+    // Skip entirely for a $0 drop (Suckerfish, and every other not-yet-
+    // behavior-wired utility species — see their SPECIES rows) — a
+    // worthless coin still lands on a Collector like any other, spawning
+    // real Waste for no reason, which is actively counterproductive for a
+    // Scavenger fish whose whole job is cleaning Waste up, not adding to it.
+    if (dropValue > 0) state.level.items.push(createCoin(fish.x, fish.y, dropValue));
+  }
+
+  // Fish poop: any non-Scavenger fish drops a Waste item directly at its
+  // own position on a flat periodic timer, independent of the
+  // Collector-byproduct path above — literal fish poop, per direct
+  // request. Suckerfish (and any other SCAVENGER species) don't poop —
+  // they're the ones cleaning this up, not producing it.
+  if (!isScavenger) {
+    fish.poopTimer += dtMs;
+    if (fish.poopTimer >= WASTE_POOP_INTERVAL_MS) {
+      fish.poopTimer = 0;
+      state.level.items.push(createWaste(fish.x, fish.y));
+      adjustCleanliness(state, -CLEANLINESS_PER_WASTE_EVENT);
+    }
   }
 
   return true;

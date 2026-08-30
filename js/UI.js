@@ -49,6 +49,7 @@ let els = null;
 let currentPreviewSpecies = null; // species currently shown in the in-panel preview, if any
 let currentPreviewBuilding = null; // building currently shown in the in-panel preview, if any — mutually exclusive with currentPreviewSpecies
 let lastMoney = null; // previous frame's money, to detect gain vs spend for the flash animation
+let lastCleanliness = null; // previous frame's cleanliness, same purpose
 let notificationLogExpanded = false;
 let lastRenderedNotificationCount = -1; // rebuild the log list only when it actually changes, not every frame
 let moundMenuOpen = false;
@@ -121,11 +122,15 @@ export function initUI(state) {
     notificationLogExpanded = !notificationLogExpanded;
     els.notificationLog.classList.toggle('hidden', !notificationLogExpanded);
     lastRenderedNotificationCount = -1; // force a rebuild next update so it's populated the instant it opens
-    // Story trigger: the first time the log is ever expanded — see
-    // CLAUDE.md's "Story & Tutorial Notifications". Only on the
-    // collapsed->expanded transition, not when collapsing back.
-    if (notificationLogExpanded && !state.level.tutorialFlags.firstChatExpanded) {
-      state.level.tutorialFlags.firstChatExpanded = true;
+    // Story trigger: the first time the log is ever CLOSED again (not
+    // opened) — per direct request, so the player has actually read
+    // whatever's in there before the "curiosity kills the fish" gag lands,
+    // rather than firing the instant they open it. Only on the
+    // expanded->collapsed transition, which can only happen after it's
+    // been opened at least once already. See CLAUDE.md's "Story & Tutorial
+    // Notifications".
+    if (!notificationLogExpanded && !state.level.tutorialFlags.firstChatClosed) {
+      state.level.tutorialFlags.firstChatClosed = true;
       const notifications = state.level.notifications;
       notifications.push({ id: notifications.length + 1, text: FOUND_THE_CHAT_MESSAGE, elapsed: state.level.elapsed });
       if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
@@ -156,9 +161,11 @@ export function initUI(state) {
   // Belt-and-suspenders alongside the defensive strip in updateShopCollapse:
   // clean up the flash class as soon as the animation actually finishes, so
   // it's never sitting there waiting to be accidentally replayed later.
-  const clearFlashClass = (e) => e.target.classList.remove('money-flash-pickup', 'money-flash-spend');
+  const clearFlashClass = (e) => e.target.classList.remove('flash-pickup', 'flash-spend');
   els.money.addEventListener('animationend', clearFlashClass);
   els.shopMoney.addEventListener('animationend', clearFlashClass);
+  els.food.addEventListener('animationend', clearFlashClass);
+  els.cleanliness.addEventListener('animationend', clearFlashClass);
 
   els.previewBuyBtn.addEventListener('click', () => {
     if (!currentPreviewSpecies) return;
@@ -210,8 +217,11 @@ function updateShopCollapse(state) {
   // from scratch — so toggling the shop could replay a stale pickup/spend
   // flash that has nothing to do with this toggle. Strip it defensively on
   // every toggle rather than relying solely on it finishing naturally.
-  els.money.classList.remove('money-flash-pickup', 'money-flash-spend');
-  els.shopMoney.classList.remove('money-flash-pickup', 'money-flash-spend');
+  // #hud holds money/food/cleanliness together, so all three need this.
+  els.money.classList.remove('flash-pickup', 'flash-spend');
+  els.food.classList.remove('flash-pickup', 'flash-spend');
+  els.cleanliness.classList.remove('flash-pickup', 'flash-spend');
+  els.shopMoney.classList.remove('flash-pickup', 'flash-spend');
   // The preview canvas is invisible while collapsed — no point animating
   // it. Resume on expand if a species is already selected; a building
   // preview has no animation to resume, just redraw its static swatch.
@@ -707,10 +717,22 @@ export function refreshShopPanel(state) {
 // Restarts a CSS animation even if it's already playing (e.g. two quick
 // purchases in a row) by removing the class, forcing a reflow, then
 // re-adding it — simply re-adding an already-present class is a no-op.
-function playMoneyFlash(el, className) {
-  el.classList.remove('money-flash-pickup', 'money-flash-spend');
+// Shared by every HUD readout that flashes (money, food capacity,
+// cleanliness), not just money any more, despite the generic name change
+// from playMoneyFlash.
+function playFlash(el, className) {
+  el.classList.remove('flash-pickup', 'flash-spend');
   void el.offsetWidth;
   el.classList.add(className);
+}
+
+// Exported so main.js can trigger this specific case directly — placing
+// food while already at the Food Capacity cap doesn't change any tracked
+// value updateHUD could detect on its own (the attempt is simply refused),
+// so unlike money/cleanliness this needs an explicit call at the point of
+// failure rather than a value-comparison each frame.
+export function flashFoodCapacity() {
+  playFlash(els.food, 'flash-spend');
 }
 
 export function updateHUD(state) {
@@ -718,7 +740,8 @@ export function updateHUD(state) {
   const moneyText = `💰 $${Math.floor(money)}`;
   els.money.textContent = moneyText;
   els.shopMoney.textContent = moneyText;
-  els.cleanliness.textContent = `✨ ${Math.round(state.level.cleanliness)}%`;
+  const cleanliness = state.level.cleanliness;
+  els.cleanliness.textContent = `✨ ${Math.round(cleanliness)}%`;
   const currentFoodCount = state.level.items.reduce((n, item) => n + (item.type === 'food' ? 1 : 0), 0);
   els.food.textContent = `🍽️ ${currentFoodCount}/${effectiveFoodCapacity(state)}`;
   refreshPreviewBuyButton(state);
@@ -728,14 +751,24 @@ export function updateHUD(state) {
   if (!state.ui.tankPanelCollapsed) refreshTankPanel(state);
 
   if (lastMoney !== null && money !== lastMoney) {
-    const className = money > lastMoney ? 'money-flash-pickup' : 'money-flash-spend';
+    const className = money > lastMoney ? 'flash-pickup' : 'flash-spend';
     // Only flash whichever readout is actually visible right now — a
     // display:none element doesn't run CSS animations at all, so flashing
     // the hidden one would just leave the class stuck there unfired,
     // waiting to wrongly replay the next time the shop toggles.
-    playMoneyFlash(state.ui.shopCollapsed ? els.money : els.shopMoney, className);
+    playFlash(state.ui.shopCollapsed ? els.money : els.shopMoney, className);
   }
   lastMoney = money;
+
+  // Cleanliness has no shop-panel duplicate to redirect to the way money
+  // does — flashing #hud-cleanliness while the shop panel has it hidden
+  // just silently doesn't animate (same graceful no-op every hidden-element
+  // flash already degrades to), rather than growing a second readout only
+  // for this.
+  if (lastCleanliness !== null && cleanliness !== lastCleanliness) {
+    playFlash(els.cleanliness, cleanliness > lastCleanliness ? 'flash-pickup' : 'flash-spend');
+  }
+  lastCleanliness = cleanliness;
 }
 
 export function updateDebugOverlay(state, stats) {

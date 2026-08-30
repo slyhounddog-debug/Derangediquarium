@@ -163,19 +163,21 @@ html, body {
   margin-bottom: 14px;
 }
 
-/* Gaining money: green flash + a bouncy pop. Spending: red flash + a
-   multi-axis shake (translate AND rotate, not just side to side). Applied
-   to whichever money readout(s) exist (#hud-money, #shop-money) whenever
-   the amount changes; UI.js re-triggers these by removing then re-adding
-   the class so rapid, repeated changes each restart the animation. */
-@keyframes money-pickup {
+/* Generic "good change: green flash + bouncy pop" / "bad change: red flash +
+   multi-axis shake" pair (translate AND rotate, not just side to side) —
+   originally money-only, now shared by any HUD readout that needs the same
+   feedback: #hud-money/#shop-money on every money change, #hud-food when a
+   food placement is blocked by the capacity cap, #hud-cleanliness whenever
+   cleanliness moves up or down. UI.js re-triggers these by removing then
+   re-adding the class so rapid, repeated changes each restart the animation. */
+@keyframes flash-pickup {
   0% { transform: scale(1) translateY(0); color: #6b4c6b; }
   25% { transform: scale(1.24) translateY(-6.4px); color: #2ecc71; }
   50% { transform: scale(0.94) translateY(1.6px); color: #2ecc71; }
   75% { transform: scale(1.06) translateY(-1.6px); color: #2ecc71; }
   100% { transform: scale(1) translateY(0); color: #6b4c6b; }
 }
-@keyframes money-spend {
+@keyframes flash-spend {
   0% { transform: translate(0, 0) rotate(0deg); color: #6b4c6b; }
   15% { transform: translate(-3.2px, 2.4px) rotate(-3.2deg); color: #ff4757; }
   30% { transform: translate(3.2px, -2.4px) rotate(3.2deg); color: #ff4757; }
@@ -185,8 +187,8 @@ html, body {
   90% { transform: translate(0.8px, -0.8px) rotate(0.8deg); }
   100% { transform: translate(0, 0) rotate(0deg); color: #6b4c6b; }
 }
-.money-flash-pickup { animation: money-pickup 0.33s ease; }
-.money-flash-spend { animation: money-spend 0.33s ease; }
+.flash-pickup { animation: flash-pickup 0.33s ease; }
+.flash-spend { animation: flash-spend 0.33s ease; }
 
 #tool-bar {
   display: flex; align-items: center; flex-wrap: wrap; gap: 8px;

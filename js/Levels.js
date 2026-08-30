@@ -51,7 +51,7 @@ export function loadLevel(state, levelId) {
     levelId: def.id,
     levelName: def.name,
     money: def.startingMoney,
-    cleanliness: 100, // placeholder — Phase 3 wires this to real toxicity
+    cleanliness: 100, // 0-100, clamped — real now (Phase 3): Entities.js/Grid.js adjust it whenever Waste spawns or gets cleaned up, see Config.js's CLEANLINESS_* comment. No gameplay effect from a low value yet (fish stress/toxicity is still unbuilt) — this is the live-tracked value + HUD feedback half of the system
     powerSupply: 0,
     powerDemand: 0,
     entities: [],
@@ -78,7 +78,7 @@ export function loadLevel(state, levelId) {
       moneyMilestone1k: false,
       escapePressed: false, // set true the first time Escape is ever pressed, regardless of context — read by the 2-minute dare check and the "made ya look" follow-up
       escapeDareShown: false,
-      firstChatExpanded: false,
+      firstChatClosed: false, // fires the "you found the chat" gag on the first CLOSE of the log, not the first open — see UI.js's notificationLatest click handler
     },
     lifetimeMoneyEarned: 0, // real in-play income only (coins banked) — NOT the starting endowment or the bankruptcy bailout gift; see Entities.js's bankMoney and Config.js's MONEY_MILESTONE_1K
     fishVanishTimer: 0, // ms remaining on the "you found the chat" gag — see Entities.js's updateEntities; every fish freezes in place (not just hidden) and stops rendering while this is > 0

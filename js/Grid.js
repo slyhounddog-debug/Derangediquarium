@@ -42,6 +42,8 @@ import {
   AUTO_FEEDER_PROCESS_DURATION_MS,
   AUTO_FEEDER_PORT_OFFSET_FRACTION,
   NOTIFICATION_LOG_MAX,
+  CLEANLINESS_MAX,
+  CLEANLINESS_PER_WASTE_EVENT,
 } from './Config.js';
 import { worldToScreen } from './Engine.js';
 
@@ -447,6 +449,10 @@ export function updateBuildings(state, dtMs) {
         const d = Math.hypot(it.x - intakeX, it.y - intakeY);
         if (d <= AUTO_FEEDER_INTAKE_RADIUS) {
           items.splice(i, 1);
+          // "Buildings" pushing cleanliness back up (see CLAUDE.md's
+          // Cleanliness section) — the Auto-Feeder is the one currently
+          // built, mirroring Entities.js's identical Suckerfish-eating case.
+          state.level.cleanliness = Math.min(CLEANLINESS_MAX, state.level.cleanliness + CLEANLINESS_PER_WASTE_EVENT);
           data.absorbing = true;
           data.progressMs = 0;
           break;

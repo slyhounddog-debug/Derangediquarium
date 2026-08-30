@@ -68,6 +68,7 @@ import {
   openMoundMenu,
   closeMoundMenu,
   isMoundMenuOpen,
+  flashFoodCapacity,
 } from './UI.js';
 
 const canvas = document.getElementById('game-canvas');
@@ -218,7 +219,7 @@ input.clickHandlers.push((sx, sy) => {
   if (isPointOnMound(state, world.x, world.y)) { openMoundMenu(state); return; } // opens the "Throw money at it" popup — see UI.js
   if (tryBankCoinAt(state, world.x, world.y)) return; // clicking a coin always banks it, regardless of selected tool
   if (state.ui.selectedTool === 'food') {
-    trySpawnFood(state, world.x, world.y);
+    if (trySpawnFood(state, world.x, world.y) === 'capacity_full') flashFoodCapacity();
   }
   // Non-fan build-mode placement doesn't happen here — see the mousedown/
   // drag handling in update() below, which also covers a single un-dragged
