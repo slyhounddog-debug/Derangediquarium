@@ -79,6 +79,7 @@ export function loadLevel(state, levelId) {
       escapePressed: false, // set true the first time Escape is ever pressed, regardless of context — read by the 2-minute dare check and the "made ya look" follow-up
       escapeDareShown: false,
       firstChatClosed: false, // fires the "you found the chat" gag on the first CLOSE of the log, not the first open — see UI.js's notificationLatest click handler
+      cleanlinessWarningShown: false, // fires once cleanliness first crosses below CLEANLINESS_WARNING_THRESHOLD — see Entities.js's adjustCleanliness
     },
     lifetimeMoneyEarned: 0, // real in-play income only (coins banked) — NOT the starting endowment or the bankruptcy bailout gift; see Entities.js's bankMoney and Config.js's MONEY_MILESTONE_1K
     fishVanishTimer: 0, // ms remaining on the "you found the chat" gag — see Entities.js's updateEntities; every fish freezes in place (not just hidden) and stops rendering while this is > 0

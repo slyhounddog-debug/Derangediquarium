@@ -8,6 +8,7 @@ import {
   WORLD_TILES_W,
   WORLD_TILES_H,
   WORLD_H,
+  WASTE_FLOOR_Y,
   SEABED_ROW_START,
   TILE_EMPTY,
   TILE_PLATFORM,
@@ -328,6 +329,22 @@ function sweepVertical(item, grid, dy) {
       item.vy = 0;
       return { landed: true, tile, row, col: colAt(item.x) };
     }
+    // Waste-only virtual floor, WASTE_FLOOR_Y (2 tiles above the world's
+    // absolute bottom) — nothing built here, just a hard stop so uncaught
+    // Waste always comes to rest at a fixed, visible height (see
+    // renderSeabedGrid's break line) instead of falling off the bottom of
+    // the world and being lost, per direct request. Only triggers while
+    // actually falling into it (stepY > 0) — an item already resting here
+    // that a Fan built in the 2 rows underneath is actively pushing back up
+    // has stepY < 0 and sails right through, unaffected. A real tile placed
+    // anywhere above this line (a Collector, another Platform) still catches
+    // Waste first via the isSolid check above, same as always — this is only
+    // the fallback for whatever nothing else caught.
+    if (item.type === 'waste' && stepY > 0 && nextBottom >= WASTE_FLOOR_Y) {
+      item.y = WASTE_FLOOR_Y - item.radius;
+      item.vy = 0;
+      return { landed: true, tile: null, row: rowAt(WASTE_FLOOR_Y), col: colAt(item.x) };
+    }
     item.y += stepY;
     applyRampNudge(item, grid); // every sub-step, not just once at the end of the tick — otherwise a fast enough item could cross an entire ramp row within one tick without this ever seeing it sitting inside that row
   }
@@ -603,6 +620,27 @@ export function resolveItemCollisions(state) {
 }
 
 // ---- Rendering ----
+// A dashed horizontal line at WASTE_FLOOR_Y, the fixed height uncaught Waste
+// rests at (see that constant's comment in Config.js) — purely decorative,
+// draws on top of the base seabed fill but underneath any real tiles so it
+// reads as "this is a shelf Waste sits on," not "there's an invisible wall
+// here." Not tied to camera.x at all (a plain horizontal line), only needs
+// camera.y/zoom to place its screen y; skipped entirely once it's scrolled
+// off screen either direction.
+function renderWasteFloorBreak(ctx, camera, canvasWidth, canvasHeight) {
+  const screen = worldToScreen(0, WASTE_FLOOR_Y, camera);
+  if (screen.y < -4 || screen.y > canvasHeight + 4) return;
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255, 220, 150, 0.55)';
+  ctx.lineWidth = Math.max(1, 2 * camera.zoom);
+  ctx.setLineDash([TILE_SIZE * camera.zoom * 0.35, TILE_SIZE * camera.zoom * 0.25]);
+  ctx.beginPath();
+  ctx.moveTo(0, screen.y);
+  ctx.lineTo(canvasWidth, screen.y);
+  ctx.stroke();
+  ctx.restore();
+}
+
 export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
   const { camera } = state;
   const grid = state.level.grid;
@@ -624,6 +662,8 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
   ctx.fillRect(0, Math.max(0, topOfSeabed.y), canvasWidth, canvasHeight);
   ctx.fillStyle = '#6b4f34';
   ctx.fillRect(0, Math.max(0, topOfSeabed.y), canvasWidth, 4); // seabed surface highlight line
+
+  renderWasteFloorBreak(ctx, camera, canvasWidth, canvasHeight);
 
   for (let row = rowStart; row <= rowEnd; row++) {
     for (let col = colStart; col <= colEnd; col++) {

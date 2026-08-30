@@ -15,6 +15,18 @@ export const WORLD_H = WORLD_TILES_H * TILE_SIZE; // 1440px
 export const SEABED_ROW_START = 27; // first seabed tile row; rows 0-26 are water column
 export const SEABED_ROW_END = WORLD_TILES_H - 1; // last seabed tile row (44)
 export const SEABED_FLOOR_Y = SEABED_ROW_START * TILE_SIZE; // world-y of the water/seabed boundary — Phase 1 renders this as a flat floor, Phase 2 replaces it with real tiles, but everything reads this one constant
+// A fixed rest height for unrouted Waste, 2 tiles above the world's absolute
+// bottom row — per direct request, so Waste never just vanishes off the
+// bottom of the world (see "Items can't stack, and can fall off the bottom")
+// or piles invisibly out of view. Grid.js's stepItemOnGrid treats this as a
+// virtual floor for Waste ONLY (Food/Coin still fall through to a real tile
+// or off the bottom, unchanged) — it doesn't occupy or block a real grid
+// tile, so the two rows underneath it stay fully buildable: a Fan built
+// there and aimed up can still blow resting Waste back off this line into
+// the water column, same as it would push it off any real solid tile.
+// Grid.js's renderSeabedGrid also draws a visible break line at this height
+// so the rest line doesn't just look like Waste floating in empty space.
+export const WASTE_FLOOR_Y = WORLD_H - 2 * TILE_SIZE;
 
 // ---- Seabed grid tile types (Phase 2) ----
 // state.level.grid is a full WORLD_TILES_H x WORLD_TILES_W array of these
@@ -272,6 +284,7 @@ export const ITEM_PUSH_IMPULSE_SPEED = 3;
 // ---- Economy & feeding ----
 export const FOOD_COST = 3; // $ per food pellet, matches the Buy Food shop entry — lowered from 5 so the early economy isn't so punishing to get rolling
 export const FOOD_RADIUS = 6; // px, visual + despawn-on-floor check
+export const FOOD_COLOR = '#ffb238'; // orange — was a green (#8bc34a) close enough to WASTE_COLOR's olive-green to be hard to tell apart at a glance; per direct request, distinct now
 export const FOOD_FLOOR_GRACE_MS = 1000; // ms an uneaten pellet rests on the floor before despawning — a last chance for a nearby hungry fish instead of an instant, silent loss of the cost
 export const COIN_RADIUS = 10; // px, base visual radius (bronze size) — 25% bigger than the original 8, easier to see and aim at
 export const COIN_CLICK_RADIUS_MULTIPLIER = 1.1; // click hit-test radius is each coin's own (tier-scaled) radius times this — a forgiving margin that scales with the coin's actual drawn size
@@ -300,7 +313,7 @@ export const COIN_TIERS = [
 // consume it, each restoring CLEANLINESS_PER_WASTE_EVENT of cleanliness
 // when they do. Electric buildings (Tier 4+) skip producing the
 // Collector-side of it entirely, once they exist.
-export const WASTE_RADIUS = 5;
+export const WASTE_RADIUS = 5 * 1.25; // 25% bigger than the original 5, per direct request so it's easier to spot on the seabed
 export const WASTE_GRAVITY = GRAVITY; // sinks like a coin, not a drifting food pellet
 export const WASTE_MAX_FALL_SPEED = MAX_FALL_SPEED;
 export const WASTE_COLOR = '#6b8e4e';
@@ -330,7 +343,19 @@ export const WASTE_POOP_INTERVAL_MS = 25000;
 // yet (fish stress/toxicity is still unbuilt, later Phase 3+ scope) — this
 // is the visible-feedback half of the system.
 export const CLEANLINESS_MAX = 100;
-export const CLEANLINESS_PER_WASTE_EVENT = 4;
+export const CLEANLINESS_PER_WASTE_EVENT = 0.5; // was 4 — cut per direct request so cleanliness drains far more gradually per individual Waste item
+// The first time cleanliness crosses below this (a one-shot tutorial gate,
+// see state.level.tutorialFlags.cleanlinessWarningShown), Entities.js's
+// adjustCleanliness posts CLEANLINESS_WARNING_MESSAGE to the notification
+// ticker. The message itself hints that a dirty tank slows fish coin
+// production — that gameplay consequence isn't actually wired up yet (same
+// "value is live-tracked, downstream effect is still unbuilt" state
+// cleanliness has been in since Phase 3 — see that section in CLAUDE.md),
+// this is foreshadowing text only, per direct request for the message as
+// written.
+export const CLEANLINESS_WARNING_THRESHOLD = 90;
+export const CLEANLINESS_WARNING_MESSAGE =
+  'Looking a little dirty in there champ. The dirtier your tank is, the less often your fish produce money. If only there was a way to clean it......';
 
 // ---- Floating pickup text ----
 export const PICKUP_TEXT_LIFETIME_MS = 900; // how long a "+$N" pickup readout stays on screen after a coin is banked

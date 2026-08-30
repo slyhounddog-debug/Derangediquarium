@@ -20,6 +20,7 @@ import {
   SEABED_FLOOR_Y,
   CAMERA_WATER_COLUMN_FIT_FRACTION,
   PICKUP_TEXT_LIFETIME_MS,
+  FOOD_COLOR,
   WASTE_COLOR,
   TILE_EMPTY,
   TILE_SIZE,
@@ -460,7 +461,7 @@ function render() {
     const pos = worldToScreen(item.x, item.y, state.camera);
     if (pos.x < -20 || pos.x > canvas.width + 20 || pos.y < -20 || pos.y > canvas.height + 20) continue; // cull offscreen
     ctx.beginPath();
-    ctx.fillStyle = item.type === 'food' ? '#8bc34a' : item.type === 'waste' ? WASTE_COLOR : getCoinColor(item.value);
+    ctx.fillStyle = item.type === 'food' ? FOOD_COLOR : item.type === 'waste' ? WASTE_COLOR : getCoinColor(item.value);
     ctx.arc(pos.x, pos.y, item.radius, 0, Math.PI * 2);
     ctx.fill();
   }

@@ -63,6 +63,8 @@ import {
   WASTE_POOP_INTERVAL_MS,
   CLEANLINESS_MAX,
   CLEANLINESS_PER_WASTE_EVENT,
+  CLEANLINESS_WARNING_THRESHOLD,
+  CLEANLINESS_WARNING_MESSAGE,
 } from './Config.js';
 import { stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemForces, updateBuildings } from './Grid.js';
 
@@ -79,7 +81,20 @@ function nextId() {
 // money HUD) and flashes #hud-cleanliness accordingly — no explicit
 // "trigger the flash" call needed here, just changing the value.
 function adjustCleanliness(state, delta) {
-  state.level.cleanliness = Math.max(0, Math.min(CLEANLINESS_MAX, state.level.cleanliness + delta));
+  const before = state.level.cleanliness;
+  state.level.cleanliness = Math.max(0, Math.min(CLEANLINESS_MAX, before + delta));
+  // One-shot warning the first time cleanliness actually crosses below the
+  // threshold (not just "is currently below it") — a plain `< THRESHOLD`
+  // check without the `before >=` guard would also fire on every subsequent
+  // waste event while already dirty, not just the first crossing.
+  if (
+    before >= CLEANLINESS_WARNING_THRESHOLD &&
+    state.level.cleanliness < CLEANLINESS_WARNING_THRESHOLD &&
+    !state.level.tutorialFlags.cleanlinessWarningShown
+  ) {
+    state.level.tutorialFlags.cleanlinessWarningShown = true;
+    pushStoryNotification(state, CLEANLINESS_WARNING_MESSAGE);
+  }
 }
 
 // How long a straight drop from startY to the floor would take under food's
