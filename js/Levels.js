@@ -12,7 +12,7 @@ import { createGrid } from './Grid.js';
 // even once real notifications start pushing past it, instead of just
 // vanishing the moment anything else happens. See CLAUDE.md's "Story &
 // Tutorial Notifications" section.
-const WELCOME_MESSAGE = "Welcome to the tank! Let's try to keep the death count low today. No pressure. 🐟";
+const WELCOME_MESSAGE = 'Welcome to the tank';
 
 // winConditions/waveSchedule/rewards are unused until later phases wire up
 // their evaluation — they exist now so a level's shape never has to change
