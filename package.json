@@ -1,0 +1,13 @@
+{
+  "name": "derangiquarium",
+  "version": "1.0.0",
+  "description": "A campaign-based incremental city builder fusing Insaniquarium, Mindustry, and Sandustry.",
+  "type": "module",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  }
+}

@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Derangiquarium</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<canvas id="game-canvas"></canvas>
+
+<div id="hud">
+  <div id="hud-money" title="Money — spend it on fish and food in the shop">💰 $0</div>
+  <div id="hud-cleanliness" title="Tank cleanliness — dirty water will stress your fish (not active yet, coming in a later phase)">✨ 100%</div>
+</div>
+
+<div id="notification-ticker">
+  <button id="notification-latest">Welcome to the tank.</button>
+  <div id="notification-log" class="hidden"></div>
+</div>
+
+<div id="panel-toggle-cluster">
+  <button id="shop-collapse-btn" title="Shop (S)">🛍️</button>
+  <button id="tank-collapse-btn" title="Tank Upgrades (P)">🏆</button>
+</div>
+
+<div id="shop-panel">
+  <div id="shop-header-row">
+    <div id="shop-header">Shop</div>
+  </div>
+  <div id="shop-money">💰 $0</div>
+
+  <div id="shop-preview">
+    <div id="shop-preview-empty">Tap a fish below to see it here!</div>
+    <div id="shop-preview-content" class="hidden">
+      <div id="shop-preview-top">
+        <canvas id="shop-preview-canvas" width="60" height="60"></canvas>
+        <div id="shop-preview-text">
+          <div id="shop-preview-name"></div>
+          <div id="shop-preview-desc"></div>
+        </div>
+      </div>
+      <button id="shop-preview-buy">Buy</button>
+    </div>
+  </div>
+
+  <div id="tool-bar">
+    <button id="tool-food-btn" class="tool-btn" title="Food">
+      <span class="tool-icon tool-icon-food"></span>
+    </button>
+    <div id="build-tool-grid"></div>
+  </div>
+  <div id="tool-tooltip" class="tool-tooltip"></div>
+  <div id="shop-species-grid"></div>
+</div>
+
+<div id="tank-panel" class="collapsed">
+  <div id="tank-header-row">
+    <div id="tank-header">Tank Upgrades</div>
+  </div>
+  <div id="tank-points-display">🏆 0</div>
+  <div id="tank-upgrade-list"></div>
+</div>
+
+<div id="mound-overlay" class="hidden">
+  <div id="mound-menu-anchor">
+    <div id="mound-menu">
+      <div id="mound-title">Throw money at it</div>
+      <button id="mound-throw-btn" class="mound-throw-btn">$150</button>
+      <button id="mound-cancel-btn" class="pause-btn">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div id="pause-overlay" class="hidden">
+  <div id="pause-menu">
+    <div id="pause-main">
+      <div id="pause-title">Paused</div>
+      <button id="pause-resume-btn" class="pause-btn">▶️ Resume</button>
+      <button id="pause-restart-btn" class="pause-btn">🔄 Restart</button>
+      <button id="pause-settings-btn" class="pause-btn">⚙️ Settings</button>
+    </div>
+    <div id="pause-settings" class="hidden">
+      <div id="pause-title">Settings</div>
+      <div id="pause-settings-placeholder">More settings are coming soon!</div>
+      <button id="pause-settings-back-btn" class="pause-btn">← Back</button>
+    </div>
+  </div>
+</div>
+
+<div id="debug-overlay" class="hidden">
+  <div id="debug-lines"></div>
+</div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

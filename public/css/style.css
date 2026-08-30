@@ -1,0 +1,470 @@
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0; overflow: hidden; height: 100%;
+  background: #0b2540;
+  font-family: 'Segoe UI', system-ui, sans-serif;
+}
+
+#game-canvas {
+  display: block;
+  position: fixed;
+  inset: 0;
+  cursor: crosshair;
+}
+
+#hud {
+  /* right offset clears the collapsed shop panel — it renders a bit wider
+     than its 56px width due to the reserved scrollbar gutter, so this
+     leaves real breathing room rather than cutting it close */
+  position: fixed; top: 14px; right: 100px;
+  display: flex; gap: 14px; align-items: center;
+  padding: 9px 18px;
+  background: #fff6ea;
+  color: #6b4c6b;
+  font-size: 15px;
+  font-weight: 700;
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(107, 76, 107, 0.2);
+  pointer-events: auto; /* needs to receive hover for its title tooltips — was none, but that also blocks hover */
+  z-index: 10;
+}
+#hud.hidden { display: none; } /* hidden while the shop is open — money lives in the shop panel then */
+
+/* Rolling notification log — collapsed by default to just its latest line
+   (Mound crack narration, tips, alerts once later phases write to it).
+   Click the pill to expand a scrollback of recent messages. */
+#notification-ticker {
+  position: fixed; top: 14px; left: 14px;
+  max-width: 360px;
+  z-index: 10;
+}
+#notification-latest {
+  display: block;
+  max-width: 100%;
+  background: #fff6ea;
+  color: #6b4c6b;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: left;
+  padding: 9px 16px;
+  border: none;
+  border-radius: 999px;
+  box-shadow: 0 4px 14px rgba(107, 76, 107, 0.2);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#notification-latest:hover { background: #fff0f6; }
+#notification-log {
+  margin-top: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+  background: #fff8f0;
+  border-radius: 16px;
+  padding: 10px 14px;
+  box-shadow: 0 4px 14px rgba(107, 76, 107, 0.2);
+}
+#notification-log.hidden { display: none; }
+.notification-line {
+  font-size: 12px;
+  line-height: 1.5;
+  color: #6b4c6b;
+  padding: 6px 0;
+  border-bottom: 1px solid rgba(107, 76, 107, 0.1);
+}
+.notification-line:last-child { border-bottom: none; }
+
+/* Both side panels (Shop, Tank Upgrades) share this exact slot — top:14,
+   right:14, bottom:14 — since only one is ever expanded at a time (opening
+   either auto-collapses the other, see UI.js). Their own toggle buttons no
+   longer live inside them (a collapsed panel used to just be a 56px-wide
+   colored strip with the button floating in it — fine for one panel, but
+   with two sharing the same slot that strip would double up/overlap), so
+   collapsing now shrinks a panel to nothing (width:0) instead. */
+#panel-toggle-cluster {
+  position: fixed; top: 14px; right: 14px;
+  display: flex; flex-direction: column; gap: 8px;
+  z-index: 15; /* above both panels — always visible/clickable no matter which (if either) is expanded */
+}
+#shop-collapse-btn, #tank-collapse-btn {
+  flex: none;
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  background: #ffd6ea;
+  border: none; border-radius: 50%;
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+  box-shadow: 0 2px 6px rgba(255, 150, 200, 0.4);
+  transition: transform 0.12s ease, background 0.12s ease;
+}
+#shop-collapse-btn:hover, #tank-collapse-btn:hover { background: #ffc2e0; transform: scale(1.08); }
+/* Whichever panel is currently open needs to be obvious at a glance — both
+   buttons stay visible and identical-looking regardless of panel state
+   otherwise, since only one panel is ever expanded but both toggles remain
+   on screen. A filled ring + a solid color swap (not just a subtle shadow)
+   reads clearly even at this small a size. */
+#shop-collapse-btn.panel-toggle-active, #tank-collapse-btn.panel-toggle-active {
+  background: #ff6fae;
+  box-shadow: 0 0 0 3px #ffffff, 0 0 0 6px #ff6fae, 0 2px 8px rgba(255, 111, 174, 0.55);
+  transform: scale(1.1);
+}
+#shop-collapse-btn.panel-toggle-active:hover, #tank-collapse-btn.panel-toggle-active:hover { background: #ff5aa0; }
+
+#shop-panel, #tank-panel {
+  position: fixed; top: 14px; right: 14px; bottom: 14px;
+  width: 260px;
+  background: #fff0f6;
+  color: #6b4c6b;
+  padding: 14px;
+  overflow-y: auto;
+  overflow-x: hidden;
+  z-index: 10;
+  border-radius: 26px;
+  box-shadow: 0 6px 22px rgba(107, 76, 107, 0.22);
+  transition: width 0.18s ease, padding 0.18s ease, opacity 0.12s ease;
+}
+#shop-panel.collapsed, #tank-panel.collapsed {
+  width: 0;
+  padding: 14px 0; /* keeps vertical padding so nothing inside reflows oddly right before it's hidden; horizontal collapses to 0 */
+  opacity: 0;
+  overflow: hidden;
+  box-shadow: none;
+  pointer-events: none;
+}
+#shop-panel.collapsed #shop-header,
+#shop-panel.collapsed #shop-money,
+#shop-panel.collapsed #shop-preview,
+#shop-panel.collapsed #tool-bar,
+#shop-panel.collapsed #tool-tooltip,
+#shop-panel.collapsed #shop-species-grid {
+  display: none;
+}
+#tank-panel.collapsed #tank-header,
+#tank-panel.collapsed #tank-points-display,
+#tank-panel.collapsed #tank-upgrade-list {
+  display: none;
+}
+
+#shop-header-row, #tank-header-row {
+  display: flex; align-items: center;
+  margin-bottom: 12px;
+}
+#shop-header, #tank-header { font-size: 17px; font-weight: 800; color: #c25f8f; }
+
+#shop-money, #tank-points-display {
+  display: inline-block;
+  background: #fff6ea;
+  font-size: 15px; font-weight: 800;
+  padding: 7px 14px;
+  border-radius: 999px;
+  box-shadow: 0 2px 8px rgba(107, 76, 107, 0.15);
+  margin-bottom: 14px;
+}
+
+/* Gaining money: green flash + a bouncy pop. Spending: red flash + a
+   multi-axis shake (translate AND rotate, not just side to side). Applied
+   to whichever money readout(s) exist (#hud-money, #shop-money) whenever
+   the amount changes; UI.js re-triggers these by removing then re-adding
+   the class so rapid, repeated changes each restart the animation. */
+@keyframes money-pickup {
+  0% { transform: scale(1) translateY(0); color: #6b4c6b; }
+  25% { transform: scale(1.24) translateY(-6.4px); color: #2ecc71; }
+  50% { transform: scale(0.94) translateY(1.6px); color: #2ecc71; }
+  75% { transform: scale(1.06) translateY(-1.6px); color: #2ecc71; }
+  100% { transform: scale(1) translateY(0); color: #6b4c6b; }
+}
+@keyframes money-spend {
+  0% { transform: translate(0, 0) rotate(0deg); color: #6b4c6b; }
+  15% { transform: translate(-3.2px, 2.4px) rotate(-3.2deg); color: #ff4757; }
+  30% { transform: translate(3.2px, -2.4px) rotate(3.2deg); color: #ff4757; }
+  45% { transform: translate(-2.4px, -2.4px) rotate(-2.4deg); color: #ff4757; }
+  60% { transform: translate(2.4px, 2.4px) rotate(2.4deg); color: #ff4757; }
+  75% { transform: translate(-1.6px, 1.6px) rotate(-0.8deg); color: #ff4757; }
+  90% { transform: translate(0.8px, -0.8px) rotate(0.8deg); }
+  100% { transform: translate(0, 0) rotate(0deg); color: #6b4c6b; }
+}
+.money-flash-pickup { animation: money-pickup 0.33s ease; }
+.money-flash-spend { animation: money-spend 0.33s ease; }
+
+#tool-bar {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  margin-bottom: 10px;
+}
+.tool-btn {
+  width: 40px; height: 40px; flex: none;
+  display: flex; align-items: center; justify-content: center;
+  background: #fff8f0;
+  border: 3px solid transparent;
+  border-radius: 14px;
+  cursor: pointer;
+  padding: 0;
+  font-size: 16px;
+  box-shadow: 0 2px 6px rgba(107, 76, 107, 0.15);
+  transition: transform 0.1s ease, background 0.1s ease;
+}
+.tool-btn:hover { transform: scale(1.06); }
+.tool-btn.selected { border-color: #ffb84d; background: #fff3d9; }
+.tool-icon { display: block; border-radius: 50%; }
+.tool-icon-food { width: 16px; height: 16px; background: #8bc34a; box-shadow: 0 0 0 4px rgba(139, 195, 74, 0.3); }
+
+#build-tool-grid {
+  display: flex; flex-wrap: wrap; gap: 8px;
+}
+.tool-btn-build { background: var(--tile-color, #ccc); opacity: 0.92; }
+.tool-btn-build.selected { opacity: 1; }
+
+.tool-tooltip {
+  display: block;
+  background: #6b4c6b;
+  color: #fff6ea;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  padding: 6px 12px;
+  border-radius: 12px;
+  white-space: normal; /* building tooltips (name + cost + description) run much longer than "Food $3" — must wrap, not spill past the panel's fixed width */
+  margin-bottom: 16px;
+}
+.tool-tooltip.hidden { display: none; }
+
+#shop-species-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 12px;
+}
+.species-icon-btn {
+  position: relative;
+  width: 56px; height: 56px; flex: none;
+  border-radius: 50%;
+  border: 3px solid transparent;
+  background: var(--species-color, #ccc);
+  cursor: pointer;
+  padding: 0;
+  box-shadow: 0 3px 8px rgba(107, 76, 107, 0.25);
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+.species-icon-btn:hover { transform: scale(1.08); }
+.species-icon-btn.selected { border-color: #ffb84d; }
+.species-icon-price {
+  position: absolute; bottom: -8px; left: 50%;
+  transform: translateX(-50%);
+  background: #fff8f0; color: #6b4c6b;
+  font-size: 10px; font-weight: 800;
+  padding: 2px 7px;
+  border-radius: 999px;
+  box-shadow: 0 1px 4px rgba(107, 76, 107, 0.3);
+  white-space: nowrap;
+}
+
+/* Fixed height so switching between species (or the empty state) never
+   resizes the panel and shoves the icon grid below it up/down. Both the
+   empty placeholder and the populated content fill this same box; the Buy
+   button is pinned to its bottom via margin-top:auto regardless of how
+   many lines the description wraps to. */
+#shop-preview {
+  height: 180px;
+  display: flex;
+  flex-direction: column;
+  background: #fff8f0;
+  border-radius: 18px;
+  padding: 14px;
+  margin-bottom: 16px;
+  box-shadow: 0 2px 8px rgba(107, 76, 107, 0.12);
+}
+#shop-preview-empty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font-size: 12px;
+  opacity: 0.6;
+}
+#shop-preview-empty.hidden { display: none; }
+#shop-preview-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+#shop-preview-content.hidden { display: none; }
+#shop-preview-top {
+  display: flex; align-items: center; gap: 12px;
+  margin-bottom: 10px;
+}
+#shop-preview-canvas {
+  width: 60px; height: 60px; flex: none;
+  border-radius: 50%;
+  background: #ffe9f2;
+  box-shadow: 0 2px 6px rgba(107, 76, 107, 0.2);
+}
+#shop-preview-text { flex: 1; min-width: 0; }
+#shop-preview-name { font-size: 14px; font-weight: 800; color: #c25f8f; }
+#shop-preview-desc {
+  font-size: 11px; line-height: 1.4; opacity: 0.85; margin-top: 2px;
+  overflow: hidden; /* clip rather than grow the fixed-height box, if a future longer description would otherwise overflow */
+}
+#shop-preview-buy {
+  margin-top: auto; /* pins to the bottom of the fixed-height column no matter how tall the description above it is */
+  width: 100%;
+  background: #8fe0b8; color: #1f4a34; border: none; border-radius: 12px;
+  padding: 9px; cursor: pointer; font-size: 14px; font-weight: 800;
+  box-shadow: 0 2px 6px rgba(53, 145, 97, 0.3);
+  transition: transform 0.1s ease, background 0.1s ease;
+}
+#shop-preview-buy:hover { background: #7ad4a8; transform: scale(1.02); }
+#shop-preview-buy:disabled {
+  background: #e6dcd0; color: #a99; opacity: 0.7; cursor: not-allowed; box-shadow: none; transform: none;
+}
+#shop-preview-buy.hidden { display: none; } /* buildings use this same preview window but arm on click instead of a separate buy step */
+
+/* Tank Upgrades panel — three cards (Food Quality, Fish Movement, locked
+   Defensive Capabilities), each with a level readout, a description of the
+   current effect, and a Buy button. Same visual language as the shop's
+   preview/buy button, just stacked as a list instead of one big preview. */
+#tank-upgrade-list {
+  display: flex; flex-direction: column; gap: 14px;
+}
+.tank-upgrade-card {
+  background: #fff8f0;
+  border-radius: 18px;
+  padding: 14px;
+  box-shadow: 0 2px 8px rgba(107, 76, 107, 0.12);
+}
+.tank-upgrade-card.locked { opacity: 0.6; }
+.tank-upgrade-name { font-size: 14px; font-weight: 800; color: #c25f8f; margin-bottom: 2px; }
+.tank-upgrade-level { font-size: 11px; font-weight: 700; opacity: 0.7; margin-bottom: 6px; }
+.tank-upgrade-desc { font-size: 11px; line-height: 1.4; opacity: 0.85; margin-bottom: 10px; }
+.tank-upgrade-desc .stat-current { color: #ff4757; font-weight: 800; } /* same red as the money-spend flash */
+.tank-upgrade-desc .stat-next { color: #2ecc71; font-weight: 800; } /* same green as the money-pickup flash */
+.tank-upgrade-buy {
+  width: 100%;
+  background: #8fe0b8; color: #1f4a34; border: none; border-radius: 12px;
+  padding: 9px; cursor: pointer; font-size: 13px; font-weight: 800;
+  box-shadow: 0 2px 6px rgba(53, 145, 97, 0.3);
+  transition: transform 0.1s ease, background 0.1s ease;
+}
+.tank-upgrade-buy:hover { background: #7ad4a8; transform: scale(1.02); }
+.tank-upgrade-buy:disabled {
+  background: #e6dcd0; color: #a99; opacity: 0.7; cursor: not-allowed; box-shadow: none; transform: none;
+}
+
+#pause-overlay {
+  position: fixed; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(107, 76, 107, 0.35);
+  z-index: 200; /* above the shop panel (10) and debug overlay (20) */
+}
+#pause-overlay.hidden { display: none; }
+
+#pause-menu {
+  width: 280px;
+  background: #fff8f0;
+  color: #6b4c6b;
+  border-radius: 28px;
+  padding: 28px 24px;
+  box-shadow: 0 14px 36px rgba(107, 76, 107, 0.4);
+  text-align: center;
+}
+#pause-main.hidden, #pause-settings.hidden { display: none; }
+#pause-title { font-size: 22px; font-weight: 800; color: #c25f8f; margin-bottom: 20px; }
+
+.pause-btn {
+  display: block;
+  width: 100%;
+  background: #fff0f6;
+  color: #6b4c6b;
+  border: none; border-radius: 14px;
+  padding: 12px;
+  margin-bottom: 12px;
+  font-size: 15px; font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(107, 76, 107, 0.15);
+  transition: transform 0.1s ease, background 0.1s ease;
+}
+.pause-btn:last-child { margin-bottom: 0; }
+.pause-btn:hover { transform: scale(1.03); background: #ffe4f0; }
+#pause-resume-btn { background: #8fe0b8; color: #1f4a34; box-shadow: 0 2px 6px rgba(53, 145, 97, 0.3); }
+#pause-resume-btn:hover { background: #7ad4a8; }
+
+#pause-settings-placeholder {
+  font-size: 13px;
+  opacity: 0.7;
+  padding: 16px 4px 24px;
+  line-height: 1.5;
+}
+
+/* Mound "Throw money at it" confirm popup. No dimming backdrop — #mound-overlay
+   stays fully transparent, it's only there as a full-viewport invisible
+   click-catcher (so a click outside the card closes it instead of falling
+   through to the canvas underneath, same as the pause menu's backdrop-click
+   behavior, just without the visible tint). The card itself is positioned
+   right next to the Mound rather than centered on screen: #mound-menu-anchor
+   gets its left/top set every frame it's open (UI.js's updateMoundMenuPosition,
+   called from updateHUD) to the Mound's live on-screen position, tracking the
+   camera if the player pans while it's open; the static translate(-50%,-100%)
+   anchors the anchor's bottom-center at that point. The fly-out/fly-in
+   animation is a separate scale+opacity transition on #mound-menu itself
+   (transform-origin pinned to that same bottom-center), so positioning and
+   animation never fight each other in one transform. */
+#mound-overlay {
+  position: fixed; inset: 0;
+  z-index: 190;
+}
+#mound-overlay.hidden { display: none; }
+
+#mound-menu-anchor {
+  position: fixed;
+  transform: translate(-50%, -100%);
+}
+
+#mound-menu {
+  width: 180px;
+  background: #fff8f0;
+  color: #6b4c6b;
+  border-radius: 21px;
+  padding: 21px 18px;
+  box-shadow: 0 14px 36px rgba(107, 76, 107, 0.4);
+  text-align: center;
+  transform-origin: 50% 100%; /* grows from/shrinks back into its bottom edge, right where the Mound is */
+  transform: scale(1);
+  opacity: 1;
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.18s ease;
+}
+#mound-menu.mound-menu-closed {
+  transform: scale(0.05);
+  opacity: 0;
+}
+#mound-title { font-size: 15px; font-weight: 800; color: #c25f8f; margin-bottom: 15px; }
+
+.mound-throw-btn {
+  display: block;
+  width: 100%;
+  background: #8fe0b8; color: #1f4a34; border: none; border-radius: 11px;
+  padding: 9px; margin-bottom: 9px;
+  font-size: 14px; font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(53, 145, 97, 0.3);
+  transition: transform 0.1s ease, background 0.1s ease;
+}
+.mound-throw-btn:hover { background: #7ad4a8; transform: scale(1.03); }
+.mound-throw-btn:disabled {
+  background: #e6dcd0; color: #a99; opacity: 0.7; cursor: not-allowed; box-shadow: none; transform: none;
+}
+#mound-menu .pause-btn { padding: 9px; font-size: 12px; margin-bottom: 0; }
+
+#debug-overlay {
+  position: fixed; bottom: 12px; left: 12px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #7cfc7c;
+  font-family: 'Consolas', monospace;
+  font-size: 12px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  white-space: pre;
+  z-index: 20;
+  pointer-events: none;
+}
+#debug-overlay.hidden { display: none; }
