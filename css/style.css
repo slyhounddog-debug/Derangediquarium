@@ -2,7 +2,12 @@
 html, body {
   margin: 0; padding: 0; overflow: hidden; height: 100%;
   background: #0b2540;
-  font-family: 'Segoe UI', system-ui, sans-serif;
+  /* A rounded, playful display font throughout — per direct request for
+     something more colorful/cute/gamey than a plain system font. Falls back
+     cleanly to the old system stack if the Google Fonts request is ever
+     blocked/offline. */
+  font-family: 'Baloo 2', 'Segoe UI', system-ui, sans-serif;
+  font-size: 15px; /* was the browser default ~13-14px effective size across this UI's px-sized rules — bumped slightly per direct request for "slightly bigger" text throughout */
 }
 
 #game-canvas {
@@ -107,8 +112,16 @@ html, body {
   border-radius: 16px;
   padding: 10px 14px;
   box-shadow: 0 4px 14px rgba(107, 76, 107, 0.2);
+  /* Firefox's scrollbar styling — Chromium ignores these two and uses the
+     ::-webkit-scrollbar rules below instead. */
+  scrollbar-width: thin;
+  scrollbar-color: #ffb6d5 #fff0f6;
 }
 #notification-log.hidden { display: none; }
+#notification-log::-webkit-scrollbar { width: 8px; }
+#notification-log::-webkit-scrollbar-track { background: #fff0f6; border-radius: 999px; }
+#notification-log::-webkit-scrollbar-thumb { background: #ffb6d5; border-radius: 999px; }
+#notification-log::-webkit-scrollbar-thumb:hover { background: #ff9ac4; }
 .notification-line {
   font-size: 12px;
   line-height: 1.5;
@@ -247,6 +260,22 @@ html, body {
   100% { background-position: -100% 0%; opacity: 0; }
 }
 
+/* A small springy pop — per direct request that things "bounce a little bit
+   when appropriate" throughout the menus/shop/chat/HUD. Reuses the same
+   forced-reflow remove-then-re-add retrigger trick every other one-shot
+   animation class in this file already uses (see playFlash/scheduleSheen in
+   UI.js). Kept as one shared class rather than a bespoke animation per
+   element, applied at the specific moments called out directly: the pause
+   menu popping open, and the notification pill on a new message (paired
+   there with .sheen-play for "bounce AND shimmer"). */
+@keyframes bounce-in {
+  0% { transform: scale(0.85); }
+  50% { transform: scale(1.07); }
+  75% { transform: scale(0.97); }
+  100% { transform: scale(1); }
+}
+.bounce-play { animation: bounce-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
+
 /* Generic "good change: green flash + bouncy pop" / "bad change: red flash +
    multi-axis shake" pair (translate AND rotate, not just side to side) —
    originally money-only, now shared by any HUD readout that needs the same
@@ -274,30 +303,40 @@ html, body {
 .flash-pickup { animation: flash-pickup 0.33s ease; }
 .flash-spend { animation: flash-spend 0.33s ease; }
 
+/* Food/Demolish and every building slot now share ONE 3-columns-per-row
+   grid — per direct request ("3 max buildings/tools to a row"). #build-
+   tool-grid uses display:contents so it doesn't create its own nested grid
+   level: its own box disappears and its children (the dynamically-built
+   building buttons) become direct grid items of #tool-bar right alongside
+   Food/Demolish, wrapping to a new row together as one sequence instead of
+   two separately-wrapping groups. */
 #tool-bar {
-  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  display: grid;
+  grid-template-columns: repeat(3, 56px);
+  justify-content: start;
+  gap: 8px;
   margin-bottom: 10px;
 }
 .tool-btn {
-  width: 40px; height: 40px; flex: none;
+  width: 56px; height: 56px; flex: none; /* was 40px — now matches the species icons' original size, per direct request */
   display: flex; align-items: center; justify-content: center;
   background: #fff8f0;
   border: 3px solid transparent;
-  border-radius: 14px;
+  border-radius: 16px;
   cursor: pointer;
   padding: 0;
-  font-size: 16px;
+  font-size: 22px;
   box-shadow: 0 2px 6px rgba(107, 76, 107, 0.15);
   transition: transform 0.1s ease, background 0.1s ease;
 }
 .tool-btn:hover { transform: scale(1.06); }
 .tool-btn.selected { border-color: #ffb84d; background: #fff3d9; }
 .tool-icon { display: block; border-radius: 50%; }
-.tool-icon-food { width: 16px; height: 16px; background: #ffb238; box-shadow: 0 0 0 4px rgba(255, 178, 56, 0.3); } /* matches Config.js's FOOD_COLOR — was a green too close to Waste's own color to tell apart at a glance */
-.tool-icon-demolish { width: 16px; height: 16px; background: #ff6b6b; box-shadow: 0 0 0 4px rgba(255, 107, 107, 0.3); } /* red, distinct from Food's green — a destructive action, not a placement one */
+.tool-icon-food { width: 22px; height: 22px; background: #ffb238; box-shadow: 0 0 0 5px rgba(255, 178, 56, 0.3); } /* matches Config.js's FOOD_COLOR — was a green too close to Waste's own color to tell apart at a glance */
+.tool-btn-emoji { font-size: 26px; } /* the Demolish button's 🔨 — was a plain colored circle, per direct request for an actual hammer/trashcan icon */
 
 #build-tool-grid {
-  display: flex; flex-wrap: wrap; gap: 8px;
+  display: contents;
 }
 .tool-btn-build {
   position: relative; /* anchors .building-icon-price and .tool-btn-family-dots */
@@ -353,7 +392,7 @@ html, body {
 }
 .species-icon-btn {
   position: relative;
-  width: 56px; height: 56px; flex: none;
+  width: 64px; height: 64px; flex: none; /* was 56px — "slightly bigger" per direct request */
   border-radius: 50%;
   border: 3px solid transparent;
   background: var(--species-color, #ccc);
@@ -566,6 +605,46 @@ html, body {
   background: #e6dcd0; color: #a99; opacity: 0.7; cursor: not-allowed; box-shadow: none; transform: none;
 }
 #mound-menu .pause-btn { padding: 9px; font-size: 12px; margin-bottom: 0; }
+
+/* Science Lab popup (Phase 4) — same click-catcher/anchor/fly-out pattern as
+   the Mound's own popup above, just a separate DOM tree since the two are
+   never open at the same time but aren't literally the same content. */
+#lab-overlay {
+  position: fixed; inset: 0;
+  z-index: 190;
+}
+#lab-overlay.hidden { display: none; }
+#lab-menu-anchor {
+  position: fixed;
+  transform: translate(-50%, -100%);
+}
+#lab-menu {
+  width: 200px;
+  background: #fff8f0;
+  color: #6b4c6b;
+  border-radius: 21px;
+  padding: 21px 18px;
+  box-shadow: 0 14px 36px rgba(107, 76, 107, 0.4);
+  text-align: center;
+  transform-origin: 50% 100%;
+  transform: scale(1);
+  opacity: 1;
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.18s ease;
+}
+#lab-menu.lab-menu-closed {
+  transform: scale(0.05);
+  opacity: 0;
+}
+#lab-title { font-size: 15px; font-weight: 800; color: #c25f8f; margin-bottom: 8px; }
+#lab-science-readout {
+  display: inline-block;
+  background: #eaf9ff; color: #2a7f96;
+  font-size: 13px; font-weight: 800;
+  padding: 5px 12px;
+  border-radius: 999px;
+  margin-bottom: 12px;
+}
+#lab-menu .pause-btn { padding: 9px; font-size: 12px; margin-bottom: 0; }
 
 #debug-overlay {
   position: fixed; bottom: 12px; left: 12px;

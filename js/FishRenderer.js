@@ -26,6 +26,24 @@ import {
   FISH_STAR_Y_OFFSET_RATIO,
 } from './Config.js';
 
+// Blends a hex color toward a target RGB by fraction t (0 = original color,
+// 1 = fully the target) — a cheap, filter-free way to tint a fish sick-green
+// as its hunger climbs. A real ctx.filter hue-rotate was considered and
+// rejected outright without even benchmarking it: Ambience.js's seaweed
+// already measured a canvas filter tanking frame rate from 60fps to ~11fps
+// with far fewer draw calls than "every fish, every frame" would be here.
+function mixColor(hex, target, t) {
+  const n = parseInt(hex.slice(1), 16);
+  const r = (n >> 16) & 255;
+  const g = (n >> 8) & 255;
+  const b = n & 255;
+  const mr = Math.round(r + (target.r - r) * t);
+  const mg = Math.round(g + (target.g - g) * t);
+  const mb = Math.round(b + (target.b - b) * t);
+  return `rgb(${mr}, ${mg}, ${mb})`;
+}
+const SICK_GREEN = { r: 120, g: 200, b: 90 };
+
 // Standard 5-point star polygon, alternating outer/inner radius points
 // around the circle starting straight up — used for the Economy Fish
 // Combining tier overlay below. Pure drawing helper, no game-state reads.
@@ -66,11 +84,17 @@ function drawStar(ctx, cx, cy, outerRadius, color) {
 // a small row of stars overlaid above it. Tier 1 has no stars at all; a
 // non-economy species or a fish that's never been combined always passes
 // the default and never draws any.
-export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDirection, starTier = 1) {
+//
+// sickness (0-1, default 0) tints the body/tail toward SICK_GREEN — the
+// caller (main.js) derives it from the fish's current hunger, so a hungry
+// fish visibly looks a little unwell rather than just showing the existing
+// "!"/"!!" text indicator. 0 draws the species' normal color untouched.
+export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDirection, starTier = 1, sickness = 0) {
   const def = SPECIES[speciesId];
   const scale = def.growthStages[stage].scale;
   const size = FISH_BASE_SIZE * scale;
-  const color = FISH_COLORS[speciesId] || '#ffffff';
+  const baseColor = FISH_COLORS[speciesId] || '#ffffff';
+  const color = sickness > 0 ? mixColor(baseColor, SICK_GREEN, sickness) : baseColor;
   const isFullyGrown = stage === def.growthStages.length - 1;
 
   // Mid and adult stages get a fin — small at mid, bigger (but still
@@ -80,12 +104,22 @@ export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDire
     const backX = x - facing * size * 0.55;
     const tailLength = size * TAIL_LENGTH_RATIO * finScale;
     const tailHalfWidth = size * TAIL_WIDTH_RATIO * finScale;
-    const tailSwing = Math.sin(tailPhase) * size * TAIL_SWING_RATIO * finScale;
+    const swing = Math.sin(tailPhase) * size * TAIL_SWING_RATIO * finScale;
+    // Swishes side to side like a real tail fin sweeping through the water,
+    // instead of just the tip flapping up/down against a fixed hinge, per
+    // direct request: the base attachment leans slightly opposite the tip's
+    // swing (a small counter-lean), and the whole outline is a curved sweep
+    // (quadraticCurveTo) rather than straight triangle edges, so the tail
+    // reads as one continuous bending motion.
+    const baseLean = -swing * 0.25;
+    const tipX = backX - facing * tailLength;
+    const tipY = y + swing;
+    const midX = backX - facing * tailLength * 0.5;
     ctx.fillStyle = color;
     ctx.beginPath();
-    ctx.moveTo(backX, y - tailHalfWidth);
-    ctx.lineTo(backX, y + tailHalfWidth);
-    ctx.lineTo(backX - facing * tailLength, y + tailSwing);
+    ctx.moveTo(backX + baseLean, y - tailHalfWidth);
+    ctx.quadraticCurveTo(midX, y - tailHalfWidth * 0.3 + swing * 0.5, tipX, tipY);
+    ctx.quadraticCurveTo(midX, y + tailHalfWidth * 0.3 + swing * 0.5, backX + baseLean, y + tailHalfWidth);
     ctx.closePath();
     ctx.fill();
   }
@@ -93,6 +127,19 @@ export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDire
   ctx.fillStyle = color;
   ctx.beginPath();
   ctx.ellipse(x, y, size * 0.6, size * 0.4, 0, 0, Math.PI * 2);
+  ctx.fill();
+  // A soft, darker underside plus a small glossy highlight — per direct
+  // request that fish "pop more and look less flat" than a single flat
+  // fill. Cheap (two extra ellipses, no filters/gradients) so it doesn't
+  // risk the same per-frame cost every fish, every frame would make a real
+  // canvas filter or gradient noticeably add up to.
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.12)';
+  ctx.beginPath();
+  ctx.ellipse(x, y + size * 0.16, size * 0.55, size * 0.22, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+  ctx.beginPath();
+  ctx.ellipse(x - facing * size * 0.12, y - size * 0.16, size * 0.22, size * 0.12, 0, 0, Math.PI * 2);
   ctx.fill();
 
   // Only the adult stage gets an eye. Growth ladder: baby = nothing,

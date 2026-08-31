@@ -4,6 +4,9 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Derangiquarium</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -57,9 +60,7 @@
     <button id="tool-food-btn" class="tool-btn sheen-target" title="Food">
       <span class="tool-icon tool-icon-food"></span>
     </button>
-    <button id="tool-demolish-btn" class="tool-btn sheen-target" title="Demolish — select this, then click a building to remove it for a full refund">
-      <span class="tool-icon tool-icon-demolish"></span>
-    </button>
+    <button id="tool-demolish-btn" class="tool-btn sheen-target tool-btn-emoji" title="Demolish — select this, then click a building to remove it for a full refund">🔨</button>
     <div id="build-tool-grid"></div>
   </div>
   <div id="tool-tooltip" class="tool-tooltip"></div>
@@ -79,6 +80,17 @@
       <div id="mound-title">Throw money at it</div>
       <button id="mound-throw-btn" class="mound-throw-btn">$150</button>
       <button id="mound-cancel-btn" class="pause-btn">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<div id="lab-overlay" class="hidden">
+  <div id="lab-menu-anchor">
+    <div id="lab-menu">
+      <div id="lab-title">Science Lab</div>
+      <div id="lab-science-readout">🔬 0</div>
+      <button id="lab-research-btn" class="mound-throw-btn">Research Gene-Splicing — 100 🔬</button>
+      <button id="lab-cancel-btn" class="pause-btn">Cancel</button>
     </div>
   </div>
 </div>

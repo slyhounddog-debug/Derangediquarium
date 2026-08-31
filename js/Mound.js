@@ -121,6 +121,48 @@ export function isPointOnMound(state, worldX, worldY) {
   return worldX >= left && worldX <= right && worldY >= top && worldY <= bottom;
 }
 
+// Small speckle-noise tile, generated once and cached as a repeating
+// CanvasPattern — same technique as Grid.js's getCityTexturePattern, giving
+// the Mound's flat fill some grain instead of reading as one solid color,
+// per direct request ("texture to the mound similar to the city").
+let moundTexturePattern = null;
+function getMoundTexturePattern(ctx) {
+  if (moundTexturePattern) return moundTexturePattern;
+  const tile = document.createElement('canvas');
+  tile.width = 32;
+  tile.height = 32;
+  const tctx = tile.getContext('2d');
+  for (let i = 0; i < 34; i++) {
+    const x = Math.random() * 32;
+    const y = Math.random() * 32;
+    const r = 0.5 + Math.random() * 1.5;
+    tctx.fillStyle = Math.random() < 0.5 ? 'rgba(0, 0, 0, 0.16)' : 'rgba(255, 255, 255, 0.13)';
+    tctx.beginPath();
+    tctx.arc(x, y, r, 0, Math.PI * 2);
+    tctx.fill();
+  }
+  moundTexturePattern = ctx.createPattern(tile, 'repeat');
+  return moundTexturePattern;
+}
+
+// A fixed set of jagged multi-segment crack shapes, generated once at module
+// load (not per-render — a fresh Math.random() every frame would make the
+// cracks visibly jitter) and reused/repositioned by renderMound below.
+// MOUND_MAX_TIER-1 is the most cracks that can ever be showing at once.
+const CRACK_SHAPES = [];
+for (let i = 0; i < 4; i++) {
+  const segments = 5 + (i % 2);
+  const points = [];
+  for (let s = 0; s <= segments; s++) {
+    points.push({ t: s / segments, dx: (Math.random() - 0.5) * 16 });
+  }
+  // A short branch forking off partway down — reads as a real fracture, not
+  // just a wiggly line, per direct request for "more interesting" cracks.
+  const branchAt = 0.35 + Math.random() * 0.3;
+  const branchAngle = (Math.random() - 0.5) * 20;
+  CRACK_SHAPES.push({ points, branchAt, branchAngle });
+}
+
 export function renderMound(ctx, state) {
   if (state.level.tier >= MOUND_MAX_TIER) return; // shattered — nothing to draw (Science Lab render is Phase 4)
   const { camera } = state;
@@ -129,23 +171,113 @@ export function renderMound(ctx, state) {
   const w = MOUND_WIDTH_PX * camera.zoom;
   const h = (MOUND_HEIGHT_PX + TILE_SIZE) * camera.zoom;
 
-  ctx.fillStyle = '#8a7458';
+  ctx.save();
   ctx.beginPath();
   ctx.moveTo(topLeft.x, topLeft.y + h);
   ctx.quadraticCurveTo(topLeft.x, topLeft.y, topLeft.x + w / 2, topLeft.y);
   ctx.quadraticCurveTo(topLeft.x + w, topLeft.y, topLeft.x + w, topLeft.y + h);
   ctx.closePath();
+  ctx.fillStyle = '#8a7458';
   ctx.fill();
+  ctx.clip(); // constrains the texture fill (and nothing else) to the dome's own silhouette
+  ctx.fillStyle = getMoundTexturePattern(ctx);
+  ctx.globalAlpha = 0.55;
+  ctx.fillRect(topLeft.x, topLeft.y, w, h);
+  ctx.globalAlpha = 1;
+  ctx.restore();
 
-  // Crack lines scale with how many times it's already been cracked.
-  ctx.strokeStyle = '#4a3c2c';
-  ctx.lineWidth = Math.max(1, 2 * camera.zoom);
+  // Crack lines scale with how many times it's already been cracked. Each
+  // one is a jagged multi-segment fracture with a short forking branch (see
+  // CRACK_SHAPES above) rather than a plain 3-point zigzag, plus a thin
+  // offset highlight stroke alongside the dark line for a carved/engraved
+  // look instead of a flat scribble.
   for (let i = 1; i < tier; i++) {
+    const shape = CRACK_SHAPES[(i - 1) % CRACK_SHAPES.length];
     const cx = topLeft.x + w * (0.3 + 0.2 * i);
+    const topY = topLeft.y + h * 0.12;
+    const bottomY = topLeft.y + h * 0.88;
+
+    const drawMainCrack = () => {
+      ctx.beginPath();
+      shape.points.forEach((p, idx) => {
+        const x = cx + p.dx * camera.zoom;
+        const y = topY + (bottomY - topY) * p.t;
+        if (idx === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    };
+
+    ctx.strokeStyle = 'rgba(255, 244, 224, 0.35)';
+    ctx.lineWidth = Math.max(1, 1.5 * camera.zoom);
+    ctx.save();
+    ctx.translate(1 * camera.zoom, 1 * camera.zoom);
+    drawMainCrack();
+    ctx.restore();
+
+    ctx.strokeStyle = '#4a3c2c';
+    ctx.lineWidth = Math.max(1, 2 * camera.zoom);
+    ctx.lineCap = 'round';
+    drawMainCrack();
+
+    // The branch: forks off the main line partway down, at branchAngle
+    // degrees off the main crack's own local direction.
+    const branchPoint = shape.points.find((p) => p.t >= shape.branchAt) || shape.points[shape.points.length - 1];
+    const bx = cx + branchPoint.dx * camera.zoom;
+    const by = topY + (bottomY - topY) * branchPoint.t;
+    const branchLen = h * 0.18;
+    const angleRad = ((25 + shape.branchAngle) * Math.PI) / 180;
     ctx.beginPath();
-    ctx.moveTo(cx, topLeft.y + h * 0.15);
-    ctx.lineTo(cx - 8 * camera.zoom, topLeft.y + h * 0.5);
-    ctx.lineTo(cx + 6 * camera.zoom, topLeft.y + h * 0.85);
+    ctx.moveTo(bx, by);
+    ctx.lineTo(bx + Math.sin(angleRad) * branchLen, by + Math.cos(angleRad) * branchLen);
     ctx.stroke();
   }
+}
+
+// ---- Science Lab (Phase 4) ----
+// Sits at the exact same footprint the Mound occupied, revealed the instant
+// the Mound shatters (state.level.tier >= MOUND_MAX_TIER — see
+// isPointOnMound/renderMound's own early-returns above, which is what
+// leaves this footprint clear). Clicking it opens UI.js's Lab popup (same
+// pattern as the Mound's own "Throw money" popup — main.js's click handler
+// calls isPointOnScienceLab and, if true, opens that modal instead of
+// calling into this file directly), which is where Gene-Splicing is
+// actually purchased. This module only owns the hit-test and the render.
+export function isPointOnScienceLab(state, worldX, worldY) {
+  if (state.level.tier < MOUND_MAX_TIER) return false;
+  const left = MOUND_X - MOUND_WIDTH_PX / 2;
+  const right = MOUND_X + MOUND_WIDTH_PX / 2;
+  const top = SEABED_FLOOR_Y - MOUND_HEIGHT_PX;
+  const bottom = SEABED_FLOOR_Y + TILE_SIZE;
+  return worldX >= left && worldX <= right && worldY >= top && worldY <= bottom;
+}
+
+export function renderScienceLab(ctx, state) {
+  if (state.level.tier < MOUND_MAX_TIER) return;
+  const { camera } = state;
+  const topLeft = worldToScreen(MOUND_X - MOUND_WIDTH_PX / 2, SEABED_FLOOR_Y - MOUND_HEIGHT_PX, camera);
+  const w = MOUND_WIDTH_PX * camera.zoom;
+  const h = (MOUND_HEIGHT_PX + TILE_SIZE) * camera.zoom;
+  const cx = topLeft.x + w / 2;
+
+  // A small rounded structure with a glowing dome — reads as "lab," not
+  // "dirt mound," at a glance, sitting on the same rubble base the Mound
+  // left behind so the transition doesn't feel like a random prop swap.
+  ctx.fillStyle = '#5a5a6e';
+  ctx.fillRect(topLeft.x + w * 0.1, topLeft.y + h * 0.55, w * 0.8, h * 0.45);
+
+  ctx.fillStyle = '#7ad4e8';
+  ctx.beginPath();
+  ctx.arc(cx, topLeft.y + h * 0.55, w * 0.32, Math.PI, 0);
+  ctx.fill();
+  ctx.globalAlpha = 0.5;
+  ctx.fillStyle = '#e8fbff';
+  ctx.beginPath();
+  ctx.arc(cx, topLeft.y + h * 0.55, w * 0.32, Math.PI * 1.15, Math.PI * 1.75);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
+  ctx.strokeStyle = 'rgba(122, 212, 232, 0.6)';
+  ctx.lineWidth = Math.max(1, 2 * camera.zoom);
+  ctx.strokeRect(topLeft.x + w * 0.1, topLeft.y + h * 0.55, w * 0.8, h * 0.45);
 }

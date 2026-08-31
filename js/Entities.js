@@ -23,16 +23,16 @@ import {
   FOOD_GRAVITY,
   FOOD_MAX_FALL_SPEED,
   FOOD_QUALITY_SINK_SPEED_REDUCTION_PER_LEVEL,
-  FOOD_WAVE_SPEED,
-  FOOD_WAVE_COUNT_MIN,
-  FOOD_WAVE_COUNT_MAX,
-  FOOD_WAVE_PERIOD_MIN_S,
-  FOOD_WAVE_PERIOD_MAX_S,
+  FOOD_SWAY_AMPLITUDE,
+  FOOD_SWAY_FREQUENCY,
+  WASTE_SWAY_AMPLITUDE,
+  WASTE_SWAY_FREQUENCY,
   COIN_TIERS,
   PICKUP_TEXT_LIFETIME_MS,
   PICKUP_TEXT_RISE_SPEED,
   FISH_SEEK_SPEED_MULTIPLIER,
   FISH_MOVEMENT_UPGRADE_SPEED_BONUS,
+  FISH_SPEED_MULTIPLIER,
   TAIL_WAG_RATE,
   COIN_TIMER_FEED_BONUS_FRACTION,
   SEABED_FLOOR_Y,
@@ -65,6 +65,10 @@ import {
   CLEANLINESS_PER_WASTE_EVENT,
   CLEANLINESS_WARNING_THRESHOLD,
   CLEANLINESS_WARNING_MESSAGE,
+  SCIENCE_COLOR,
+  POWER_COLOR,
+  UTILITY_SPECIES_IDS,
+  GENE_SPLICING_TECH_ID,
 } from './Config.js';
 import { stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemForces, updateBuildings } from './Grid.js';
 // Sound is a fire-and-forget side effect at the moment something already
@@ -101,42 +105,14 @@ function adjustCleanliness(state, delta) {
   }
 }
 
-// How long a straight drop from startY to the floor would take under food's
-// physics — used only to spread this pellet's sway bursts across its fall,
-// not for the actual per-tick motion (that's still driven by real gravity).
-function estimateFoodFallTime(startY) {
-  const distance = Math.max(0, SEABED_FLOOR_Y - startY);
-  const timeToTerminal = FOOD_MAX_FALL_SPEED / FOOD_GRAVITY;
-  const distanceToTerminal = (FOOD_MAX_FALL_SPEED * FOOD_MAX_FALL_SPEED) / (2 * FOOD_GRAVITY);
-  if (distance <= distanceToTerminal) return Math.sqrt((2 * distance) / FOOD_GRAVITY);
-  return timeToTerminal + (distance - distanceToTerminal) / FOOD_MAX_FALL_SPEED;
-}
-
-// A handful of distinct sway bursts (not continuous wavering) scattered
-// across the fall — one roughly-even slot per burst, jittered within the
-// first part of its slot so the burst's own period has room to play out.
-function createSwayEvents(fallTime) {
-  const count = FOOD_WAVE_COUNT_MIN + Math.floor(Math.random() * (FOOD_WAVE_COUNT_MAX - FOOD_WAVE_COUNT_MIN + 1));
-  const slotWidth = fallTime / count;
-  const events = [];
-  for (let i = 0; i < count; i++) {
-    const period = FOOD_WAVE_PERIOD_MIN_S + Math.random() * (FOOD_WAVE_PERIOD_MAX_S - FOOD_WAVE_PERIOD_MIN_S);
-    const startTime = slotWidth * i + Math.random() * slotWidth * 0.4;
-    events.push({ startTime, endTime: startTime + period, period, phase: Math.random() * Math.PI * 2 });
-  }
-  return events;
-}
-
-// Returns the pellet's current sideways speed: 0 unless fallTime falls
-// inside one of its scheduled sway bursts, in which case it's mid-sine-wave.
-function currentSwayVx(item) {
-  for (const ev of item.swayEvents) {
-    if (item.fallTime >= ev.startTime && item.fallTime < ev.endTime) {
-      const localT = item.fallTime - ev.startTime;
-      return FOOD_WAVE_SPEED * Math.sin((localT / ev.period) * 2 * Math.PI + ev.phase);
-    }
-  }
-  return 0;
+// A continuous sine wobble on horizontal velocity — same underlying idea
+// Ambience.js's bubbles already use for their own left-right drift, per
+// direct request. Self-correcting no matter what the item's actual fall
+// looks like (a Fan shove, item-item collisions, etc.) since it's just a
+// function of elapsed fallTime and a per-item random phase, recomputed
+// fresh every tick — nothing pre-scheduled to go stale.
+function currentSwayVx(item, amplitude, frequency) {
+  return amplitude * Math.sin(item.fallTime * frequency * 2 * Math.PI + item.swayPhase);
 }
 
 export function createFood(x, y) {
@@ -152,7 +128,7 @@ export function createFood(x, y) {
     restingOnFloor: false,
     floorTimer: 0,
     fallTime: 0,
-    swayEvents: createSwayEvents(estimateFoodFallTime(y)),
+    swayPhase: Math.random() * Math.PI * 2,
   };
 }
 
@@ -181,7 +157,10 @@ export function createCoin(x, y, value) {
 // section. Falls/routes through the same Grid.js tile physics as a coin,
 // but isn't click-bankable and nothing currently consumes it.
 export function createWaste(x, y) {
-  return { id: nextId(), type: 'waste', x, y, vx: 0, vy: 0, radius: WASTE_RADIUS, mass: ITEM_MASS_BY_TYPE.waste, resting: false };
+  return {
+    id: nextId(), type: 'waste', x, y, vx: 0, vy: 0, radius: WASTE_RADIUS, mass: ITEM_MASS_BY_TYPE.waste, resting: false,
+    fallTime: 0, swayPhase: Math.random() * Math.PI * 2, // a light sway while falling through open water, same mechanism as Food's — see currentSwayVx
+  };
 }
 
 export function createPickupText(x, y, text, color) {
@@ -202,7 +181,7 @@ function stageIndexForFeeds(speciesDef, totalFeeds) {
 // buying a level speeds up every fish already in the tank immediately, not
 // just future spawns. Read wherever swimSpeed drives actual movement.
 function effectiveSwimSpeed(def, state) {
-  return def.swimSpeed + FISH_MOVEMENT_UPGRADE_SPEED_BONUS * state.level.upgrades.fishMovement;
+  return (def.swimSpeed + FISH_MOVEMENT_UPGRADE_SPEED_BONUS * state.level.upgrades.fishMovement) * FISH_SPEED_MULTIPLIER;
 }
 
 export function createFish(speciesId, x, y, state, { grown = false, starTier = 1, dropValueOverride = null } = {}) {
@@ -506,6 +485,68 @@ export function createHybridFish(state, economyFish, utilitySpeciesId) {
   return fish;
 }
 
+// ---- Gene-Splicing drag interaction (Phase 4) ----
+// The pipeline above (getHybridSpeciesId/createHybridFish) already existed
+// as unwired scaffolding — this is what actually wires it up. Deliberately
+// one-directional, same as combineFish's drag: `utilityFish` is always the
+// one the player picks up and drags, `targetFish` is always the one it's
+// dropped onto (mirrors main.js's Economy Fish Combining mousedown/mouseup,
+// which now checks this alongside canCombineFish). A dragged fish that
+// doesn't qualify as a splice source just isn't picked up in the first
+// place — see main.js.
+
+// Whether a fish is a legal splice-drag SOURCE — checked on mousedown,
+// before any target is even known (mirrors isCombinableFish's role for the
+// Economy Fish Combining drag). Any of the 3 utility species, any growth
+// stage — only the TARGET needs to be Adult (see canSpliceFish below).
+export function isSpliceSource(state, fish) {
+  if (!state.meta.techUnlocked.includes(GENE_SPLICING_TECH_ID)) return false;
+  if (!fish || fish.type !== 'fish') return false;
+  return UTILITY_SPECIES_IDS.includes(fish.speciesId);
+}
+
+export function canSpliceFish(state, utilityFish, targetFish) {
+  if (!targetFish || !utilityFish || utilityFish.id === targetFish.id) return false;
+  if (!isSpliceSource(state, utilityFish) || targetFish.type !== 'fish') return false;
+  const targetDef = SPECIES[targetFish.speciesId];
+  // Splicing requires an adult target — see CLAUDE.md's Gene-Splicing note:
+  // a feeder-based hybrid's carried-over coin value is read off the
+  // target's own adult dropValue, so a hatchling/juvenile target has
+  // nothing meaningful to carry over yet.
+  if (targetFish.stage !== targetDef.growthStages.length - 1) return false;
+  return getHybridSpeciesId(targetFish.speciesId, utilityFish.speciesId) != null;
+}
+
+const FIRST_SPLICE_MESSAGE =
+  "Whoa, actual gene-splicing. Science says this is fine. Science has been wrong before, but let's not think about that too hard.";
+
+// Consumes both fish (same as combineFish) and spawns the resulting hybrid
+// at their midpoint. Returns the new fish, or null if the pair isn't
+// actually a legal splice (defensive — callers should already have checked
+// canSpliceFish).
+export function spliceFish(state, utilityFish, targetFish) {
+  if (!canSpliceFish(state, utilityFish, targetFish)) return null;
+  const x = (utilityFish.x + targetFish.x) / 2;
+  const y = (utilityFish.y + targetFish.y) / 2;
+  const hybrid = createHybridFish(state, targetFish, utilityFish.speciesId);
+  if (!hybrid) return null;
+  hybrid.x = x;
+  hybrid.y = y;
+
+  const idxU = state.level.entities.indexOf(utilityFish);
+  if (idxU !== -1) state.level.entities.splice(idxU, 1);
+  const idxT = state.level.entities.indexOf(targetFish);
+  if (idxT !== -1) state.level.entities.splice(idxT, 1);
+  state.level.entities.push(hybrid);
+
+  state.level.floatingTexts.push(createPickupText(x, y, 'Spliced!', TANK_POINT_COLOR));
+  if (!state.level.tutorialFlags.firstSplice) {
+    state.level.tutorialFlags.firstSplice = true;
+    pushStoryNotification(state, FIRST_SPLICE_MESSAGE);
+  }
+  return hybrid;
+}
+
 // While item.y < SEABED_FLOOR_Y it's still in open water — gravity plus any
 // active Fan force (Grid.js's computeFanForce/integrateItemForces, which
 // apply everywhere, not just the seabed band). Once it crosses that
@@ -536,13 +577,13 @@ function updateFood(item, state, dtMs, spawned) {
   const physics = { gravity, maxFallSpeed };
   if (item.y < SEABED_FLOOR_Y) {
     // Fan force applies everywhere, not just the seabed band — see Grid.js's
-    // computeFanForce/integrateItemForces. The scripted sway burst is a
+    // computeFanForce/integrateItemForces. The continuous sway is a
     // separate flavor effect layered on top of (not replacing) the physics
     // vx, so a Fan-launched pellet still wavers a little as it rises/falls.
     const fanForce = computeFanForce(state, item);
     integrateItemForces(item, dt, physics, fanForce);
     item.fallTime += dt;
-    const swayVx = currentSwayVx(item);
+    const swayVx = currentSwayVx(item, FOOD_SWAY_AMPLITUDE, FOOD_SWAY_FREQUENCY);
     item.x += (item.vx + swayVx) * dt;
     item.y += item.vy * dt;
     return true;
@@ -611,8 +652,10 @@ function updateWaste(item, state, dtMs) {
   if (item.y < SEABED_FLOOR_Y) {
     const fanForce = computeFanForce(state, item);
     integrateItemForces(item, dt, physics, fanForce);
+    item.fallTime += dt;
+    const swayVx = currentSwayVx(item, WASTE_SWAY_AMPLITUDE, WASTE_SWAY_FREQUENCY);
     item.y += item.vy * dt;
-    item.x += item.vx * dt;
+    item.x += (item.vx + swayVx) * dt;
     return true;
   }
   const status = stepItemOnGrid(item, state, dt, physics);
@@ -795,26 +838,65 @@ function updateFish(fish, state, dtMs) {
   fish.dropTimer += dtMs;
   if (fish.dropTimer >= stageDef.dropInterval) {
     fish.dropTimer = 0;
-    // A hybrid's dropValueOverride (T5 value carry-over pipeline) already
-    // reflects its economy parent's tier-scaled value in full — using it
-    // directly, not layering the starTier multiplier on top again, since a
-    // hybrid fish's own starTier is always the unused default (1). Every
-    // other fish scales its species row's stage dropValue by its own star
-    // tier (a no-op ^0 = 1x for the overwhelming majority that never
-    // combined) — see Config.js's FISH_STAR_TIER_VALUE_MULTIPLIER.
-    // Math.ceil: a higher star tier's 1.8^N scaling almost never lands on a
-    // whole dollar (e.g. a Tier-3 fish's 5 * 1.8^2 = 16.2) — round up to
-    // the next whole coin value rather than handing out a fractional
-    // amount, per direct request.
-    const dropValue = fish.dropValueOverride != null
-      ? fish.dropValueOverride
-      : Math.ceil(stageDef.dropValue * Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, (fish.starTier || 1) - 1));
-    // Skip entirely for a $0 drop (Suckerfish, and every other not-yet-
-    // behavior-wired utility species — see their SPECIES rows) — a
-    // worthless coin still lands on a Collector like any other, spawning
-    // real Waste for no reason, which is actively counterproductive for a
-    // Scavenger fish whose whole job is cleaning Waste up, not adding to it.
-    if (dropValue > 0) state.level.items.push(createCoin(fish.x, fish.y, dropValue));
+    // A pure Researcher or Generator (RESEARCHER/GENERATOR without also
+    // FEEDER — Science Octopus, Electric Eel, and the utility-utility
+    // hybrids that carry one of those tags without the other: Scrub-Topus,
+    // Scrub-Eel; Volt-Topus checks RESEARCHER first and only ever produces
+    // Science, a deliberate one-resource-per-fish simplification rather
+    // than a dual-output stream) produces Science/Power directly on this
+    // same timer instead of a coin — Phase 4. A Scholar/Volt hybrid
+    // (RESEARCHER or GENERATOR *and* FEEDER — spliced from a utility fish
+    // onto a base feeder) keeps producing its carried-over coin value below
+    // instead; it doesn't also produce Science/Power on top, same
+    // simplification.
+    //
+    // Speed-scaled per direct request — "science and electricity are based
+    // on a fish's movement speed... even when it's moving towards food":
+    // `speed` (computed above for the tail-wag) is the fish's actual
+    // current velocity magnitude, already reflecting whatever's boosting it
+    // right now — the Fish Movement Tank Upgrade (via effectiveSwimSpeed)
+    // and a seek-chase's FISH_SEEK_SPEED_MULTIPLIER alike — compared against
+    // its own effectiveSwimSpeed as the baseline "normal" pace. Floored at
+    // 0.3x so a fish caught mid-wander-turn (a brief near-zero vx/vy while
+    // picking a new heading) doesn't produce a confusing flat zero.
+    const isPureResearcher = def.behavior.includes('RESEARCHER') && !def.behavior.includes('FEEDER');
+    const isPureGenerator = def.behavior.includes('GENERATOR') && !def.behavior.includes('FEEDER');
+    if (isPureResearcher || isPureGenerator) {
+      const speedMultiplier = Math.max(0.3, speed / effectiveSwimSpeed(def, state));
+      // dropValue is 0 for several of these rows (Electric Eel, Scrub-Eel) —
+      // that 0 originally meant "skip the coin drop entirely" (see the
+      // dropValue>0 guard below); repurposed here as a resource amount it
+      // would mean literally never producing anything, so it's floored at 1.
+      const amount = Math.max(1, Math.ceil(stageDef.dropValue * speedMultiplier));
+      if (isPureResearcher) {
+        state.meta.scienceTotal += amount;
+        state.level.floatingTexts.push(createPickupText(fish.x, fish.y, `+${amount} 🔬`, SCIENCE_COLOR));
+      } else {
+        state.level.powerSupply += amount;
+        state.level.floatingTexts.push(createPickupText(fish.x, fish.y, `+${amount} ⚡`, POWER_COLOR));
+      }
+    } else {
+      // A hybrid's dropValueOverride (T5 value carry-over pipeline) already
+      // reflects its economy parent's tier-scaled value in full — using it
+      // directly, not layering the starTier multiplier on top again, since a
+      // hybrid fish's own starTier is always the unused default (1). Every
+      // other fish scales its species row's stage dropValue by its own star
+      // tier (a no-op ^0 = 1x for the overwhelming majority that never
+      // combined) — see Config.js's FISH_STAR_TIER_VALUE_MULTIPLIER.
+      // Math.ceil: a higher star tier's 1.8^N scaling almost never lands on
+      // a whole dollar (e.g. a Tier-3 fish's 5 * 1.8^2 = 16.2) — round up
+      // to the next whole coin value rather than handing out a fractional
+      // amount, per direct request.
+      const dropValue = fish.dropValueOverride != null
+        ? fish.dropValueOverride
+        : Math.ceil(stageDef.dropValue * Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, (fish.starTier || 1) - 1));
+      // Skip entirely for a $0 drop (Suckerfish, and every other not-yet-
+      // behavior-wired utility species — see their SPECIES rows) — a
+      // worthless coin still lands on a Collector like any other, spawning
+      // real Waste for no reason, which is actively counterproductive for a
+      // Scavenger fish whose whole job is cleaning Waste up, not adding to it.
+      if (dropValue > 0) state.level.items.push(createCoin(fish.x, fish.y, dropValue));
+    }
   }
 
   // Fish poop: any non-Scavenger fish drops a Waste item directly at its

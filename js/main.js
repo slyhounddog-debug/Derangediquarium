@@ -30,6 +30,7 @@ import {
   TILE_FAN_T4,
   TILE_REFUND_FRACTION,
   NOTIFICATION_LOG_MAX,
+  CLEANLINESS_MAX,
 } from './Config.js';
 import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop } from './Engine.js';
 import { loadLevel, LEVELS } from './Levels.js';
@@ -48,6 +49,9 @@ import {
   isCombinableFish,
   canCombineFish,
   combineFish,
+  isSpliceSource,
+  canSpliceFish,
+  spliceFish,
 } from './Entities.js';
 import {
   renderSeabedGrid,
@@ -55,13 +59,14 @@ import {
   placeTile,
   removeTile,
   cycleTileCheat,
+  rotateBuilding,
   worldToTile,
   angleFromTileToPoint,
   canPlaceTile,
   getBuildingCost,
   getTile,
 } from './Grid.js';
-import { isPointOnMound, crackMound, renderMound, centerCameraOnMound } from './Mound.js';
+import { isPointOnMound, crackMound, renderMound, centerCameraOnMound, isPointOnScienceLab, renderScienceLab } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
 import {
   initUI,
@@ -75,6 +80,9 @@ import {
   openMoundMenu,
   closeMoundMenu,
   isMoundMenuOpen,
+  openLabMenu,
+  closeLabMenu,
+  isLabMenuOpen,
   flashFoodCapacity,
 } from './UI.js';
 
@@ -191,7 +199,12 @@ input.mouseDownHandlers.push((sx, sy) => {
   if (state.ui.paused) return;
   const world = screenToWorld(sx, sy, state.camera);
   const fish = findFishAt(state, world.x, world.y);
-  if (fish && isCombinableFish(state, fish)) {
+  // A fish can be a legal drag SOURCE for either interaction — Economy Fish
+  // Combining or (Phase 4) Gene-Splicing — the two are mutually exclusive
+  // per fish (a combine source is always an economy species, a splice
+  // source is always a utility species, and neither set overlaps), so
+  // there's no ambiguity about which one mouseup below should attempt.
+  if (fish && (isCombinableFish(state, fish) || isSpliceSource(state, fish))) {
     draggedFishId = fish.id;
     fishDragArmed = true;
   }
@@ -202,8 +215,9 @@ input.mouseUpHandlers.push((sx, sy) => {
   const world = screenToWorld(sx, sy, state.camera);
   const dragged = state.level.entities.find((e) => e.id === draggedFishId);
   const target = findFishAt(state, world.x, world.y, draggedFishId);
-  if (dragged && target && canCombineFish(state, dragged, target)) {
-    combineFish(state, dragged, target);
+  if (dragged && target) {
+    if (canCombineFish(state, dragged, target)) combineFish(state, dragged, target);
+    else if (canSpliceFish(state, dragged, target)) spliceFish(state, dragged, target);
   }
   draggedFishId = null;
 });
@@ -256,6 +270,7 @@ input.clickHandlers.push((sx, sy) => {
   }
 
   if (isPointOnMound(state, world.x, world.y)) { openMoundMenu(state); return; } // opens the "Throw money at it" popup — see UI.js
+  if (isPointOnScienceLab(state, world.x, world.y)) { openLabMenu(state); return; } // Phase 4 — the Mound's replacement once it's fully shattered
   if (tryBankCoinAt(state, world.x, world.y)) return; // clicking a coin always banks it, regardless of selected tool
   if (state.ui.selectedTool === 'food') {
     if (trySpawnFood(state, world.x, world.y) === 'capacity_full') flashFoodCapacity(state);
@@ -310,6 +325,7 @@ input.keydownHandlers.push((e) => {
       if (state.level.tutorialFlags.escapeDareShown) pushMainNotification(MADE_YA_LOOK_MESSAGE);
     }
     if (isMoundMenuOpen()) { closeMoundMenu(); return; } // close whatever's on top first, rather than opening the pause menu behind/over it
+    if (isLabMenuOpen()) { closeLabMenu(); return; } // same, for the Science Lab's popup
     if (isFanAimingActive()) { fanAimingCell = null; return; } // cancel the pending Fan placement instead of opening the pause menu on top of it
     togglePauseMenu(state);
     return;
@@ -355,6 +371,11 @@ input.keydownHandlers.push((e) => {
     case 'KeyT': { // cycle the tile under the cursor through every building type, free
       const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
       cycleTileCheat(state, world.x, world.y);
+      break;
+    }
+    case 'KeyR': { // rotate the Collector/Auto-Feeder under the cursor 90° — see Grid.js's rotateBuilding
+      const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
+      rotateBuilding(state, world.x, world.y);
       break;
     }
     case 'KeyN': // force-crack the Mound to the next real tier, free — skips the tease if it hasn't happened yet, so this always advances a tier rather than sometimes just spending the press on the joke
@@ -452,6 +473,27 @@ function update(dtMs) {
   }
 }
 
+// The open-water background — a vertical gradient (lighter at the top,
+// deeper/darker toward the bottom) instead of a single flat fill, and
+// overall lightened from the original flat #1c5f8a, per direct request.
+// Also responds live to state.level.cleanliness: at 100% it's the full
+// lightened gradient; toward 0% both stops darken by DIRTY_DARKEN_FACTOR —
+// "not a ton, but enough to notice." Recomputed every frame (cleanliness
+// and canvas size can both change) rather than cached, same as every other
+// per-frame canvas style in this render pass.
+const WATER_TOP_CLEAN = { r: 58, g: 138, b: 184 };
+const WATER_BOTTOM_CLEAN = { r: 32, g: 100, b: 145 };
+const DIRTY_DARKEN_FACTOR = 0.82; // at 0% cleanliness, colors scale down to 82% of their clean brightness
+function waterBackgroundGradient(ctx, canvasHeight, cleanliness) {
+  const darken = DIRTY_DARKEN_FACTOR + (1 - DIRTY_DARKEN_FACTOR) * (cleanliness / CLEANLINESS_MAX);
+  const top = `rgb(${Math.round(WATER_TOP_CLEAN.r * darken)}, ${Math.round(WATER_TOP_CLEAN.g * darken)}, ${Math.round(WATER_TOP_CLEAN.b * darken)})`;
+  const bottom = `rgb(${Math.round(WATER_BOTTOM_CLEAN.r * darken)}, ${Math.round(WATER_BOTTOM_CLEAN.g * darken)}, ${Math.round(WATER_BOTTOM_CLEAN.b * darken)})`;
+  const gradient = ctx.createLinearGradient(0, 0, 0, canvasHeight);
+  gradient.addColorStop(0, top);
+  gradient.addColorStop(1, bottom);
+  return gradient;
+}
+
 function render() {
   fpsCounter++;
   const now = performance.now();
@@ -461,11 +503,12 @@ function render() {
     lastFpsTime = now;
   }
 
-  ctx.fillStyle = '#1c5f8a';
+  ctx.fillStyle = waterBackgroundGradient(ctx, canvas.height, state.level.cleanliness);
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   renderSeabedGrid(ctx, state, canvas.width, canvas.height);
   renderMound(ctx, state);
+  renderScienceLab(ctx, state);
   renderAmbience(ctx, state, canvas.width, canvas.height);
 
   if (isFanAimingActive() && input.mouse.inside && !state.ui.paused) {
@@ -533,9 +576,20 @@ function render() {
   for (const item of state.level.items) {
     const pos = worldToScreen(item.x, item.y, state.camera);
     if (pos.x < -20 || pos.x > canvas.width + 20 || pos.y < -20 || pos.y > canvas.height + 20) continue; // cull offscreen
+    const itemColor = item.type === 'food' ? FOOD_COLOR : item.type === 'waste' ? WASTE_COLOR : getCoinColor(item.value);
     ctx.beginPath();
-    ctx.fillStyle = item.type === 'food' ? FOOD_COLOR : item.type === 'waste' ? WASTE_COLOR : getCoinColor(item.value);
+    ctx.fillStyle = itemColor;
     ctx.arc(pos.x, pos.y, item.radius, 0, Math.PI * 2);
+    ctx.fill();
+    // A thin darker rim plus a small glossy highlight — per direct request
+    // that items "pop more and look less flat" than a single flat fill,
+    // same treatment FishRenderer.js's drawFish gets for its own body.
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.22)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+    ctx.beginPath();
+    ctx.arc(pos.x - item.radius * 0.32, pos.y - item.radius * 0.32, item.radius * 0.32, 0, Math.PI * 2);
     ctx.fill();
   }
 
@@ -552,12 +606,14 @@ function render() {
 
   const cursorWorld = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
 
-  // Economy Fish Combining: while a drag is active, find whatever fish is
-  // currently under the cursor (excluding the dragged fish itself — it's
-  // been snapped to the cursor's exact position by updateFishDrag, so
-  // without excluding it, it would always be its own nearest match) and
-  // check whether dropping here would be a legal combine, for the
-  // green/red highlight drawn in the fish loop below.
+  // Economy Fish Combining / Gene-Splicing: while a drag is active, find
+  // whatever fish is currently under the cursor (excluding the dragged fish
+  // itself — it's been snapped to the cursor's exact position by
+  // updateFishDrag, so without excluding it, it would always be its own
+  // nearest match) and check whether dropping here would be a legal combine
+  // OR splice — whichever applies depends on what's being dragged, same as
+  // the mouseup handler above — for the green/red highlight drawn in the
+  // fish loop below.
   let combineHoverTargetId = null;
   let combineHoverValid = false;
   if (draggedFishId != null) {
@@ -566,7 +622,7 @@ function render() {
       const hoverTarget = findFishAt(state, cursorWorld.x, cursorWorld.y, draggedFishId);
       if (hoverTarget) {
         combineHoverTargetId = hoverTarget.id;
-        combineHoverValid = canCombineFish(state, dragged, hoverTarget);
+        combineHoverValid = canCombineFish(state, dragged, hoverTarget) || canSpliceFish(state, dragged, hoverTarget);
       }
     }
   }
@@ -604,7 +660,12 @@ function render() {
       eyeDirection = { x: dx / dist, y: dy / dist };
     }
 
-    drawFish(ctx, pos.x, pos.y, fish.speciesId, fish.stage, facing, fish.tailPhase, eyeDirection, fish.starTier || 1);
+    // Slightly green once a fish is hungry enough to actively seek food (the
+    // same threshold that already shows the "!" indicator below) — a
+    // little more green past the "!!" critical threshold — per direct
+    // request that a hungry fish should visibly look a bit unwell.
+    const sickness = fish.hunger >= HUNGER_CRITICAL_THRESHOLD ? 0.35 : fish.hunger >= HUNGER_SEEK_THRESHOLD ? 0.18 : 0;
+    drawFish(ctx, pos.x, pos.y, fish.speciesId, fish.stage, facing, fish.tailPhase, eyeDirection, fish.starTier || 1, sickness);
 
     // Economy Fish Combining: a soft ring around the fish currently being
     // dragged, and a green/red ring around whatever it's hovering over.

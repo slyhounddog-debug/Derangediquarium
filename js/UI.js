@@ -30,6 +30,8 @@ import {
   CLEANLINESS_MAX,
   CLEANLINESS_COLOR_CLEAN,
   CLEANLINESS_COLOR_DIRTY,
+  GENE_SPLICING_TECH_ID,
+  GENE_SPLICING_COST,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings, loadLevel } from './Levels.js';
 import { getFishPurchaseCost, effectiveFoodCapacity, countTankFood } from './Entities.js';
@@ -41,6 +43,7 @@ import { playUpgrade } from './Sound.js';
 
 const MOUND_MENU_GAP_PX = 12; // screen px of breathing room between the popup's bottom edge and the Mound's top edge
 const MOUND_MENU_TRANSITION_MS = 220; // must match #mound-menu's CSS transition duration
+const LAB_MENU_TRANSITION_MS = 220; // must match #lab-menu's CSS transition duration — same popup pattern as the Mound's, see openLabMenu below
 
 // One-time story/tutorial notification — see state.level.tutorialFlags and
 // CLAUDE.md's "Story & Tutorial Notifications" section. (First-fish-bought
@@ -55,9 +58,13 @@ let lastMoney = null; // previous frame's money, to detect gain vs spend for the
 let lastCleanliness = null; // previous frame's cleanliness, same purpose
 let notificationLogExpanded = false;
 let lastRenderedNotificationCount = -1; // rebuild the log list only when it actually changes, not every frame
+let lastPillNotificationCount = null; // separate from the above — tracks the pill's own bounce/shimmer trigger regardless of whether the log is expanded; null means "not yet initialized," so the very first real notification on page load doesn't bounce
 let moundMenuOpen = false;
 let moundMenuClosing = false; // true while the shrink-back transition is still playing, before it's actually hidden
 let moundMenuCloseTimer = null;
+let labMenuOpen = false;
+let labMenuClosing = false;
+let labMenuCloseTimer = null;
 // familyId -> currently-selected tile id within that family (see Config.js's
 // BUILDING_FAMILIES) — reset to the highest-unlocked tier every time
 // buildBuildPalette rebuilds (init, the U cheat key, a Mound crack), then
@@ -126,6 +133,7 @@ export function initUI(state) {
     buildToolGrid: document.getElementById('build-tool-grid'),
     toolTooltip: document.getElementById('tool-tooltip'),
     pauseOverlay: document.getElementById('pause-overlay'),
+    pauseMenu: document.getElementById('pause-menu'),
     pauseMain: document.getElementById('pause-main'),
     pauseSettings: document.getElementById('pause-settings'),
     pauseResumeBtn: document.getElementById('pause-resume-btn'),
@@ -141,6 +149,12 @@ export function initUI(state) {
     moundMenu: document.getElementById('mound-menu'),
     moundThrowBtn: document.getElementById('mound-throw-btn'),
     moundCancelBtn: document.getElementById('mound-cancel-btn'),
+    labOverlay: document.getElementById('lab-overlay'),
+    labMenuAnchor: document.getElementById('lab-menu-anchor'),
+    labMenu: document.getElementById('lab-menu'),
+    labScienceReadout: document.getElementById('lab-science-readout'),
+    labResearchBtn: document.getElementById('lab-research-btn'),
+    labCancelBtn: document.getElementById('lab-cancel-btn'),
     tankPanel: document.getElementById('tank-panel'),
     tankCollapseBtn: document.getElementById('tank-collapse-btn'),
     tankPointsDisplay: document.getElementById('tank-points-display'),
@@ -156,6 +170,19 @@ export function initUI(state) {
   els.moundCancelBtn.addEventListener('click', () => closeMoundMenu());
   els.moundOverlay.addEventListener('click', (e) => {
     if (e.target === els.moundOverlay) closeMoundMenu(); // clicked the backdrop, not the card
+  });
+
+  els.labResearchBtn.addEventListener('click', () => {
+    if (state.meta.techUnlocked.includes(GENE_SPLICING_TECH_ID)) return;
+    if (state.meta.scienceTotal < GENE_SPLICING_COST) return;
+    state.meta.scienceTotal -= GENE_SPLICING_COST;
+    state.meta.techUnlocked.push(GENE_SPLICING_TECH_ID);
+    playUpgrade();
+    refreshLabMenu(state);
+  });
+  els.labCancelBtn.addEventListener('click', () => closeLabMenu());
+  els.labOverlay.addEventListener('click', (e) => {
+    if (e.target === els.labOverlay) closeLabMenu();
   });
 
   els.notificationLatest.addEventListener('click', () => {
@@ -286,7 +313,10 @@ function updateTankPanelCollapse(state) {
 // skips simulating entirely while true, so the tank sits frozen behind it.
 export function togglePauseMenu(state) {
   state.ui.paused = !state.ui.paused;
-  if (state.ui.paused) showPauseMain();
+  if (state.ui.paused) {
+    showPauseMain();
+    playFlash(els.pauseMenu, 'bounce-play'); // reuses the generic flash-restart helper below purely for its remove-reflow-readd trick, not an actual flash class
+  }
   els.pauseOverlay.classList.toggle('hidden', !state.ui.paused);
 }
 
@@ -357,6 +387,62 @@ function refreshMoundThrowButton(state) {
   const affordable = state.level.money >= cost;
   els.moundThrowBtn.textContent = `$${cost}`;
   els.moundThrowBtn.disabled = !affordable;
+}
+
+// ---- Science Lab popup (Phase 4) ----
+// Same fly-out-of-its-anchor pattern as the Mound's own popup above, just a
+// separate DOM tree — opened by main.js's click handler when
+// isPointOnScienceLab(...) hits, once the Mound has fully shattered.
+export function openLabMenu(state) {
+  labMenuOpen = true;
+  labMenuClosing = false;
+  if (labMenuCloseTimer !== null) { clearTimeout(labMenuCloseTimer); labMenuCloseTimer = null; }
+  els.labOverlay.classList.remove('hidden');
+  refreshLabMenu(state);
+  updateLabMenuPosition(state);
+
+  els.labMenu.classList.add('lab-menu-closed');
+  void els.labMenu.offsetWidth;
+  els.labMenu.classList.remove('lab-menu-closed');
+}
+
+export function closeLabMenu() {
+  if (!labMenuOpen) return;
+  labMenuOpen = false;
+  labMenuClosing = true;
+  els.labMenu.classList.add('lab-menu-closed');
+  labMenuCloseTimer = setTimeout(() => {
+    els.labOverlay.classList.add('hidden');
+    labMenuClosing = false;
+    labMenuCloseTimer = null;
+  }, LAB_MENU_TRANSITION_MS);
+}
+
+// Read by main.js's Escape handler, same reason isMoundMenuOpen is.
+export function isLabMenuOpen() {
+  return labMenuOpen;
+}
+
+function updateLabMenuPosition(state) {
+  const anchorWorld = { x: MOUND_X, y: SEABED_FLOOR_Y - MOUND_HEIGHT_PX };
+  const screen = worldToScreen(anchorWorld.x, anchorWorld.y, state.camera);
+  els.labMenuAnchor.style.left = `${screen.x}px`;
+  els.labMenuAnchor.style.top = `${screen.y - MOUND_MENU_GAP_PX}px`;
+}
+
+// Re-checked every frame the popup is open (from updateHUD) — science total
+// and the research button's afford-state can both change while it's open.
+function refreshLabMenu(state) {
+  const unlocked = state.meta.techUnlocked.includes(GENE_SPLICING_TECH_ID);
+  els.labScienceReadout.textContent = `🔬 ${state.meta.scienceTotal}`;
+  if (unlocked) {
+    els.labResearchBtn.textContent = 'Gene-Splicing researched ✓';
+    els.labResearchBtn.disabled = true;
+  } else {
+    const affordable = state.meta.scienceTotal >= GENE_SPLICING_COST;
+    els.labResearchBtn.textContent = `Research Gene-Splicing — ${GENE_SPLICING_COST} 🔬`;
+    els.labResearchBtn.disabled = !affordable;
+  }
 }
 
 function showPauseMain() {
@@ -880,7 +966,7 @@ export function refreshShopPanel(state) {
 // cleanliness), not just money any more, despite the generic name change
 // from playMoneyFlash.
 function playFlash(el, className) {
-  el.classList.remove('flash-pickup', 'flash-spend');
+  el.classList.remove('flash-pickup', 'flash-spend', 'bounce-play');
   void el.offsetWidth;
   el.classList.add(className);
 }
@@ -931,6 +1017,8 @@ export function updateHUD(state) {
   if (!state.ui.shopCollapsed) refreshShopPrices(state);
   if (moundMenuOpen) refreshMoundThrowButton(state);
   if (moundMenuOpen || moundMenuClosing) updateMoundMenuPosition(state); // keeps tracking through the shrink-back so it doesn't jump right as it starts closing
+  if (labMenuOpen) refreshLabMenu(state);
+  if (labMenuOpen || labMenuClosing) updateLabMenuPosition(state);
   if (!state.ui.tankPanelCollapsed) refreshTankPanel(state);
 
   // The shop sits open most of the game now, so it carries its own copy of
@@ -986,6 +1074,18 @@ export function updateNotificationTicker(state) {
   const notifications = state.level.notifications;
   const latest = notifications[notifications.length - 1];
   els.notificationLatest.textContent = latest ? latest.text : 'Welcome to the tank.';
+
+  // Bounce + shimmer the pill on every genuinely NEW message — per direct
+  // request. lastPillNotificationCount starts null so the level's opening
+  // "Welcome to the tank" line (already present before this first call)
+  // doesn't trigger it on load; every real arrival after that does.
+  if (lastPillNotificationCount !== null && notifications.length !== lastPillNotificationCount) {
+    playFlash(els.notificationLatest, 'bounce-play');
+    els.notificationLatest.classList.remove('sheen-play');
+    void els.notificationLatest.offsetWidth;
+    els.notificationLatest.classList.add('sheen-play');
+  }
+  lastPillNotificationCount = notifications.length;
 
   if (!notificationLogExpanded || notifications.length === lastRenderedNotificationCount) return;
   lastRenderedNotificationCount = notifications.length;

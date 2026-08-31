@@ -41,12 +41,30 @@ for (let i = 0; i < BUBBLE_COUNT; i++) {
 // control point. Rendered blurred and low-opacity so it reads as soft
 // background texture, never something the player mistakes for an obstacle
 // or a real building.
-const SEAWEED_COUNT = 16;
+//
+// Sizing, per direct request: 3x as many strands as the original pass;
+// the smallest a strand can now be is exactly the biggest it used to get
+// (the old height range topped out at 130px, old stroke width was a flat
+// 5px pre-zoom) — the new range runs from there up to 4x that height and
+// 3x that width. Each strand's width tracks its own height (bigger strands
+// read as both taller AND thicker, not just stretched), and its blur
+// (blurFactor, consumed by renderSeaweed's fake-blur below) scales with
+// size too: the smallest strands are LESS blurry than the old fixed amount,
+// the biggest are only SLIGHTLY more — the old fixed amount (blurFactor 1.0)
+// sits deliberately near the top of this new range, not the middle.
+const SEAWEED_COUNT = 48; // was 16 — 3x as many, per direct request
+const SEAWEED_MIN_HEIGHT = 130; // was the old range's max (55-130)
+const SEAWEED_MAX_HEIGHT = 130 * 4;
+const SEAWEED_MIN_WIDTH = 5; // was the old fixed stroke width
+const SEAWEED_MAX_WIDTH = 5 * 3;
 const seaweeds = [];
 for (let i = 0; i < SEAWEED_COUNT; i++) {
+  const sizeT = Math.random(); // 0 = smallest, 1 = biggest — drives height/width/blur together
   seaweeds.push({
     x: (i + 0.5) * (WORLD_W / SEAWEED_COUNT) + (Math.random() - 0.5) * 90,
-    height: 55 + Math.random() * 75,
+    height: SEAWEED_MIN_HEIGHT + (SEAWEED_MAX_HEIGHT - SEAWEED_MIN_HEIGHT) * sizeT,
+    width: SEAWEED_MIN_WIDTH + (SEAWEED_MAX_WIDTH - SEAWEED_MIN_WIDTH) * sizeT,
+    blurFactor: 0.6 + 0.55 * sizeT, // 0.6x (crisper) at the smallest, 1.15x (slightly blurrier) at the biggest, vs. the old fixed 1.0x
     sway: 10 + Math.random() * 16,
     freq: 0.35 + Math.random() * 0.45,
     phase: Math.random() * Math.PI * 2,
@@ -99,16 +117,16 @@ function renderSeaweed(ctx, camera, canvasWidth) {
   ctx.lineCap = 'round';
   for (const w of seaweeds) {
     const screen = worldToScreen(w.x, SEABED_FLOOR_Y, camera);
-    if (screen.x < -60 || screen.x > canvasWidth + 60) continue;
+    if (screen.x < -100 || screen.x > canvasWidth + 100) continue;
     const sway = Math.sin(elapsed * w.freq + w.phase) * w.sway * camera.zoom;
     const h = w.height * camera.zoom;
-    const baseWidth = Math.max(2, 5 * camera.zoom);
+    const baseWidth = Math.max(2, w.width * camera.zoom);
     ctx.strokeStyle = `hsl(${w.hue}, 42%, 32%)`;
     ctx.beginPath();
     ctx.moveTo(screen.x, screen.y + 2);
     ctx.quadraticCurveTo(screen.x + sway, screen.y - h * 0.5, screen.x + sway * 0.4, screen.y - h);
-    ctx.globalAlpha = 0.1;
-    ctx.lineWidth = baseWidth * 2.2;
+    ctx.globalAlpha = 0.1 * w.blurFactor;
+    ctx.lineWidth = baseWidth * 2.2 * w.blurFactor;
     ctx.stroke();
     ctx.globalAlpha = 0.24;
     ctx.lineWidth = baseWidth;

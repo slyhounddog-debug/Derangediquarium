@@ -86,14 +86,26 @@ export const MAX_FALL_SPEED = 72; // terminal velocity, px/sec — 20% slower th
 // down. See FOOD_WAVE_* below.
 export const FOOD_GRAVITY = 33; // 25% slower again on top of the earlier 20% cut (was 44) — part of a general de-pacing pass, see CLAUDE.md
 export const FOOD_MAX_FALL_SPEED = 27; // 25% slower again on top of the earlier 20% cut (was 36)
-// Food doesn't sway continuously — it mostly falls straight, with a handful
-// of distinct sway bursts scattered across the drop (count and each burst's
-// period are randomized per pellet so it reads as organic, not mechanical).
-export const FOOD_WAVE_SPEED = 31; // px/sec, peak sideways speed during an active sway burst — drifts the pellet roughly ±15-25px off a straight line per burst (varies with that burst's period)
-export const FOOD_WAVE_COUNT_MIN = 2; // fewest sway bursts over a full fall
-export const FOOD_WAVE_COUNT_MAX = 4; // most sway bursts over a full fall
-export const FOOD_WAVE_PERIOD_MIN_S = 3; // shortest a single sway burst (one full left-right-left cycle) can last
-export const FOOD_WAVE_PERIOD_MAX_S = 5; // longest a single sway burst can last
+// Food sways continuously as it falls — a straight sine wobble on its
+// horizontal velocity, the same underlying idea Ambience.js's bubbles
+// already use for their own left-right drift, per direct request to make
+// the two consistent. Replaces an earlier "discrete scheduled sway bursts
+// timed against an estimated total fall duration" scheme that didn't hold
+// up — the estimate went wrong the moment a Fan actually touched the
+// pellet's real trajectory, and pre-scheduling events up front made the
+// whole thing rigid to begin with. This version needs no schedule at all:
+// item.fallTime just accumulates every tick it's in open water (unchanged),
+// and swayVx is recomputed fresh from it and a per-item random phase every
+// single tick — self-correcting no matter what the item's actual fall looks
+// like. FOOD_SWAY_AMPLITUDE is the peak sideways speed; FOOD_SWAY_FREQUENCY
+// is in full left-right-left cycles per second.
+export const FOOD_SWAY_AMPLITUDE = 24; // px/sec
+export const FOOD_SWAY_FREQUENCY = 0.35; // Hz
+// Waste gets the same treatment but "to a less degree" per direct request —
+// it's a denser byproduct, not a light drifting pellet, so it should read
+// as barely swaying rather than genuinely wavering.
+export const WASTE_SWAY_AMPLITUDE = 9; // px/sec
+export const WASTE_SWAY_FREQUENCY = 0.3; // Hz
 
 // ---- Seabed grid item physics (Phase 2) ----
 // Once an item's y crosses SEABED_FLOOR_Y, Grid.js takes over its motion
@@ -125,7 +137,7 @@ export const RAMP_NUDGE_DISTANCE = TILE_SIZE;
 // are. The cone is a fixed-direction blow (uniform along the fan's aim
 // angle, not radiating outward from its center like an explosion), narrowing
 // force linearly to 0 at max range.
-export const FAN_CONE_HALF_ANGLE_DEG = 25; // total cone width = 2x this = 50° (was 15/30°, then 20/40° — widened slightly again per direct request)
+export const FAN_CONE_HALF_ANGLE_DEG = 28; // total cone width = 2x this = 56° (was 15/30°, then 20/40°, then 25/50° — widened slightly again per direct request)
 // Placeholder balance per tier, same as every other economy/physics constant
 // in this file — tune once real playtesting exists. Power cost is only
 // tracked into state.level.powerDemand for now (Systems.js's real power
@@ -133,13 +145,13 @@ export const FAN_CONE_HALF_ANGLE_DEG = 25; // total cone width = 2x this = 50° 
 // header), so an Electric/Turbo Fan still runs unconditionally today, same
 // as every other not-yet-power-gated Electric building in the codebase.
 export const FAN_T2_MAX_FORCE = 260; // Rudimentary Fan — force magnitude at the emitter (see Grid.js's a = F/mass integration)
-export const FAN_T2_MAX_RANGE = 288; // px — 9 tiles (was 3, then 5, then 6, then 7; +2 more tiles per direct request, the 6th such increase this session)
+export const FAN_T2_MAX_RANGE = 320; // px — 10 tiles (was 3, then 5, then 6, then 7, then 9; +1 more tile per direct request, the 7th such increase this session)
 export const FAN_T2_POWER_COST = 0;
 export const FAN_T3_MAX_FORCE = 520; // Electric Fan
-export const FAN_T3_MAX_RANGE = 432; // px — 13.5 tiles (was 5.5, then 8.5, then 9.5, then 10.5; +3 more tiles)
+export const FAN_T3_MAX_RANGE = 496; // px — 15.5 tiles (was 5.5, then 8.5, then 9.5, then 10.5, then 13.5; +2 more tiles)
 export const FAN_T3_POWER_COST = 5;
 export const FAN_T4_MAX_FORCE = 1100; // Turbo Fan — extreme thrust, enough to clear a heavy coin across a ledge on its own
-export const FAN_T4_MAX_RANGE = 576; // px — 18 tiles (was 10, then 13, then 14, then 15; +3 more tiles)
+export const FAN_T4_MAX_RANGE = 640; // px — 20 tiles (was 10, then 13, then 14, then 15, then 18; +2 more tiles)
 export const FAN_T4_POWER_COST = 14;
 
 // ---- Auto-Feeder ----
@@ -484,6 +496,13 @@ export const FISH_MOVEMENT_UPGRADE_MAX_LEVEL = FISH_MOVEMENT_UPGRADE_COSTS.lengt
 // effectiveSwimSpeed(). Left as a flat px/sec bonus per level (not a
 // percentage) per direct request to leave this mechanic's formula alone.
 export const FISH_MOVEMENT_UPGRADE_SPEED_BONUS = 5; // px/sec per level
+// A flat 10% speed bump across every species, applied once at the single
+// choke point every fish speed calc already reads through
+// (Entities.js's effectiveSwimSpeed) rather than editing all 18 SPECIES
+// rows' swimSpeed individually — per direct request. Stacks with the Fish
+// Movement Tank Upgrade bonus above (the whole sum gets the 10%, not just
+// the base stat).
+export const FISH_SPEED_MULTIPLIER = 1.1;
 
 // Food Capacity: how many food pellets can exist in state.level.items at
 // once (checked in Entities.js's trySpawnFood — spawning is refused past
@@ -884,6 +903,28 @@ export const TIER_UNLOCKS = {
     buildings: [TILE_FAN_T4],
   },
 };
+
+// ---- Phase 4: Science Lab & Gene-Splicing ----
+// The Science Lab (Mound.js's renderScienceLab/isPointOnScienceLab) replaces
+// the Mound once it shatters at MOUND_MAX_TIER. Its one purchasable tech
+// node is Gene-Splicing — once bought (state.meta.techUnlocked, a permanent
+// meta unlock like buildings/species), dragging a utility fish (Suckerfish/
+// Electric Eel/Science Octopus) onto an eligible Adult fish spawns the
+// matching hybrid — see Entities.js's canSpliceFish/spliceFish and the
+// existing T5 value-carry-over pipeline (getEconomyAdultDropValue/
+// getHybridSpeciesId/createHybridFish) it's built on top of.
+export const GENE_SPLICING_TECH_ID = 'gene_splicing';
+export const GENE_SPLICING_COST = 100; // Science — placeholder balance like every other economy constant
+export const SCIENCE_COLOR = '#5fc9ff';
+export const POWER_COLOR = '#ffd23f';
+// The 3 utility species — the only valid splice SOURCES (dragged onto an
+// eligible target, never the other way around, to keep the interaction
+// symmetric with Economy Fish Combining's own single-direction drag). Also
+// used to keep Entities.js's Science-production branch (RESEARCHER species
+// without FEEDER also in their behavior list) and Config.js's own species
+// rows in one place conceptually, even though that branch derives its
+// condition from the behavior tags directly rather than this list.
+export const UTILITY_SPECIES_IDS = ['suckerfish', 'electric_eel', 'octopus'];
 
 // ---- Economy Fish Combining/Splicing (Tier 2) ----
 // The 3 base feeder species — the only ones dynamic pricing and star-tier

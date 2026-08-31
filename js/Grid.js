@@ -239,6 +239,28 @@ export function removeTile(state, col, row) {
   return true;
 }
 
+// R hotkey — rotates the Collector or Auto-Feeder under the cursor 90° per
+// press, per direct request. Only ever touches `data.angle` — every other
+// piece of behavior (which side is intake vs output, the two-arrow render,
+// the isOnIntakeSide scan in updateBuildings) already reads `data.angle`
+// live off state.level.buildingData every tick/frame rather than caching it
+// anywhere, so rotating a placed building "just works" the instant this
+// updates the one stored value: the output side is always wherever the
+// current angle points, and the intake-side check is always relative to
+// that same current angle, with no separate bookkeeping to keep in sync.
+// Fans are deliberately excluded — they already have their own two-click
+// aiming flow at placement (see "Aiming" in CLAUDE.md) and were not asked
+// for this.
+export function rotateBuilding(state, worldX, worldY) {
+  const { col, row } = worldToTile(worldX, worldY);
+  const type = getTile(state.level.grid, col, row);
+  if (type !== TILE_COLLECTOR && type !== TILE_AUTO_FEEDER) return false;
+  const data = state.level.buildingData[buildingKey(col, row)];
+  if (!data) return false;
+  data.angle += Math.PI / 2;
+  return true;
+}
+
 // T debug key — cycles the tile under the cursor through every building type
 // (plus empty) for free, ignoring cost/occupancy/anchoring. Fans/Auto-Feeder
 // default to pointing straight up (toward the water column) since that's the
@@ -856,6 +878,28 @@ function renderFanIndicators(ctx, state, canvasWidth, canvasHeight) {
 // while it holds them for COLLECTOR_PROCESS_DURATION_MS. A Fan/Auto-Feeder
 // is a plain square here (renderDirectionIndicator draws its aim on top).
 // Every other building type is a plain square too.
+// A diagonal highlight/shadow bevel across a square tile's own bounds — a
+// lighter top-left triangle, a darker bottom-right one — per direct request
+// that buildings "pop more and look less flat" than a single flat fill.
+// Cheap (two extra filled triangles, no gradients/filters) so it's safe to
+// run every building, every frame.
+function renderSquareBevel(ctx, x, y, size) {
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x + size, y);
+  ctx.lineTo(x, y + size);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+  ctx.beginPath();
+  ctx.moveTo(x + size, y);
+  ctx.lineTo(x + size, y + size);
+  ctx.lineTo(x, y + size);
+  ctx.closePath();
+  ctx.fill();
+}
+
 function renderTileShape(ctx, type, color, x, y, size) {
   ctx.fillStyle = color;
   ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
@@ -877,6 +921,7 @@ function renderTileShape(ctx, type, color, x, y, size) {
     ctx.rect(x, y, size, size);
     ctx.fill();
     ctx.stroke();
+    renderSquareBevel(ctx, x, y, size);
     ctx.beginPath();
     ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
     ctx.arc(x + size / 2, y + size / 2, size * COLLECTOR_CIRCLE_RADIUS_FRACTION, 0, Math.PI * 2);
@@ -885,6 +930,7 @@ function renderTileShape(ctx, type, color, x, y, size) {
     ctx.rect(x, y, size, size);
     ctx.fill();
     ctx.stroke();
+    renderSquareBevel(ctx, x, y, size);
   }
 }
 
