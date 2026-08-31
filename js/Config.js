@@ -35,8 +35,6 @@ export const WASTE_FLOOR_Y = WORLD_H - 2 * TILE_SIZE;
 // every row/col calc a single division by TILE_SIZE, no offset to remember.
 export const TILE_EMPTY = 'empty'; // passable — items fall straight through
 export const TILE_PLATFORM = 'platform'; // solid — items land and rest on top. The structural anchor: every other building must be placed adjacent to a Platform (or directly on the world's bottom row) — see BUILDING_TYPES' anchoring rule and Grid.js's canPlaceTile.
-export const TILE_RAMP_LEFT = 'ramp_left'; // solid — items land then slide down-left
-export const TILE_RAMP_RIGHT = 'ramp_right'; // solid — items land then slide down-right
 export const TILE_COLLECTOR = 'collector'; // solid — items landing here are immediately consumed (coins auto-banked)
 export const TILE_FAN_T2 = 'fan_t2'; // solid — Rudimentary Fan (Tier 2, free, short reach/low force)
 export const TILE_FAN_T3 = 'fan_t3'; // solid — Electric Fan (Tier 3, draws power, medium reach/force)
@@ -99,8 +97,18 @@ export const FOOD_MAX_FALL_SPEED = 27; // 25% slower again on top of the earlier
 // single tick — self-correcting no matter what the item's actual fall looks
 // like. FOOD_SWAY_AMPLITUDE is the peak sideways speed; FOOD_SWAY_FREQUENCY
 // is in full left-right-left cycles per second.
-export const FOOD_SWAY_AMPLITUDE = 24; // px/sec
-export const FOOD_SWAY_FREQUENCY = 0.35; // Hz
+export const FOOD_SWAY_AMPLITUDE = 24; // px/sec — the peak, only actually reached at the crest of a sway burst; see FOOD_SWAY_ENVELOPE_FREQUENCY below
+export const FOOD_SWAY_FREQUENCY = 0.22; // Hz — was 0.35, slowed down per direct request for "less frequently"
+// Per direct request ("less frequently and more sporadically"), the sway
+// isn't one constant-amplitude wobble any more — a second, much slower sine
+// (the "envelope") modulates the amplitude via max(0, sin(...))^2, so any
+// given stretch of the fall alternates between long near-zero-sway
+// stretches and shorter swelling-then-fading bursts of actual wobble,
+// reading as occasional/sporadic rather than continuous — without
+// reintroducing the fragile pre-scheduled-events system this replaced
+// (still just a function of fallTime + a random phase, recomputed fresh
+// every tick, nothing scheduled up front to go stale).
+export const FOOD_SWAY_ENVELOPE_FREQUENCY = 0.06; // Hz — one swell-and-fade cycle takes ~16-17 seconds
 // Waste gets the same treatment but "to a less degree" per direct request —
 // it's a denser byproduct, not a light drifting pellet, so it should read
 // as barely swaying rather than genuinely wavering.
@@ -113,17 +121,6 @@ export const WASTE_SWAY_FREQUENCY = 0.3; // Hz
 // still uses the item's own GRAVITY/MAX_FALL_SPEED or FOOD_GRAVITY/
 // FOOD_MAX_FALL_SPEED — these three below are the tile-interaction speeds.
 export const GRID_SWEEP_SUBSTEP = TILE_SIZE / 4; // px — every swept move is walked in steps this small, so a fast-falling item can never skip clean over a landing tile in one step, at any of the fall speeds above
-// A Ramp is a pass-through nudge, not a surface an item rests or slides on —
-// it doesn't arrest vertical motion at all (an earlier version had items
-// "land" on a ramp and ride a fixed-speed 45-degree slope down it, which
-// read as a sticky conveyor belt rather than something that just deflects
-// what's already moving through it). Instead: an item's vy is left
-// completely alone — falling through keeps falling, rising through (e.g. off
-// a Fan's push) keeps rising — and crossing into a Ramp tile's row applies a
-// single one-tile-width horizontal shift in that ramp's direction, exactly
-// once per row (RAMP_NUDGE_DISTANCE, tracked via item.rampNudgedRow so it
-// doesn't re-trigger every tick while still passing through the same row).
-export const RAMP_NUDGE_DISTANCE = TILE_SIZE;
 // ---- Directional Fans (Seabed Platform architecture) ----
 // A Fan is a directional force emitter, not a landing-triggered launcher —
 // see CLAUDE.md's "Directional Fans" section. Its aim angle is captured once
@@ -227,7 +224,7 @@ export const ITEM_LOST_COLOR = '#ff9999'; // muted red "Lost!" floating text whe
 // it falls again like anything else. This is deliberate: a single Collector
 // tile can only actually receive the one item currently touching it —
 // everything else piles up and spills, so a real factory needs width
-// (ramps, multiple Collectors) to keep up, not just one tile under a
+// (multiple Collectors, Fans routing overflow) to keep up, not just one tile under a
 // firehose.
 //
 // Mass drives how much an item moves when it collides with another —
@@ -546,7 +543,14 @@ export const SHOP_PREVIEW_FLIP_MAX_S = 4; // longest time before it flips
 export const FISH_COLORS = {
   guppy: '#ffa94d',
   dartfin: '#4dd2ff',
-  blimpfish: '#c77dff',
+  blimpfish: '#ff8a65', // was purple (#c77dff) — pinkish-orange now, per direct request; Octopus took over the purple slot instead
+  // The 3 utility species previously had no entry here at all (silently
+  // falling back to FishRenderer.js's plain white default) — per direct
+  // request, each now gets its own distinct, thematic color: Suckerfish
+  // teal/green, Electric Eel yellow, Science Octopus purple.
+  suckerfish: '#2dd4a5',
+  electric_eel: '#ffd93d',
+  octopus: '#a663ff',
 };
 
 // ---- Species table (§4) ----
@@ -787,16 +791,6 @@ export const BUILDING_TYPES = {
     description: 'Solid structural floor. Items land and rest on top. Every other building must be anchored to a Platform (or the seabed floor) to be placed.',
     color: '#dba36f', unlockedByDefault: true, // available from level start — every other building needs one to anchor to, so it can't be gated behind any Mound tier
   },
-  [TILE_RAMP_LEFT]: {
-    id: TILE_RAMP_LEFT, name: 'Ramp Left', icon: '↙️', cost: 8,
-    description: "Doesn't stop anything passing through it, up or down — just nudges it one tile left, like a gentle fan.",
-    color: '#ffcf6b', unlockedByDefault: false,
-  },
-  [TILE_RAMP_RIGHT]: {
-    id: TILE_RAMP_RIGHT, name: 'Ramp Right', icon: '↘️', cost: 8,
-    description: "Doesn't stop anything passing through it, up or down — just nudges it one tile right, like a gentle fan.",
-    color: '#ffb04d', unlockedByDefault: false,
-  },
   [TILE_COLLECTOR]: {
     id: TILE_COLLECTOR, name: 'Collector', icon: '🧲', cost: 12,
     description: 'Auto-banks any coin pulled into its intake side — aim it like a Fan. Unpowered, so it leaves a little waste behind each time.',
@@ -871,7 +865,7 @@ export const MOUND_HEIGHT_PX = 62; // how far it mounds up above the seabed surf
 // is NOT tier-gated at all any more — see BUILDING_TYPES' unlockedByDefault
 // above — since every other building needs one to anchor to, per direct
 // request it's available from level start rather than waiting on any crack.
-// Collector and Auto-Feeder moved to Tier 3 (alongside the Ramps and
+// Collector and Auto-Feeder moved to Tier 3 (alongside
 // Suckerfish) per the same request. The Rudimentary Fan isn't granted by a
 // TIER_UNLOCKS entry at all any more — it moved even earlier, to the Mound's
 // first "throw money" tease itself (the informal "Tier 1.5" step, before
@@ -883,7 +877,7 @@ export const TIER_UNLOCKS = {
   },
   3: {
     species: ['suckerfish'],
-    buildings: [TILE_RAMP_LEFT, TILE_RAMP_RIGHT, TILE_COLLECTOR, TILE_AUTO_FEEDER],
+    buildings: [TILE_COLLECTOR, TILE_AUTO_FEEDER], // Ramps were removed from the game entirely, per direct request — see CLAUDE.md's Current Phase changelog
   },
   // Tier 4/5 species are listed even though some of their mechanics aren't
   // built yet (Phase 3/4 alignment, not Phase 2 coding scope) — reaching

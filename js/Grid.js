@@ -1,5 +1,5 @@
 // Grid.js — seabed tile array, gravity/fan-force physics for items once they
-// reach the seabed, ramp/collector/auto-feeder routing, platform anchoring.
+// reach the seabed, collector/auto-feeder routing, platform anchoring.
 // Owns state.level.grid and state.level.buildingData.
 // Forbidden: no fish logic, no camera math.
 
@@ -12,8 +12,6 @@ import {
   SEABED_ROW_START,
   TILE_EMPTY,
   TILE_PLATFORM,
-  TILE_RAMP_LEFT,
-  TILE_RAMP_RIGHT,
   TILE_COLLECTOR,
   TILE_FAN_T2,
   TILE_FAN_T3,
@@ -22,7 +20,6 @@ import {
   BUILDING_TYPES,
   TILE_REFUND_FRACTION,
   GRID_SWEEP_SUBSTEP,
-  RAMP_NUDGE_DISTANCE,
   ITEM_LOST_BELOW_WORLD_MARGIN_PX,
   ITEM_HORIZONTAL_DAMPING,
   ITEM_COLLISION_ITERATIONS,
@@ -64,11 +61,8 @@ function pushGridNotification(state, text) {
   if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
 }
 
-// Tiles an item's fall (or rise) is arrested by. Ramps are deliberately NOT
-// solid — see RAMP_NUDGE_DISTANCE's comment in Config.js: they're a
-// pass-through nudge, not a surface anything lands or rests on.
+// Tiles an item's fall (or rise) is arrested by.
 const SOLID_TILES = new Set([TILE_PLATFORM, TILE_COLLECTOR, TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4, TILE_AUTO_FEEDER]);
-const RAMP_TILES = new Set([TILE_RAMP_LEFT, TILE_RAMP_RIGHT]);
 const FAN_TILES = new Set([TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4]);
 
 // Per-tier fan stats, keyed by tile id — Grid.js's own lookup table (not
@@ -266,7 +260,7 @@ export function rotateBuilding(state, worldX, worldY) {
 // default to pointing straight up (toward the water column) since that's the
 // most useful direction to test filtration with.
 const CHEAT_CYCLE = [
-  TILE_EMPTY, TILE_PLATFORM, TILE_RAMP_LEFT, TILE_RAMP_RIGHT, TILE_COLLECTOR,
+  TILE_EMPTY, TILE_PLATFORM, TILE_COLLECTOR,
   TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4, TILE_AUTO_FEEDER,
 ];
 const CHEAT_DEFAULT_ANGLE = -Math.PI / 2; // straight up
@@ -346,43 +340,12 @@ export function integrateItemForces(item, dt, physics, fanForce) {
   item.vy = (item.vy || 0) + ay * dt;
 }
 
-// A Ramp doesn't arrest vertical motion at all — see RAMP_NUDGE_DISTANCE's
-// comment in Config.js. Whatever row of the grid an item's center currently
-// sits in, if that's a Ramp tile, it gets shoved sideways by exactly one
-// tile width in that ramp's direction — once per row, tracked via
-// item.rampNudgedRow so a slow-moving item lingering in the same row for
-// several ticks doesn't get re-nudged every tick (that would read as rapid
-// stuttering, not "moved one tile"). Clearing rampNudgedRow the moment the
-// item is no longer sitting in a ramp row at all means it's free to be
-// nudged again by a *different* ramp encountered later — including a second
-// ramp of the same direction placed right below the first, which just
-// chains the push (a reasonable, not specially-blocked, way to move
-// something further than one tile).
-function applyRampNudge(item, grid) {
-  const row = rowAt(item.y);
-  const col = colAt(item.x);
-  if (row < 0 || row >= grid.length) {
-    item.rampNudgedRow = null;
-    return;
-  }
-  const tile = grid[row][col];
-  if (!RAMP_TILES.has(tile)) {
-    item.rampNudgedRow = null;
-    return;
-  }
-  if (item.rampNudgedRow === row) return; // already nudged for this row — don't repeat every tick while still passing through it
-  const dir = tile === TILE_RAMP_LEFT ? -1 : 1;
-  const targetX = item.x + dir * RAMP_NUDGE_DISTANCE;
-  if (!isSolid(tileAt(grid, targetX, item.y))) item.x = targetX; // don't shove it into a wall — it'll just keep moving through this row untouched instead
-  item.rampNudgedRow = row;
-}
-
 // Sub-steps every swept move in chunks no larger than GRID_SWEEP_SUBSTEP so
-// a landing tile (or a Ramp row) can never be skipped over in a single step,
-// regardless of how fast the item is currently moving in either direction
-// (this is what makes it "swept" rather than a plain end-of-tick position
-// check, which could tunnel through a tile if a future speed constant ever
-// got fast enough to clear one in a single tick).
+// a landing tile can never be skipped over in a single step, regardless of
+// how fast the item is currently moving in either direction (this is what
+// makes it "swept" rather than a plain end-of-tick position check, which
+// could tunnel through a tile if a future speed constant ever got fast
+// enough to clear one in a single tick).
 function sweepVertical(item, grid, dy) {
   const steps = Math.max(1, Math.ceil(Math.abs(dy) / GRID_SWEEP_SUBSTEP));
   const stepY = dy / steps;
@@ -412,7 +375,6 @@ function sweepVertical(item, grid, dy) {
       return { landed: true, tile: null, row: rowAt(WASTE_FLOOR_Y), col: colAt(item.x) };
     }
     item.y += stepY;
-    applyRampNudge(item, grid); // every sub-step, not just once at the end of the tick — otherwise a fast enough item could cross an entire ramp row within one tick without this ever seeing it sitting inside that row
   }
   return { landed: false };
 }
@@ -423,9 +385,7 @@ function sweepVertical(item, grid, dy) {
 // it only pulls items in from its designated intake side (see
 // beginCollectorProcessing/updateBuildings' Collector scan below), the same
 // way the Auto-Feeder already worked — top-landing isn't a valid entry
-// point for either any more. Ramps never reach here — they're not in
-// SOLID_TILES, so sweepVertical never reports a "landing" on one (see
-// applyRampNudge instead).
+// point for either any more.
 function handleLanding() {
   return 'resting'; // TILE_PLATFORM, a Collector, a Fan, the Auto-Feeder, or the implicit world-boundary wall
 }
@@ -870,14 +830,6 @@ function renderFanIndicators(ctx, state, canvasWidth, canvasHeight) {
   }
 }
 
-// A Ramp draws as a triangle pointing the direction it nudges items — a
-// left-pointing wedge for TILE_RAMP_LEFT, right-pointing for
-// TILE_RAMP_RIGHT — instead of a plain square, so its effect on anything
-// passing through reads visually at a glance. A Collector gets a circle in
-// its center — the point stepCollectorProcessing actually draws items into
-// while it holds them for COLLECTOR_PROCESS_DURATION_MS. A Fan/Auto-Feeder
-// is a plain square here (renderDirectionIndicator draws its aim on top).
-// Every other building type is a plain square too.
 // A diagonal highlight/shadow bevel across a square tile's own bounds — a
 // lighter top-left triangle, a darker bottom-right one — per direct request
 // that buildings "pop more and look less flat" than a single flat fill.
@@ -900,24 +852,16 @@ function renderSquareBevel(ctx, x, y, size) {
   ctx.fill();
 }
 
+// A Collector gets a circle in its center — the point
+// stepCollectorProcessing actually draws items into while it holds them for
+// COLLECTOR_PROCESS_DURATION_MS. A Fan/Auto-Feeder is a plain square here
+// (renderDirectionIndicator draws its aim on top). Every other building
+// type is a plain square too.
 function renderTileShape(ctx, type, color, x, y, size) {
   ctx.fillStyle = color;
   ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
   ctx.beginPath();
-  if (type === TILE_RAMP_LEFT || type === TILE_RAMP_RIGHT) {
-    if (type === TILE_RAMP_LEFT) {
-      ctx.moveTo(x + size, y); // top-right
-      ctx.lineTo(x + size, y + size); // bottom-right
-      ctx.lineTo(x, y + size / 2); // apex, pointing left
-    } else {
-      ctx.moveTo(x, y); // top-left
-      ctx.lineTo(x, y + size); // bottom-left
-      ctx.lineTo(x + size, y + size / 2); // apex, pointing right
-    }
-    ctx.closePath();
-    ctx.fill();
-    ctx.stroke();
-  } else if (type === TILE_COLLECTOR) {
+  if (type === TILE_COLLECTOR) {
     ctx.rect(x, y, size, size);
     ctx.fill();
     ctx.stroke();

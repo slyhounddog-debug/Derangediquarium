@@ -31,6 +31,7 @@ import {
   TILE_REFUND_FRACTION,
   NOTIFICATION_LOG_MAX,
   CLEANLINESS_MAX,
+  GENE_SPLICING_TECH_ID,
 } from './Config.js';
 import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop } from './Engine.js';
 import { loadLevel, LEVELS } from './Levels.js';
@@ -357,6 +358,7 @@ input.keydownHandlers.push((e) => {
     case 'KeyU': // unlock all species, buildings, and tech
       state.meta.speciesUnlocked = SPECIES_LIST.map((s) => s.id);
       state.meta.buildingsUnlocked = BUILDING_LIST.map((b) => b.id);
+      if (!state.meta.techUnlocked.includes(GENE_SPLICING_TECH_ID)) state.meta.techUnlocked.push(GENE_SPLICING_TECH_ID);
       refreshShopPanel(state);
       break;
     case 'KeyK': // clear all items

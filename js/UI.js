@@ -746,7 +746,7 @@ function refreshTankPanel(state) {
     foodQuality.buyBtn.disabled = true;
   } else {
     const cost = FOOD_QUALITY_UPGRADE_COSTS[fqLevel];
-    foodQuality.buyBtn.textContent = `Buy Level ${fqLevel + 1} — ${cost} 🏆`;
+    foodQuality.buyBtn.textContent = `${cost} 🏆`;
     foodQuality.buyBtn.disabled = available < cost;
   }
 
@@ -758,7 +758,7 @@ function refreshTankPanel(state) {
     fishMovement.buyBtn.disabled = true;
   } else {
     const cost = FISH_MOVEMENT_UPGRADE_COSTS[fmLevel];
-    fishMovement.buyBtn.textContent = `Buy Level ${fmLevel + 1} — ${cost} 🏆`;
+    fishMovement.buyBtn.textContent = `${cost} 🏆`;
     fishMovement.buyBtn.disabled = available < cost;
   }
 
@@ -770,7 +770,7 @@ function refreshTankPanel(state) {
     foodCapacity.buyBtn.disabled = true;
   } else {
     const cost = FOOD_CAPACITY_UPGRADE_COSTS[fcLevel];
-    foodCapacity.buyBtn.textContent = `Buy Level ${fcLevel + 1} — ${cost} 🏆`;
+    foodCapacity.buyBtn.textContent = `${cost} 🏆`;
     foodCapacity.buyBtn.disabled = available < cost;
   }
 
@@ -911,7 +911,14 @@ let speciesPriceTags = {};
 function buildShopPanel(state) {
   els.shopGrid.innerHTML = '';
   speciesPriceTags = {};
-  for (const species of getAvailableSpecies(state)) {
+  // Only the base 6 species are purchasable here — per direct request, a
+  // Gene-Splicing hybrid (species.parents set) is never buyable directly,
+  // only ever created by splicing two existing fish together (see
+  // Entities.js's spliceFish). getAvailableSpecies still includes hybrids
+  // in what it returns (state.meta.speciesUnlocked genuinely does unlock
+  // them, for the splicing lookup itself to work), so this is purely a shop
+  // UI filter, not an unlock-gate change.
+  for (const species of getAvailableSpecies(state).filter((s) => !s.parents)) {
     const btn = document.createElement('button');
     btn.className = 'species-icon-btn sheen-target';
     btn.title = species.name;

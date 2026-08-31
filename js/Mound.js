@@ -54,7 +54,7 @@ const TIER_CRACK_MESSAGES = {
   // Combining system on. Still gets its own reveal line since that's a real
   // (if invisible) unlock, not nothing.
   2: "Something shifts in the local fish economy. Guppies are suddenly very aware of their own market value, and the going rate climbs every time you buy another. You can now splice two full-grown feeder fish of the same size together into one bigger, pricier fish. Don't think about it too hard.",
-  3: 'Another crack spreads wider. A Ramp, a Collector, and an Auto-Feeder tumble out, closely followed by a Suckerfish that looks personally offended by the mess.',
+  3: 'Another crack spreads wider. A Collector and an Auto-Feeder tumble out, closely followed by a Suckerfish that looks personally offended by the mess.',
   4: "A low hum starts underneath the rubble. Shockingly, it's an Electric Eel — here for the Electric Fan, and to remind everyone who's really in charge of this power grid.",
   5: 'The mound stops cracking and just gives up, shattering completely. Underneath: a Science Lab that has apparently been there the whole time. A Science Octopus climbs out already holding a beaker like it owns the place. Gene-Splicing research is open now — may cod have mercy on your fish.',
 };

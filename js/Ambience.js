@@ -17,6 +17,10 @@ let elapsed = 0; // seconds, drives every sway/wobble phase below
 // past the top of the water column, wobbling side to side as it goes, then
 // respawns lower down once it's off the top.
 const BUBBLE_COUNT = 45;
+// Per direct request, a bubble grows to full size over this many seconds
+// after it spawns, instead of just appearing at full size — `age` (seconds
+// since spawn) drives the scale in renderBubbles below.
+const BUBBLE_GROW_DURATION_S = 3;
 function randomBubble() {
   return {
     x: Math.random() * WORLD_W,
@@ -26,12 +30,14 @@ function randomBubble() {
     wobbleFreq: 0.5 + Math.random() * 1.1,
     wobblePhase: Math.random() * Math.PI * 2,
     wobbleAmp: 4 + Math.random() * 9,
+    age: 0,
   };
 }
 const bubbles = [];
 for (let i = 0; i < BUBBLE_COUNT; i++) {
   const b = randomBubble();
   b.y = Math.random() * SEABED_FLOOR_Y; // scattered through the column on first load, not all lined up at the floor
+  b.age = BUBBLE_GROW_DURATION_S; // already fully grown on page load — only bubbles recycled AFTER that play the grow-in
   bubbles.push(b);
 }
 
@@ -77,6 +83,7 @@ export function updateAmbience(dtMs) {
   elapsed += dt;
   for (const b of bubbles) {
     b.y -= b.speed * dt;
+    b.age += dt;
     if (b.y < -20) Object.assign(b, randomBubble());
   }
 }
@@ -87,7 +94,8 @@ function renderBubbles(ctx, camera, canvasWidth, canvasHeight) {
     const wobbleX = Math.sin(elapsed * b.wobbleFreq + b.wobblePhase) * b.wobbleAmp;
     const screen = worldToScreen(b.x + wobbleX, b.y, camera);
     if (screen.x < -20 || screen.x > canvasWidth + 20 || screen.y < -20 || screen.y > canvasHeight + 20) continue;
-    const r = Math.max(1, b.radius * camera.zoom);
+    const growT = Math.min(1, b.age / BUBBLE_GROW_DURATION_S);
+    const r = Math.max(1, b.radius * growT * camera.zoom); // floored at 1px — a bubble's very first instant is a tiny dot, not literally invisible
     ctx.globalAlpha = 0.32;
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
     ctx.lineWidth = Math.max(1, camera.zoom);

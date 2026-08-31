@@ -25,6 +25,7 @@ import {
   FOOD_QUALITY_SINK_SPEED_REDUCTION_PER_LEVEL,
   FOOD_SWAY_AMPLITUDE,
   FOOD_SWAY_FREQUENCY,
+  FOOD_SWAY_ENVELOPE_FREQUENCY,
   WASTE_SWAY_AMPLITUDE,
   WASTE_SWAY_FREQUENCY,
   COIN_TIERS,
@@ -105,14 +106,18 @@ function adjustCleanliness(state, delta) {
   }
 }
 
-// A continuous sine wobble on horizontal velocity — same underlying idea
-// Ambience.js's bubbles already use for their own left-right drift, per
-// direct request. Self-correcting no matter what the item's actual fall
-// looks like (a Fan shove, item-item collisions, etc.) since it's just a
-// function of elapsed fallTime and a per-item random phase, recomputed
-// fresh every tick — nothing pre-scheduled to go stale.
-function currentSwayVx(item, amplitude, frequency) {
-  return amplitude * Math.sin(item.fallTime * frequency * 2 * Math.PI + item.swayPhase);
+// A sine wobble on horizontal velocity — same underlying idea Ambience.js's
+// bubbles already use for their own left-right drift, per direct request.
+// Self-correcting no matter what the item's actual fall looks like (a Fan
+// shove, item-item collisions, etc.) since it's just a function of elapsed
+// fallTime and a per-item random phase, recomputed fresh every tick —
+// nothing pre-scheduled to go stale. The amplitude itself is further
+// modulated by a much slower second sine (the "envelope", squared so it
+// never goes negative) — per direct request that the sway read as
+// occasional/sporadic bursts rather than one continuous wave.
+function currentSwayVx(item, amplitude, frequency, envelopeFrequency) {
+  const envelope = Math.max(0, Math.sin(item.fallTime * envelopeFrequency * 2 * Math.PI + item.swayPhase * 0.3));
+  return amplitude * envelope * envelope * Math.sin(item.fallTime * frequency * 2 * Math.PI + item.swayPhase);
 }
 
 export function createFood(x, y) {
@@ -551,7 +556,7 @@ export function spliceFish(state, utilityFish, targetFish) {
 // active Fan force (Grid.js's computeFanForce/integrateItemForces, which
 // apply everywhere, not just the seabed band). Once it crosses that
 // boundary, Grid.js's stepItemOnGrid owns its motion for the rest of its
-// life (tile collision, ramps, collectors, Auto-Feeder intake, item-item
+// life (tile collision, collectors, Auto-Feeder intake, item-item
 // drift) — see Grid.js's module comment for why the
 // split falls there, and CLAUDE.md's "Items can't stack, and can fall off
 // the bottom" for why this now runs every tick forever instead of stopping
@@ -583,7 +588,7 @@ function updateFood(item, state, dtMs, spawned) {
     const fanForce = computeFanForce(state, item);
     integrateItemForces(item, dt, physics, fanForce);
     item.fallTime += dt;
-    const swayVx = currentSwayVx(item, FOOD_SWAY_AMPLITUDE, FOOD_SWAY_FREQUENCY);
+    const swayVx = currentSwayVx(item, FOOD_SWAY_AMPLITUDE, FOOD_SWAY_FREQUENCY, FOOD_SWAY_ENVELOPE_FREQUENCY);
     item.x += (item.vx + swayVx) * dt;
     item.y += item.vy * dt;
     return true;
@@ -653,7 +658,7 @@ function updateWaste(item, state, dtMs) {
     const fanForce = computeFanForce(state, item);
     integrateItemForces(item, dt, physics, fanForce);
     item.fallTime += dt;
-    const swayVx = currentSwayVx(item, WASTE_SWAY_AMPLITUDE, WASTE_SWAY_FREQUENCY);
+    const swayVx = currentSwayVx(item, WASTE_SWAY_AMPLITUDE, WASTE_SWAY_FREQUENCY, FOOD_SWAY_ENVELOPE_FREQUENCY);
     item.y += item.vy * dt;
     item.x += (item.vx + swayVx) * dt;
     return true;
