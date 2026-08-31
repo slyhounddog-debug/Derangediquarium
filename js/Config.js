@@ -15,6 +15,20 @@ export const WORLD_H = WORLD_TILES_H * TILE_SIZE; // 1440px
 export const SEABED_ROW_START = 27; // first seabed tile row; rows 0-26 are water column
 export const SEABED_ROW_END = WORLD_TILES_H - 1; // last seabed tile row (44)
 export const SEABED_FLOOR_Y = SEABED_ROW_START * TILE_SIZE; // world-y of the water/seabed boundary — Phase 1 renders this as a flat floor, Phase 2 replaces it with real tiles, but everything reads this one constant
+// A pure-visual strip the camera can scroll past the world's real bottom
+// edge (WORLD_H) into, per direct request — a permanent home for the fixed
+// bottom tool-bar (see UI.js/index.html's #bottom-tool-bar) that never
+// covers real gameplay content, even when the player's scrolled all the way
+// down. Deliberately NOT extra tile rows — state.level.grid stays exactly
+// WORLD_TILES_H rows, so nothing can ever be built down there (canPlaceTile
+// already rejects any row >= WORLD_TILES_H) and no new physics/grid code is
+// needed at all. Grid.js's renderSeabedGrid already fills the seabed color
+// all the way to the bottom of the canvas regardless of true world bounds,
+// so this buffer reads as "the same city floor" for free; the only new
+// render step is the black gradient Grid.js's renderCameraBottomBuffer adds
+// on top, fading to black exactly at the buffer's own bottom edge (not
+// bleeding up into the real seabed above it).
+export const CAMERA_BOTTOM_BUFFER_PX = 220;
 // A fixed rest height for unrouted Waste, 2 tiles above the world's absolute
 // bottom row — per direct request, so Waste never just vanishes off the
 // bottom of the world (see "Items can't stack, and can fall off the bottom")
@@ -339,7 +353,7 @@ export const FOOD_RADIUS = 6; // px, visual + despawn-on-floor check
 export const FOOD_COLOR = '#ffb238'; // orange — was a green (#8bc34a) close enough to WASTE_COLOR's olive-green to be hard to tell apart at a glance; per direct request, distinct now
 export const FOOD_FLOOR_GRACE_MS = 1000; // ms an uneaten pellet rests on the floor before despawning — a last chance for a nearby hungry fish instead of an instant, silent loss of the cost
 export const COIN_RADIUS = 10; // px, base visual radius (bronze size) — 25% bigger than the original 8, easier to see and aim at
-export const COIN_CLICK_RADIUS_MULTIPLIER = 1.4; // click hit-test radius is each coin's own (tier-scaled) radius times this — 40% bigger than the coin itself per direct request, so a click doesn't have to be pixel-perfect (and doesn't get misread as a food-placement click on a miss). tryBankCoinAt still only ever banks the first match it finds per click and returns immediately, so an overlapping pair of these bigger radii still can't bank two coins on one click.
+export const COIN_CLICK_RADIUS_MULTIPLIER = 1.6; // click hit-test radius is each coin's own (tier-scaled) radius times this — 60% bigger than the coin itself (was 40%, bumped again per direct request so coins are "even easier to click"), so a click doesn't have to be pixel-perfect (and doesn't get misread as a food-placement click on a miss). tryBankCoinAt still only ever banks the first match it finds per click and returns immediately, so an overlapping pair of these bigger radii still can't bank two coins on one click.
 export const CHEAT_GRANT_AMOUNT = 10000; // $ granted by the M debug key
 export const CHEAT_TANK_POINTS_GRANT_AMOUNT = 20; // Tank Points also granted by the M debug key, so testing the Tank Upgrades panel doesn't require grinding fish growth
 export const CHEAT_SCIENCE_GRANT_AMOUNT = 500; // Science Bubbles also granted by the M debug key, so testing the Science Lab's tech tree doesn't require grinding an Octopus's real brew-and-collect cycle

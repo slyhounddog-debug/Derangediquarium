@@ -92,6 +92,8 @@ import {
   closeLabMenu,
   isLabMenuOpen,
   flashFoodCapacity,
+  flashMoneyInsufficient,
+  selectTool,
 } from './UI.js';
 
 const canvas = document.getElementById('game-canvas');
@@ -264,6 +266,9 @@ input.clickHandlers.push((sx, sy) => {
         // wherever the cursor is NOW, not necessarily back over that cell)
         // and actually place the tile.
         const angle = angleFromTileToPoint(fanAimingCell.col, fanAimingCell.row, world.x, world.y);
+        if (canPlaceTile(state, fanAimingCell.col, fanAimingCell.row, buildingId).reason === 'cannot afford') {
+          flashMoneyInsufficient(state);
+        }
         placeTile(state, fanAimingCell.col, fanAimingCell.row, buildingId, angle);
         fanAimingCell = null;
         return;
@@ -271,7 +276,9 @@ input.clickHandlers.push((sx, sy) => {
       // Click 1: arm aiming at this cell if it's actually a legal placement —
       // no tile placed yet, no money spent yet.
       const { col, row } = worldToTile(world.x, world.y);
-      if (canPlaceTile(state, col, row, buildingId).ok) fanAimingCell = { col, row, buildingId };
+      const check = canPlaceTile(state, col, row, buildingId);
+      if (check.ok) fanAimingCell = { col, row, buildingId };
+      else if (check.reason === 'cannot afford') flashMoneyInsufficient(state);
       return; // either way, a fan-tool click never falls through to mound/coin/food
     }
   }
@@ -287,14 +294,18 @@ input.clickHandlers.push((sx, sy) => {
   if (tryBankCoinAt(state, world.x, world.y)) return; // clicking a coin always banks it, regardless of selected tool
   if (tryBankScienceAt(state, world.x, world.y)) return; // same for a Science Bubble
   if (state.ui.selectedTool === 'food') {
-    if (trySpawnFood(state, world.x, world.y) === 'capacity_full') flashFoodCapacity(state);
+    const reason = trySpawnFood(state, world.x, world.y);
+    if (reason === 'capacity_full') flashFoodCapacity(state);
+    else if (reason === 'no_money') flashMoneyInsufficient(state);
     return;
   }
   // A purchased fish is placed with a click, exactly like a building — see
   // Entities.js's trySpawnPurchasedFish and UI.js's selectSpeciesForPreview
   // (which sets this tool instead of arming a Buy button any more).
   if (state.ui.selectedTool.startsWith('fish:')) {
-    trySpawnPurchasedFish(state, state.ui.selectedTool.slice('fish:'.length), world.x, world.y);
+    if (trySpawnPurchasedFish(state, state.ui.selectedTool.slice('fish:'.length), world.x, world.y) === 'no_money') {
+      flashMoneyInsufficient(state);
+    }
     return;
   }
   // Non-fan build-mode placement doesn't happen here — see the mousedown/
@@ -379,6 +390,15 @@ input.keydownHandlers.push((e) => {
     case 'KeyK': // clear all items
       state.level.items = [];
       break;
+    case 'Digit1': // Food — matches the fixed bottom tool-bar's own 1/2/3 hotkeys
+      selectTool(state, 'food');
+      break;
+    case 'Digit2': // Demolish
+      selectTool(state, 'demolish');
+      break;
+    case 'Digit3': // Merge
+      selectTool(state, 'merge');
+      break;
     case 'KeyS': // toggle-collapse the shop panel
       toggleShopCollapse(state);
       break;
@@ -451,6 +471,7 @@ function updateBuildDrag() {
   // at the moment it's placed — see Grid.js's angleFromTileToPoint. Ignored
   // for every other building type.
   const angle = angleFromTileToPoint(col, row, world.x, world.y);
+  if (canPlaceTile(state, col, row, buildingId).reason === 'cannot afford') flashMoneyInsufficient(state);
   placeTile(state, col, row, buildingId, angle);
 }
 

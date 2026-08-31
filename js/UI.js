@@ -65,6 +65,8 @@ let lastCleanliness = null; // previous frame's cleanliness, same purpose
 let notificationLogExpanded = false;
 let lastRenderedNotificationCount = -1; // rebuild the log list only when it actually changes, not every frame
 let lastPillNotificationCount = null; // separate from the above — tracks the pill's own bounce/shimmer trigger regardless of whether the log is expanded; null means "not yet initialized," so the very first real notification on page load doesn't bounce
+let notificationUnread = false; // true from the moment a new message arrives until the player actually expands the log — see scheduleNotificationReminder below
+let notificationReminderTimer = null;
 let moundMenuOpen = false;
 let moundMenuClosing = false; // true while the shrink-back transition is still playing, before it's actually hidden
 let moundMenuCloseTimer = null;
@@ -117,6 +119,26 @@ function scheduleSheenAll() {
   document.querySelectorAll('.sheen-target').forEach(scheduleSheen);
 }
 
+// Per direct request — while there's an unread notification (the pill has a
+// message the player hasn't actually expanded the log to read yet), it
+// bounces on its own every random 3-6 seconds as a reminder, not just once
+// on arrival. Self-terminating: each firing checks notificationUnread again
+// before bouncing and before rescheduling, so it stops on its own the tick
+// after the log gets expanded (see the notificationLatest click handler)
+// rather than needing an explicit cancel from that other call site.
+const NOTIFICATION_REMINDER_MIN_MS = 3000;
+const NOTIFICATION_REMINDER_MAX_MS = 6000;
+function scheduleNotificationReminder() {
+  if (notificationReminderTimer !== null) return; // already have one pending
+  const delay = NOTIFICATION_REMINDER_MIN_MS + Math.random() * (NOTIFICATION_REMINDER_MAX_MS - NOTIFICATION_REMINDER_MIN_MS);
+  notificationReminderTimer = setTimeout(() => {
+    notificationReminderTimer = null;
+    if (!notificationUnread) return;
+    playFlash(els.notificationLatest, 'bounce-play');
+    scheduleNotificationReminder();
+  }, delay);
+}
+
 export function initUI(state) {
   els = {
     hud: document.getElementById('hud'),
@@ -144,7 +166,6 @@ export function initUI(state) {
     toolDemolishBtn: document.getElementById('tool-demolish-btn'),
     toolMergeBtn: document.getElementById('tool-merge-btn'),
     buildToolGrid: document.getElementById('build-tool-grid'),
-    toolTooltip: document.getElementById('tool-tooltip'),
     pauseOverlay: document.getElementById('pause-overlay'),
     pauseMenu: document.getElementById('pause-menu'),
     pauseMain: document.getElementById('pause-main'),
@@ -204,6 +225,11 @@ export function initUI(state) {
     notificationLogExpanded = !notificationLogExpanded;
     els.notificationLog.classList.toggle('hidden', !notificationLogExpanded);
     lastRenderedNotificationCount = -1; // force a rebuild next update so it's populated the instant it opens
+    // The player has now actually looked at the pill — stop the periodic
+    // reminder bounce (see scheduleNotificationReminder below) regardless of
+    // whether they immediately close the log again; only a genuinely NEW
+    // message re-arms it.
+    if (notificationLogExpanded) notificationUnread = false;
     // Story trigger: the first time the log is ever CLOSED again (not
     // opened) — per direct request, so the player has actually read
     // whatever's in there before the "curiosity kills the fish" gag lands,
@@ -220,21 +246,12 @@ export function initUI(state) {
     }
   });
 
-  els.toolFoodBtn.addEventListener('click', () => {
-    state.ui.selectedTool = 'food';
-    updateToolbar(state);
-  });
-  els.toolDemolishBtn.addEventListener('click', () => {
-    state.ui.selectedTool = 'demolish';
-    updateToolbar(state);
-  });
+  els.toolFoodBtn.addEventListener('click', () => selectTool(state, 'food'));
+  els.toolDemolishBtn.addEventListener('click', () => selectTool(state, 'demolish'));
   // Merge tool (🧤) — combining/splicing fish now requires this to be
   // selected first, per direct request, instead of firing on any mousedown
   // that happened to land on an eligible fish regardless of tool.
-  els.toolMergeBtn.addEventListener('click', () => {
-    state.ui.selectedTool = 'merge';
-    updateToolbar(state);
-  });
+  els.toolMergeBtn.addEventListener('click', () => selectTool(state, 'merge'));
 
   els.shopCollapseBtn.addEventListener('click', () => toggleShopCollapse(state));
   els.tankCollapseBtn.addEventListener('click', () => toggleTankPanel(state));
@@ -648,6 +665,14 @@ function restartLevel(state) {
 // tooltip (a one-liner, no separate window needed); species/buildings show
 // their info in the shared shop-preview window instead (see
 // selectSpeciesForPreview/selectBuildingForPreview).
+// Shared by the bottom tool-bar's own click handlers above and main.js's
+// 1/2/3 hotkeys (see main.js's keydownHandlers) — one place that actually
+// sets the tool so both paths stay in sync.
+export function selectTool(state, tool) {
+  state.ui.selectedTool = tool;
+  updateToolbar(state);
+}
+
 function updateToolbar(state) {
   const foodSelected = state.ui.selectedTool === 'food';
   const demolishSelected = state.ui.selectedTool === 'demolish';
@@ -655,10 +680,13 @@ function updateToolbar(state) {
   els.toolFoodBtn.classList.toggle('selected', foodSelected);
   els.toolDemolishBtn.classList.toggle('selected', demolishSelected);
   els.toolMergeBtn.classList.toggle('selected', mergeSelected);
-  els.toolTooltip.classList.toggle('hidden', !foodSelected && !demolishSelected && !mergeSelected);
-  if (foodSelected) els.toolTooltip.textContent = `Food $${FOOD_COST}`;
-  else if (demolishSelected) els.toolTooltip.textContent = 'Click a building to remove it — full refund';
-  else if (mergeSelected) els.toolTooltip.textContent = 'Drag one Adult fish onto a matching one to combine or splice it';
+  // Descriptive text lives on each button's own native `title` hover
+  // tooltip now, not a separate always-visible shop line — per direct
+  // request ("remove any text from the shop for the tools, and move those
+  // to a tool hovertip"). Demolish/Merge's titles are static (set once in
+  // index.html); only Food's needs to stay JS-driven since FOOD_COST could
+  // in principle change.
+  els.toolFoodBtn.title = `Food — $${FOOD_COST} (1)`;
 
   for (const btn of els.buildToolGrid.children) {
     btn.classList.toggle('selected', state.ui.selectedTool === btn.dataset.tool);
@@ -1237,6 +1265,15 @@ export function flashFoodCapacity(state) {
   playFlash(state.ui.shopCollapsed ? els.food : els.shopFood, 'flash-spend');
 }
 
+// Same redirect-to-whichever-copy-is-visible pattern as flashFoodCapacity —
+// per direct request, an attempted shop purchase (food, a fish, a building)
+// that fails for lack of money shakes the money readout red instead of
+// silently doing nothing, so the failure actually reads as "you can't
+// afford that" rather than "nothing happened, did my click even register."
+export function flashMoneyInsufficient(state) {
+  playFlash(state.ui.shopCollapsed ? els.money : els.shopMoney, 'flash-spend');
+}
+
 // Bright blue at 100% cleanliness, fading to olive green (WASTE_COLOR's own
 // hex — a dirty tank literally reads the color of what's dirtying it) at 0%
 // — a straight per-channel RGB lerp, recomputed fresh every frame in
@@ -1420,6 +1457,11 @@ export function updateNotificationTicker(state) {
     els.notificationLatest.classList.remove('sheen-play');
     void els.notificationLatest.offsetWidth;
     els.notificationLatest.classList.add('sheen-play');
+    // A genuinely new message re-arms the periodic reminder bounce — see
+    // scheduleNotificationReminder above — even if the log was already read
+    // and closed for a PREVIOUS message.
+    notificationUnread = true;
+    scheduleNotificationReminder();
   }
   lastPillNotificationCount = notifications.length;
 

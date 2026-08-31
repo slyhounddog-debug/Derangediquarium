@@ -2,7 +2,7 @@
 // Forbidden: no knowledge of fish/items/grid contents. This module moves the
 // camera and hands out coordinates; gameplay lives elsewhere.
 
-import { CAMERA_PAN_SPEED, CAMERA_SCROLL_SENSITIVITY, WORLD_W, WORLD_H } from './Config.js';
+import { CAMERA_PAN_SPEED, CAMERA_SCROLL_SENSITIVITY, WORLD_W, WORLD_H, CAMERA_BOTTOM_BUFFER_PX } from './Config.js';
 
 export function worldToScreen(x, y, camera) {
   return {
@@ -122,7 +122,11 @@ export function updateCamera(camera, input, canvas, dtMs) {
   const viewW = canvas.width / camera.zoom;
   const viewH = canvas.height / camera.zoom;
   camera.x = Math.max(0, Math.min(camera.x, Math.max(0, WORLD_W - viewW)));
-  camera.y = Math.max(0, Math.min(camera.y, Math.max(0, WORLD_H - viewH)));
+  // Allowed to scroll CAMERA_BOTTOM_BUFFER_PX past the world's real bottom
+  // edge — a pure-visual buffer strip, per direct request, that's always
+  // reachable so the fixed bottom tool-bar has somewhere to live that never
+  // covers real gameplay content.
+  camera.y = Math.max(0, Math.min(camera.y, Math.max(0, WORLD_H + CAMERA_BOTTOM_BUFFER_PX - viewH)));
 }
 
 // Fixed 60Hz accumulator loop (§3.4). rAF drives rendering only; update()

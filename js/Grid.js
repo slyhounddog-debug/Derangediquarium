@@ -50,6 +50,7 @@ import {
   NOTIFICATION_LOG_MAX,
   CLEANLINESS_MAX,
   CLEANLINESS_PER_WASTE_EVENT,
+  CAMERA_BOTTOM_BUFFER_PX,
 } from './Config.js';
 import { worldToScreen } from './Engine.js';
 import { playBuildPlace, playDemolish } from './Sound.js';
@@ -847,10 +848,13 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
   const rowStart = Math.max(SEABED_ROW_START, rowAt(topLeft.y) - 1);
   const rowEnd = Math.min(WORLD_TILES_H - 1, rowAt(bottomRight.y) + 1);
 
-  if (rowStart > rowEnd) return; // seabed entirely below/above the current view
-
   // Base seabed color behind every tile, including empty ones, so the grid
-  // still reads as "ground" before anything's been built on it.
+  // still reads as "ground" before anything's been built on it. Deliberately
+  // NOT gated on rowStart <= rowEnd (only the real tile loop below is) — the
+  // camera can now scroll CAMERA_BOTTOM_BUFFER_PX past the world's real
+  // bottom edge into a pure-visual buffer strip (see Config.js), and this
+  // fill needs to keep covering the screen there too so the buffer "looks
+  // the same as the rest of the city background," per direct request.
   const topOfSeabed = worldToScreen(0, SEABED_ROW_START * TILE_SIZE, camera);
   ctx.fillStyle = '#4a3624';
   ctx.fillRect(0, Math.max(0, topOfSeabed.y), canvasWidth, canvasHeight);
@@ -864,34 +868,65 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
   ctx.restore();
 
   renderWasteFloorBreak(ctx, camera, canvasWidth, canvasHeight);
+  renderCameraBottomBuffer(ctx, camera, canvasWidth, canvasHeight);
 
-  for (let row = rowStart; row <= rowEnd; row++) {
-    for (let col = colStart; col <= colEnd; col++) {
-      const type = grid[row][col];
-      if (type === TILE_EMPTY) continue;
-      const building = BUILDING_TYPES[type];
-      if (!building) continue;
-      const screen = worldToScreen(col * TILE_SIZE, row * TILE_SIZE, camera);
-      const size = TILE_SIZE * camera.zoom;
-      const data = state.level.buildingData[buildingKey(col, row)];
-      renderTileShape(ctx, type, building.color, screen.x, screen.y, size, data);
-      // Fans are drawn separately below (renderFanIndicators), over EVERY
-      // fan in state.level.buildingData rather than just the on-screen-tile-
-      // culled ones this loop already skipped past — a Fan's cone can reach
-      // tiles/water well beyond its own tile, so its own tile scrolling off
-      // screen doesn't mean its effective range has too. Collector/Auto-
-      // Feeder's indicators stay here — their intake radius is small enough
-      // (sub-tile) that tile-culling never cuts off anything actually visible.
-      if (data && (AUTO_FEEDER_TILES.has(type) || COLLECTOR_TILES.has(type))) {
-        renderDirectionIndicator(ctx, type, screen.x, screen.y, size, data.angle, camera.zoom);
-      }
-      if (data && AUTO_FEEDER_TILES.has(type)) {
-        renderAutoFeederDots(ctx, type, screen.x, screen.y, size, data.wasteCount, camera.zoom);
+  // The real tile loop is skipped (not the whole function) once every real
+  // tile row is off-screen — e.g. scrolled down into the camera buffer
+  // strip above — but renderFanIndicators still needs to run regardless,
+  // same reasoning as its own comment below: a Fan's cone can reach well
+  // past its own tile, so it shouldn't disappear just because this culled
+  // loop found nothing to draw.
+  if (rowStart <= rowEnd) {
+    for (let row = rowStart; row <= rowEnd; row++) {
+      for (let col = colStart; col <= colEnd; col++) {
+        const type = grid[row][col];
+        if (type === TILE_EMPTY) continue;
+        const building = BUILDING_TYPES[type];
+        if (!building) continue;
+        const screen = worldToScreen(col * TILE_SIZE, row * TILE_SIZE, camera);
+        const size = TILE_SIZE * camera.zoom;
+        const data = state.level.buildingData[buildingKey(col, row)];
+        renderTileShape(ctx, type, building.color, screen.x, screen.y, size, data);
+        // Fans are drawn separately below (renderFanIndicators), over EVERY
+        // fan in state.level.buildingData rather than just the on-screen-tile-
+        // culled ones this loop already skipped past — a Fan's cone can reach
+        // tiles/water well beyond its own tile, so its own tile scrolling off
+        // screen doesn't mean its effective range has too. Collector/Auto-
+        // Feeder's indicators stay here — their intake radius is small enough
+        // (sub-tile) that tile-culling never cuts off anything actually visible.
+        if (data && (AUTO_FEEDER_TILES.has(type) || COLLECTOR_TILES.has(type))) {
+          renderDirectionIndicator(ctx, type, screen.x, screen.y, size, data.angle, camera.zoom);
+        }
+        if (data && AUTO_FEEDER_TILES.has(type)) {
+          renderAutoFeederDots(ctx, type, screen.x, screen.y, size, data.wasteCount, camera.zoom);
+        }
       }
     }
   }
 
   renderFanIndicators(ctx, state, canvasWidth, canvasHeight);
+}
+
+// The camera can now scroll CAMERA_BOTTOM_BUFFER_PX past the world's real
+// bottom edge (see Config.js) into a pure-visual strip — a permanent home
+// for the fixed bottom tool-bar that never covers real gameplay content.
+// The seabed fill/texture above already covers it for free (that fill runs
+// to the bottom of the canvas regardless of true world bounds), so the only
+// thing this adds is a black gradient fading in exactly across the buffer's
+// own world-Y span — not bleeding up into the real seabed above it, per
+// direct request ("the gradient shouldn't go over the entire city part,
+// just the new part added onto the bottom").
+function renderCameraBottomBuffer(ctx, camera, canvasWidth, canvasHeight) {
+  const topScreenY = worldToScreen(0, WORLD_H, camera).y;
+  const bottomScreenY = worldToScreen(0, WORLD_H + CAMERA_BOTTOM_BUFFER_PX, camera).y;
+  if (topScreenY > canvasHeight || bottomScreenY < 0) return; // buffer strip entirely off-screen
+  const gradient = ctx.createLinearGradient(0, topScreenY, 0, bottomScreenY);
+  gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+  gradient.addColorStop(1, 'rgba(0, 0, 0, 1)');
+  ctx.fillStyle = gradient;
+  const clampedTop = Math.max(0, topScreenY);
+  const clampedBottom = Math.min(canvasHeight, bottomScreenY);
+  ctx.fillRect(0, clampedTop, canvasWidth, clampedBottom - clampedTop);
 }
 
 // Draws every Fan's cone + aim arrow regardless of whether its own tile is

@@ -245,7 +245,6 @@ html, body {
 #shop-panel.collapsed #shop-hud,
 #shop-panel.collapsed #shop-preview,
 #shop-panel.collapsed #tool-bar,
-#shop-panel.collapsed #tool-tooltip,
 #shop-panel.collapsed #shop-species-grid {
   display: none;
 }
@@ -358,13 +357,14 @@ html, body {
 .flash-pickup { animation: flash-pickup 0.33s ease; }
 .flash-spend { animation: flash-spend 0.33s ease; }
 
-/* Food/Demolish and every building slot now share ONE 3-columns-per-row
-   grid — per direct request ("3 max buildings/tools to a row"). #build-
-   tool-grid uses display:contents so it doesn't create its own nested grid
-   level: its own box disappears and its children (the dynamically-built
-   building buttons) become direct grid items of #tool-bar right alongside
-   Food/Demolish, wrapping to a new row together as one sequence instead of
-   two separately-wrapping groups. */
+/* Every building slot shares ONE 3-columns-per-row grid — per direct
+   request ("3 max buildings/tools to a row"). Food/Demolish/Merge used to
+   live in here too but moved out to the fixed #bottom-tool-bar below, per a
+   later direct request that they "always be there" regardless of whether
+   the shop is open — #build-tool-grid is the only thing left in here now,
+   still using display:contents so its dynamically-built building buttons
+   are direct grid items of #tool-bar (matters for the 3-per-row wrapping
+   even with just one child group left). */
 #tool-bar {
   display: grid;
   grid-template-columns: repeat(3, 56px);
@@ -437,19 +437,24 @@ html, body {
 }
 .tool-btn-family-dots span.current { background: #ffb84d; }
 
-.tool-tooltip {
-  display: block;
-  background: #6b4c6b;
-  color: #fff6ea;
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1.4;
-  padding: 6px 12px;
-  border-radius: 12px;
-  white-space: normal; /* building tooltips (name + cost + description) run much longer than "Food $3" — must wrap, not spill past the panel's fixed width */
-  margin-bottom: 16px;
+/* The fixed bottom tool-bar — Food/Demolish/Merge, always on screen
+   regardless of shop/tank-panel/pause state, per direct request. Their
+   descriptive text (cost, what each tool does) moved from the shop's old
+   #tool-tooltip line onto each button's own native `title` attribute
+   instead — a real hover tooltip, not a separate always-visible line. */
+#bottom-tool-bar {
+  position: fixed;
+  bottom: 14px; left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 10px;
+  padding: 8px;
+  background: linear-gradient(165deg, #fffaf3 0%, #ffe4f2 100%);
+  border: 2px solid #ffffff;
+  border-radius: 22px;
+  box-shadow: 0 8px 22px rgba(107, 76, 107, 0.28), inset 0 2px 0 rgba(255, 255, 255, 0.7);
+  z-index: 15; /* same tier as #panel-toggle-cluster — always visible/clickable no matter what else is open */
 }
-.tool-tooltip.hidden { display: none; }
 
 #shop-species-grid {
   display: flex;
