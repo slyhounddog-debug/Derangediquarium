@@ -815,24 +815,86 @@ function getCityTexturePattern(ctx) {
   return cityTexturePattern;
 }
 
-// A dashed horizontal line at WASTE_FLOOR_Y, the fixed height uncaught Waste
-// rests at (see that constant's comment in Config.js) — purely decorative,
-// draws on top of the base seabed fill but underneath any real tiles so it
-// reads as "this is a shelf Waste sits on," not "there's an invisible wall
-// here." Not tied to camera.x at all (a plain horizontal line), only needs
-// camera.y/zoom to place its screen y; skipped entirely once it's scrolled
-// off screen either direction.
+// A jagged rocky shelf at WASTE_FLOOR_Y, the fixed height uncaught Waste
+// rests at (see that constant's comment in Config.js) — replaces the old
+// plain dashed line per direct request, so it reads as a physical rock ledge
+// Waste is piling up against instead of an abstract marker. Draws on top of
+// the base seabed fill but underneath any real tiles.
+//
+// The jagged top edge is a fixed set of world-space (x, yOffset) points
+// spanning the full world width, generated once at module load — NOT
+// reseeded every frame — so panning never makes the rock "jitter." Each
+// frame only maps the currently-visible points to screen space and fills/
+// strokes a shaded polygon; no ctx.filter anywhere (see CLAUDE.md's canvas
+// performance note), just a real linear gradient plus two cheap offset
+// strokes standing in for a highlight ridge and an underside shadow.
+const ROCK_SHELF_POINT_SPACING = TILE_SIZE * 0.4;
+const ROCK_SHELF_JAG_PX = 14;
+const ROCK_SHELF_THICKNESS = TILE_SIZE * 0.9;
+const ROCK_SHELF_POINTS = (() => {
+  const points = [];
+  const worldWidth = WORLD_TILES_W * TILE_SIZE;
+  let y = 0;
+  for (let x = 0; x <= worldWidth + ROCK_SHELF_POINT_SPACING; x += ROCK_SHELF_POINT_SPACING) {
+    y += (Math.random() - 0.5) * ROCK_SHELF_JAG_PX;
+    y = Math.max(-ROCK_SHELF_JAG_PX, Math.min(ROCK_SHELF_JAG_PX, y));
+    points.push({ x, y: Math.round(y) });
+  }
+  return points;
+})();
+
 function renderWasteFloorBreak(ctx, camera, canvasWidth, canvasHeight) {
-  const screen = worldToScreen(0, WASTE_FLOOR_Y, camera);
-  if (screen.y < -4 || screen.y > canvasHeight + 4) return;
+  const topScreenY = worldToScreen(0, WASTE_FLOOR_Y - ROCK_SHELF_JAG_PX, camera).y;
+  const bottomScreenY = worldToScreen(0, WASTE_FLOOR_Y + ROCK_SHELF_THICKNESS, camera).y;
+  if (topScreenY > canvasHeight || bottomScreenY < 0) return;
+
+  const worldLeft = camera.x;
+  const worldRight = camera.x + canvasWidth / camera.zoom;
+  const margin = ROCK_SHELF_POINT_SPACING * 2;
+  const visible = ROCK_SHELF_POINTS.filter((p) => p.x >= worldLeft - margin && p.x <= worldRight + margin);
+  if (visible.length === 0) return;
+
+  const screenPoints = visible.map((p) => worldToScreen(p.x, WASTE_FLOOR_Y + p.y, camera));
+  const bottomY = bottomScreenY;
+
   ctx.save();
-  ctx.strokeStyle = 'rgba(255, 220, 150, 0.55)';
-  ctx.lineWidth = Math.max(1, 2 * camera.zoom);
-  ctx.setLineDash([TILE_SIZE * camera.zoom * 0.35, TILE_SIZE * camera.zoom * 0.25]);
+
+  // Rock body: a shaded fill under the jagged top edge, extending down to a
+  // flat bottom well past WASTE_FLOOR_Y so it reads as a solid ledge rather
+  // than a thin line waste happens to rest on.
   ctx.beginPath();
-  ctx.moveTo(0, screen.y);
-  ctx.lineTo(canvasWidth, screen.y);
+  ctx.moveTo(-4, screenPoints[0].y);
+  for (const sp of screenPoints) ctx.lineTo(sp.x, sp.y);
+  ctx.lineTo(canvasWidth + 4, screenPoints[screenPoints.length - 1].y);
+  ctx.lineTo(canvasWidth + 4, bottomY);
+  ctx.lineTo(-4, bottomY);
+  ctx.closePath();
+  const bodyGradient = ctx.createLinearGradient(0, screenPoints[0].y, 0, bottomY);
+  bodyGradient.addColorStop(0, '#8a7256');
+  bodyGradient.addColorStop(0.25, '#6b5a42');
+  bodyGradient.addColorStop(1, '#3c3226');
+  ctx.fillStyle = bodyGradient;
+  ctx.fill();
+
+  // A bright, sunlit-looking lip right along the jagged top edge.
+  ctx.beginPath();
+  ctx.moveTo(screenPoints[0].x, screenPoints[0].y);
+  for (const sp of screenPoints) ctx.lineTo(sp.x, sp.y);
+  ctx.strokeStyle = 'rgba(222, 200, 160, 0.65)';
+  ctx.lineWidth = Math.max(1, 2.5 * camera.zoom);
+  ctx.lineJoin = 'round';
   ctx.stroke();
+
+  // A darker shadow line just under the highlight, faking depth/thickness
+  // on the top edge without a blur filter.
+  const shadowOffset = 2 * camera.zoom;
+  ctx.beginPath();
+  ctx.moveTo(screenPoints[0].x, screenPoints[0].y + shadowOffset);
+  for (const sp of screenPoints) ctx.lineTo(sp.x, sp.y + shadowOffset);
+  ctx.strokeStyle = 'rgba(28, 20, 12, 0.5)';
+  ctx.lineWidth = Math.max(1, 1.5 * camera.zoom);
+  ctx.stroke();
+
   ctx.restore();
 }
 

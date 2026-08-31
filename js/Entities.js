@@ -845,6 +845,12 @@ function updateFish(fish, state, dtMs) {
   }
 
   const isScavenger = def.behavior.includes('SCAVENGER'); // Suckerfish (and any future SCAVENGER species) eats ONLY Waste, never Food
+  // A SCAVENGER+FEEDER hybrid (Scrub-Guppy/Dartfin/Blimpfish) still eats
+  // Waste like any Scavenger, but its dropInterval is claimed for coin-drop
+  // timing instead (see the passive-production branch below) — so unlike a
+  // pure Scavenger (Suckerfish itself), it must NOT have an eat cooldown
+  // carved out of that same field.
+  const isPureScavenger = isScavenger && !def.behavior.includes('FEEDER');
 
   // A Scavenger's growth-stage dropInterval is repurposed as its EAT
   // COOLDOWN (see Config.js's suckerfish rows) — the minimum time between
@@ -869,7 +875,7 @@ function updateFish(fish, state, dtMs) {
       // doesn't look frozen/broken) but can't actually eat it until the
       // cooldown clears — the eat action itself is what's gated, not the
       // seek/approach behavior above.
-      const onEatCooldown = isScavenger && fish.eatCooldownRemainingMs > 0;
+      const onEatCooldown = isPureScavenger && fish.eatCooldownRemainingMs > 0;
       if (dist <= FISH_EAT_RADIUS && !onEatCooldown) {
         const idx = state.level.items.indexOf(target);
         if (idx !== -1) state.level.items.splice(idx, 1);
@@ -883,7 +889,7 @@ function updateFish(fish, state, dtMs) {
           // per-Waste-spawn penalty above.
           fish.hunger -= WASTE_HUNGER_RELIEF;
           adjustCleanliness(state, CLEANLINESS_PER_WASTE_EVENT);
-          fish.eatCooldownRemainingMs = def.growthStages[fish.stage].dropInterval;
+          if (isPureScavenger) fish.eatCooldownRemainingMs = def.growthStages[fish.stage].dropInterval;
         } else {
           // Food Quality Tank Upgrade: relief is a flat lookup by purchased
           // level, no longer clamped to the fish's current hunger — a
@@ -988,9 +994,11 @@ function updateFish(fish, state, dtMs) {
       state.level.powerSupply += 1;
       state.level.floatingTexts.push(createPickupText(fish.x, fish.y, '+1 ⚡', POWER_COLOR));
     }
-  } else if (!isScavenger) {
+  } else if (!isPureScavenger) {
     // Every plain FEEDER and Gene-Splicing hybrid (feeder-based or
-    // utility-utility) still drops a coin on this timer, unchanged.
+    // utility-utility) still drops a coin on this timer, unchanged. A
+    // SCAVENGER+FEEDER hybrid (Scrub-Guppy/Dartfin/Blimpfish) falls through
+    // to here too — its dropInterval is a coin timer, not an eat cooldown.
     fish.dropTimer += dtMs;
     if (fish.dropTimer >= stageDef.dropInterval) {
       fish.dropTimer = 0;

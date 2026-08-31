@@ -394,7 +394,7 @@ export const WASTE_HUNGER_RELIEF = 70;
 // of size/species, placeholder balance like every other timing constant
 // here, tune once real playtesting exists. Scavenger fish (Suckerfish)
 // don't poop — they're the one eating this, not producing it.
-export const WASTE_POOP_INTERVAL_MS = 25000;
+export const WASTE_POOP_INTERVAL_MS = 27778; // waste production 10% less frequent per direct request — was 25000
 
 // ---- Science (physical resource) ----
 // Per direct request, Science is no longer an instant number added straight
@@ -569,7 +569,7 @@ export const FISH_SPEED_MULTIPLIER = 1.1;
 // from 2 to 1 per level now that there are 9 levels instead of 5, so the cap
 // still tops out at a comparable place (2 -> 11 at max level) rather than
 // nearly doubling.
-export const FOOD_MAX_ON_SCREEN_BASE = 2;
+export const FOOD_MAX_ON_SCREEN_BASE = 3; // start with 3 placeable pellets per direct request — was 2
 export const FOOD_CAPACITY_UPGRADE_INCREMENT = 1; // per level — base 2 -> 3 -> 4 -> ... -> 11 at max level (9 levels)
 export const FOOD_CAPACITY_UPGRADE_COSTS = FISH_MOVEMENT_FOOD_CAPACITY_UPGRADE_COSTS;
 export const FOOD_CAPACITY_UPGRADE_MAX_LEVEL = FOOD_CAPACITY_UPGRADE_COSTS.length;
@@ -630,11 +630,11 @@ export const SPECIES = {
     behavior: ['FEEDER'], dropType: 'coin',
     swimSpeed: 35, // px/sec — 5 below the original 40; the Level 1 Fish Movement Tank Upgrade restores it, see Config.js's FISH_MOVEMENT_UPGRADE_SPEED_BONUS
     lifespan: 300000, // ms, not enforced until a later phase
-    hungerRate: 2.03, // hunger points/sec — 20% lower than the original 2.54, part of a general de-pacing pass; hungry ~every 23s now, flat across all growth stages
+    hungerRate: 1.624, // hunger points/sec — a further 20% slower on top of the earlier de-pacing pass, per direct request ("all the fish get hungrier 20% slower across the board"); hungry ~every 29s now
     growthStages: [
-      { feedsRequired: 0, scale: 0.5, dropInterval: 30200, dropValue: 5 }, // stage 1: hatchling — 10% less frequent than before; feeding fills the timer, see COIN_TIMER_FEED_BONUS_FRACTION
-      { feedsRequired: 3, scale: 0.75, dropInterval: 24200, dropValue: 5 }, // stage 2: juvenile — was 8; the baby->adult raw value now barely grows at all, the ~1.9x lifetime income bump comes almost entirely from dropInterval shrinking, not dropValue climbing (see the Species Roster & Progression note on this rebalance)
-      { feedsRequired: 6, scale: 1.0, dropInterval: 15700, dropValue: 5 }, // stage 3: adult — was 13; baby->adult income ratio is now ~1.9x (was ~5x), matching the "closer to double, not 4-6x" rebalance
+      { feedsRequired: 0, scale: 0.5, dropInterval: 33556, dropValue: 5 }, // stage 1: hatchling — coin production 10% LESS frequent (dropInterval / 0.9), per direct request ("produce money... 10% less frequently across the board"); feeding fills the timer, see COIN_TIMER_FEED_BONUS_FRACTION
+      { feedsRequired: 3, scale: 0.75, dropInterval: 26889, dropValue: 5 }, // stage 2: juvenile
+      { feedsRequired: 6, scale: 1.0, dropInterval: 17444, dropValue: 5 }, // stage 3: adult
     ],
     unlockedByDefault: true,
   },
@@ -644,11 +644,11 @@ export const SPECIES = {
     behavior: ['FEEDER'], dropType: 'coin',
     swimSpeed: 65, // -5, see FISH_MOVEMENT_UPGRADE_SPEED_BONUS
     lifespan: 240000,
-    hungerRate: 1.58, // 20% lower than the original 1.98, part of a general de-pacing pass; hungry ~every 30s now — lowest coin value of the three, so it's the least demanding to keep fed
+    hungerRate: 1.264, // a further 20% slower per direct request — was 1.58; hungry ~every 37s now — lowest coin value of the three, so it's the least demanding to keep fed
     growthStages: [
-      { feedsRequired: 0, scale: 0.5, dropInterval: 18150, dropValue: 3 },
-      { feedsRequired: 3, scale: 0.75, dropInterval: 11400, dropValue: 3 }, // was 5 — see the baby->adult rebalance note on Guppy above; dropValue stays flat, dropInterval alone carries the growth curve
-      { feedsRequired: 6, scale: 1.0, dropInterval: 7600, dropValue: 3 }, // was 5 — baby->adult income ratio is now ~2.4x (was ~4x); high-frequency coin firehose despite low feeding demand; the Phase 2 throughput stress test
+      { feedsRequired: 0, scale: 0.5, dropInterval: 20167, dropValue: 3 }, // coin production 10% less frequent per direct request — was 18150
+      { feedsRequired: 3, scale: 0.75, dropInterval: 12667, dropValue: 3 }, // was 11400
+      { feedsRequired: 6, scale: 1.0, dropInterval: 8444, dropValue: 3 }, // was 7600 — still the high-frequency coin firehose of the three, just slightly less so
     ],
     unlockedByDefault: true,
   },
@@ -658,11 +658,11 @@ export const SPECIES = {
     behavior: ['FEEDER'], dropType: 'coin',
     swimSpeed: 17, // 10% faster than the original 20, then -5, see FISH_MOVEMENT_UPGRADE_SPEED_BONUS
     lifespan: 360000,
-    hungerRate: 2.59, // 20% lower than the original 3.24, part of a general de-pacing pass; hungry ~every 18s now — highest coin value of the three, so it's the most demanding to keep fed
+    hungerRate: 2.072, // a further 20% slower per direct request — was 2.59; hungry ~every 22s now — highest coin value of the three, so it's still the most demanding to keep fed
     growthStages: [
-      { feedsRequired: 0, scale: 0.6, dropInterval: 33900, dropValue: 16 },
-      { feedsRequired: 3, scale: 0.8, dropInterval: 29000, dropValue: 17 }, // was 29 — Blimpfish's dropInterval alone only shrinks ~1.4x baby->adult (unlike Guppy/Dartfin's ~2x+), so unlike those two this one needs a modest dropValue bump too to reach the "closer to double" target
-      { feedsRequired: 6, scale: 1.0, dropInterval: 23700, dropValue: 22 }, // was 40 — baby->adult income ratio is now ~2.0x (was ~3.6x); still rewards feeding discipline with the biggest payout of the three, just not a 2.5x-in-raw-value jump any more
+      { feedsRequired: 0, scale: 0.6, dropInterval: 37667, dropValue: 16 }, // coin production 10% less frequent per direct request — was 33900
+      { feedsRequired: 3, scale: 0.8, dropInterval: 32222, dropValue: 17 }, // was 29000
+      { feedsRequired: 6, scale: 1.0, dropInterval: 26333, dropValue: 22 }, // was 23700
     ],
     unlockedByDefault: true,
   },
@@ -688,7 +688,7 @@ export const SPECIES = {
     description: 'Only eats Waste, never Food — cleans up after the rest of the tank instead of adding to the mess.',
     behavior: ['SCAVENGER'], dropType: 'waste_cleared',
     swimSpeed: 30, lifespan: 300000,
-    hungerRate: 1.015, // exactly half of Guppy's 2.03, per direct request — Entities.js's updateFish targets Waste items (never Food) for any species carrying the SCAVENGER tag. Deliberately flat across all 3 stages (unlike dropInterval below) — per direct request, a baby eats less OFTEN than an adult but still starves on the same overall clock.
+    hungerRate: 0.812, // a further 20% slower per direct request — was 1.015 (itself exactly half of Guppy's original 2.03). Entities.js's updateFish targets Waste items (never Food) for any species carrying the SCAVENGER tag. Deliberately flat across all 3 stages (unlike dropInterval below) — per direct request, a baby eats less OFTEN than an adult but still starves on the same overall clock.
     // dropInterval is repurposed for a Scavenger as its EAT COOLDOWN — the
     // minimum time between two waste-eating events, not a coin-drop timer
     // (dropValue stays 0, unused) — see Entities.js's updateFish SCAVENGER
@@ -705,7 +705,7 @@ export const SPECIES = {
     id: 'electric_eel', name: 'Electric Eel', tier: 2, unlockPhase: 3, cost: 80,
     description: 'Primary MW supply. Must be fed to keep generating.',
     behavior: ['GENERATOR'], dropType: 'power',
-    swimSpeed: 20, lifespan: 300000, hungerRate: 0.97, // -20%, part of a general de-pacing pass — was 1.21
+    swimSpeed: 20, lifespan: 300000, hungerRate: 0.776, // a further 20% slower per direct request — was 0.97
     // pixelsPerMW replaces the old timer+speed-multiplier scheme for a pure
     // Generator, per direct request ("produces 1MW per 10 pixels swam as a
     // baby, and 1MW per 5 pixels as an adult") — a literal distance-traveled
@@ -723,7 +723,7 @@ export const SPECIES = {
     id: 'octopus', name: 'Science Octopus', tier: 3, unlockPhase: 4, cost: 90,
     description: 'Slowly brews one Science Bubble at a time — collect it like a coin once it drops.',
     behavior: ['RESEARCHER'], dropType: 'science_blue',
-    swimSpeed: 25, lifespan: 300000, hungerRate: 0.78, // -20%, part of a general de-pacing pass — was 0.98
+    swimSpeed: 25, lifespan: 300000, hungerRate: 0.624, // a further 20% slower per direct request — was 0.78
     // dropInterval is now a real long brew cycle, not a short speed-scaled
     // tick — per direct request ("a full minute at base... every 70 seconds
     // as a baby, every 50 seconds as an adult"). dropValue is the number of
@@ -753,79 +753,79 @@ export const SPECIES = {
     id: 'scrub_guppy', name: 'Scrub Guppy', tier: 4, unlockPhase: 4, cost: 45,
     description: 'Suckerfish-spliced Guppy — clears waste on its rounds, still drops coins.',
     behavior: ['SCAVENGER', 'FEEDER'], dropType: 'waste_cleared', parents: ['suckerfish', 'guppy'],
-    swimSpeed: 33, lifespan: 300000, hungerRate: 1.44, // -20%, part of a general de-pacing pass — was 1.80
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 12850, dropValue: 6 }], // 1.2x Guppy's adult dropValue (5) — see CLAUDE.md's Gene-Splicing note: a splice can only happen on an adult fish, and inherits 1.2x that fish's adult coin value
+    swimSpeed: 33, lifespan: 300000, hungerRate: 1.152, // a further 20% slower per direct request — was 1.44
+    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 14278, dropValue: 6 }], // 1.2x Guppy's adult dropValue (5) — see CLAUDE.md's Gene-Splicing note: a splice can only happen on an adult fish, and inherits 1.2x that fish's adult coin value. Coin production 10% less frequent per direct request — was 12850
     unlockedByDefault: false,
   },
   scrub_dartfin: {
     id: 'scrub_dartfin', name: 'Scrub Dartfin', tier: 4, unlockPhase: 4, cost: 37,
     description: 'Suckerfish-spliced Dartfin — fast waste cleanup, frequent small coins.',
     behavior: ['SCAVENGER', 'FEEDER'], dropType: 'waste_cleared', parents: ['suckerfish', 'dartfin'],
-    swimSpeed: 48, lifespan: 300000, hungerRate: 1.22, // -20%, part of a general de-pacing pass — was 1.52
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 8800, dropValue: 4 }], // 1.2x Dartfin's adult dropValue (3) — see CLAUDE.md's Gene-Splicing note
+    swimSpeed: 48, lifespan: 300000, hungerRate: 0.976, // a further 20% slower per direct request — was 1.22
+    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 9778, dropValue: 4 }], // 1.2x Dartfin's adult dropValue (3) — see CLAUDE.md's Gene-Splicing note. Coin production 10% less frequent per direct request — was 8800
     unlockedByDefault: false,
   },
   scrub_blimpfish: {
     id: 'scrub_blimpfish', name: 'Scrub Blimpfish', tier: 4, unlockPhase: 4, cost: 85,
     description: 'Suckerfish-spliced Blimpfish — slow but thorough, big coins and a clean tank.',
     behavior: ['SCAVENGER', 'FEEDER'], dropType: 'waste_cleared', parents: ['suckerfish', 'blimpfish'],
-    swimSpeed: 24, lifespan: 300000, hungerRate: 1.72, // -20%, part of a general de-pacing pass — was 2.15
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 16850, dropValue: 26 }], // 1.2x Blimpfish's adult dropValue (22) — see CLAUDE.md's Gene-Splicing note
+    swimSpeed: 24, lifespan: 300000, hungerRate: 1.376, // a further 20% slower per direct request — was 1.72
+    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 18722, dropValue: 26 }], // 1.2x Blimpfish's adult dropValue (22) — see CLAUDE.md's Gene-Splicing note. Coin production 10% less frequent per direct request — was 16850
     unlockedByDefault: false,
   },
   volt_guppy: {
     id: 'volt_guppy', name: 'Volt Guppy', tier: 4, unlockPhase: 4, cost: 100,
     description: 'Electric Eel-spliced Guppy — generates MW alongside its usual coin drops.',
     behavior: ['GENERATOR', 'FEEDER'], dropType: 'power', parents: ['electric_eel', 'guppy'],
-    swimSpeed: 28, lifespan: 300000, hungerRate: 1.50, // -20%, part of a general de-pacing pass — was 1.88
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 10350, dropValue: 6 }], // 1.2x Guppy's adult dropValue (5) — see CLAUDE.md's Gene-Splicing note
+    swimSpeed: 28, lifespan: 300000, hungerRate: 1.2, // a further 20% slower per direct request — was 1.50
+    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 11500, dropValue: 6 }], // 1.2x Guppy's adult dropValue (5) — see CLAUDE.md's Gene-Splicing note. Coin production 10% less frequent per direct request — was 10350
     unlockedByDefault: false,
   },
   volt_dartfin: {
     id: 'volt_dartfin', name: 'Volt Dartfin', tier: 4, unlockPhase: 4, cost: 92,
     description: 'Electric Eel-spliced Dartfin — a fast, low-cost trickle of power and coins.',
     behavior: ['GENERATOR', 'FEEDER'], dropType: 'power', parents: ['electric_eel', 'dartfin'],
-    swimSpeed: 43, lifespan: 300000, hungerRate: 1.28, // -20%, part of a general de-pacing pass — was 1.60
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 6300, dropValue: 4 }], // 1.2x Dartfin's adult dropValue (3) — see CLAUDE.md's Gene-Splicing note
+    swimSpeed: 43, lifespan: 300000, hungerRate: 1.024, // a further 20% slower per direct request — was 1.28
+    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 7000, dropValue: 4 }], // 1.2x Dartfin's adult dropValue (3) — see CLAUDE.md's Gene-Splicing note. Coin production 10% less frequent per direct request — was 6300
     unlockedByDefault: false,
   },
   volt_blimpfish: {
     id: 'volt_blimpfish', name: 'Volt Blimpfish', tier: 4, unlockPhase: 4, cost: 140,
     description: 'Electric Eel-spliced Blimpfish — slow, heavy-feeding hybrid with big power output.',
     behavior: ['GENERATOR', 'FEEDER'], dropType: 'power', parents: ['electric_eel', 'blimpfish'],
-    swimSpeed: 19, lifespan: 300000, hungerRate: 1.78, // -20%, part of a general de-pacing pass — was 2.23
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 14350, dropValue: 26 }], // 1.2x Blimpfish's adult dropValue (22) — see CLAUDE.md's Gene-Splicing note
+    swimSpeed: 19, lifespan: 300000, hungerRate: 1.424, // a further 20% slower per direct request — was 1.78
+    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 15944, dropValue: 26 }], // 1.2x Blimpfish's adult dropValue (22) — see CLAUDE.md's Gene-Splicing note. Coin production 10% less frequent per direct request — was 14350
     unlockedByDefault: false,
   },
   scholar_guppy: {
     id: 'scholar_guppy', name: 'Scholar Guppy', tier: 4, unlockPhase: 4, cost: 110,
     description: 'Science Octopus-spliced Guppy — drops Blue Science alongside coins.',
     behavior: ['RESEARCHER', 'FEEDER'], dropType: 'science_blue', parents: ['octopus', 'guppy'],
-    swimSpeed: 30, lifespan: 300000, hungerRate: 1.41, // -20%, part of a general de-pacing pass — was 1.76
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 15350, dropValue: 6 }], // 1.2x Guppy's adult dropValue (5) — see CLAUDE.md's Gene-Splicing note
+    swimSpeed: 30, lifespan: 300000, hungerRate: 1.128, // a further 20% slower per direct request — was 1.41
+    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 17056, dropValue: 6 }], // 1.2x Guppy's adult dropValue (5) — see CLAUDE.md's Gene-Splicing note. Coin production 10% less frequent per direct request — was 15350
     unlockedByDefault: false,
   },
   scholar_dartfin: {
     id: 'scholar_dartfin', name: 'Scholar Dartfin', tier: 4, unlockPhase: 4, cost: 102,
     description: 'Science Octopus-spliced Dartfin — quick, cheap research on the move.',
     behavior: ['RESEARCHER', 'FEEDER'], dropType: 'science_blue', parents: ['octopus', 'dartfin'],
-    swimSpeed: 45, lifespan: 300000, hungerRate: 1.18, // -20%, part of a general de-pacing pass — was 1.48
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 11300, dropValue: 4 }], // 1.2x Dartfin's adult dropValue (3) — see CLAUDE.md's Gene-Splicing note
+    swimSpeed: 45, lifespan: 300000, hungerRate: 0.944, // a further 20% slower per direct request — was 1.18
+    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 12556, dropValue: 4 }], // 1.2x Dartfin's adult dropValue (3) — see CLAUDE.md's Gene-Splicing note. Coin production 10% less frequent per direct request — was 11300
     unlockedByDefault: false,
   },
   scholar_blimpfish: {
     id: 'scholar_blimpfish', name: 'Scholar Blimpfish', tier: 4, unlockPhase: 4, cost: 150,
     description: 'Science Octopus-spliced Blimpfish — slow but valuable, big coins and big science.',
     behavior: ['RESEARCHER', 'FEEDER'], dropType: 'science_blue', parents: ['octopus', 'blimpfish'],
-    swimSpeed: 21, lifespan: 300000, hungerRate: 1.69, // -20%, part of a general de-pacing pass — was 2.11
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 19350, dropValue: 26 }], // 1.2x Blimpfish's adult dropValue (22) — see CLAUDE.md's Gene-Splicing note
+    swimSpeed: 21, lifespan: 300000, hungerRate: 1.352, // a further 20% slower per direct request — was 1.69
+    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 21500, dropValue: 26 }], // 1.2x Blimpfish's adult dropValue (22) — see CLAUDE.md's Gene-Splicing note. Coin production 10% less frequent per direct request — was 19350
     unlockedByDefault: false,
   },
   scrub_eel: {
     id: 'scrub_eel', name: 'Scrub-Eel', tier: 4, unlockPhase: 4, cost: 105,
     description: 'Suckerfish-Eel splice — keeps the tank clean while powering the grid.',
     behavior: ['SCAVENGER', 'GENERATOR'], dropType: 'waste_cleared+power', parents: ['suckerfish', 'electric_eel'],
-    swimSpeed: 25, lifespan: 300000, hungerRate: 0.91, // -20%, part of a general de-pacing pass — was 1.14
+    swimSpeed: 25, lifespan: 300000, hungerRate: 0.728, // a further 20% slower per direct request — was 0.91
     growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 7500, dropValue: 0 }],
     unlockedByDefault: false,
   },
@@ -833,7 +833,7 @@ export const SPECIES = {
     id: 'scrub_topus', name: 'Scrub-Topus', tier: 4, unlockPhase: 4, cost: 115,
     description: 'Suckerfish-Octopus splice — clears waste while trickling Blue Science.',
     behavior: ['SCAVENGER', 'RESEARCHER'], dropType: 'waste_cleared+science_blue', parents: ['suckerfish', 'octopus'],
-    swimSpeed: 28, lifespan: 300000, hungerRate: 0.82, // -20%, part of a general de-pacing pass — was 1.02
+    swimSpeed: 28, lifespan: 300000, hungerRate: 0.656, // a further 20% slower per direct request — was 0.82
     growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 12500, dropValue: 1 }],
     unlockedByDefault: false,
   },
@@ -841,7 +841,7 @@ export const SPECIES = {
     id: 'volt_topus', name: 'Volt-Topus', tier: 4, unlockPhase: 4, cost: 170,
     description: 'Eel-Octopus splice — powers the grid and researches at the same time.',
     behavior: ['GENERATOR', 'RESEARCHER'], dropType: 'power+science_blue', parents: ['electric_eel', 'octopus'],
-    swimSpeed: 23, lifespan: 300000, hungerRate: 0.88, // -20%, part of a general de-pacing pass — was 1.10
+    swimSpeed: 23, lifespan: 300000, hungerRate: 0.704, // a further 20% slower per direct request — was 0.88
     growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 10000, dropValue: 1 }],
     unlockedByDefault: false,
   },
