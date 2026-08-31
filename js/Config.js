@@ -153,6 +153,16 @@ export const FAN_T4_POWER_COST = 14;
 export const AUTO_FEEDER_INTAKE_RADIUS = TILE_SIZE * 0.6;
 export const AUTO_FEEDER_PROCESS_DURATION_MS = 2000;
 export const AUTO_FEEDER_PORT_OFFSET_FRACTION = 0.5; // fraction of TILE_SIZE — how far outside the tile's center the intake/output points sit, along the aim axis
+// A candidate item must not just be within the intake radius above — it also
+// has to actually be approaching from the intake side, not resting on top of
+// the tile or drifting in from some other direction. Grid.js's isOnIntakeSide
+// checks the item's offset from tile-center against the intake direction (the
+// aim angle, reversed) via a dot product; this is the minimum fraction of
+// that offset's length that has to point toward the intake side to count —
+// per direct request that items shouldn't be pulled in "through the
+// building" or "from the top." Shared by both the Auto-Feeder and the
+// Collector's intake scans (see COLLECTOR_INTAKE_RADIUS below).
+export const INTAKE_SIDE_MIN_DOT_FRACTION = 0.35;
 
 // A Collector doesn't bank an item the instant it lands any more — it visibly
 // draws it in toward the tile's center and holds it there for a full
@@ -173,6 +183,17 @@ export const COLLECTOR_PROCESS_DURATION_MS = 3000;
 export const COLLECTOR_PULL_STRENGTH = 10; // 1/sec ease rate toward the tile's center
 export const COLLECTOR_PROCESSING_MASS = 1000;
 export const COLLECTOR_CIRCLE_RADIUS_FRACTION = 0.32; // fraction of TILE_SIZE — the drawing-in point rendered in the tile's center
+// A Collector is now aimed at placement exactly like the Auto-Feeder (angle
+// locked from the cursor's sub-tile position — see Grid.js's placeTile) and
+// pulled from via the same kind of intake-radius scan, instead of consuming
+// whatever happens to land on top of it via ordinary gravity. Per direct
+// request — items shouldn't be pulled in "through the building" or land on
+// it from the top and get vacuumed up; they need to approach from its
+// designated intake side (opposite the aim/output arrow), same as the
+// Auto-Feeder. A plain top-landing on a Collector now just rests there like
+// a Platform, until something (a Fan, gravity carrying it past the tile's
+// edge) brings it around to the intake side within COLLECTOR_INTAKE_RADIUS.
+export const COLLECTOR_INTAKE_RADIUS = TILE_SIZE * 0.65;
 
 // Items no longer rest at the world's bottom edge — with nothing built to
 // catch it, a coin just keeps falling and is deleted once it's fallen this
@@ -287,7 +308,7 @@ export const FOOD_RADIUS = 6; // px, visual + despawn-on-floor check
 export const FOOD_COLOR = '#ffb238'; // orange — was a green (#8bc34a) close enough to WASTE_COLOR's olive-green to be hard to tell apart at a glance; per direct request, distinct now
 export const FOOD_FLOOR_GRACE_MS = 1000; // ms an uneaten pellet rests on the floor before despawning — a last chance for a nearby hungry fish instead of an instant, silent loss of the cost
 export const COIN_RADIUS = 10; // px, base visual radius (bronze size) — 25% bigger than the original 8, easier to see and aim at
-export const COIN_CLICK_RADIUS_MULTIPLIER = 1.1; // click hit-test radius is each coin's own (tier-scaled) radius times this — a forgiving margin that scales with the coin's actual drawn size
+export const COIN_CLICK_RADIUS_MULTIPLIER = 1.4; // click hit-test radius is each coin's own (tier-scaled) radius times this — 40% bigger than the coin itself per direct request, so a click doesn't have to be pixel-perfect (and doesn't get misread as a food-placement click on a miss). tryBankCoinAt still only ever banks the first match it finds per click and returns immediately, so an overlapping pair of these bigger radii still can't bank two coins on one click.
 export const CHEAT_GRANT_AMOUNT = 10000; // $ granted by the M debug key
 export const CHEAT_TANK_POINTS_GRANT_AMOUNT = 20; // Tank Points also granted by the M debug key, so testing the Tank Upgrades panel doesn't require grinding fish growth
 
@@ -469,6 +490,15 @@ export const FOOD_MAX_ON_SCREEN_BASE = 2;
 export const FOOD_CAPACITY_UPGRADE_INCREMENT = 1; // per level — base 2 -> 3 -> 4 -> ... -> 11 at max level (9 levels)
 export const FOOD_CAPACITY_UPGRADE_COSTS = FISH_MOVEMENT_FOOD_CAPACITY_UPGRADE_COSTS;
 export const FOOD_CAPACITY_UPGRADE_MAX_LEVEL = FOOD_CAPACITY_UPGRADE_COSTS.length;
+
+// Fish Merging (Economy Fish Combining's drag-to-combine interaction) is a
+// Tank Upgrade now, not a Tier unlock — a one-time, unleveled purchase
+// (state.level.upgrades.fishMergingUnlocked, false until bought) rather than
+// a 0-N ladder like the three above. Entities.js's isCombinableFish checks
+// this flag before anything else; dynamic economy-fish pricing itself is
+// unaffected (that was never actually tier-gated in code, only in an older
+// doc pass — see CLAUDE.md) — only the drag-combine interaction is gated.
+export const FISH_MERGING_UNLOCK_COST = 10; // Tank Points, flat, one-time
 
 // Defensive Capabilities (click damage/offense vs invading aliens) has no
 // system to upgrade yet — Phase 5 aliens don't exist. The Tank Upgrades
@@ -710,9 +740,23 @@ export const SPECIES_LIST = Object.values(SPECIES);
 // there's no risk of it being used as a free item-conveyor exploit the way
 // a partial-refund policy was originally hedging against.
 export const TILE_REFUND_FRACTION = 1.0;
+// Every building's shop cost is dynamic now, mirroring the Economy Fish
+// dynamic-pricing pattern but additive instead of multiplicative — per
+// direct request. Platform is a flat $3 regardless of how many are already
+// placed (it's the cheap, unlimited structural anchor everything else needs
+// — see Platform Anchoring). Every other building's live cost is its base
+// BUILDING_TYPES cost plus BUILDING_COST_INCREMENT for each tile of that
+// exact type already placed on the grid (Grid.js's getBuildingCost, counted
+// live off state.level.grid every call, same "no separate counter to keep in
+// sync" approach the fish pricing already uses — demolishing one brings the
+// next one's cost back down). Tile *removal* still refunds off the tile's
+// original placed cost (stored implicitly by BUILDING_TYPES[type].cost at
+// demolish time — see Grid.js's removeTile), not today's live price.
+export const PLATFORM_FLAT_COST = 3;
+export const BUILDING_COST_INCREMENT = 1;
 export const BUILDING_TYPES = {
   [TILE_PLATFORM]: {
-    id: TILE_PLATFORM, name: 'Platform', icon: '🧱', cost: 5,
+    id: TILE_PLATFORM, name: 'Platform', icon: '🧱', cost: PLATFORM_FLAT_COST,
     description: 'Solid structural floor. Items land and rest on top. Every other building must be anchored to a Platform (or the seabed floor) to be placed.',
     color: '#dba36f', unlockedByDefault: true, // available from level start — every other building needs one to anchor to, so it can't be gated behind any Mound tier
   },
@@ -728,7 +772,7 @@ export const BUILDING_TYPES = {
   },
   [TILE_COLLECTOR]: {
     id: TILE_COLLECTOR, name: 'Collector', icon: '🧲', cost: 12,
-    description: 'Auto-banks any coin that reaches it — no clicking required. Unpowered, so it leaves a little waste behind each time.',
+    description: 'Auto-banks any coin pulled into its intake side — aim it like a Fan. Unpowered, so it leaves a little waste behind each time.',
     color: '#8fe0b8', unlockedByDefault: false,
   },
   [TILE_FAN_T2]: {
@@ -753,6 +797,18 @@ export const BUILDING_TYPES = {
   },
 };
 export const BUILDING_LIST = Object.values(BUILDING_TYPES);
+// Buildings that share one shop slot instead of each getting their own icon
+// — per direct request, the 3 Fan tiers "stack" into a single spot: UI.js's
+// buildBuildPalette shows one button (whichever tier is currently selected
+// for that family, defaulting to the highest-unlocked whenever the palette
+// rebuilds) with small dots indicating there's more than one option, and
+// clicking it again while already selected cycles to the next unlocked tier
+// instead of doing nothing. Every building not listed in any family here
+// keeps its own single slot, unchanged. Keyed by an arbitrary family id, not
+// a tile id, since no single member is "the" family.
+export const BUILDING_FAMILIES = {
+  fan: [TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4],
+};
 
 // ---- Tier Progression & The Mound (Phase 2) ----
 // See CLAUDE.md's "Tier Progression & The Mound" section for the full
@@ -778,9 +834,13 @@ export const MOUND_WIDTH_TILES = 4.4; // how many seabed tiles wide its clickabl
 export const MOUND_HEIGHT_PX = 62; // how far it mounds up above the seabed surface — 10% bigger than the original 56
 // All tiers shifted up by +1 from their original numbering (old T2->new T3,
 // old T3->new T4, old T4->new T5) to make room for a new Tier 2 dedicated to
-// Economy Fish Combining/Splicing and dynamic economy-fish pricing (both
-// mechanics, not unlocks — gated on state.level.tier >= 2 wherever they're
-// read, see ECONOMY_SPECIES_IDS/FISH_STAR_TIER_MAX below). Platform itself
+// Economy Fish Combining/Splicing and dynamic economy-fish pricing — both
+// mechanics, not unlocks, and neither was ever actually gated by tier in
+// code (this comment previously claimed otherwise; dynamic pricing has
+// always applied regardless of tier, and the drag-combine interaction is now
+// explicitly gated by a Tank Upgrade purchase instead — see
+// FISH_MERGING_UNLOCK_COST above). See ECONOMY_SPECIES_IDS/FISH_STAR_TIER_MAX
+// below. Platform itself
 // is NOT tier-gated at all any more — see BUILDING_TYPES' unlockedByDefault
 // above — since every other building needs one to anchor to, per direct
 // request it's available from level start rather than waiting on any crack.

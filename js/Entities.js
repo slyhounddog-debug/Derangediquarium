@@ -263,6 +263,29 @@ export function trySpawnFood(state, x, y) {
   return 'spawned';
 }
 
+const FIRST_FISH_BOUGHT_MESSAGE = "You bought your first fish! Please remember to feed it occasionally. It's not a decoration. Probably.";
+
+// A purchased fish is now placed with a click, the same as a building —
+// there's no separate "Buy" button/preview-window purchase step any more,
+// per direct request. Same reason-string contract as trySpawnFood so
+// main.js's click handler can react the same way (only flash something on
+// the specific 'no_money' case, not silently no-op). Blocks placement inside
+// the seabed city for the same reason Food does — a fish can never swim down
+// there anyway (see updateFish's Y clamp), so dropping one there would just
+// spawn it somewhere it immediately gets pushed out of.
+export function trySpawnPurchasedFish(state, speciesId, x, y) {
+  if (y >= SEABED_FLOOR_Y) return 'in_city';
+  const cost = getFishPurchaseCost(state, speciesId);
+  if (state.level.money < cost) return 'no_money';
+  state.level.money -= cost;
+  state.level.entities.push(createFish(speciesId, x, y, state, { grown: false }));
+  if (!state.level.tutorialFlags.firstFishBought) {
+    state.level.tutorialFlags.firstFishBought = true;
+    pushStoryNotification(state, FIRST_FISH_BOUGHT_MESSAGE);
+  }
+  return 'spawned';
+}
+
 const MONEY_MILESTONE_1K_MESSAGE = '1k money? Bruh save some for the fishes';
 
 // Routes every real in-play coin gain (click-banked or auto-Collected —
@@ -356,10 +379,14 @@ export function findFishAt(state, worldX, worldY, excludeId = null) {
   return best;
 }
 
-// Whether a fish is a legal SOURCE for starting a combine-drag: an economy
-// species, Adult, and not already at the combining cap (a Tier-4 fish has
-// nothing left to combine into).
-export function isCombinableFish(fish) {
+// Whether a fish is a legal SOURCE for starting a combine-drag: fish merging
+// itself has to be unlocked (state.level.upgrades.fishMergingUnlocked — a
+// one-time Tank Upgrade purchase, not a Tier unlock any more, see Config.js's
+// FISH_MERGING_UNLOCK_COST), the fish an economy species, Adult, and not
+// already at the combining cap (a Tier-4 fish has nothing left to combine
+// into).
+export function isCombinableFish(state, fish) {
+  if (!state.level.upgrades.fishMergingUnlocked) return false;
   if (!fish || fish.type !== 'fish') return false;
   if (!ECONOMY_SPECIES_IDS.includes(fish.speciesId)) return false;
   const def = SPECIES[fish.speciesId];
@@ -372,9 +399,9 @@ export function isCombinableFish(fish) {
 // must independently qualify as combinable (see isCombinableFish), be two
 // distinct entities, the exact same species, and the exact same star tier —
 // per the design spec's prerequisite. Symmetric in a/b.
-export function canCombineFish(a, b) {
+export function canCombineFish(state, a, b) {
   if (!a || !b || a.id === b.id) return false;
-  if (!isCombinableFish(a) || !isCombinableFish(b)) return false;
+  if (!isCombinableFish(state, a) || !isCombinableFish(state, b)) return false;
   if (a.speciesId !== b.speciesId) return false;
   if ((a.starTier || 1) !== (b.starTier || 1)) return false;
   return true;
@@ -393,7 +420,7 @@ const FISH_VANISH_REAPPEAR_MESSAGE = 'JK! You should have seen your face tho';
 // the pair isn't actually a legal combine (defensive — callers should
 // already have checked canCombineFish).
 export function combineFish(state, a, b) {
-  if (!canCombineFish(a, b)) return null;
+  if (!canCombineFish(state, a, b)) return null;
   const newTier = (a.starTier || 1) + 1;
   const x = (a.x + b.x) / 2;
   const y = (a.y + b.y) / 2;

@@ -4,11 +4,6 @@
 
 import {
   SEABED_FLOOR_Y,
-  FISH_MIN_X,
-  FISH_MAX_X,
-  FISH_MIN_Y,
-  FISH_MAX_Y,
-  FISH_SPAWN_VIEW_INSET_FRACTION,
   FOOD_COST,
   FISH_COLORS,
   SHOP_PREVIEW_CANVAS_SIZE,
@@ -29,10 +24,13 @@ import {
   FOOD_MAX_ON_SCREEN_BASE,
   NOTIFICATION_LOG_MAX,
   FISH_VANISH_DURATION_MS,
+  BUILDING_FAMILIES,
+  BUILDING_TYPES,
+  FISH_MERGING_UNLOCK_COST,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings, loadLevel } from './Levels.js';
-import { spawnFishCheat, getFishPurchaseCost, effectiveFoodCapacity } from './Entities.js';
-import { getTile, worldToTile } from './Grid.js';
+import { getFishPurchaseCost, effectiveFoodCapacity } from './Entities.js';
+import { getTile, worldToTile, getBuildingCost } from './Grid.js';
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
@@ -40,9 +38,10 @@ import { drawFish } from './FishRenderer.js';
 const MOUND_MENU_GAP_PX = 12; // screen px of breathing room between the popup's bottom edge and the Mound's top edge
 const MOUND_MENU_TRANSITION_MS = 220; // must match #mound-menu's CSS transition duration
 
-// One-time story/tutorial notifications — see state.level.tutorialFlags and
-// CLAUDE.md's "Story & Tutorial Notifications" section.
-const FIRST_FISH_BOUGHT_MESSAGE = "You bought your first fish! Please remember to feed it occasionally. It's not a decoration. Probably.";
+// One-time story/tutorial notification — see state.level.tutorialFlags and
+// CLAUDE.md's "Story & Tutorial Notifications" section. (First-fish-bought
+// moved to Entities.js's trySpawnPurchasedFish, since buying is now a canvas
+// click rather than a UI.js button handler.)
 const FOUND_THE_CHAT_MESSAGE = 'You found the chat. Curiosity kills the fish.';
 
 let els = null;
@@ -55,6 +54,11 @@ let lastRenderedNotificationCount = -1; // rebuild the log list only when it act
 let moundMenuOpen = false;
 let moundMenuClosing = false; // true while the shrink-back transition is still playing, before it's actually hidden
 let moundMenuCloseTimer = null;
+// familyId -> currently-selected tile id within that family (see Config.js's
+// BUILDING_FAMILIES) — reset to the highest-unlocked tier every time
+// buildBuildPalette rebuilds (init, the U cheat key, a Mound crack), then
+// only changed by re-clicking an already-selected family slot to cycle it.
+let familySelectedTier = {};
 
 // Preview canvas idle-swim animation state — runs its own rAF loop,
 // independent of the game's fixed-timestep sim, since it's purely
@@ -74,13 +78,15 @@ export function initUI(state) {
     shopPanel: document.getElementById('shop-panel'),
     shopCollapseBtn: document.getElementById('shop-collapse-btn'),
     shopMoney: document.getElementById('shop-money'),
+    shopFood: document.getElementById('shop-food'),
+    shopCleanliness: document.getElementById('shop-cleanliness'),
     shopGrid: document.getElementById('shop-species-grid'),
     previewEmpty: document.getElementById('shop-preview-empty'),
     previewContent: document.getElementById('shop-preview-content'),
     previewCanvas: document.getElementById('shop-preview-canvas'),
     previewName: document.getElementById('shop-preview-name'),
     previewDesc: document.getElementById('shop-preview-desc'),
-    previewBuyBtn: document.getElementById('shop-preview-buy'),
+    previewHint: document.getElementById('shop-preview-hint'),
     toolFoodBtn: document.getElementById('tool-food-btn'),
     toolDemolishBtn: document.getElementById('tool-demolish-btn'),
     buildToolGrid: document.getElementById('build-tool-grid'),
@@ -166,25 +172,14 @@ export function initUI(state) {
   els.shopMoney.addEventListener('animationend', clearFlashClass);
   els.food.addEventListener('animationend', clearFlashClass);
   els.cleanliness.addEventListener('animationend', clearFlashClass);
+  els.shopFood.addEventListener('animationend', clearFlashClass);
+  els.shopCleanliness.addEventListener('animationend', clearFlashClass);
 
-  els.previewBuyBtn.addEventListener('click', () => {
-    if (!currentPreviewSpecies) return;
-    const cost = getFishPurchaseCost(state, currentPreviewSpecies.id); // dynamic for economy species (Guppy/Dartfin/Blimpfish) — see Config.js's ECONOMY_FISH_COST_GROWTH_RATE
-    if (state.level.money < cost) return;
-    state.level.money -= cost;
-    const { x, y } = randomVisibleSpawnPoint(state);
-    spawnFishCheat(state, currentPreviewSpecies.id, x, y, false);
-    if (!state.level.tutorialFlags.firstFishBought) {
-      state.level.tutorialFlags.firstFishBought = true;
-      const notifications = state.level.notifications;
-      notifications.push({ id: notifications.length + 1, text: FIRST_FISH_BOUGHT_MESSAGE, elapsed: state.level.elapsed });
-      if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
-    }
-    // Stays populated with the same species — buying several in a row
-    // doesn't need re-clicking its icon each time. Its price tag/preview
-    // name update on the very next frame (refreshPreviewBuyButton,
-    // refreshShopPrices) since this purchase just changed N.
-  });
+  // No Buy button any more — picking a species arms it as the active
+  // click-tool (state.ui.selectedTool = 'fish:<id>'), exactly like picking a
+  // building does, and main.js's click handler spends the cost and spawns it
+  // at the clicked world point (Entities.js's trySpawnPurchasedFish). See
+  // selectSpeciesForPreview below.
 
   updateToolbar(state);
   updateShopCollapse(state);
@@ -217,11 +212,14 @@ function updateShopCollapse(state) {
   // from scratch — so toggling the shop could replay a stale pickup/spend
   // flash that has nothing to do with this toggle. Strip it defensively on
   // every toggle rather than relying solely on it finishing naturally.
-  // #hud holds money/food/cleanliness together, so all three need this.
+  // #hud holds money/food/cleanliness together, and #shop-hud holds the
+  // shop panel's own copies of all three, so all six need this.
   els.money.classList.remove('flash-pickup', 'flash-spend');
   els.food.classList.remove('flash-pickup', 'flash-spend');
   els.cleanliness.classList.remove('flash-pickup', 'flash-spend');
   els.shopMoney.classList.remove('flash-pickup', 'flash-spend');
+  els.shopFood.classList.remove('flash-pickup', 'flash-spend');
+  els.shopCleanliness.classList.remove('flash-pickup', 'flash-spend');
   // The preview canvas is invisible while collapsed — no point animating
   // it. Resume on expand if a species is already selected; a building
   // preview has no animation to resume, just redraw its static swatch.
@@ -346,10 +344,16 @@ function restartLevel(state) {
   closePauseMenu(state);
 }
 
-// Highlights whichever click-tool is active. Food/Demolish get their own
-// small tooltip (a one-liner, no separate window needed); buildings show
+// Highlights whichever single shop selection is active — Food, Demolish, a
+// species, or a building (family-grouped ones included). All of these live
+// off the exact same state.ui.selectedTool string now, so setting it
+// anywhere (a species click, a building click, a family cycle) implicitly
+// deselects whatever else was previously armed — per direct request that
+// only one shop selection should ever be active at a time, not a building
+// AND a fish simultaneously. Food/Demolish also get their own small
+// tooltip (a one-liner, no separate window needed); species/buildings show
 // their info in the shared shop-preview window instead (see
-// selectBuildingForPreview) so this only needs to track the selected state.
+// selectSpeciesForPreview/selectBuildingForPreview).
 function updateToolbar(state) {
   const foodSelected = state.ui.selectedTool === 'food';
   const demolishSelected = state.ui.selectedTool === 'demolish';
@@ -362,22 +366,120 @@ function updateToolbar(state) {
   for (const btn of els.buildToolGrid.children) {
     btn.classList.toggle('selected', state.ui.selectedTool === btn.dataset.tool);
   }
+  for (const btn of els.shopGrid.children) {
+    btn.classList.toggle('selected', state.ui.selectedTool === btn.dataset.tool);
+  }
+}
+
+// familyId -> { btn, iconSpan, priceTag, dotsWrap, memberIds } for every
+// family-grouped slot currently in the palette — lets refreshShopPrices
+// update just the live price/current-tier display every frame the shop is
+// open without rebuilding the whole palette. Rebuilt by buildBuildPalette.
+let familyButtons = {};
+// buildingId -> price-tag <span>, for every STANDALONE (non-family) building
+// slot — same live-refresh purpose as speciesPriceTags below.
+let buildingPriceTags = {};
+
+// Syncs one family slot's icon/title/price/dataset.tool/dots to whichever
+// tier familySelectedTier currently has it on. Called both right after a
+// click (select or cycle) and every frame the shop is open (so its price
+// tag stays live, same as every other dynamic cost in this panel).
+function refreshFamilyButton(state, familyId) {
+  const f = familyButtons[familyId];
+  if (!f) return;
+  const currentId = familySelectedTier[familyId];
+  const building = BUILDING_TYPES[currentId];
+  f.btn.title = building.name;
+  f.btn.dataset.tool = `build:${currentId}`;
+  f.btn.style.setProperty('--tile-color', building.color);
+  f.iconSpan.textContent = building.icon;
+  f.priceTag.textContent = `$${getBuildingCost(state, currentId)}`;
+  f.dotsWrap.innerHTML = '';
+  for (const id of f.memberIds) {
+    const dot = document.createElement('span');
+    if (id === currentId) dot.classList.add('current');
+    f.dotsWrap.appendChild(dot);
+  }
+}
+
+function buildFamilyButton(state, familyId, memberIds) {
+  const btn = document.createElement('button');
+  btn.className = 'tool-btn tool-btn-build';
+  const dotsWrap = document.createElement('div');
+  dotsWrap.className = 'tool-btn-family-dots';
+  btn.appendChild(dotsWrap);
+  const iconSpan = document.createElement('span');
+  btn.appendChild(iconSpan);
+  const priceTag = document.createElement('span');
+  priceTag.className = 'building-icon-price';
+  btn.appendChild(priceTag);
+  familyButtons[familyId] = { btn, iconSpan, priceTag, dotsWrap, memberIds };
+
+  btn.addEventListener('click', () => {
+    const currentId = familySelectedTier[familyId];
+    // Only cycle if this slot is already the active selection — a first
+    // click just selects whatever tier it's currently defaulted to.
+    if (state.ui.selectedTool === `build:${currentId}`) {
+      const idx = memberIds.indexOf(currentId);
+      familySelectedTier[familyId] = memberIds[(idx + 1) % memberIds.length];
+    }
+    refreshFamilyButton(state, familyId); // sync dataset.tool to the (possibly just-cycled) tier before selecting it
+    selectBuildingForPreview(state, BUILDING_TYPES[familySelectedTier[familyId]]);
+  });
+
+  refreshFamilyButton(state, familyId);
+  els.buildToolGrid.appendChild(btn);
+}
+
+function buildSingleBuildingButton(state, building) {
+  const btn = document.createElement('button');
+  btn.className = 'tool-btn tool-btn-build';
+  btn.title = building.name;
+  btn.textContent = building.icon;
+  btn.dataset.tool = `build:${building.id}`;
+  btn.style.setProperty('--tile-color', building.color);
+  const priceTag = document.createElement('span');
+  priceTag.className = 'building-icon-price';
+  priceTag.textContent = `$${getBuildingCost(state, building.id)}`;
+  btn.appendChild(priceTag);
+  buildingPriceTags[building.id] = priceTag;
+  btn.addEventListener('click', () => selectBuildingForPreview(state, building));
+  els.buildToolGrid.appendChild(btn);
 }
 
 // Rebuilt whenever available buildings might have changed (init, U cheat
-// key) — same pattern as buildShopPanel/refreshShopPanel below.
+// key, a Mound crack) — same pattern as buildShopPanel/refreshShopPanel
+// below. Buildings listed together in Config.js's BUILDING_FAMILIES (the 3
+// Fan tiers) collapse into one slot each — per direct request, so higher
+// tiers "stack" onto the same spot instead of each getting their own icon —
+// defaulting to the highest currently-unlocked tier in that family every
+// time this rebuilds (see refreshFamilyButton/buildFamilyButton above).
+// Every other building keeps its own single, ungrouped slot, unchanged.
 function buildBuildPalette(state) {
   els.buildToolGrid.innerHTML = '';
-  for (const building of getAvailableBuildings(state)) {
-    const btn = document.createElement('button');
-    btn.className = 'tool-btn tool-btn-build';
-    btn.title = building.name;
-    btn.textContent = building.icon;
-    btn.dataset.tool = `build:${building.id}`;
-    btn.style.setProperty('--tile-color', building.color);
-    btn.addEventListener('click', () => selectBuildingForPreview(state, building));
-    els.buildToolGrid.appendChild(btn);
+  familyButtons = {};
+  buildingPriceTags = {};
+  const available = getAvailableBuildings(state);
+  const availableIds = new Set(available.map((b) => b.id));
+  const familyOfBuilding = {};
+  for (const [familyId, memberIds] of Object.entries(BUILDING_FAMILIES)) {
+    for (const id of memberIds) familyOfBuilding[id] = familyId;
   }
+
+  const renderedFamilies = new Set();
+  for (const building of available) {
+    const familyId = familyOfBuilding[building.id];
+    if (!familyId) {
+      buildSingleBuildingButton(state, building);
+      continue;
+    }
+    if (renderedFamilies.has(familyId)) continue; // this family's one slot is already built
+    renderedFamilies.add(familyId);
+    const memberIds = BUILDING_FAMILIES[familyId].filter((id) => availableIds.has(id));
+    familySelectedTier[familyId] = memberIds[memberIds.length - 1]; // highest-unlocked — BUILDING_FAMILIES lists tiers low-to-high
+    buildFamilyButton(state, familyId, memberIds);
+  }
+  updateToolbar(state); // re-apply .selected to whichever button matches the current tool, if any survive this rebuild
 }
 
 // Pure stat readouts, current level in red -> next level in green — no
@@ -440,14 +542,26 @@ function createUpgradeCard(name, icon) {
   return { card, levelEl, descEl, buyBtn };
 }
 
-let tankCards = null; // { foodQuality, fishMovement, foodCapacity } — each { card, levelEl, descEl, buyBtn }
+let tankCards = null; // { foodQuality, fishMovement, foodCapacity, fishMerging } — each { card, levelEl, descEl, buyBtn }
 
 function buildTankPanel(state) {
   els.tankUpgradeList.innerHTML = '';
   const foodQuality = createUpgradeCard('Food Quality', '🍽️');
   const fishMovement = createUpgradeCard('Fish Movement', '🏊');
   const foodCapacity = createUpgradeCard('Food Capacity', '🧺');
-  tankCards = { foodQuality, fishMovement, foodCapacity };
+  const fishMerging = createUpgradeCard('Fish Merging', '🧬');
+  tankCards = { foodQuality, fishMovement, foodCapacity, fishMerging };
+
+  // A one-time unlock, not a leveled ladder like the three above — per
+  // direct request, drag-to-combine (Entities.js's isCombinableFish) is now
+  // gated on this Tank Upgrade purchase instead of any Tier.
+  fishMerging.buyBtn.addEventListener('click', () => {
+    if (state.level.upgrades.fishMergingUnlocked) return;
+    if (state.level.tankPoints.available < FISH_MERGING_UNLOCK_COST) return;
+    state.level.tankPoints.available -= FISH_MERGING_UNLOCK_COST;
+    state.level.upgrades.fishMergingUnlocked = true;
+    refreshTankPanel(state);
+  });
 
   foodQuality.buyBtn.addEventListener('click', () => {
     const level = state.level.upgrades.foodQuality;
@@ -477,7 +591,7 @@ function buildTankPanel(state) {
     refreshTankPanel(state);
   });
 
-  els.tankUpgradeList.append(foodQuality.card, fishMovement.card, foodCapacity.card);
+  els.tankUpgradeList.append(foodQuality.card, fishMovement.card, foodCapacity.card, fishMerging.card);
 
   // Defensive Capabilities: shown per the design update's Phase 2 UI-shell
   // scope, but locked — there's no alien system to upgrade yet (Phase 5).
@@ -496,7 +610,7 @@ function buildTankPanel(state) {
 // state can all change while the player has it open.
 function refreshTankPanel(state) {
   if (!tankCards) return;
-  const { foodQuality, fishMovement, foodCapacity } = tankCards;
+  const { foodQuality, fishMovement, foodCapacity, fishMerging } = tankCards;
   const available = state.level.tankPoints.available;
 
   const fqLevel = state.level.upgrades.foodQuality;
@@ -535,59 +649,60 @@ function refreshTankPanel(state) {
     foodCapacity.buyBtn.disabled = available < cost;
   }
 
-  els.tankPointsDisplay.textContent = `🏆 ${available}`;
-}
+  const merged = state.level.upgrades.fishMergingUnlocked;
+  fishMerging.levelEl.textContent = merged ? 'Unlocked' : 'Locked';
+  fishMerging.descEl.textContent =
+    'Lets you drag one Adult economy fish (Guppy/Dartfin/Blimpfish) onto another matching one to combine them into a bigger, shinier, more valuable fish.';
+  if (merged) {
+    fishMerging.buyBtn.textContent = 'Unlocked';
+    fishMerging.buyBtn.disabled = true;
+  } else {
+    fishMerging.buyBtn.textContent = `Unlock — ${FISH_MERGING_UNLOCK_COST} 🏆`;
+    fishMerging.buyBtn.disabled = available < FISH_MERGING_UNLOCK_COST;
+  }
 
-// A purchased fish spawns somewhere actually visible right now — inset a
-// bit from the current camera view's edges, clamped to the overall bounds
-// fish are allowed to roam in — rather than "anywhere in the tank," which
-// could land far off camera and look like the purchase did nothing.
-function randomVisibleSpawnPoint(state) {
-  const { x: camX, y: camY, viewWidth, viewHeight } = state.camera;
-  const insetX = viewWidth * FISH_SPAWN_VIEW_INSET_FRACTION;
-  const insetY = viewHeight * FISH_SPAWN_VIEW_INSET_FRACTION;
-  const minX = Math.max(FISH_MIN_X, camX + insetX);
-  const maxX = Math.min(FISH_MAX_X, camX + viewWidth - insetX);
-  const minY = Math.max(FISH_MIN_Y, camY + insetY);
-  const maxY = Math.min(FISH_MAX_Y, camY + viewHeight - insetY);
-  return {
-    x: minX + Math.random() * Math.max(0, maxX - minX),
-    y: minY + Math.random() * Math.max(0, maxY - minY),
-  };
+  els.tankPointsDisplay.textContent = `🏆 ${available}`;
 }
 
 // Clicking a species icon populates this in-panel preview with its
 // description and the actual Buy action — it doesn't buy directly. That
 // way there's one obvious way to buy, not two (an icon and a per-row
 // button that did the same thing), and no separate modal to open/close.
+// Clicking a species icon arms it as the active click-tool (like a building
+// — see main.js's click handler and Entities.js's trySpawnPurchasedFish) and
+// populates this in-panel preview with its description — there's no
+// separate Buy button/step any more, per direct request: one obvious way to
+// place a fish (click in the tank), not two.
 function selectSpeciesForPreview(state, species) {
   state.debug.selectedSpecies = species.id; // keeps the G debug key in sync with what's being previewed
+  state.ui.selectedTool = `fish:${species.id}`;
   currentPreviewSpecies = species;
   currentPreviewBuilding = null;
   els.previewEmpty.classList.add('hidden');
   els.previewContent.classList.remove('hidden');
-  els.previewBuyBtn.classList.remove('hidden');
+  els.previewHint.textContent = 'Click in the tank to place it';
   els.previewDesc.textContent = species.description;
-  // Name/price text is set live in refreshPreviewBuyButton (called both
-  // here and every frame from updateHUD) since an economy species' price is
-  // dynamic — see Config.js's ECONOMY_FISH_COST_GROWTH_RATE.
-  refreshPreviewBuyButton(state);
+  // Name/price text is set live in refreshPreviewInfo (called both here and
+  // every frame from updateHUD) since an economy species' price is dynamic —
+  // see Config.js's ECONOMY_FISH_COST_GROWTH_RATE.
+  refreshPreviewInfo(state);
   startPreviewAnimation();
+  updateToolbar(state);
 }
 
 // Buildings share the exact same preview window as species (same box, same
-// name/description layout) — just no Buy button, since clicking a building
-// icon arms it as the active build tool immediately rather than requiring a
-// separate purchase step (cost is spent per-tile on placement instead).
+// name/description layout, same "click in the tank to place it" hint) — a
+// building's cost is dynamic now too (see Config.js's BUILDING_COST_INCREMENT),
+// so its name/price text is refreshed the same live way as a species'.
 function selectBuildingForPreview(state, building) {
   currentPreviewBuilding = building;
   currentPreviewSpecies = null;
   stopPreviewAnimation(); // no idle-swim animation for a building — it's a static tile icon
   els.previewEmpty.classList.add('hidden');
   els.previewContent.classList.remove('hidden');
-  els.previewBuyBtn.classList.add('hidden');
-  els.previewName.textContent = `${building.name} — $${building.cost}`;
+  els.previewHint.textContent = 'Click in the tank to place it';
   els.previewDesc.textContent = building.description;
+  refreshPreviewInfo(state);
   renderPreviewCanvas();
   state.ui.selectedTool = `build:${building.id}`;
   updateToolbar(state);
@@ -651,17 +766,16 @@ function renderPreviewCanvas() {
   }
 }
 
-// Re-checked every frame (from updateHUD) so the button/name live-update if
-// money changes, or an economy species' dynamic price shifts (buying one
-// raises it, one dying/combining lowers it), while it happens to be
-// previewed — see Config.js's ECONOMY_FISH_COST_GROWTH_RATE.
-function refreshPreviewBuyButton(state) {
-  if (!currentPreviewSpecies) return;
-  const cost = getFishPurchaseCost(state, currentPreviewSpecies.id);
-  els.previewName.textContent = `${currentPreviewSpecies.name} — $${cost}`;
-  const affordable = state.level.money >= cost;
-  els.previewBuyBtn.disabled = !affordable;
-  els.previewBuyBtn.textContent = affordable ? 'Buy' : "Can't afford";
+// Re-checked every frame (from updateHUD) so the name/price live-update if
+// money changes, or an economy species'/a building's dynamic price shifts,
+// while it happens to be previewed — see Config.js's
+// ECONOMY_FISH_COST_GROWTH_RATE and BUILDING_COST_INCREMENT.
+function refreshPreviewInfo(state) {
+  if (currentPreviewSpecies) {
+    els.previewName.textContent = `${currentPreviewSpecies.name} — $${getFishPurchaseCost(state, currentPreviewSpecies.id)}`;
+  } else if (currentPreviewBuilding) {
+    els.previewName.textContent = `${currentPreviewBuilding.name} — $${getBuildingCost(state, currentPreviewBuilding.id)}`;
+  }
 }
 
 // speciesId -> price-tag <span>, populated by buildShopPanel — lets
@@ -676,8 +790,8 @@ function buildShopPanel(state) {
     const btn = document.createElement('button');
     btn.className = 'species-icon-btn';
     btn.title = species.name;
+    btn.dataset.tool = `fish:${species.id}`;
     btn.style.setProperty('--species-color', FISH_COLORS[species.id] || '#ffffff');
-    if (state.debug.selectedSpecies === species.id) btn.classList.add('selected');
 
     const priceTag = document.createElement('span');
     priceTag.className = 'species-icon-price';
@@ -685,23 +799,28 @@ function buildShopPanel(state) {
     btn.appendChild(priceTag);
     speciesPriceTags[species.id] = priceTag;
 
-    btn.addEventListener('click', () => {
-      for (const b of els.shopGrid.children) b.classList.remove('selected');
-      btn.classList.add('selected');
-      selectSpeciesForPreview(state, species);
-    });
+    btn.addEventListener('click', () => selectSpeciesForPreview(state, species));
 
     els.shopGrid.appendChild(btn);
   }
+  updateToolbar(state); // re-apply .selected to whichever button matches the current tool, if any survive this rebuild
 }
 
-// Called every frame the shop is open (from updateHUD) — only the 3 economy
-// species' prices actually change over time, but it's cheap enough to just
-// refresh every visible tag's text rather than tracking which ones are
-// dynamic separately.
+// Called every frame the shop is open (from updateHUD) — species/building
+// costs can all shift live (economy species' population-based pricing,
+// every building's placed-count-based pricing — see Config.js's
+// ECONOMY_FISH_COST_GROWTH_RATE/BUILDING_COST_INCREMENT), so it's cheap
+// enough to just refresh every visible tag's text rather than tracking which
+// ones are actually dynamic separately.
 function refreshShopPrices(state) {
   for (const speciesId in speciesPriceTags) {
     speciesPriceTags[speciesId].textContent = `$${getFishPurchaseCost(state, speciesId)}`;
+  }
+  for (const buildingId in buildingPriceTags) {
+    buildingPriceTags[buildingId].textContent = `$${getBuildingCost(state, buildingId)}`;
+  }
+  for (const familyId in familyButtons) {
+    refreshFamilyButton(state, familyId);
   }
 }
 
@@ -731,8 +850,8 @@ function playFlash(el, className) {
 // value updateHUD could detect on its own (the attempt is simply refused),
 // so unlike money/cleanliness this needs an explicit call at the point of
 // failure rather than a value-comparison each frame.
-export function flashFoodCapacity() {
-  playFlash(els.food, 'flash-spend');
+export function flashFoodCapacity(state) {
+  playFlash(state.ui.shopCollapsed ? els.food : els.shopFood, 'flash-spend');
 }
 
 export function updateHUD(state) {
@@ -741,32 +860,33 @@ export function updateHUD(state) {
   els.money.textContent = moneyText;
   els.shopMoney.textContent = moneyText;
   const cleanliness = state.level.cleanliness;
-  els.cleanliness.textContent = `✨ ${Math.round(cleanliness)}%`;
+  const cleanlinessText = `✨ ${Math.round(cleanliness)}%`;
+  els.cleanliness.textContent = cleanlinessText;
+  els.shopCleanliness.textContent = cleanlinessText;
   const currentFoodCount = state.level.items.reduce((n, item) => n + (item.type === 'food' ? 1 : 0), 0);
-  els.food.textContent = `🍽️ ${currentFoodCount}/${effectiveFoodCapacity(state)}`;
-  refreshPreviewBuyButton(state);
+  const foodText = `🍽️ ${currentFoodCount}/${effectiveFoodCapacity(state)}`;
+  els.food.textContent = foodText;
+  els.shopFood.textContent = foodText;
+  refreshPreviewInfo(state);
   if (!state.ui.shopCollapsed) refreshShopPrices(state);
   if (moundMenuOpen) refreshMoundThrowButton(state);
   if (moundMenuOpen || moundMenuClosing) updateMoundMenuPosition(state); // keeps tracking through the shrink-back so it doesn't jump right as it starts closing
   if (!state.ui.tankPanelCollapsed) refreshTankPanel(state);
 
+  // The shop sits open most of the game now, so it carries its own copy of
+  // every readout that flashes (money already did; food/cleanliness follow
+  // the same pattern) — only flash whichever copy is actually visible right
+  // now, since a display:none element doesn't run CSS animations at all and
+  // would just leave the class stuck there unfired, waiting to wrongly
+  // replay the next time the shop toggles.
+  const shopOpen = !state.ui.shopCollapsed;
   if (lastMoney !== null && money !== lastMoney) {
-    const className = money > lastMoney ? 'flash-pickup' : 'flash-spend';
-    // Only flash whichever readout is actually visible right now — a
-    // display:none element doesn't run CSS animations at all, so flashing
-    // the hidden one would just leave the class stuck there unfired,
-    // waiting to wrongly replay the next time the shop toggles.
-    playFlash(state.ui.shopCollapsed ? els.money : els.shopMoney, className);
+    playFlash(shopOpen ? els.shopMoney : els.money, money > lastMoney ? 'flash-pickup' : 'flash-spend');
   }
   lastMoney = money;
 
-  // Cleanliness has no shop-panel duplicate to redirect to the way money
-  // does — flashing #hud-cleanliness while the shop panel has it hidden
-  // just silently doesn't animate (same graceful no-op every hidden-element
-  // flash already degrades to), rather than growing a second readout only
-  // for this.
   if (lastCleanliness !== null && cleanliness !== lastCleanliness) {
-    playFlash(els.cleanliness, cleanliness > lastCleanliness ? 'flash-pickup' : 'flash-spend');
+    playFlash(shopOpen ? els.shopCleanliness : els.cleanliness, cleanliness > lastCleanliness ? 'flash-pickup' : 'flash-spend');
   }
   lastCleanliness = cleanliness;
 }

@@ -12,6 +12,33 @@ html, body {
   cursor: crosshair;
 }
 
+/* One-shot title splash, played once on load — bounces/splashes onto screen
+   then slowly fades, per direct request. Pure decoration: pointer-events
+   none so it never blocks the very first click, and main.js removes the
+   element entirely once the animation finishes (see its 'animationend'
+   listener) rather than leaving a hidden node sitting on top of everything. */
+#splash-screen {
+  position: fixed; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  z-index: 500;
+  pointer-events: none;
+}
+#splash-title {
+  font-size: 64px; font-weight: 900;
+  color: #fff6ea;
+  text-shadow: 0 0 24px rgba(255, 111, 174, 0.8), 0 6px 0 #c25f8f, 0 10px 18px rgba(0, 0, 0, 0.35);
+  animation: splash-bounce-in 3.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+@keyframes splash-bounce-in {
+  0% { transform: scale(0.2) translateY(-140px); opacity: 0; }
+  35% { transform: scale(1.15) translateY(10px); opacity: 1; }
+  48% { transform: scale(0.92) translateY(-6px); opacity: 1; }
+  60% { transform: scale(1.04) translateY(2px); opacity: 1; }
+  70% { transform: scale(1) translateY(0); opacity: 1; }
+  85% { transform: scale(1) translateY(0); opacity: 1; }
+  100% { transform: scale(1) translateY(0); opacity: 0; }
+}
+
 #hud {
   /* right offset clears the collapsed shop panel — it renders a bit wider
      than its 56px width due to the reserved scrollbar gutter, so this
@@ -134,7 +161,7 @@ html, body {
   pointer-events: none;
 }
 #shop-panel.collapsed #shop-header,
-#shop-panel.collapsed #shop-money,
+#shop-panel.collapsed #shop-hud,
 #shop-panel.collapsed #shop-preview,
 #shop-panel.collapsed #tool-bar,
 #shop-panel.collapsed #tool-tooltip,
@@ -153,15 +180,24 @@ html, body {
 }
 #shop-header, #tank-header { font-size: 17px; font-weight: 800; color: #c25f8f; }
 
-#shop-money, #tank-points-display {
-  display: inline-block;
-  background: #fff6ea;
-  font-size: 15px; font-weight: 800;
-  padding: 7px 14px;
-  border-radius: 999px;
-  box-shadow: 0 2px 8px rgba(107, 76, 107, 0.15);
+/* The shop sits open most of the game now, so it carries its own copy of
+   every main-HUD readout (money/food/cleanliness) rather than relying on
+   #hud, which is hidden while the shop panel is expanded — see UI.js's
+   updateHUD, which writes to whichever set is actually visible and redirects
+   the flash-pickup/flash-spend animations there too. */
+#shop-hud {
+  display: flex; flex-wrap: wrap; gap: 8px;
   margin-bottom: 14px;
 }
+#shop-money, #shop-food, #shop-cleanliness, #tank-points-display {
+  display: inline-block;
+  background: #fff6ea;
+  font-size: 13px; font-weight: 800;
+  padding: 7px 12px;
+  border-radius: 999px;
+  box-shadow: 0 2px 8px rgba(107, 76, 107, 0.15);
+}
+#tank-points-display { margin-bottom: 14px; }
 
 /* Generic "good change: green flash + bouncy pop" / "bad change: red flash +
    multi-axis shake" pair (translate AND rotate, not just side to side) —
@@ -209,14 +245,43 @@ html, body {
 .tool-btn:hover { transform: scale(1.06); }
 .tool-btn.selected { border-color: #ffb84d; background: #fff3d9; }
 .tool-icon { display: block; border-radius: 50%; }
-.tool-icon-food { width: 16px; height: 16px; background: #8bc34a; box-shadow: 0 0 0 4px rgba(139, 195, 74, 0.3); }
+.tool-icon-food { width: 16px; height: 16px; background: #ffb238; box-shadow: 0 0 0 4px rgba(255, 178, 56, 0.3); } /* matches Config.js's FOOD_COLOR — was a green too close to Waste's own color to tell apart at a glance */
 .tool-icon-demolish { width: 16px; height: 16px; background: #ff6b6b; box-shadow: 0 0 0 4px rgba(255, 107, 107, 0.3); } /* red, distinct from Food's green — a destructive action, not a placement one */
 
 #build-tool-grid {
   display: flex; flex-wrap: wrap; gap: 8px;
 }
-.tool-btn-build { background: var(--tile-color, #ccc); opacity: 0.92; }
+.tool-btn-build {
+  position: relative; /* anchors .building-icon-price and .tool-btn-family-dots */
+  background: var(--tile-color, #ccc); opacity: 0.92;
+}
 .tool-btn-build.selected { opacity: 1; }
+.building-icon-price {
+  position: absolute; bottom: -8px; left: 50%;
+  transform: translateX(-50%);
+  background: #fff8f0; color: #6b4c6b;
+  font-size: 9px; font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 999px;
+  box-shadow: 0 1px 4px rgba(107, 76, 107, 0.3);
+  white-space: nowrap;
+}
+/* A family slot (the 3 Fan tiers stacked into one button — see Config.js's
+   BUILDING_FAMILIES) shows one small dot per unlocked tier in that family,
+   the current one filled in solid, so "there's more than one option here,
+   click again to cycle" reads at a glance without needing a tooltip. */
+.tool-btn-family-dots {
+  position: absolute; top: -5px; left: 50%;
+  transform: translateX(-50%);
+  display: flex; gap: 2px;
+}
+.tool-btn-family-dots span {
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.5);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.25);
+}
+.tool-btn-family-dots span.current { background: #ffb84d; }
 
 .tool-tooltip {
   display: block;
@@ -310,19 +375,14 @@ html, body {
   font-size: 11px; line-height: 1.4; opacity: 0.85; margin-top: 2px;
   overflow: hidden; /* clip rather than grow the fixed-height box, if a future longer description would otherwise overflow */
 }
-#shop-preview-buy {
+/* No Buy button any more — a fish is armed as the active click-tool exactly
+   like a building is (see UI.js's selectSpeciesForPreview/main.js's click
+   handler), so the preview is read-only info plus this one hint line. */
+#shop-preview-hint {
   margin-top: auto; /* pins to the bottom of the fixed-height column no matter how tall the description above it is */
-  width: 100%;
-  background: #8fe0b8; color: #1f4a34; border: none; border-radius: 12px;
-  padding: 9px; cursor: pointer; font-size: 14px; font-weight: 800;
-  box-shadow: 0 2px 6px rgba(53, 145, 97, 0.3);
-  transition: transform 0.1s ease, background 0.1s ease;
+  text-align: center;
+  font-size: 11px; font-weight: 700; opacity: 0.6;
 }
-#shop-preview-buy:hover { background: #7ad4a8; transform: scale(1.02); }
-#shop-preview-buy:disabled {
-  background: #e6dcd0; color: #a99; opacity: 0.7; cursor: not-allowed; box-shadow: none; transform: none;
-}
-#shop-preview-buy.hidden { display: none; } /* buildings use this same preview window but arm on click instead of a separate buy step */
 
 /* Tank Upgrades panel — three cards (Food Quality, Fish Movement, locked
    Defensive Capabilities), each with a level readout, a description of the

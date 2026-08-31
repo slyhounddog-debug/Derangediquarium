@@ -8,6 +8,7 @@ import {
   SPECIES_LIST,
   BUILDING_LIST,
   BUILDING_TYPES,
+  FISH_COLORS,
   FISH_BASE_SIZE,
   HUNGER_SEEK_THRESHOLD,
   HUNGER_CRITICAL_THRESHOLD,
@@ -36,9 +37,11 @@ import { updateStoryTriggers } from './Systems.js';
 import {
   updateEntities,
   trySpawnFood,
+  trySpawnPurchasedFish,
   tryBankCoinAt,
   spawnFishCheat,
   getCoinColor,
+  getFishPurchaseCost,
   findFishAt,
   isCombinableFish,
   canCombineFish,
@@ -53,6 +56,7 @@ import {
   worldToTile,
   angleFromTileToPoint,
   canPlaceTile,
+  getBuildingCost,
   getTile,
 } from './Grid.js';
 import { isPointOnMound, crackMound, renderMound, centerCameraOnMound } from './Mound.js';
@@ -74,6 +78,13 @@ import {
 
 const canvas = document.getElementById('game-canvas');
 const ctx = canvas.getContext('2d');
+
+// One-shot title splash (see index.html/style.css's #splash-screen) — pure
+// CSS animation, this just removes the element once it's done playing
+// rather than leaving a hidden pointer-events:none node parked on top of
+// everything forever.
+const splashScreen = document.getElementById('splash-screen');
+splashScreen.querySelector('#splash-title').addEventListener('animationend', () => splashScreen.remove());
 
 // ---- Root state (§3.1) — plain, JSON-serializable, meta/level split ----
 const state = {
@@ -153,7 +164,7 @@ input.mouseDownHandlers.push((sx, sy) => {
   if (state.ui.paused) return;
   const world = screenToWorld(sx, sy, state.camera);
   const fish = findFishAt(state, world.x, world.y);
-  if (fish && isCombinableFish(fish)) {
+  if (fish && isCombinableFish(state, fish)) {
     draggedFishId = fish.id;
     fishDragArmed = true;
   }
@@ -164,7 +175,7 @@ input.mouseUpHandlers.push((sx, sy) => {
   const world = screenToWorld(sx, sy, state.camera);
   const dragged = state.level.entities.find((e) => e.id === draggedFishId);
   const target = findFishAt(state, world.x, world.y, draggedFishId);
-  if (dragged && target && canCombineFish(dragged, target)) {
+  if (dragged && target && canCombineFish(state, dragged, target)) {
     combineFish(state, dragged, target);
   }
   draggedFishId = null;
@@ -220,7 +231,15 @@ input.clickHandlers.push((sx, sy) => {
   if (isPointOnMound(state, world.x, world.y)) { openMoundMenu(state); return; } // opens the "Throw money at it" popup — see UI.js
   if (tryBankCoinAt(state, world.x, world.y)) return; // clicking a coin always banks it, regardless of selected tool
   if (state.ui.selectedTool === 'food') {
-    if (trySpawnFood(state, world.x, world.y) === 'capacity_full') flashFoodCapacity();
+    if (trySpawnFood(state, world.x, world.y) === 'capacity_full') flashFoodCapacity(state);
+    return;
+  }
+  // A purchased fish is placed with a click, exactly like a building — see
+  // Entities.js's trySpawnPurchasedFish and UI.js's selectSpeciesForPreview
+  // (which sets this tool instead of arming a Buy button any more).
+  if (state.ui.selectedTool.startsWith('fish:')) {
+    trySpawnPurchasedFish(state, state.ui.selectedTool.slice('fish:'.length), world.x, world.y);
+    return;
   }
   // Non-fan build-mode placement doesn't happen here — see the mousedown/
   // drag handling in update() below, which also covers a single un-dragged
@@ -438,23 +457,39 @@ function render() {
     // Ghost-mode preview of whatever's under the cursor, plus the refund
     // it'll pay out — TILE_REFUND_FRACTION is 1.0 (a full refund) per
     // direct request, since removal now requires deliberately picking this
-    // tool rather than being an always-available right-click.
+    // tool rather than being an always-available right-click. Refund is read
+    // off the tile's current live/dynamic cost (getBuildingCost), matching
+    // what removeTile actually pays out — see Grid.js's comment there.
     const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
     const { col, row } = worldToTile(world.x, world.y);
     const tile = getTile(state.level.grid, col, row);
     if (tile && tile !== TILE_EMPTY) {
-      const building = BUILDING_TYPES[tile];
       const screen = worldToScreen(col * TILE_SIZE, row * TILE_SIZE, state.camera);
       const size = TILE_SIZE * state.camera.zoom;
       ctx.globalAlpha = 0.5;
       ctx.fillStyle = '#ff6b6b';
       ctx.fillRect(screen.x, screen.y, size, size);
       ctx.globalAlpha = 1;
-      const refund = Math.floor(building.cost * TILE_REFUND_FRACTION);
+      const refund = Math.floor(getBuildingCost(state, tile) * TILE_REFUND_FRACTION);
       ctx.fillStyle = '#ffffff';
       ctx.font = 'bold 12px sans-serif';
       ctx.fillText(`+$${refund}`, screen.x + 2, screen.y - 4);
     }
+  } else if (state.ui.selectedTool.startsWith('fish:') && input.mouse.inside && !state.ui.paused) {
+    // Same visual language as a building ghost — translucent, green if this
+    // click would actually place the fish, red if not (unaffordable, or
+    // inside the seabed city where a fish could never actually reach/stay).
+    const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
+    const speciesId = state.ui.selectedTool.slice('fish:'.length);
+    const affordable = state.level.money >= getFishPurchaseCost(state, speciesId);
+    const ok = affordable && world.y < SEABED_FLOOR_Y;
+    const screen = worldToScreen(world.x, world.y, state.camera);
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = ok ? (FISH_COLORS[speciesId] || '#ffffff') : '#ff6b6b';
+    ctx.beginPath();
+    ctx.arc(screen.x, screen.y, (FISH_BASE_SIZE / 2) * state.camera.zoom, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 1;
   }
 
   for (const item of state.level.items) {
@@ -493,7 +528,7 @@ function render() {
       const hoverTarget = findFishAt(state, cursorWorld.x, cursorWorld.y, draggedFishId);
       if (hoverTarget) {
         combineHoverTargetId = hoverTarget.id;
-        combineHoverValid = canCombineFish(dragged, hoverTarget);
+        combineHoverValid = canCombineFish(state, dragged, hoverTarget);
       }
     }
   }

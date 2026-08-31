@@ -42,6 +42,10 @@ import {
   AUTO_FEEDER_INTAKE_RADIUS,
   AUTO_FEEDER_PROCESS_DURATION_MS,
   AUTO_FEEDER_PORT_OFFSET_FRACTION,
+  COLLECTOR_INTAKE_RADIUS,
+  INTAKE_SIDE_MIN_DOT_FRACTION,
+  PLATFORM_FLAT_COST,
+  BUILDING_COST_INCREMENT,
   NOTIFICATION_LOG_MAX,
   CLEANLINESS_MAX,
   CLEANLINESS_PER_WASTE_EVENT,
@@ -139,6 +143,32 @@ function isAnchored(grid, col, row, buildingId) {
   return false;
 }
 
+// Live count of tiles of one exact type currently on the grid — what
+// getBuildingCost scales off of. Counted fresh every call rather than
+// tracked as a running counter, same "no separate bookkeeping to keep in
+// sync" approach the Economy Fish dynamic pricing already uses (a demolished
+// tile brings the next one's price back down automatically).
+function countPlacedOfType(grid, buildingId) {
+  let n = 0;
+  for (let r = SEABED_ROW_START; r < WORLD_TILES_H; r++) {
+    for (let c = 0; c < WORLD_TILES_W; c++) {
+      if (grid[r][c] === buildingId) n++;
+    }
+  }
+  return n;
+}
+
+// Every building's live shop cost — Platform is a flat PLATFORM_FLAT_COST
+// regardless of how many exist; every other building's cost climbs by
+// BUILDING_COST_INCREMENT for each tile of that exact type already placed —
+// see Config.js's comment above BUILDING_TYPES for the full rationale.
+export function getBuildingCost(state, buildingId) {
+  const building = BUILDING_TYPES[buildingId];
+  if (!building) return Infinity;
+  if (buildingId === TILE_PLATFORM) return PLATFORM_FLAT_COST;
+  return building.cost + BUILDING_COST_INCREMENT * countPlacedOfType(state.level.grid, buildingId);
+}
+
 // Returns { ok, reason } rather than a bare bool so the build-mode UI can
 // show *why* a placement is invalid (ghost preview tint, tooltip, etc).
 export function canPlaceTile(state, col, row, buildingId) {
@@ -148,7 +178,7 @@ export function canPlaceTile(state, col, row, buildingId) {
   if (state.level.grid[row][col] !== TILE_EMPTY) return { ok: false, reason: 'occupied' };
   const building = BUILDING_TYPES[buildingId];
   if (!building) return { ok: false, reason: 'unknown building' };
-  if (state.level.money < building.cost) return { ok: false, reason: 'cannot afford' };
+  if (state.level.money < getBuildingCost(state, buildingId)) return { ok: false, reason: 'cannot afford' };
   if (!isAnchored(state.level.grid, col, row, buildingId)) {
     return { ok: false, reason: 'must be anchored to a Platform or the seabed floor' };
   }
@@ -156,19 +186,24 @@ export function canPlaceTile(state, col, row, buildingId) {
 }
 
 // `angle` (radians, atan2 convention: 0 = +x/right, +y is down) is only
-// meaningful for Fans and the Auto-Feeder — it's the direction locked in at
-// placement (see UI/main.js's build-drag, which derives it from the cursor's
-// exact sub-tile position). Stored in state.level.buildingData, keyed by
-// "row,col", since the grid array itself only holds a bare type id string.
+// meaningful for Fans, the Collector, and the Auto-Feeder — it's the
+// direction locked in at placement (see UI/main.js's build-drag, which
+// derives it from the cursor's exact sub-tile position). Stored in
+// state.level.buildingData, keyed by "row,col", since the grid array itself
+// only holds a bare type id string. The Collector's angle works exactly like
+// the Auto-Feeder's: aim = output side, intake is directly opposite — see
+// updateBuildings' collector intake scan below.
 export function placeTile(state, col, row, buildingId, angle = 0) {
   const check = canPlaceTile(state, col, row, buildingId);
   if (!check.ok) return false;
-  state.level.money -= BUILDING_TYPES[buildingId].cost;
+  state.level.money -= getBuildingCost(state, buildingId);
   state.level.grid[row][col] = buildingId;
   if (FAN_TILES.has(buildingId)) {
     state.level.buildingData[buildingKey(col, row)] = { type: buildingId, angle };
   } else if (buildingId === TILE_AUTO_FEEDER) {
     state.level.buildingData[buildingKey(col, row)] = { type: buildingId, angle, absorbing: false, progressMs: 0 };
+  } else if (buildingId === TILE_COLLECTOR) {
+    state.level.buildingData[buildingKey(col, row)] = { type: buildingId, angle };
   }
   if (!state.level.tutorialFlags.firstBuildingPlaced) {
     state.level.tutorialFlags.firstBuildingPlaced = true;
@@ -181,17 +216,23 @@ export function placeTile(state, col, row, buildingId, angle = 0) {
   return true;
 }
 
-// Refunds a fraction of the removed building's cost — never removes a tile
-// an item happens to be riding mid-tick; physics only ever reads the grid at
-// the start of an item's step, so a same-tick removal is safe either way.
+// Refunds a fraction of the removed building's cost — computed off its
+// current live cost (getBuildingCost, evaluated before this tile is actually
+// removed from the count) rather than its static base cost, so a full-refund
+// (TILE_REFUND_FRACTION = 1.0) place-then-immediately-demolish stays exactly
+// cost-neutral even at a higher placed count, instead of refunding less than
+// the dynamic price actually paid. Never removes a tile an item happens to
+// be riding mid-tick; physics only ever reads the grid at the start of an
+// item's step, so a same-tick removal is safe either way.
 export function removeTile(state, col, row) {
   if (row < SEABED_ROW_START || row >= WORLD_TILES_H || col < 0 || col >= WORLD_TILES_W) return false;
   const existing = state.level.grid[row][col];
   if (existing === TILE_EMPTY) return false;
   const building = BUILDING_TYPES[existing];
+  const liveCost = getBuildingCost(state, existing);
   state.level.grid[row][col] = TILE_EMPTY;
   delete state.level.buildingData[buildingKey(col, row)];
-  if (building) state.level.money += Math.floor(building.cost * TILE_REFUND_FRACTION);
+  if (building) state.level.money += Math.floor(liveCost * TILE_REFUND_FRACTION);
   return true;
 }
 
@@ -212,7 +253,7 @@ export function cycleTileCheat(state, worldX, worldY) {
   const next = CHEAT_CYCLE[(idx + 1) % CHEAT_CYCLE.length];
   state.level.grid[row][col] = next;
   delete state.level.buildingData[buildingKey(col, row)];
-  if (FAN_TILES.has(next)) {
+  if (FAN_TILES.has(next) || next === TILE_COLLECTOR) {
     state.level.buildingData[buildingKey(col, row)] = { type: next, angle: CHEAT_DEFAULT_ANGLE };
   } else if (next === TILE_AUTO_FEEDER) {
     state.level.buildingData[buildingKey(col, row)] = { type: next, angle: CHEAT_DEFAULT_ANGLE, absorbing: false, progressMs: 0 };
@@ -351,24 +392,17 @@ function sweepVertical(item, grid, dy) {
   return { landed: false };
 }
 
-// A Collector doesn't bank an item the instant it lands — it starts a
-// COLLECTOR_PROCESS_DURATION_MS hold (see stepCollectorProcessing), visibly
-// drawing the item in toward the tile's center first. A Platform/Fan/
-// Auto-Feeder just holds it (a Fan pointed away from vertical will actively
-// blow it back off, since the force field still applies to anything resting
-// in its cone). Ramps never reach here — they're not in SOLID_TILES, so
-// sweepVertical never reports a "landing" on one (see applyRampNudge
-// instead).
-function handleLanding(item, grid, tile, row, col) {
-  if (tile === TILE_COLLECTOR) {
-    item.collectorCenterX = col * TILE_SIZE + TILE_SIZE / 2;
-    item.collectorCenterY = row * TILE_SIZE + TILE_SIZE / 2;
-    item.collectorProgressMs = 0;
-    item.collectorOriginalMass = item.mass;
-    item.mass = COLLECTOR_PROCESSING_MASS; // barely budges if something else piles into it mid-process — see Config.js's comment
-    return 'processing';
-  }
-  return 'resting'; // TILE_PLATFORM, a Fan, the Auto-Feeder, or the implicit world-boundary wall
+// A landing on top of any solid tile — including a Collector now — just
+// rests there, the same as a Platform. A Collector no longer starts
+// processing purely from something landing on top of it; per direct request,
+// it only pulls items in from its designated intake side (see
+// beginCollectorProcessing/updateBuildings' Collector scan below), the same
+// way the Auto-Feeder already worked — top-landing isn't a valid entry
+// point for either any more. Ramps never reach here — they're not in
+// SOLID_TILES, so sweepVertical never reports a "landing" on one (see
+// applyRampNudge instead).
+function handleLanding() {
+  return 'resting'; // TILE_PLATFORM, a Collector, a Fan, the Auto-Feeder, or the implicit world-boundary wall
 }
 
 // Runs every tick an item is mid-collection instead of the normal
@@ -429,42 +463,99 @@ export function stepItemOnGrid(item, state, dt, physics) {
 
   // Vertical: swept tile landing, same as before.
   const result = sweepVertical(item, grid, item.vy * dt);
-  if (result.landed) return handleLanding(item, grid, result.tile, result.row, result.col);
+  if (result.landed) return handleLanding();
 
   return 'falling';
 }
 
-// ---- Auto-Feeder ----
+// Whether an item at (itemX, itemY) is both within `radius` of a directional
+// building's intake point AND actually approaching from that side of the
+// tile — not merely close to the port coordinate, which (given the port sits
+// only AUTO_FEEDER_PORT_OFFSET_FRACTION of a tile out from center) could
+// otherwise still be satisfied by an item resting on top of the tile or
+// drifting in from another side entirely. `angle` is the building's
+// aim/output direction; the intake is the opposite side, so an item's offset
+// from the tile's CENTER (not the port) is checked against -angle via a
+// normalized dot product — per direct request that items shouldn't be
+// pulled in "through the building" or land on it from the top and get
+// vacuumed up regardless of side.
+function isOnIntakeSide(centerX, centerY, angle, intakeX, intakeY, itemX, itemY, radius) {
+  if (Math.hypot(itemX - intakeX, itemY - intakeY) > radius) return false;
+  const dx = itemX - centerX;
+  const dy = itemY - centerY;
+  const dist = Math.hypot(dx, dy) || 1;
+  const dot = (dx * -Math.cos(angle) + dy * -Math.sin(angle)) / dist; // -1..1, 1 = dead-on the intake side
+  return dot >= INTAKE_SIDE_MIN_DOT_FRACTION;
+}
+
+// Starts the same pull-to-center hold stepCollectorProcessing eases through
+// every tick — previously only ever kicked off by a top-landing event
+// (handleLanding); now triggered by updateBuildings' intake scan below
+// instead, since a Collector no longer accepts a plain top-landing as a
+// valid entry at all.
+function beginCollectorProcessing(item, centerX, centerY) {
+  item.collectorCenterX = centerX;
+  item.collectorCenterY = centerY;
+  item.collectorProgressMs = 0;
+  item.collectorOriginalMass = item.mass;
+  item.mass = COLLECTOR_PROCESSING_MASS; // barely budges if something else piles into it mid-process — see Config.js's comment
+}
+
+// ---- Collector + Auto-Feeder intake scans ----
 // Ticked once per frame from Entities.js's updateEntities (alongside
-// resolveItemCollisions) — separate from the event-driven Collector because
-// this needs to actively scan for nearby Waste rather than wait for
-// something to land on it. Directly removes absorbed Waste from
-// state.level.items (an exception to the usual "Grid.js returns a status,
-// Entities.js mutates the array" split — justified the same way
+// resolveItemCollisions) — both are scan-driven rather than landing-event-
+// driven, since each needs to actively pull in whatever's nearby on its
+// intake side rather than wait for something to fall onto its top. The
+// Collector directly mutates matched items in place (beginCollectorProcessing
+// above; stepItemOnGrid picks the hold up on that item's own next per-tick
+// step, same as it always has). The Auto-Feeder directly removes absorbed
+// Waste from state.level.items (an exception to the usual "Grid.js returns a
+// status, Entities.js mutates the array" split — justified the same way
 // resolveItemCollisions already directly mutates item positions/velocities
 // in place). Newly-dispensed Food is NOT created here, to avoid a circular
 // import with Entities.js's createFood — instead this returns an array of
 // spawn points `{ x, y }` for the caller to actually construct.
 export function updateBuildings(state, dtMs) {
   const spawnPoints = [];
+  const items = state.level.items;
   for (const key in state.level.buildingData) {
     const data = state.level.buildingData[key];
-    if (data.type !== TILE_AUTO_FEEDER) continue;
     const [row, col] = key.split(',').map(Number);
     const centerX = col * TILE_SIZE + TILE_SIZE / 2;
     const centerY = row * TILE_SIZE + TILE_SIZE / 2;
     const intakeX = centerX - Math.cos(data.angle) * TILE_SIZE * AUTO_FEEDER_PORT_OFFSET_FRACTION;
     const intakeY = centerY - Math.sin(data.angle) * TILE_SIZE * AUTO_FEEDER_PORT_OFFSET_FRACTION;
+
+    if (data.type === TILE_COLLECTOR) {
+      // Only one item processes at a time per Collector — skip the scan
+      // entirely if this tile already has one mid-hold, so a second item
+      // drifting into range while the first is still easing toward center
+      // doesn't also get pulled onto the same spot.
+      const alreadyProcessing = items.some(
+        (it) => it.collectorProgressMs != null && it.collectorCenterX === centerX && it.collectorCenterY === centerY
+      );
+      if (!alreadyProcessing) {
+        for (let i = 0; i < items.length; i++) {
+          const it = items[i];
+          if (it.collectorProgressMs != null) continue;
+          if (isOnIntakeSide(centerX, centerY, data.angle, intakeX, intakeY, it.x, it.y, COLLECTOR_INTAKE_RADIUS)) {
+            beginCollectorProcessing(it, centerX, centerY);
+            break;
+          }
+        }
+      }
+      continue;
+    }
+
+    if (data.type !== TILE_AUTO_FEEDER) continue;
     const outputX = centerX + Math.cos(data.angle) * TILE_SIZE * AUTO_FEEDER_PORT_OFFSET_FRACTION;
     const outputY = centerY + Math.sin(data.angle) * TILE_SIZE * AUTO_FEEDER_PORT_OFFSET_FRACTION;
 
     if (!data.absorbing) {
-      const items = state.level.items;
       for (let i = 0; i < items.length; i++) {
         const it = items[i];
         if (it.type !== 'waste') continue;
-        const d = Math.hypot(it.x - intakeX, it.y - intakeY);
-        if (d <= AUTO_FEEDER_INTAKE_RADIUS) {
+        if (isOnIntakeSide(centerX, centerY, data.angle, intakeX, intakeY, it.x, it.y, AUTO_FEEDER_INTAKE_RADIUS)) {
           items.splice(i, 1);
           // "Buildings" pushing cleanliness back up (see CLAUDE.md's
           // Cleanliness section) — the Auto-Feeder is the one currently
@@ -675,7 +766,7 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
       const size = TILE_SIZE * camera.zoom;
       const data = state.level.buildingData[buildingKey(col, row)];
       renderTileShape(ctx, type, building.color, screen.x, screen.y, size, data);
-      if (data && (FAN_TILES.has(type) || type === TILE_AUTO_FEEDER)) {
+      if (data && (FAN_TILES.has(type) || type === TILE_AUTO_FEEDER || type === TILE_COLLECTOR)) {
         renderDirectionIndicator(ctx, type, screen.x, screen.y, size, data.angle, camera.zoom);
       }
     }
@@ -722,9 +813,25 @@ function renderTileShape(ctx, type, color, x, y, size) {
   }
 }
 
-// Draws a small arrow (Fan aim) or an intake/output arrow pair (Auto-Feeder)
-// plus, for Fans, a translucent cone showing their live area of effect —
-// makes the invisible force field/routing direction actually visible.
+// A small filled triangle at (tipX, tipY), pointing along `angle` — the
+// arrowhead cap shared by every direction indicator below.
+function drawArrowhead(ctx, tipX, tipY, angle, headSize) {
+  ctx.beginPath();
+  ctx.moveTo(tipX, tipY);
+  ctx.lineTo(tipX - Math.cos(angle - 0.5) * headSize, tipY - Math.sin(angle - 0.5) * headSize);
+  ctx.lineTo(tipX - Math.cos(angle + 0.5) * headSize, tipY - Math.sin(angle + 0.5) * headSize);
+  ctx.closePath();
+  ctx.fill();
+}
+
+// Fans get a single small aim arrow plus their translucent force cone — a
+// Fan has no "intake," it's a pure emitter. The Collector and Auto-Feeder
+// instead get two distinct arrows: a dark one pointing OUT from center along
+// `angle` (the output side) and a cyan one pointing IN toward center from
+// the opposite side (the intake side, where an item actually has to be to
+// get pulled in — see Grid.js's isOnIntakeSide) — two different colors/
+// directions so which side is which reads at a glance, per direct request,
+// rather than one generic arrow implying a single direction.
 function renderDirectionIndicator(ctx, type, x, y, size, angle, zoom) {
   const cx = x + size / 2;
   const cy = y + size / 2;
@@ -740,15 +847,49 @@ function renderDirectionIndicator(ctx, type, x, y, size, angle, zoom) {
     ctx.closePath();
     ctx.fill();
     ctx.restore();
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
+    ctx.lineWidth = Math.max(1, 2 * zoom);
+    ctx.beginPath();
+    const len = size * 0.32;
+    ctx.moveTo(cx - Math.cos(angle) * len * 0.4, cy - Math.sin(angle) * len * 0.4);
+    ctx.lineTo(cx + Math.cos(angle) * len, cy + Math.sin(angle) * len);
+    ctx.stroke();
+    ctx.restore();
+    return;
   }
+
+  const armLen = size * 0.34;
+  const headSize = Math.max(2, size * 0.12);
   ctx.save();
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
   ctx.lineWidth = Math.max(1, 2 * zoom);
+
+  // Output — points away from center, toward the tile's edge.
+  ctx.strokeStyle = 'rgba(20, 20, 20, 0.7)';
+  ctx.fillStyle = 'rgba(20, 20, 20, 0.7)';
+  const outX = cx + Math.cos(angle) * armLen;
+  const outY = cy + Math.sin(angle) * armLen;
   ctx.beginPath();
-  const len = size * 0.32;
-  ctx.moveTo(cx - Math.cos(angle) * len * 0.4, cy - Math.sin(angle) * len * 0.4);
-  ctx.lineTo(cx + Math.cos(angle) * len, cy + Math.sin(angle) * len);
+  ctx.moveTo(cx, cy);
+  ctx.lineTo(outX, outY);
   ctx.stroke();
+  drawArrowhead(ctx, outX, outY, angle, headSize);
+
+  // Intake — points toward center from the opposite side, stopping short of
+  // dead-center so it doesn't collide with the Collector's own center-circle
+  // render (renderTileShape).
+  ctx.strokeStyle = 'rgba(90, 220, 255, 0.9)';
+  ctx.fillStyle = 'rgba(90, 220, 255, 0.9)';
+  const inStartX = cx - Math.cos(angle) * armLen;
+  const inStartY = cy - Math.sin(angle) * armLen;
+  const inTipX = cx - Math.cos(angle) * armLen * 0.3;
+  const inTipY = cy - Math.sin(angle) * armLen * 0.3;
+  ctx.beginPath();
+  ctx.moveTo(inStartX, inStartY);
+  ctx.lineTo(inTipX, inTipY);
+  ctx.stroke();
+  drawArrowhead(ctx, inTipX, inTipY, angle, headSize);
   ctx.restore();
 }
 
@@ -766,7 +907,7 @@ export function renderBuildGhost(ctx, state, worldX, worldY, buildingId, angle) 
   ctx.fillStyle = check.ok ? '#8fe0b8' : '#ff6b6b';
   ctx.fillRect(screen.x, screen.y, size, size);
   ctx.globalAlpha = 1;
-  if (check.ok && (FAN_TILES.has(buildingId) || buildingId === TILE_AUTO_FEEDER)) {
+  if (check.ok && (FAN_TILES.has(buildingId) || buildingId === TILE_AUTO_FEEDER || buildingId === TILE_COLLECTOR)) {
     renderDirectionIndicator(ctx, buildingId, screen.x, screen.y, size, angle, state.camera.zoom);
   }
 }

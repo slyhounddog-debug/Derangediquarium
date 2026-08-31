@@ -9,6 +9,8 @@
 <body>
 <canvas id="game-canvas"></canvas>
 
+<div id="splash-screen"><div id="splash-title">Derangiquarium</div></div>
+
 <div id="hud">
   <div id="hud-money" title="Money — spend it on fish and food in the shop">💰 $0</div>
   <div id="hud-food" title="Food on screen — capped by your Food Capacity Tank Upgrade">🍽️ 0/2</div>
@@ -29,10 +31,14 @@
   <div id="shop-header-row">
     <div id="shop-header">Shop</div>
   </div>
-  <div id="shop-money">💰 $0</div>
+  <div id="shop-hud">
+    <div id="shop-money">💰 $0</div>
+    <div id="shop-food">🍽️ 0/2</div>
+    <div id="shop-cleanliness">✨ 100%</div>
+  </div>
 
   <div id="shop-preview">
-    <div id="shop-preview-empty">Tap a fish below to see it here!</div>
+    <div id="shop-preview-empty">Tap a fish or building below to see it here!</div>
     <div id="shop-preview-content" class="hidden">
       <div id="shop-preview-top">
         <canvas id="shop-preview-canvas" width="60" height="60"></canvas>
@@ -41,7 +47,7 @@
           <div id="shop-preview-desc"></div>
         </div>
       </div>
-      <button id="shop-preview-buy">Buy</button>
+      <div id="shop-preview-hint">Click in the tank to place it</div>
     </div>
   </div>
 

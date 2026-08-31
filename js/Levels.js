@@ -64,7 +64,7 @@ export function loadLevel(state, levelId) {
     moundTeased: false, // has the Mound's first "throw money" attempt already happened this level? — see Mound.js's crackMound/getMoundNextCost. No longer a no-op joke — it grants the Rudimentary Fan (the "Tier 1.5" step), still without advancing state.level.tier
     notifications: [{ id: 1, text: WELCOME_MESSAGE, elapsed: 0 }], // rolling log for UI.js's ticker — { id, text, elapsed }, capped at NOTIFICATION_LOG_MAX. Seeded with the welcome message as a real entry (not a UI fallback) so it survives in the scrollback log
     tankPoints: { total: 0, available: 0 }, // earned by Entities.js on fish adult-growth transitions, spent in UI.js's Tank Upgrades panel — see CLAUDE.md's "Tank Points & Tank Upgrades"
-    upgrades: { foodQuality: 0, fishMovement: 0, foodCapacity: 0 }, // purchased Tank Upgrade levels, 0 = not yet bought; read live by Entities.js, not baked into fish/food at creation time
+    upgrades: { foodQuality: 0, fishMovement: 0, foodCapacity: 0, fishMergingUnlocked: false }, // purchased Tank Upgrade levels, 0 = not yet bought; read live by Entities.js, not baked into fish/food at creation time. fishMergingUnlocked is a one-time flag, not a level — see Config.js's FISH_MERGING_UNLOCK_COST
     // One-time story/tutorial notification gates — see CLAUDE.md's "Story &
     // Tutorial Notifications". Level-scoped like everything else here, so a
     // restart replays them (matching moundTeased/the Tank Point tutorial's
