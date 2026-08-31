@@ -506,10 +506,16 @@ function render() {
   ctx.fillStyle = waterBackgroundGradient(ctx, canvas.height, state.level.cleanliness);
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+  // Ambience (bubbles/seaweed) renders immediately after the plain
+  // background fill and before anything else — per direct request, it
+  // needs to sit behind the seabed/city, the Mound/Science Lab, and every
+  // building/item/fish drawn later in this function, not just behind the
+  // fish/items the way it was before.
+  renderAmbience(ctx, state, canvas.width, canvas.height);
+
   renderSeabedGrid(ctx, state, canvas.width, canvas.height);
   renderMound(ctx, state);
   renderScienceLab(ctx, state);
-  renderAmbience(ctx, state, canvas.width, canvas.height);
 
   if (isFanAimingActive() && input.mouse.inside && !state.ui.paused) {
     // Click 1 already happened — the ghost stays fixed at the armed cell
