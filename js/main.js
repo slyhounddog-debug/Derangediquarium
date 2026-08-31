@@ -589,8 +589,19 @@ function updateFishDrag() {
 }
 
 function update(dtMs) {
-  updateAmbience(dtMs); // pure decoration (bubbles/seaweed) — keeps drifting even through pause/game-over/the start screen, ahead of every early return below, so the blurred tank still reads as alive behind the start overlay
-  if (!state.ui.gameStarted) return; // frozen until the player clicks Start on the first-launch start screen — render() still runs, same "frozen but visible" pattern the pause menu already uses
+  // Ambience (bubbles/seaweed) deliberately does NOT run before the game
+  // has started — the start screen's #start-overlay blurs the tank behind
+  // it with a real backdrop-filter (a compositor-level blur, recomputed
+  // every frame the content behind it changes), so a continuously-animating
+  // scene under a full-viewport blur risked a genuinely laggy/unresponsive
+  // page on slower hardware, which could easily read as "nothing can be
+  // clicked" and "it never goes away" — not because the click handlers
+  // were broken, but because the page itself was struggling to keep up.
+  // Freezing ambience means the blurred backdrop is one static frame the
+  // compositor only has to blur once, not forty times a second, while still
+  // satisfying "the tank blurry behind it" — it's just not animating.
+  if (state.ui.gameStarted) updateAmbience(dtMs);
+  if (!state.ui.gameStarted) return; // frozen until the player clicks Start on the first-launch start screen — render() still runs (a static frame), same "frozen but visible" pattern the pause menu already uses
   if (state.ui.paused) return; // frozen behind the pause menu — render() still runs so the tank stays visible
   if (state.level.gameOver) return; // lost — frozen the same way, but via a separate flag so Escape still reaches the pause menu's Restart without also un-freezing a lost game (see Systems.js's updateBankruptcy)
 

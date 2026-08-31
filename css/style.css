@@ -705,18 +705,25 @@ html, body {
   z-index: 600; /* above the splash (500) — the splash only ever starts animating once this closes */
 }
 #start-overlay.hidden { display: none; }
+/* Same size and look as #pause-menu, per direct request — identical width/
+   padding/border/radius/shadow recipe (just the outer overlay's own tint
+   differs, to read as "before the game" rather than "game paused"), and
+   flex-shrink:0/max-width so it can never be stretched to fill the
+   flex-centered overlay even in an unusual viewport. */
 #start-modal {
-  width: 300px;
+  width: 280px;
+  max-width: 90vw;
+  flex-shrink: 0;
   background: linear-gradient(165deg, #fffaf3 0%, #ffe4f2 100%);
   color: #6b4c6b;
   border-radius: 28px;
   border: 3px solid #ffffff;
-  padding: 32px 26px 26px;
-  box-shadow: 0 20px 50px rgba(11, 37, 64, 0.5), inset 0 2px 0 rgba(255, 255, 255, 0.7);
+  padding: 28px 24px;
+  box-shadow: 0 16px 40px rgba(107, 76, 107, 0.45), inset 0 2px 0 rgba(255, 255, 255, 0.7);
   text-align: center;
 }
-#start-title { font-size: 30px; font-weight: 900; color: #c25f8f; text-shadow: 0 2px 0 rgba(255, 255, 255, 0.6); }
-#start-subtitle { font-size: 12px; font-weight: 700; opacity: 0.65; margin: 6px 0 22px; }
+#start-title { font-size: 26px; font-weight: 900; color: #c25f8f; text-shadow: 0 2px 0 rgba(255, 255, 255, 0.6); }
+#start-subtitle { font-size: 12px; font-weight: 700; opacity: 0.65; margin: 6px 0 20px; }
 #start-play-btn { background: linear-gradient(160deg, #a8f0cb 0%, #7ad4a8 100%); color: #1f4a34; box-shadow: 0 3px 8px rgba(53, 145, 97, 0.35), inset 0 2px 0 rgba(255, 255, 255, 0.5); }
 #start-play-btn:hover { background: linear-gradient(160deg, #97e8bd 0%, #68c896 100%); }
 
