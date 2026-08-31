@@ -831,24 +831,55 @@ function getCityTexturePattern(ctx) {
   return cityTexturePattern;
 }
 
-// A jagged rocky shelf at ROCK_SHELF_Y, the fixed height EVERY uncaught item
-// rests at now (see that constant's comment in Config.js — originally Waste
-// only, generalized to coins/Science/Food/Waste alike per direct request
-// that it "is now a hard barrier for all objects"). Replaces the old plain
-// dashed line, so it reads as a physical rock ledge things are piling up
-// against instead of an abstract marker. Draws on top of the base seabed
-// fill but underneath any real tiles.
+// The underground biome's own speckle texture, mirroring getCityTexturePattern
+// above exactly (same generation technique, cached the same way) but in a
+// cooler, darker palette — a few pale blue-grey mineral flecks mixed in with
+// the dark speckle instead of the city's plain black/white — so it reads as
+// "a deeper rock version" of the same city grain, not an unrelated pattern.
+let undergroundTexturePattern = null;
+function getUndergroundTexturePattern(ctx) {
+  if (undergroundTexturePattern) return undergroundTexturePattern;
+  const tile = document.createElement('canvas');
+  tile.width = 48;
+  tile.height = 48;
+  const tctx = tile.getContext('2d');
+  for (let i = 0; i < 55; i++) {
+    const x = Math.random() * 48;
+    const y = Math.random() * 48;
+    const r = 0.6 + Math.random() * 1.7;
+    tctx.fillStyle = Math.random() < 0.7 ? 'rgba(0, 0, 0, 0.22)' : 'rgba(150, 175, 195, 0.14)';
+    tctx.beginPath();
+    tctx.arc(x, y, r, 0, Math.PI * 2);
+    tctx.fill();
+  }
+  undergroundTexturePattern = ctx.createPattern(tile, 'repeat');
+  return undergroundTexturePattern;
+}
+
+// A rocky shelf at ROCK_SHELF_Y, the fixed height EVERY uncaught item rests
+// at now (see that constant's comment in Config.js — originally Waste only,
+// generalized to coins/Science/Food/Waste alike per direct request that it
+// "is now a hard barrier for all objects"). Reworked per direct request to
+// read as a real geological boundary rather than a decorative outcrop: the
+// TOP edge is flat (mirroring renderSeabedGrid's own tank/city surface
+// line — a solid fill plus a thin lighter highlight strip, the same
+// "boundary" language this file already uses at SEABED_ROW_START), and the
+// jaggedness moves to the BOTTOM edge instead, reading as the shelf's rocky
+// underside hanging down into the underground biome beneath it (see
+// renderSeabedGrid's own underground fill, painted before this so the jagged
+// underside visibly overlaps into it) — that hanging silhouette, not a
+// jagged top, is now "the part extending the 3D look."
 //
-// The jagged top edge is a fixed set of world-space (x, yOffset) points
+// The jagged bottom edge is a fixed set of world-space (x, yOffset) points
 // spanning the full world width, generated once at module load — NOT
 // reseeded every frame — so panning never makes the rock "jitter." Each
 // frame only maps the currently-visible points to screen space and fills/
 // strokes a shaded polygon; no ctx.filter anywhere (see CLAUDE.md's canvas
-// performance note), just a real linear gradient plus two cheap offset
-// strokes standing in for a highlight ridge and an underside shadow.
+// performance note), just a real linear gradient plus a flat highlight strip
+// and one cheap stroke along the jagged underside for shadow/depth.
 const ROCK_SHELF_POINT_SPACING = TILE_SIZE * 0.4;
 const ROCK_SHELF_JAG_PX = 14;
-const ROCK_SHELF_THICKNESS = TILE_SIZE * 0.9;
+const ROCK_SHELF_THICKNESS = TILE_SIZE * 0.9; // average distance from the flat top down to the jagged underside
 const ROCK_SHELF_POINTS = (() => {
   const points = [];
   const worldWidth = WORLD_TILES_W * TILE_SIZE;
@@ -862,8 +893,8 @@ const ROCK_SHELF_POINTS = (() => {
 })();
 
 function renderRockShelf(ctx, camera, canvasWidth, canvasHeight) {
-  const topScreenY = worldToScreen(0, ROCK_SHELF_Y - ROCK_SHELF_JAG_PX, camera).y;
-  const bottomScreenY = worldToScreen(0, ROCK_SHELF_Y + ROCK_SHELF_THICKNESS, camera).y;
+  const topScreenY = worldToScreen(0, ROCK_SHELF_Y, camera).y;
+  const bottomScreenY = worldToScreen(0, ROCK_SHELF_Y + ROCK_SHELF_THICKNESS + ROCK_SHELF_JAG_PX, camera).y;
   if (topScreenY > canvasHeight || bottomScreenY < 0) return;
 
   const worldLeft = camera.x;
@@ -872,45 +903,45 @@ function renderRockShelf(ctx, camera, canvasWidth, canvasHeight) {
   const visible = ROCK_SHELF_POINTS.filter((p) => p.x >= worldLeft - margin && p.x <= worldRight + margin);
   if (visible.length === 0) return;
 
-  const screenPoints = visible.map((p) => worldToScreen(p.x, ROCK_SHELF_Y + p.y, camera));
-  const bottomY = bottomScreenY;
+  // The jagged edge now sits along the BOTTOM (ROCK_SHELF_Y + THICKNESS +
+  // per-point jitter), not the top.
+  const screenPoints = visible.map((p) => worldToScreen(p.x, ROCK_SHELF_Y + ROCK_SHELF_THICKNESS + p.y, camera));
+  const topY = topScreenY;
 
   ctx.save();
 
-  // Rock body: a shaded fill under the jagged top edge, extending down to a
-  // flat bottom well past ROCK_SHELF_Y so it reads as a solid ledge rather
-  // than a thin line items happen to rest on.
+  // Rock body: a flat top edge, a shaded fill, and a jagged bottom edge —
+  // reads as a solid ledge whose underside is the irregular, "3D" part,
+  // rather than a thin line items happen to rest on.
   ctx.beginPath();
-  ctx.moveTo(-4, screenPoints[0].y);
-  for (const sp of screenPoints) ctx.lineTo(sp.x, sp.y);
+  ctx.moveTo(-4, topY);
+  ctx.lineTo(canvasWidth + 4, topY);
   ctx.lineTo(canvasWidth + 4, screenPoints[screenPoints.length - 1].y);
-  ctx.lineTo(canvasWidth + 4, bottomY);
-  ctx.lineTo(-4, bottomY);
+  for (let i = screenPoints.length - 1; i >= 0; i--) ctx.lineTo(screenPoints[i].x, screenPoints[i].y);
+  ctx.lineTo(-4, screenPoints[0].y);
   ctx.closePath();
-  const bodyGradient = ctx.createLinearGradient(0, screenPoints[0].y, 0, bottomY);
+  const bodyGradient = ctx.createLinearGradient(0, topY, 0, bottomScreenY);
   bodyGradient.addColorStop(0, '#8a7256');
-  bodyGradient.addColorStop(0.25, '#6b5a42');
+  bodyGradient.addColorStop(0.4, '#6b5a42');
   bodyGradient.addColorStop(1, '#3c3226');
   ctx.fillStyle = bodyGradient;
   ctx.fill();
 
-  // A bright, sunlit-looking lip right along the jagged top edge.
+  // A flat, sunlit-looking highlight strip right along the flat top edge —
+  // the same "solid fill plus a thin lighter strip" treatment
+  // renderSeabedGrid uses for the tank/city surface line, so this reads as
+  // the same kind of boundary rather than a different visual language.
+  ctx.fillStyle = '#a68a68';
+  ctx.fillRect(-4, topY, canvasWidth + 8, Math.max(2, 4 * camera.zoom));
+
+  // A darker shadow stroke along the jagged underside, selling depth where
+  // the shelf's rock hangs down into the underground biome beneath it.
   ctx.beginPath();
   ctx.moveTo(screenPoints[0].x, screenPoints[0].y);
   for (const sp of screenPoints) ctx.lineTo(sp.x, sp.y);
-  ctx.strokeStyle = 'rgba(222, 200, 160, 0.65)';
-  ctx.lineWidth = Math.max(1, 2.5 * camera.zoom);
+  ctx.strokeStyle = 'rgba(20, 14, 10, 0.55)';
+  ctx.lineWidth = Math.max(1, 2 * camera.zoom);
   ctx.lineJoin = 'round';
-  ctx.stroke();
-
-  // A darker shadow line just under the highlight, faking depth/thickness
-  // on the top edge without a blur filter.
-  const shadowOffset = 2 * camera.zoom;
-  ctx.beginPath();
-  ctx.moveTo(screenPoints[0].x, screenPoints[0].y + shadowOffset);
-  for (const sp of screenPoints) ctx.lineTo(sp.x, sp.y + shadowOffset);
-  ctx.strokeStyle = 'rgba(28, 20, 12, 0.5)';
-  ctx.lineWidth = Math.max(1, 1.5 * camera.zoom);
   ctx.stroke();
 
   ctx.restore();
@@ -946,6 +977,25 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
   ctx.globalAlpha = 0.55;
   ctx.fillRect(0, Math.max(0, topOfSeabed.y) + 4, canvasWidth, canvasHeight);
   ctx.restore();
+
+  // Underground biome: a visually distinct "deeper rock" version of the
+  // dirt-city fill above, painted over it starting exactly at the Rocky
+  // Shelf's flat top edge — per direct request, everything below the shelf
+  // now reads as its own mini-biome (same speckled-texture technique as the
+  // city above, just a darker, cooler palette) rather than a continuation
+  // of the same dirt. renderRockShelf (below) then draws its jagged
+  // underside on top of this boundary, so the rock visibly hangs down into
+  // the underground fill rather than the fill starting at a hard edge.
+  const undergroundTop = worldToScreen(0, ROCK_SHELF_Y, camera).y;
+  if (undergroundTop < canvasHeight) {
+    ctx.fillStyle = '#352a1f';
+    ctx.fillRect(0, Math.max(0, undergroundTop), canvasWidth, canvasHeight);
+    ctx.save();
+    ctx.fillStyle = getUndergroundTexturePattern(ctx);
+    ctx.globalAlpha = 0.6;
+    ctx.fillRect(0, Math.max(0, undergroundTop), canvasWidth, canvasHeight);
+    ctx.restore();
+  }
 
   renderRockShelf(ctx, camera, canvasWidth, canvasHeight);
   renderCameraBottomBuffer(ctx, camera, canvasWidth, canvasHeight);
