@@ -390,10 +390,11 @@ input.keydownHandlers.push((e) => {
       rotateBuilding(state, world.x, world.y);
       break;
     }
-    case 'KeyN': // force-crack the Mound to the next real tier, free — skips the tease and the paid Tier 1.75 Fan-unlock step if they haven't happened yet, so this always advances a tier rather than sometimes just spending the press on one of those instead
+    case 'KeyN': // force-crack the Mound to the next real tier, free — skips the tease and the paid Tier 1.75/2.5 sub-steps if they haven't happened yet, so this always advances a tier rather than sometimes just spending the press on one of those instead
       state.level.money += CHEAT_GRANT_AMOUNT;
       state.level.moundTeased = true;
       state.level.fanUnlockPurchased = true;
+      state.level.autoFeederUnlockPurchased = true;
       crackMound(state);
       refreshShopPanel(state);
       break;
@@ -531,7 +532,16 @@ function emojiCursorCss(emoji) {
   const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'><text x='0' y='26' font-size='26'>${emoji}</text></svg>`;
   return `url("data:image/svg+xml,${encodeURIComponent(svg)}") 4 26, auto`;
 }
-const CURSOR_BY_TOOL = { demolish: emojiCursorCss('🔨'), merge: emojiCursorCss('🧤') };
+// The Food tool's cursor is a plain colored dot instead of an emoji — per
+// direct request ("make the cursor look like the food"), matching the same
+// FOOD_COLOR circle the shop's own Food icon (.tool-icon-food) and every
+// dropped pellet already use, rather than reaching for an unrelated emoji.
+// Hotspot centered on the circle so it aims precisely at the placement point.
+function circleCursorCss(color) {
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'><circle cx='10' cy='10' r='8' fill='${color}' stroke='rgba(0,0,0,0.35)' stroke-width='1.5'/></svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}") 10 10, auto`;
+}
+const CURSOR_BY_TOOL = { demolish: emojiCursorCss('🔨'), merge: emojiCursorCss('🧤'), food: circleCursorCss(FOOD_COLOR) };
 let lastCursorTool = null;
 function updateCanvasCursor() {
   const cursorKey = CURSOR_BY_TOOL[state.ui.selectedTool] ? state.ui.selectedTool : 'default';

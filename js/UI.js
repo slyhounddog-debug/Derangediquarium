@@ -31,7 +31,7 @@ import {
   CLEANLINESS_COLOR_CLEAN,
   CLEANLINESS_COLOR_DIRTY,
   GENE_SPLICING_TECH_ID,
-  GENE_SPLICING_COST,
+  GENE_SPLICING_TANK_POINT_COST,
   PROCESSOR_STATS,
   AUTO_FEEDER_STATS,
   TILE_COLLECTOR_ADVANCED,
@@ -46,7 +46,7 @@ import { getTile, worldToTile, getBuildingCost, FAN_STATS } from './Grid.js';
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
-import { playUpgrade, setMusicVolume, setSfxVolume, getMusicVolume, getSfxVolume } from './Sound.js';
+import { playUpgrade, setMusicVolume, setSfxVolume, getMusicVolume, getSfxVolume, playPanelOpen, playPanelClose } from './Sound.js';
 
 const MOUND_MENU_GAP_PX = 12; // screen px of breathing room between the popup's bottom edge and the Mound's top edge
 const MOUND_MENU_TRANSITION_MS = 220; // must match #mound-menu's CSS transition duration
@@ -169,7 +169,6 @@ export function initUI(state) {
     labMenuAnchor: document.getElementById('lab-menu-anchor'),
     labMenu: document.getElementById('lab-menu'),
     labScienceReadout: document.getElementById('lab-science-readout'),
-    labResearchBtn: document.getElementById('lab-research-btn'),
     labAdvancedProcessorBtn: document.getElementById('lab-advanced-processor-btn'),
     labAdvancedAutoFeederBtn: document.getElementById('lab-advanced-auto-feeder-btn'),
     labCancelBtn: document.getElementById('lab-cancel-btn'),
@@ -190,14 +189,9 @@ export function initUI(state) {
     if (e.target === els.moundOverlay) closeMoundMenu(); // clicked the backdrop, not the card
   });
 
-  els.labResearchBtn.addEventListener('click', () => {
-    if (state.meta.techUnlocked.includes(GENE_SPLICING_TECH_ID)) return;
-    if (state.level.science < GENE_SPLICING_COST) return;
-    state.level.science -= GENE_SPLICING_COST;
-    state.meta.techUnlocked.push(GENE_SPLICING_TECH_ID);
-    playUpgrade();
-    refreshLabMenu(state);
-  });
+  // Gene-Splicing moved to the Tank Upgrades panel (see buildTankPanel) — no
+  // longer purchased here, per direct request ("unlocked through the tank
+  // upgrades... instead of unlocked through mound tiers").
   // Advanced Processor/Auto-Feeder: same one-time-Lab-purchase-then-
   // placeable-for-money pattern as Gene-Splicing itself — pushes the tile id
   // into state.meta.buildingsUnlocked (same permanent-unlock mechanism every
@@ -267,8 +261,8 @@ export function initUI(state) {
 
   els.pauseResumeBtn.addEventListener('click', () => closePauseMenu(state));
   els.pauseRestartBtn.addEventListener('click', () => restartLevel(state));
-  els.pauseSettingsBtn.addEventListener('click', showPauseSettings);
-  els.pauseSettingsBackBtn.addEventListener('click', showPauseMain);
+  els.pauseSettingsBtn.addEventListener('click', () => { showPauseSettings(); playPanelOpen(); });
+  els.pauseSettingsBackBtn.addEventListener('click', () => { showPauseMain(); playPanelClose(); });
   els.pauseOverlay.addEventListener('click', (e) => {
     if (e.target === els.pauseOverlay) closePauseMenu(state); // clicked the backdrop, not the card
   });
@@ -283,6 +277,7 @@ export function initUI(state) {
     powerGraphOpen = !powerGraphOpen;
     els.powerGraph.classList.toggle('hidden', !powerGraphOpen);
     if (powerGraphOpen) renderPowerGraph(state);
+    (powerGraphOpen ? playPanelOpen : playPanelClose)();
   });
 
   els.musicVolumeSlider.value = String(Math.round(getMusicVolume() * 100));
@@ -328,6 +323,7 @@ export function toggleShopCollapse(state) {
     updateTankPanelCollapse(state);
   }
   updateShopCollapse(state);
+  (state.ui.shopCollapsed ? playPanelClose : playPanelOpen)();
 }
 
 function updateShopCollapse(state) {
@@ -364,6 +360,7 @@ export function toggleTankPanel(state) {
     updateShopCollapse(state);
   }
   updateTankPanelCollapse(state);
+  (state.ui.tankPanelCollapsed ? playPanelClose : playPanelOpen)();
 }
 
 function updateTankPanelCollapse(state) {
@@ -381,6 +378,9 @@ export function togglePauseMenu(state) {
   if (state.ui.paused) {
     showPauseMain();
     playFlash(els.pauseMenu, 'bounce-play'); // reuses the generic flash-restart helper below purely for its remove-reflow-readd trick, not an actual flash class
+    playPanelOpen();
+  } else {
+    playPanelClose();
   }
   els.pauseOverlay.classList.toggle('hidden', !state.ui.paused);
 }
@@ -388,6 +388,7 @@ export function togglePauseMenu(state) {
 function closePauseMenu(state) {
   state.ui.paused = false;
   els.pauseOverlay.classList.add('hidden');
+  playPanelClose();
 }
 
 // Opened by main.js's click handler when isPointOnMound(...) hits — replaces
@@ -499,15 +500,7 @@ function updateLabMenuPosition(state) {
 // and the research button's afford-state can both change while it's open.
 function refreshLabMenu(state) {
   const science = state.level.science;
-  const unlocked = state.meta.techUnlocked.includes(GENE_SPLICING_TECH_ID);
   els.labScienceReadout.textContent = `🔬 ${science}`;
-  if (unlocked) {
-    els.labResearchBtn.textContent = 'Gene-Splicing researched ✓';
-    els.labResearchBtn.disabled = true;
-  } else {
-    els.labResearchBtn.textContent = `Research Gene-Splicing — ${GENE_SPLICING_COST} 🔬`;
-    els.labResearchBtn.disabled = science < GENE_SPLICING_COST;
-  }
 
   const advProcessorUnlocked = state.meta.buildingsUnlocked.includes(TILE_COLLECTOR_ADVANCED);
   els.labAdvancedProcessorBtn.textContent = advProcessorUnlocked
@@ -751,7 +744,8 @@ function buildTankPanel(state) {
   const fishMovement = createUpgradeCard('Fish Movement', '🏊');
   const foodCapacity = createUpgradeCard('Food Capacity', '🧺');
   const fishMerging = createUpgradeCard('Fish Merging', '🧬');
-  tankCards = { foodQuality, fishMovement, foodCapacity, fishMerging };
+  const geneSplicing = createUpgradeCard('Gene-Splicing', '🧪');
+  tankCards = { foodQuality, fishMovement, foodCapacity, fishMerging, geneSplicing };
 
   // A one-time unlock, not a leveled ladder like the three above — per
   // direct request, drag-to-combine (Entities.js's isCombinableFish) is now
@@ -761,6 +755,21 @@ function buildTankPanel(state) {
     if (state.level.tankPoints.available < FISH_MERGING_UNLOCK_COST) return;
     state.level.tankPoints.available -= FISH_MERGING_UNLOCK_COST;
     state.level.upgrades.fishMergingUnlocked = true;
+    playUpgrade();
+    refreshTankPanel(state);
+  });
+
+  // Gene-Splicing (Entities.js's isSpliceSource/canSpliceFish/spliceFish) —
+  // moved here from a Science Lab purchase, per direct request ("unlocked
+  // through the tank upgrades for 5 tank points, instead of unlocked
+  // through mound tiers"). Same one-time-unlock pattern as Fish Merging,
+  // just writing into state.meta.techUnlocked instead of a level upgrade
+  // flag, since that's the field Entities.js's isSpliceSource already reads.
+  geneSplicing.buyBtn.addEventListener('click', () => {
+    if (state.meta.techUnlocked.includes(GENE_SPLICING_TECH_ID)) return;
+    if (state.level.tankPoints.available < GENE_SPLICING_TANK_POINT_COST) return;
+    state.level.tankPoints.available -= GENE_SPLICING_TANK_POINT_COST;
+    state.meta.techUnlocked.push(GENE_SPLICING_TECH_ID);
     playUpgrade();
     refreshTankPanel(state);
   });
@@ -796,7 +805,7 @@ function buildTankPanel(state) {
     refreshTankPanel(state);
   });
 
-  els.tankUpgradeList.append(foodQuality.card, fishMovement.card, foodCapacity.card, fishMerging.card);
+  els.tankUpgradeList.append(foodQuality.card, fishMovement.card, foodCapacity.card, fishMerging.card, geneSplicing.card);
 
   // Defensive Capabilities: shown per the design update's Phase 2 UI-shell
   // scope, but locked — there's no alien system to upgrade yet (Phase 5).
@@ -815,7 +824,7 @@ function buildTankPanel(state) {
 // state can all change while the player has it open.
 function refreshTankPanel(state) {
   if (!tankCards) return;
-  const { foodQuality, fishMovement, foodCapacity, fishMerging } = tankCards;
+  const { foodQuality, fishMovement, foodCapacity, fishMerging, geneSplicing } = tankCards;
   const available = state.level.tankPoints.available;
 
   const fqLevel = state.level.upgrades.foodQuality;
@@ -864,6 +873,18 @@ function refreshTankPanel(state) {
   } else {
     fishMerging.buyBtn.textContent = `Unlock — ${FISH_MERGING_UNLOCK_COST} 🏆`;
     fishMerging.buyBtn.disabled = available < FISH_MERGING_UNLOCK_COST;
+  }
+
+  const spliced = state.meta.techUnlocked.includes(GENE_SPLICING_TECH_ID);
+  geneSplicing.levelEl.textContent = spliced ? 'Unlocked' : 'Locked';
+  geneSplicing.descEl.textContent =
+    'Lets you drag an Adult Suckerfish/Electric Eel/Science Octopus onto another Adult fish to splice a hybrid — no Mound progress needed.';
+  if (spliced) {
+    geneSplicing.buyBtn.textContent = 'Unlocked';
+    geneSplicing.buyBtn.disabled = true;
+  } else {
+    geneSplicing.buyBtn.textContent = `Unlock — ${GENE_SPLICING_TANK_POINT_COST} 🏆`;
+    geneSplicing.buyBtn.disabled = available < GENE_SPLICING_TANK_POINT_COST;
   }
 
   els.tankPointsDisplay.textContent = `🏆 ${available}`;

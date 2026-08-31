@@ -161,48 +161,79 @@ export function playTankPoint() {
   playTone(1567.98, 0.09, { type: 'triangle', gain: 0.12, when: 0.05 }); // G6
 }
 
+// A soft rising blip — opening a panel (Shop, Tank Upgrades, pause menu, the
+// electricity HUD's graph popup) or switching into a pause-menu sub-tab
+// (Settings). Deliberately gentler/quieter than playPurchase's own rising
+// blip — this fires on nearly every click in this game's UI chrome, so it
+// needs to stay unobtrusive rather than compete for attention.
+export function playPanelOpen() {
+  playTone(659.25, 0.05, { type: 'sine', gain: 0.09 }); // E5
+  playTone(880, 0.07, { type: 'sine', gain: 0.09, when: 0.04 }); // A5
+}
+
+// The falling mirror of playPanelOpen — closing a panel or backing out of a
+// pause-menu sub-tab.
+export function playPanelClose() {
+  playTone(659.25, 0.05, { type: 'sine', gain: 0.08 }); // E5
+  playTone(493.88, 0.07, { type: 'sine', gain: 0.08, when: 0.04 }); // B4
+}
+
 // ---- Background music ----
-// Reworked per direct request — the original was flagged as "annoying...
-// staccato and grating." Root causes fixed: (1) the lead used a buzzy
-// 'triangle' wave with a short 0.05s release and only 82% note-length
-// coverage, leaving an audible gap of silence between almost every note —
-// that gap IS what staccato sounds like. Now it's a warmer 'sine' lead with
-// a much longer release (0.22s) and 97% coverage, so consecutive notes
-// overlap into each other (legato) instead of clicking on and off. (2) The
-// melody itself was a fairly flat stepwise walk with no real shape — now it
-// opens with a rising 3-note flourish (an "adventure fanfare" gesture),
-// leans on longer sustained notes for a sweeping feel, and resolves with a
-// small falling cadence, still built entirely from a pentatonic scale (no
-// bad-sounding interval is possible regardless of order, so this stays safe
-// to hand-tune without needing real music theory). (3) Tempo dropped from
-// 132 to 112 BPM — unhurried, "upbeat adventure" rather than a rushed loop.
-// (4) A soft sustained triangle-wave pad note now plays under each bass hit
-// for a fuller, warmer low end instead of a single thin square-wave blip.
-// Scheduled the same way as before: the whole loop's notes are converted
-// into absolute `when` offsets up front, then the next loop is scheduled via
-// setTimeout timed to the loop's own total duration — any timer drift just
-// delays the NEXT loop's first note by a few ms, never an audible glitch
-// mid-phrase.
-const MUSIC_TEMPO_BPM = 112;
+// Reworked a second time per direct request — the previous pass fixed the
+// "staccato/grating" complaint (legato articulation, a warm sine lead) but
+// landed too slow/sparse to read as "cute and upbeat... a hero on a new
+// adventure" (Stardew Valley's Summer theme, Yoshi's Island, SMW's Special
+// World music were the reference points given) — those all share a bouncy,
+// skipping rhythm (lots of paired eighth notes, not long held whole notes)
+// and a fuller arrangement (a moving bassline, not one note every two bars).
+// This pass keeps the legato articulation fix (still 'sine' lead, still a
+// long release/near-full note coverage — no staccato gaps reappear) but:
+// (1) tempo back up to 128 BPM, a genuine bounce rather than a slow sweep;
+// (2) the melody rewritten with dense paired-eighth "hop" phrasing and a
+// rising three-phrase call-and-response shape (each phrase answers the last
+// a step higher) before a confident low resolve, still pure C major
+// pentatonic (no bad-sounding interval possible regardless of order); (3)
+// the bass now WALKS — 8 moving hits across the loop instead of 4 static
+// ones, a real root-sixth-fifth pattern instead of a single held drone,
+// for the "more substantial" fuller low end; (4) a new quiet rhythmic
+// "bounce" pulse (a tiny soft square blip on the off-beat of every bass
+// hit) layered underneath — the same trick Yoshi's Island/SMW's upbeat
+// tracks lean on, a light percussive skip nobody consciously hears as an
+// instrument but that makes the whole loop feel like it's hopping forward
+// instead of just floating. Scheduled the same way as before: the whole
+// loop's notes are converted into absolute `when` offsets up front, then
+// the next loop is scheduled via setTimeout timed to the loop's own total
+// duration — any timer drift just delays the NEXT loop's first note by a
+// few ms, never an audible glitch mid-phrase.
+const MUSIC_TEMPO_BPM = 128;
 const BEAT_S = 60 / MUSIC_TEMPO_BPM;
-// C major pentatonic, one octave: C4 D4 E4 G4 A4 C5 D5 E5
-const SCALE = [261.63, 293.66, 329.63, 392.0, 440.0, 523.25, 587.33, 659.25];
-// Scale-degree indices (0-7) and beat-lengths for one 8-bar phrase. Opens
-// with a rising flourish (0 -> 3 -> 5, a fanfare-like leap up rather than a
-// stepwise crawl), holds longer notes at each phrase's peak/end for a
-// sweeping rather than choppy feel, and the final phrase mirrors the
-// opening flourish in reverse for a satisfying resolve back to the root.
+// C major pentatonic, ~1.5 octaves: C4 D4 E4 G4 A4 C5 D5 E5 G5 A5
+const SCALE = [261.63, 293.66, 329.63, 392.0, 440.0, 523.25, 587.33, 659.25, 783.99, 880.0];
+// Three answering phrases (each a step higher than the last, a classic
+// "call and response climbing" shape) built from dense paired-eighth hops
+// with a one-beat landing every 4 notes, then a confident low resolve back
+// to the root to close the loop.
 const MELODY = [
-  { deg: 0, beats: 0.75 }, { deg: 3, beats: 0.75 }, { deg: 5, beats: 1.5 }, { deg: 4, beats: 1 },
-  { deg: 3, beats: 1 }, { deg: 5, beats: 3 },
-  { deg: 4, beats: 0.75 }, { deg: 5, beats: 0.75 }, { deg: 7, beats: 1.5 }, { deg: 6, beats: 1 },
-  { deg: 5, beats: 1 }, { deg: 7, beats: 3 },
-  { deg: 5, beats: 1 }, { deg: 4, beats: 1 }, { deg: 3, beats: 1 }, { deg: 2, beats: 1 },
-  { deg: 3, beats: 2 }, { deg: 4, beats: 2 },
-  { deg: 5, beats: 1 }, { deg: 3, beats: 1 }, { deg: 0, beats: 1 },
-  { deg: 3, beats: 1 }, { deg: 0, beats: 4 },
+  // Phrase A — the opening hop, grounded near the root.
+  { deg: 0, beats: 0.5 }, { deg: 2, beats: 0.5 }, { deg: 3, beats: 0.5 }, { deg: 5, beats: 0.5 },
+  { deg: 6, beats: 1 }, { deg: 5, beats: 0.5 }, { deg: 3, beats: 0.5 }, { deg: 6, beats: 2 },
+  // Phrase B — the same hop, answered a step higher.
+  { deg: 5, beats: 0.5 }, { deg: 6, beats: 0.5 }, { deg: 7, beats: 0.5 }, { deg: 6, beats: 0.5 },
+  { deg: 8, beats: 1 }, { deg: 7, beats: 0.5 }, { deg: 6, beats: 0.5 }, { deg: 7, beats: 2 },
+  // Phrase C — a bouncy descending skip-run back down, energetic and busy.
+  { deg: 6, beats: 0.5 }, { deg: 5, beats: 0.5 }, { deg: 6, beats: 0.5 }, { deg: 4, beats: 0.5 },
+  { deg: 5, beats: 0.5 }, { deg: 3, beats: 0.5 }, { deg: 4, beats: 0.5 }, { deg: 2, beats: 0.5 },
+  { deg: 3, beats: 1 }, { deg: 5, beats: 1 },
+  // Phrase D — confident resolve, a last little flourish up before landing
+  // hard on the root to close the loop cleanly.
+  { deg: 3, beats: 0.5 }, { deg: 5, beats: 0.5 }, { deg: 6, beats: 0.5 }, { deg: 8, beats: 0.5 },
+  { deg: 7, beats: 1.5 }, { deg: 5, beats: 0.5 }, { deg: 3, beats: 0.5 }, { deg: 0, beats: 3 },
 ];
-const BASS_DEGREES = [0, 3, 4, 3]; // one bass note every 2 bars (8 beats), root-ish walking pattern
+// A real walking bass — 8 moving hits (root-sixth-fifth-sixth, twice) across
+// the loop instead of 4 static ones, per direct request for "a more
+// substantial sound."
+const BASS_DEGREES = [0, 4, 3, 4, 0, 3, 4, 3];
+const BASS_STEP_BEATS = 3; // spacing between bass hits — dense enough to feel like real movement, not a drone
 
 function scheduleMusicLoop() {
   const audioCtx = ensureContext();
@@ -213,8 +244,8 @@ function scheduleMusicLoop() {
     playTone(freq, note.beats * BEAT_S * 0.97, {
       type: 'sine',
       gain: 0.12,
-      attack: 0.02,
-      release: 0.22,
+      attack: 0.015,
+      release: 0.16,
       when: beatCursor * BEAT_S,
       destination: musicGain,
     });
@@ -223,26 +254,38 @@ function scheduleMusicLoop() {
   const totalBeats = beatCursor;
   let bassCursor = 0;
   for (const deg of BASS_DEGREES) {
-    playTone(SCALE[deg] / 2, BEAT_S * 1.8, {
+    playTone(SCALE[deg] / 2, BEAT_S * 1.4, {
       type: 'triangle',
-      gain: 0.06,
-      attack: 0.02,
-      release: 0.35,
+      gain: 0.065,
+      attack: 0.015,
+      release: 0.22,
       when: bassCursor * BEAT_S,
       destination: musicGain,
     });
     // A soft sustained pad an octave above the bass note — warms out the
     // low end into a fuller chord tone instead of one thin blip, at a low
     // enough gain to sit underneath the lead rather than compete with it.
-    playTone(SCALE[deg], BEAT_S * 1.8, {
+    playTone(SCALE[deg], BEAT_S * 1.4, {
       type: 'triangle',
       gain: 0.025,
-      attack: 0.15,
-      release: 0.4,
+      attack: 0.1,
+      release: 0.25,
       when: bassCursor * BEAT_S,
       destination: musicGain,
     });
-    bassCursor += 8;
+    // The rhythmic "bounce" — a tiny, quiet square-wave tick on the
+    // off-beat between this bass hit and the next, purely percussive
+    // texture (not a melodic statement) to give the loop a skipping,
+    // forward-hopping pulse.
+    playTone(SCALE[5], 0.045, {
+      type: 'square',
+      gain: 0.03,
+      attack: 0.002,
+      release: 0.03,
+      when: (bassCursor + BASS_STEP_BEATS / 2) * BEAT_S,
+      destination: musicGain,
+    });
+    bassCursor += BASS_STEP_BEATS;
   }
   musicTimer = setTimeout(scheduleMusicLoop, totalBeats * BEAT_S * 1000);
 }

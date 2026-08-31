@@ -22,7 +22,9 @@ import {
   TIER_UNLOCKS,
   NOTIFICATION_LOG_MAX,
   TILE_FAN_T2,
+  TILE_AUTO_FEEDER,
   FAN_UNLOCK_COST,
+  AUTO_FEEDER_UNLOCK_COST,
 } from './Config.js';
 import { worldToScreen } from './Engine.js';
 
@@ -55,16 +57,16 @@ const MOUND_TEASE_MESSAGE = "You throw $150 at a suspicious lump of dirt. Nothin
 // getMoundNextCost/crackMound below and Config.js's FAN_UNLOCK_COST.
 const MOUND_FAN_UNLOCK_MESSAGE = "You throw another $500 at the same lump of dirt, out of spite this time. Something's fishy... and it works! A crack splits open and a Rudimentary Fan flops out, blades already spinning. Turns out bribery works on geology too — you just had to pay full price.";
 
+// "Tier 2.5" — same idea as the Fan's own paid step above, sitting between
+// the real Tier 1->2 crack and the real Tier 2->3 crack instead. Costs
+// AUTO_FEEDER_UNLOCK_COST ($5000) and grants only the Auto-Feeder, still
+// without advancing state.level.tier past 2.
+const MOUND_AUTO_FEEDER_UNLOCK_MESSAGE = "A third crack opens up just for you, apparently — an Auto-Feeder rolls out, already smelling faintly of expired fish flakes. Somewhere, a Suckerfish weeps tears of joy.";
+
 const TIER_CRACK_MESSAGES = {
-  // Tier 2 no longer grants a building (the Rudimentary Fan moved to the
-  // tease/"Tier 1.5" above) — this crack's only real effect is flipping
-  // state.level.tier to 2, which is what gates the whole Economy Fish
-  // Combining system on. Still gets its own reveal line since that's a real
-  // (if invisible) unlock, not nothing.
-  2: "Something shifts in the local fish economy. Guppies are suddenly very aware of their own market value, and the going rate climbs every time you buy another. You can now splice two full-grown feeder fish of the same size together into one bigger, pricier fish. Don't think about it too hard.",
-  3: 'Another crack spreads wider. A Collector and an Auto-Feeder tumble out, closely followed by a Suckerfish that looks personally offended by the mess.',
-  4: "A low hum starts underneath the rubble. Shockingly, it's an Electric Eel — here for the Electric Fan, and to remind everyone who's really in charge of this power grid.",
-  5: 'The mound stops cracking and just gives up, shattering completely. Underneath: a Science Lab that has apparently been there the whole time. A Science Octopus climbs out already holding a beaker like it owns the place. Gene-Splicing research is open now — may cod have mercy on your fish.',
+  2: 'Another crack spreads wider. A Processor tumbles out, closely followed by a Suckerfish that looks personally offended by the mess.',
+  3: "A low hum starts underneath the rubble. Shockingly, it's an Electric Eel — here for the Electric Fan and the Electric Processor/Auto-Feeder, and to remind everyone who's really in charge of this power grid.",
+  4: 'The mound stops cracking and just gives up, shattering completely. Underneath: a Science Lab that has apparently been there the whole time. A Science Octopus climbs out already holding a beaker like it owns the place.',
 };
 
 function pushNotification(state, text) {
@@ -72,16 +74,19 @@ function pushNotification(state, text) {
   if (state.level.notifications.length > NOTIFICATION_LOG_MAX) state.level.notifications.shift();
 }
 
-// Three distinct steps now sit before the real Tier 1 -> 2 crack, per direct
+// Five distinct steps now sit across the first two real tiers, per direct
 // request: (1) the Tier 1.5 "tease" (MOUND_TEASE_COST, a pure joke — does
 // nothing), (2) "Tier 1.75" (FAN_UNLOCK_COST, grants ONLY the Rudimentary
-// Fan), then (3) the real crack (MOUND_CRACK_COST[1]) which finally advances
-// state.level.tier. Every other tier transition beyond that is unchanged —
-// a normal single-cost crack.
+// Fan), (3) the real Tier 1->2 crack (MOUND_CRACK_COST[1], grants the
+// Processor + Suckerfish), (4) "Tier 2.5" (AUTO_FEEDER_UNLOCK_COST, grants
+// ONLY the Auto-Feeder), then (5) the real Tier 2->3 crack
+// (MOUND_CRACK_COST[2]). Every tier transition beyond that is unchanged — a
+// normal single-cost crack.
 export function getMoundNextCost(state) {
   const tier = state.level.tier;
   if (tier === 1 && !state.level.moundTeased) return MOUND_TEASE_COST;
   if (tier === 1 && !state.level.fanUnlockPurchased) return FAN_UNLOCK_COST;
+  if (tier === 2 && !state.level.autoFeederUnlockPurchased) return AUTO_FEEDER_UNLOCK_COST;
   return MOUND_CRACK_COST[tier];
 }
 
@@ -106,6 +111,13 @@ export function crackMound(state) {
     if (!state.meta.buildingsUnlocked.includes(TILE_FAN_T2)) state.meta.buildingsUnlocked.push(TILE_FAN_T2);
     pushNotification(state, MOUND_FAN_UNLOCK_MESSAGE);
     return true; // money spent, Fan granted — still no tier advance
+  }
+
+  if (state.level.tier === 2 && !state.level.autoFeederUnlockPurchased) {
+    state.level.autoFeederUnlockPurchased = true;
+    if (!state.meta.buildingsUnlocked.includes(TILE_AUTO_FEEDER)) state.meta.buildingsUnlocked.push(TILE_AUTO_FEEDER);
+    pushNotification(state, MOUND_AUTO_FEEDER_UNLOCK_MESSAGE);
+    return true; // money spent, Auto-Feeder granted — still no tier advance
   }
 
   state.level.tier += 1;

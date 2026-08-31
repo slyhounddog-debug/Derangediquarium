@@ -140,20 +140,35 @@ export const GRID_SWEEP_SUBSTEP = TILE_SIZE / 4; // px — every swept move is w
 // force linearly to 0 at max range.
 export const FAN_CONE_HALF_ANGLE_DEG = 28; // total cone width = 2x this = 56° (was 15/30°, then 20/40°, then 25/50° — widened slightly again per direct request)
 // Placeholder balance per tier, same as every other economy/physics constant
-// in this file — tune once real playtesting exists. Power cost is only
-// tracked into state.level.powerDemand for now (Systems.js's real power
-// grid/supply is Phase 3 scope, not yet implemented — see its module
-// header), so an Electric/Turbo Fan still runs unconditionally today, same
-// as every other not-yet-power-gated Electric building in the codebase.
-export const FAN_T2_MAX_FORCE = 260; // Rudimentary Fan — force magnitude at the emitter (see Grid.js's a = F/mass integration)
+// in this file — tune once real playtesting exists. Power cost is drawn
+// unconditionally while a Fan is placed (Grid.js's computeCurrentPowerDemand)
+// — tracked/displayed on the electricity HUD but never actually gates
+// anything, same as every other not-yet-power-gated Electric building.
+//
+// Turbo Fan force cut from 1100 to 440, per direct request ("same range,
+// but less powerful") — reverse-engineered from two explicit hover targets:
+// at equilibrium, a suspended item's weight (mass * GRAVITY) exactly
+// balances the Fan's force at that distance (force decays linearly to 0 at
+// maxRange — see computeFanForce), so hoverFraction = 1 - (mass * GRAVITY) /
+// maxForce. Solving maxForce so a coin (mass 3) hovers at the requested 40%
+// of range gives maxForce = 3*88 / 0.6 = 440 — and that SAME 440 also lands
+// Waste (mass 1) almost exactly at the requested 80% (1 - 88/440 = 0.8,
+// exact), which is a strong signal 440 is the intended number rather than a
+// coincidence. Food (mass 0.3, much lighter) ends up hovering near 94% —
+// close to the water's surface at the far edge of the range, consistent
+// with "food floats near the top" even though it doesn't land on the exact
+// same percentage as Waste (a single force value can't put two different
+// masses at identical equilibrium points; Waste's 80% match was prioritized
+// since it was named explicitly alongside the coin figure).
+export const FAN_T2_MAX_FORCE = 260; // Rudimentary Fan — force magnitude at the emitter (see Grid.js's a = F/mass integration). Deliberately still too weak to hover a coin at all (3*88=264 > 260) — "struggles to lift a coin," unchanged.
 export const FAN_T2_MAX_RANGE = 320; // px — 10 tiles (was 3, then 5, then 6, then 7, then 9; +1 more tile per direct request, the 7th such increase this session)
-export const FAN_T2_POWER_COST = 0;
-export const FAN_T3_MAX_FORCE = 520; // Electric Fan
+export const FAN_T2_POWER_COST = 0; // per direct request — "the rudimentary fan takes 0mw electricity"
+export const FAN_T3_MAX_FORCE = 350; // Electric Fan — cut from 520, per direct request to rebalance the middle tier now that Turbo dropped to 440 (520 would otherwise have been the STRONGEST fan, backwards); sits clearly between Rudimentary (260) and Turbo (440)
 export const FAN_T3_MAX_RANGE = 496; // px — 15.5 tiles (was 5.5, then 8.5, then 9.5, then 10.5, then 13.5; +2 more tiles)
-export const FAN_T3_POWER_COST = 5;
-export const FAN_T4_MAX_FORCE = 1100; // Turbo Fan — extreme thrust, enough to clear a heavy coin across a ledge on its own
-export const FAN_T4_MAX_RANGE = 640; // px — 20 tiles (was 10, then 13, then 14, then 15, then 18; +2 more tiles)
-export const FAN_T4_POWER_COST = 14;
+export const FAN_T3_POWER_COST = 1; // per direct request — "the mid takes 1mw always"
+export const FAN_T4_MAX_FORCE = 440; // Turbo Fan — see the hover-math comment above; was 1100 ("extreme thrust"), now a real but gentler suspension force
+export const FAN_T4_MAX_RANGE = 640; // px — 20 tiles, unchanged per direct request ("the same range, but less powerful")
+export const FAN_T4_POWER_COST = 3; // per direct request — "the advanced takes 3mw always"
 
 // ---- Auto-Feeder ----
 // Placed and aimed the same way as a Fan (angle locked at placement) — its
@@ -888,7 +903,7 @@ export const BUILDING_TYPES = {
   },
   [TILE_FAN_T4]: {
     id: TILE_FAN_T4, name: 'Turbo Fan', icon: '🌪️', cost: 120,
-    description: `Extreme thrust and long reach (${FAN_T4_MAX_RANGE}px) — clears even a heavy coin over a ledge on its own. Draws moderate power.`,
+    description: `The longest reach (${FAN_T4_MAX_RANGE}px) of any Fan, gentle enough to suspend a coin mid-air rather than launching it. Draws a little power.`,
     color: '#2f7fd6', unlockedByDefault: false,
   },
   [TILE_AUTO_FEEDER]: {
@@ -965,65 +980,65 @@ export const AUTO_FEEDER_STATS = {
 // state.level.moundTeased). MOUND_CRACK_COST[tier] is the $ spent to
 // actually crack FROM that tier to the next, once teased (placeholder
 // balance, same as every other economy constant here — tune once real
-// playtesting exists; Tier 4->5 in particular is priced steeply (50000) as
-// though it needs "a whole system" behind it, not just a bigger number).
+// playtesting exists).
 // TIER_UNLOCKS[tier]
 // is what gets permanently granted into state.meta the first time that tier
 // is reached.
-export const MOUND_MAX_TIER = 5; // reaching this shatters the Mound completely (Tier 5 reveal) instead of cracking further — shifted from 4 to make room for the new Tier 2 (Economy Fish Combining) below
+//
+// Full sequence, per direct request (a full rework of the old sequence,
+// which included a wasted real crack — $1000 spent just to flip
+// state.level.tier from 1 to 2 with nothing granted, since neither Economy
+// Fish Combining nor Fish Merging has ever actually been gated by tier in
+// code): Tier 1 (start) -> Tier 1.5 tease ($150, nothing, a pure joke) ->
+// Tier 1.75 ($500, Rudimentary Fan only) -> real Tier 1->2 crack ($1000,
+// Processor + Suckerfish) -> Tier 2.5 ($5000, Auto-Feeder only) -> real
+// Tier 2->3 crack ($25000, Electric Eel/Fan/Processor/Auto-Feeder) -> real
+// Tier 3->4 crack ($50000, the Mound shatters into the Science Lab,
+// Science Octopus + every Gene-Splicing hybrid + Turbo Fan). MOUND_MAX_TIER
+// dropped from 5 to 4 accordingly — one fewer real integer tier now that the
+// old empty flip is gone.
+export const MOUND_MAX_TIER = 4; // reaching this shatters the Mound completely into the Science Lab instead of cracking further
 export const MOUND_TEASE_COST = 150; // unchanged — the tease is still a Tier 1 no-op regardless of how many tiers exist above it
-// "Tier 1.75" — a new paid step between the tease and the real Tier 1->2
-// crack, per direct request: the Rudimentary Fan no longer comes free with
-// the tease (it used to) — it now costs its own flat $500 and grants ONLY
-// the Fan, still without advancing state.level.tier. Tracked by a new
-// state.level.fanUnlockPurchased flag (Levels.js), checked the same way
-// moundTeased already is — see Mound.js's getMoundNextCost/crackMound.
+// "Tier 1.75" — a paid step between the tease and the real Tier 1->2 crack:
+// $500, grants ONLY the Rudimentary Fan, still without advancing
+// state.level.tier. Tracked by state.level.fanUnlockPurchased (Levels.js),
+// checked the same way moundTeased already is — see Mound.js's
+// getMoundNextCost/crackMound.
 export const FAN_UNLOCK_COST = 500;
-// Crack costs 1/2/3 are unchanged from before the tier shift (1000/5000/25000
-// for 1->2, 2->3, 3->4); 4 (2->3... — see TIER_UNLOCKS below for exactly what
-// each transition now grants) is new, priced at the explicitly requested
-// 50000 for the final crack into Tier 5 (Hybridization).
-export const MOUND_CRACK_COST = { 1: 1000, 2: 5000, 3: 25000, 4: 50000 };
+// "Tier 2.5" — the same kind of paid sub-step, but sitting between the real
+// Tier 1->2 and Tier 2->3 cracks instead: $5000, grants ONLY the
+// Auto-Feeder (split out from what the Tier 1->2 crack itself grants — see
+// TIER_UNLOCKS below), still without advancing state.level.tier past 2.
+// Tracked by state.level.autoFeederUnlockPurchased (Levels.js).
+export const AUTO_FEEDER_UNLOCK_COST = 5000;
+export const MOUND_CRACK_COST = { 1: 1000, 2: 25000, 3: 50000 };
 export const MOUND_WIDTH_TILES = 4.4; // how many seabed tiles wide its clickable footprint is — 10% bigger than the original 4
 export const MOUND_HEIGHT_PX = 62; // how far it mounds up above the seabed surface — 10% bigger than the original 56
-// All tiers shifted up by +1 from their original numbering (old T2->new T3,
-// old T3->new T4, old T4->new T5) to make room for a new Tier 2 dedicated to
-// Economy Fish Combining/Splicing and dynamic economy-fish pricing — both
-// mechanics, not unlocks, and neither was ever actually gated by tier in
-// code (this comment previously claimed otherwise; dynamic pricing has
-// always applied regardless of tier, and the drag-combine interaction is now
-// explicitly gated by a Tank Upgrade purchase instead — see
-// FISH_MERGING_UNLOCK_COST above). See ECONOMY_SPECIES_IDS/FISH_STAR_TIER_MAX
-// below. Platform itself
-// is NOT tier-gated at all any more — see BUILDING_TYPES' unlockedByDefault
-// above — since every other building needs one to anchor to, per direct
-// request it's available from level start rather than waiting on any crack.
-// Collector and Auto-Feeder moved to Tier 3 (alongside
-// Suckerfish) per the same request. The Rudimentary Fan isn't granted by a
-// TIER_UNLOCKS entry at all any more — it moved even earlier, to the Mound's
-// first "throw money" tease itself (the informal "Tier 1.5" step, before
-// state.level.tier even reaches 2) — see Mound.js's crackMound.
+// Platform itself is NOT tier-gated at all — see BUILDING_TYPES'
+// unlockedByDefault above — since every other building needs one to anchor
+// to, per direct request it's available from level start rather than
+// waiting on any crack. The Rudimentary Fan isn't granted by a
+// TIER_UNLOCKS entry at all — it's granted by the Mound's paid "Tier 1.75"
+// step (FAN_UNLOCK_COST, $500); the Auto-Feeder likewise isn't granted here
+// — it's the paid "Tier 2.5" step (AUTO_FEEDER_UNLOCK_COST, $5000). Both
+// are separate steps after their respective real crack, still without
+// advancing state.level.tier — see Mound.js's getMoundNextCost/crackMound.
 export const TIER_UNLOCKS = {
   2: {
-    species: [],
-    buildings: [], // Rudimentary Fan already granted by the Tier 1.5 tease — this crack's only effect is flipping state.level.tier to 2, which is what gates Economy Fish Combining
-  },
-  3: {
     species: ['suckerfish'],
-    buildings: [TILE_COLLECTOR, TILE_AUTO_FEEDER], // Ramps were removed from the game entirely, per direct request — see CLAUDE.md's Current Phase changelog
+    buildings: [TILE_COLLECTOR], // Auto-Feeder is its own separate "Tier 2.5" paid step, not part of this crack — see AUTO_FEEDER_UNLOCK_COST above
   },
-  // Tier 4/5 species are listed even though some of their mechanics aren't
-  // built yet (Phase 3/4 alignment, not Phase 2 coding scope) — reaching
-  // them today just makes these purchasable early with no real
-  // Generator/Researcher/splicing behavior behind them yet, same inert-
-  // scaffold situation every not-yet-behavior-wired species has been in. The
-  // Electric/Turbo Fans ARE fully functional the moment they unlock, unlike
-  // those still-scaffolded species/behaviors.
+  // Species listed even though some mechanics aren't built yet (Phase 3/4
+  // alignment, not Phase 2 coding scope) — reaching them today just makes
+  // these purchasable early with no real Generator/Researcher behavior
+  // behind them yet, same inert-scaffold situation every not-yet-behavior-
+  // wired species has been in. The Electric/Turbo Fans ARE fully functional
+  // the moment they unlock, unlike those still-scaffolded species.
   // Electric Processor/Auto-Feeder are granted in the same crack as Electric
   // Eel — "unlocked automatically when the electric eel is unlocked," per
   // direct request, rather than needing their own separate Tier gate.
-  4: { species: ['electric_eel'], buildings: [TILE_FAN_T3, TILE_COLLECTOR_ELECTRIC, TILE_AUTO_FEEDER_ELECTRIC] },
-  5: {
+  3: { species: ['electric_eel'], buildings: [TILE_FAN_T3, TILE_COLLECTOR_ELECTRIC, TILE_AUTO_FEEDER_ELECTRIC] },
+  4: {
     species: [
       'octopus', 'scrub_guppy', 'volt_guppy', 'scholar_guppy',
       'scrub_dartfin', 'volt_dartfin', 'scholar_dartfin',
@@ -1053,10 +1068,17 @@ export const TIER_UNLOCKS = {
 export const POWER_HISTORY_MAX = 60;
 
 export const GENE_SPLICING_TECH_ID = 'gene_splicing';
-export const GENE_SPLICING_COST = 25; // Science Bubbles — was 100, cut per direct request now that Science is a real collected/banked resource (state.level.science) rather than an instantly-ticking counter
-// Advanced Processor/Auto-Feeder are also bought in the Lab, same currency
-// and same one-time-unlock-then-placeable-for-money pattern as Gene-Splicing
-// itself — see UI.js's Lab popup.
+// Gene-Splicing is bought as a Tank Upgrade now, not in the Science Lab —
+// per direct request ("unlocked through the tank upgrades for 5 tank
+// points, instead of unlocked through mound tiers"), a one-time purchase
+// exactly like Fish Merging's own card (FISH_MERGING_UNLOCK_COST), spending
+// Tank Points instead of Science and requiring no Mound tier at all. See
+// UI.js's buildTankPanel.
+export const GENE_SPLICING_TANK_POINT_COST = 5; // Tank Points
+// Advanced Processor/Auto-Feeder are still bought in the Science Lab (still
+// only reachable once the Mound fully shatters at MOUND_MAX_TIER) — same
+// currency and same one-time-unlock-then-placeable-for-money pattern
+// Gene-Splicing itself used to follow.
 export const ADVANCED_PROCESSOR_COST = 25; // Science Bubbles
 export const ADVANCED_AUTO_FEEDER_COST = 25; // Science Bubbles
 export const SCIENCE_COLOR = '#5fc9ff';
