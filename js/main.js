@@ -16,6 +16,7 @@ import {
   DEFAULT_TIME_SCALE_INDEX,
   CHEAT_GRANT_AMOUNT,
   CHEAT_TANK_POINTS_GRANT_AMOUNT,
+  CHEAT_SCIENCE_GRANT_AMOUNT,
   SIM_DT_MS,
   MAX_FRAME_SKIP,
   SEABED_FLOOR_Y,
@@ -32,6 +33,7 @@ import {
   NOTIFICATION_LOG_MAX,
   CLEANLINESS_MAX,
   GENE_SPLICING_TECH_ID,
+  SCIENCE_LAB_UPGRADES,
   SCIENCE_ITEM_COLOR_A,
   SCIENCE_ITEM_COLOR_B,
   POWER_HISTORY_MAX,
@@ -133,6 +135,7 @@ const state = {
     techUnlocked: [],
     buildingsUnlocked: BUILDING_LIST.filter((b) => b.unlockedByDefault).map((b) => b.id),
     speciesUnlocked: SPECIES_LIST.filter((s) => s.unlockedByDefault).map((s) => s.id),
+    labUpgradesPurchased: [], // ids from Config.js's SCIENCE_LAB_UPGRADES — permanent like every other meta unlock, tracked separately from what each node actually grants so UI.js's tree can check prerequisites uniformly regardless of whether a node grants a species or a building
     levelsCompleted: [],
     settings: { soundOn: true },
   },
@@ -355,20 +358,22 @@ input.keydownHandlers.push((e) => {
     case 'NumpadSubtract': // - — slower / pause at 0x
       state.debug.timeScaleIndex = Math.max(0, state.debug.timeScaleIndex - 1);
       break;
-    case 'KeyM': // grant $10,000 and 20 Tank Points, for testing both the Mound and the Tank Upgrades panel without grinding
+    case 'KeyM': // grant $10,000, 20 Tank Points, and 500 Science, for testing the Mound/Tank Upgrades/Science Lab without grinding
       state.level.money += CHEAT_GRANT_AMOUNT;
       state.level.tankPoints.total += CHEAT_TANK_POINTS_GRANT_AMOUNT;
       state.level.tankPoints.available += CHEAT_TANK_POINTS_GRANT_AMOUNT;
+      state.level.science += CHEAT_SCIENCE_GRANT_AMOUNT;
       break;
     case 'KeyG': { // spawn selected species at cursor; Shift+G spawns fully grown
       const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
       spawnFishCheat(state, state.debug.selectedSpecies, world.x, world.y, e.shiftKey);
       break;
     }
-    case 'KeyU': // unlock all species, buildings, and tech
+    case 'KeyU': // unlock all species, buildings, tech, and every Science Lab tree node
       state.meta.speciesUnlocked = SPECIES_LIST.map((s) => s.id);
       state.meta.buildingsUnlocked = BUILDING_LIST.map((b) => b.id);
       if (!state.meta.techUnlocked.includes(GENE_SPLICING_TECH_ID)) state.meta.techUnlocked.push(GENE_SPLICING_TECH_ID);
+      state.meta.labUpgradesPurchased = Object.keys(SCIENCE_LAB_UPGRADES);
       refreshShopPanel(state);
       break;
     case 'KeyK': // clear all items

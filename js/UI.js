@@ -34,11 +34,10 @@ import {
   GENE_SPLICING_TANK_POINT_COST,
   PROCESSOR_STATS,
   AUTO_FEEDER_STATS,
-  TILE_COLLECTOR_ADVANCED,
-  TILE_AUTO_FEEDER_ADVANCED,
-  ADVANCED_PROCESSOR_COST,
-  ADVANCED_AUTO_FEEDER_COST,
   POWER_HISTORY_MAX,
+  SCIENCE_LAB_UPGRADES,
+  SCIENCE_LAB_UPGRADE_LIST,
+  SPECIES_LIST,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings, loadLevel } from './Levels.js';
 import { getFishPurchaseCost, effectiveFoodCapacity, countTankFood } from './Entities.js';
@@ -50,7 +49,7 @@ import { playUpgrade, setMusicVolume, setSfxVolume, getMusicVolume, getSfxVolume
 
 const MOUND_MENU_GAP_PX = 12; // screen px of breathing room between the popup's bottom edge and the Mound's top edge
 const MOUND_MENU_TRANSITION_MS = 220; // must match #mound-menu's CSS transition duration
-const LAB_MENU_TRANSITION_MS = 220; // must match #lab-menu's CSS transition duration — same popup pattern as the Mound's, see openLabMenu below
+const LAB_MENU_TRANSITION_MS = 220; // must match #lab-modal's CSS transition duration — see openLabMenu/closeLabMenu below
 
 // One-time story/tutorial notification — see state.level.tutorialFlags and
 // CLAUDE.md's "Story & Tutorial Notifications" section. (First-fish-bought
@@ -166,12 +165,12 @@ export function initUI(state) {
     moundThrowBtn: document.getElementById('mound-throw-btn'),
     moundCancelBtn: document.getElementById('mound-cancel-btn'),
     labOverlay: document.getElementById('lab-overlay'),
-    labMenuAnchor: document.getElementById('lab-menu-anchor'),
-    labMenu: document.getElementById('lab-menu'),
+    labModal: document.getElementById('lab-modal'),
     labScienceReadout: document.getElementById('lab-science-readout'),
-    labAdvancedProcessorBtn: document.getElementById('lab-advanced-processor-btn'),
-    labAdvancedAutoFeederBtn: document.getElementById('lab-advanced-auto-feeder-btn'),
-    labCancelBtn: document.getElementById('lab-cancel-btn'),
+    labCloseBtn: document.getElementById('lab-close-btn'),
+    labTreeWrap: document.getElementById('lab-tree-wrap'),
+    labTreeCanvas: document.getElementById('lab-tree-canvas'),
+    labTreeColumns: document.getElementById('lab-tree-columns'),
     tankPanel: document.getElementById('tank-panel'),
     tankCollapseBtn: document.getElementById('tank-collapse-btn'),
     tankPointsDisplay: document.getElementById('tank-points-display'),
@@ -191,31 +190,12 @@ export function initUI(state) {
 
   // Gene-Splicing moved to the Tank Upgrades panel (see buildTankPanel) — no
   // longer purchased here, per direct request ("unlocked through the tank
-  // upgrades... instead of unlocked through mound tiers").
-  // Advanced Processor/Auto-Feeder: same one-time-Lab-purchase-then-
-  // placeable-for-money pattern as Gene-Splicing itself — pushes the tile id
-  // into state.meta.buildingsUnlocked (same permanent-unlock mechanism every
-  // other building already uses) rather than a techUnlocked flag, since
-  // it's a building unlock, not a tech flag.
-  els.labAdvancedProcessorBtn.addEventListener('click', () => {
-    if (state.meta.buildingsUnlocked.includes(TILE_COLLECTOR_ADVANCED)) return;
-    if (state.level.science < ADVANCED_PROCESSOR_COST) return;
-    state.level.science -= ADVANCED_PROCESSOR_COST;
-    state.meta.buildingsUnlocked.push(TILE_COLLECTOR_ADVANCED);
-    playUpgrade();
-    refreshLabMenu(state);
-    refreshShopPanel(state);
-  });
-  els.labAdvancedAutoFeederBtn.addEventListener('click', () => {
-    if (state.meta.buildingsUnlocked.includes(TILE_AUTO_FEEDER_ADVANCED)) return;
-    if (state.level.science < ADVANCED_AUTO_FEEDER_COST) return;
-    state.level.science -= ADVANCED_AUTO_FEEDER_COST;
-    state.meta.buildingsUnlocked.push(TILE_AUTO_FEEDER_ADVANCED);
-    playUpgrade();
-    refreshLabMenu(state);
-    refreshShopPanel(state);
-  });
-  els.labCancelBtn.addEventListener('click', () => closeLabMenu());
+  // upgrades... instead of unlocked through mound tiers"). Every other
+  // Science Lab purchase (Suckerfish, Electric Eel, every Electric/Advanced
+  // building) is now data-driven off Config.js's SCIENCE_LAB_UPGRADES — see
+  // buildLabTree/buyLabUpgrade below, which wire up all 8 node buttons at
+  // once instead of one bespoke handler per building.
+  els.labCloseBtn.addEventListener('click', () => closeLabMenu());
   els.labOverlay.addEventListener('click', (e) => {
     if (e.target === els.labOverlay) closeLabMenu();
   });
@@ -308,6 +288,7 @@ export function initUI(state) {
   buildShopPanel(state);
   buildBuildPalette(state);
   buildTankPanel(state);
+  buildLabTree(state);
   scheduleSheenAll();
 }
 
@@ -455,33 +436,38 @@ function refreshMoundThrowButton(state) {
   els.moundThrowBtn.disabled = !affordable;
 }
 
-// ---- Science Lab popup (Phase 4) ----
-// Same fly-out-of-its-anchor pattern as the Mound's own popup above, just a
-// separate DOM tree — opened by main.js's click handler when
-// isPointOnScienceLab(...) hits, once the Mound has fully shattered.
+// ---- Science Lab popup: a real branching tech tree ----
+// Per direct request ("the science lab should look like a web of unlocks
+// branching from the unlocks that are barring them before") — replaces the
+// old small Mound-anchored flyout (which only ever had room for a flat
+// button list) with a centered modal, the same dimmed-backdrop pattern
+// #pause-overlay already uses, since a real node-link tree needs consistent
+// screen space regardless of where the camera happens to be. Opened by
+// main.js's click handler when isPointOnScienceLab(...) hits, once the
+// Mound has fully shattered.
 export function openLabMenu(state) {
   labMenuOpen = true;
   labMenuClosing = false;
   if (labMenuCloseTimer !== null) { clearTimeout(labMenuCloseTimer); labMenuCloseTimer = null; }
   els.labOverlay.classList.remove('hidden');
-  refreshLabMenu(state);
-  updateLabMenuPosition(state);
-
-  els.labMenu.classList.add('lab-menu-closed');
-  void els.labMenu.offsetWidth;
-  els.labMenu.classList.remove('lab-menu-closed');
+  refreshLabTree(state);
+  els.labModal.classList.add('lab-modal-closed');
+  void els.labModal.offsetWidth; // forced reflow — same retrigger trick every other one-shot transition in this file uses
+  els.labModal.classList.remove('lab-modal-closed');
+  playPanelOpen();
 }
 
 export function closeLabMenu() {
   if (!labMenuOpen) return;
   labMenuOpen = false;
   labMenuClosing = true;
-  els.labMenu.classList.add('lab-menu-closed');
+  els.labModal.classList.add('lab-modal-closed');
   labMenuCloseTimer = setTimeout(() => {
     els.labOverlay.classList.add('hidden');
     labMenuClosing = false;
     labMenuCloseTimer = null;
   }, LAB_MENU_TRANSITION_MS);
+  playPanelClose();
 }
 
 // Read by main.js's Escape handler, same reason isMoundMenuOpen is.
@@ -489,30 +475,147 @@ export function isLabMenuOpen() {
   return labMenuOpen;
 }
 
-function updateLabMenuPosition(state) {
-  const anchorWorld = { x: MOUND_X, y: SEABED_FLOOR_Y - MOUND_HEIGHT_PX };
-  const screen = worldToScreen(anchorWorld.x, anchorWorld.y, state.camera);
-  els.labMenuAnchor.style.left = `${screen.x}px`;
-  els.labMenuAnchor.style.top = `${screen.y - MOUND_MENU_GAP_PX}px`;
+// One dependency-depth per column — a node with no prerequisites is depth
+// 0; a node's depth is always one more than the DEEPEST of its own
+// prerequisites (not just the first), so a node requiring both a depth-0
+// and a depth-1 prerequisite still lands in depth 2, never overlapping the
+// column its deeper prerequisite occupies. Memoized since several nodes
+// share prerequisites (electric_fan/electric_collector/electric_auto_feeder
+// all require `eel`).
+function labNodeDepth(id, memo) {
+  if (memo[id] != null) return memo[id];
+  const node = SCIENCE_LAB_UPGRADES[id];
+  memo[id] = node.requires.length === 0 ? 0 : 1 + Math.max(...node.requires.map((r) => labNodeDepth(r, memo)));
+  return memo[id];
 }
 
-// Re-checked every frame the popup is open (from updateHUD) — science total
-// and the research button's afford-state can both change while it's open.
-function refreshLabMenu(state) {
+let labNodeDepthMemo = {};
+let labNodeButtons = {}; // id -> { btn, costEl }, rebuilt by buildLabTree, read by refreshLabTree/drawLabTreeConnectors
+
+// Built once at init (mirrors buildTankPanel) — the tree's SHAPE (which
+// node sits in which column) never changes at runtime, only each node's
+// locked/affordable/purchased state does, so only refreshLabTree needs to
+// re-run as state changes.
+function buildLabTree(state) {
+  els.labTreeColumns.innerHTML = '';
+  labNodeButtons = {};
+  labNodeDepthMemo = {};
+  const depths = SCIENCE_LAB_UPGRADE_LIST.map((n) => labNodeDepth(n.id, labNodeDepthMemo));
+  const maxDepth = Math.max(...depths);
+  const columns = [];
+  for (let d = 0; d <= maxDepth; d++) {
+    const col = document.createElement('div');
+    col.className = 'lab-tree-col';
+    columns.push(col);
+    els.labTreeColumns.appendChild(col);
+  }
+  for (const node of SCIENCE_LAB_UPGRADE_LIST) {
+    const btn = document.createElement('button');
+    btn.className = 'lab-node sheen-target';
+    btn.dataset.nodeId = node.id;
+    const nameEl = document.createElement('div');
+    nameEl.className = 'lab-node-name';
+    nameEl.textContent = `${node.icon} ${node.name}`;
+    const costEl = document.createElement('div');
+    costEl.className = 'lab-node-cost';
+    btn.append(nameEl, costEl);
+    btn.addEventListener('click', () => buyLabUpgrade(state, node.id));
+    labNodeButtons[node.id] = { btn, costEl };
+    columns[labNodeDepthMemo[node.id]].appendChild(btn);
+  }
+  refreshLabTree(state);
+}
+
+// Every Science Lab node spends BOTH Science and gold at once — a
+// deliberate first in this game's economy, per direct request, tying the
+// whole tree to two resources so it reads as the real end-goal sink.
+function buyLabUpgrade(state, id) {
+  const node = SCIENCE_LAB_UPGRADES[id];
+  if (state.meta.labUpgradesPurchased.includes(id)) return;
+  if (!node.requires.every((r) => state.meta.labUpgradesPurchased.includes(r))) return;
+  if (state.level.science < node.scienceCost || state.level.money < node.goldCost) return;
+  state.level.science -= node.scienceCost;
+  state.level.money -= node.goldCost;
+  state.meta.labUpgradesPurchased.push(id);
+  if (node.grants.species) {
+    for (const sid of node.grants.species) {
+      if (!state.meta.speciesUnlocked.includes(sid)) state.meta.speciesUnlocked.push(sid);
+    }
+  }
+  if (node.grants.buildings) {
+    for (const bid of node.grants.buildings) {
+      if (!state.meta.buildingsUnlocked.includes(bid)) state.meta.buildingsUnlocked.push(bid);
+    }
+  }
+  playUpgrade();
+  refreshLabTree(state);
+  refreshShopPanel(state);
+}
+
+// Re-checked every frame the popup is open (from updateHUD) — Science/money
+// and every node's prerequisite state can all change while it's open.
+function refreshLabTree(state) {
   const science = state.level.science;
-  els.labScienceReadout.textContent = `🔬 ${science}`;
+  els.labScienceReadout.textContent = `🔬 ${science} · 💰 $${Math.floor(state.level.money)}`;
+  for (const node of SCIENCE_LAB_UPGRADE_LIST) {
+    const { btn, costEl } = labNodeButtons[node.id];
+    const purchased = state.meta.labUpgradesPurchased.includes(node.id);
+    const prereqsMet = node.requires.every((r) => state.meta.labUpgradesPurchased.includes(r));
+    btn.classList.toggle('purchased', purchased);
+    btn.classList.toggle('locked', !purchased && !prereqsMet);
+    if (purchased) {
+      costEl.textContent = 'Unlocked ✓';
+      btn.disabled = true;
+    } else if (!prereqsMet) {
+      costEl.textContent = 'Locked';
+      btn.disabled = true;
+    } else {
+      costEl.textContent = `${node.scienceCost} 🔬 · $${node.goldCost}`;
+      btn.disabled = science < node.scienceCost || state.level.money < node.goldCost;
+    }
+  }
+  drawLabTreeConnectors(state);
+}
 
-  const advProcessorUnlocked = state.meta.buildingsUnlocked.includes(TILE_COLLECTOR_ADVANCED);
-  els.labAdvancedProcessorBtn.textContent = advProcessorUnlocked
-    ? 'Advanced Processor unlocked ✓'
-    : `Advanced Processor — ${ADVANCED_PROCESSOR_COST} 🔬`;
-  els.labAdvancedProcessorBtn.disabled = advProcessorUnlocked || science < ADVANCED_PROCESSOR_COST;
+// The "web" itself — one bezier connector per prerequisite edge, drawn on a
+// canvas layered underneath the node buttons (so it never intercepts
+// clicks). A node requiring two prerequisites (Electric Auto-Feeder needs
+// both `eel` and `suckerfish`) gets two separate curves converging on it —
+// per direct request, so it's visually obvious both are required, not a
+// single merged line. An edge whose prerequisite is already purchased
+// draws brighter/solid; still-locked edges draw faint/dashed.
+function drawLabTreeConnectors(state) {
+  const wrap = els.labTreeWrap;
+  const canvas = els.labTreeCanvas;
+  const w = wrap.scrollWidth;
+  const h = wrap.scrollHeight;
+  if (canvas.width !== w) canvas.width = w;
+  if (canvas.height !== h) canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, w, h);
+  const wrapRect = wrap.getBoundingClientRect();
 
-  const advFeederUnlocked = state.meta.buildingsUnlocked.includes(TILE_AUTO_FEEDER_ADVANCED);
-  els.labAdvancedAutoFeederBtn.textContent = advFeederUnlocked
-    ? 'Advanced Auto-Feeder unlocked ✓'
-    : `Advanced Auto-Feeder — ${ADVANCED_AUTO_FEEDER_COST} 🔬`;
-  els.labAdvancedAutoFeederBtn.disabled = advFeederUnlocked || science < ADVANCED_AUTO_FEEDER_COST;
+  for (const node of SCIENCE_LAB_UPGRADE_LIST) {
+    if (!node.requires.length) continue;
+    const toRect = labNodeButtons[node.id].btn.getBoundingClientRect();
+    const toX = toRect.left - wrapRect.left + wrap.scrollLeft;
+    const toY = toRect.top - wrapRect.top + wrap.scrollTop + toRect.height / 2;
+    for (const reqId of node.requires) {
+      const fromRect = labNodeButtons[reqId].btn.getBoundingClientRect();
+      const fromX = fromRect.right - wrapRect.left + wrap.scrollLeft;
+      const fromY = fromRect.top - wrapRect.top + wrap.scrollTop + fromRect.height / 2;
+      const reqPurchased = state.meta.labUpgradesPurchased.includes(reqId);
+      ctx.strokeStyle = reqPurchased ? 'rgba(122, 212, 168, 0.85)' : 'rgba(107, 76, 107, 0.3)';
+      ctx.lineWidth = reqPurchased ? 3 : 2;
+      ctx.setLineDash(reqPurchased ? [] : [5, 4]);
+      const midX = (fromX + toX) / 2;
+      ctx.beginPath();
+      ctx.moveTo(fromX, fromY);
+      ctx.bezierCurveTo(midX, fromY, midX, toY, toX, toY);
+      ctx.stroke();
+    }
+  }
+  ctx.setLineDash([]);
 }
 
 function showPauseMain() {
@@ -770,6 +873,15 @@ function buildTankPanel(state) {
     if (state.level.tankPoints.available < GENE_SPLICING_TANK_POINT_COST) return;
     state.level.tankPoints.available -= GENE_SPLICING_TANK_POINT_COST;
     state.meta.techUnlocked.push(GENE_SPLICING_TECH_ID);
+    // Every hybrid row also goes into speciesUnlocked here — not strictly
+    // required for the splice interaction itself (isSpliceSource/
+    // canSpliceFish never check a hybrid's own unlock status, only its
+    // utility parent's), but keeps state.meta consistent with how a Mound
+    // crack used to grant them, and is what a future shop/species-list
+    // pass would read.
+    for (const s of SPECIES_LIST) {
+      if (s.parents && !state.meta.speciesUnlocked.includes(s.id)) state.meta.speciesUnlocked.push(s.id);
+    }
     playUpgrade();
     refreshTankPanel(state);
   });
@@ -1242,8 +1354,7 @@ export function updateHUD(state) {
   if (!state.ui.shopCollapsed) refreshShopPrices(state);
   if (moundMenuOpen) refreshMoundThrowButton(state);
   if (moundMenuOpen || moundMenuClosing) updateMoundMenuPosition(state); // keeps tracking through the shrink-back so it doesn't jump right as it starts closing
-  if (labMenuOpen) refreshLabMenu(state);
-  if (labMenuOpen || labMenuClosing) updateLabMenuPosition(state);
+  if (labMenuOpen) refreshLabTree(state); // no position-tracking needed any more — it's a centered modal now, not anchored to the Mound's screen position
   if (!state.ui.tankPanelCollapsed) refreshTankPanel(state);
 
   // The shop sits open most of the game now, so it carries its own copy of

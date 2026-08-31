@@ -726,45 +726,114 @@ html, body {
 }
 #mound-menu .pause-btn { padding: 9px; font-size: 12px; margin-bottom: 0; }
 
-/* Science Lab popup (Phase 4) — same click-catcher/anchor/fly-out pattern as
-   the Mound's own popup above, just a separate DOM tree since the two are
-   never open at the same time but aren't literally the same content. */
+/* Science Lab: a real branching tech tree now, per direct request — a
+   centered dimmed-backdrop modal (same pattern #pause-overlay already
+   uses) instead of the small Mound-anchored flyout every other popup here
+   uses, since a node-link tree needs real, consistent screen space
+   regardless of where the camera happens to be panned. */
 #lab-overlay {
   position: fixed; inset: 0;
-  z-index: 190;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(107, 76, 107, 0.35);
+  z-index: 210; /* above the pause menu (200) — the Lab and pause menu are never open together, but this keeps the stacking order sensible if that ever changes */
 }
 #lab-overlay.hidden { display: none; }
-#lab-menu-anchor {
-  position: fixed;
-  transform: translate(-50%, -100%);
-}
-#lab-menu {
-  width: 200px;
-  background: #fff8f0;
+
+#lab-modal {
+  width: 680px;
+  max-width: 92vw;
+  max-height: 86vh;
+  background: linear-gradient(165deg, #fffaf3 0%, #ffe4f2 100%);
   color: #6b4c6b;
-  border-radius: 21px;
-  padding: 21px 18px;
-  box-shadow: 0 14px 36px rgba(107, 76, 107, 0.4);
-  text-align: center;
-  transform-origin: 50% 100%;
+  border: 3px solid #ffffff;
+  border-radius: 28px;
+  padding: 22px 24px;
+  box-shadow: 0 16px 40px rgba(107, 76, 107, 0.45), inset 0 2px 0 rgba(255, 255, 255, 0.7);
+  display: flex;
+  flex-direction: column;
+  transform-origin: 50% 50%;
   transform: scale(1);
   opacity: 1;
   transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.18s ease;
 }
-#lab-menu.lab-menu-closed {
-  transform: scale(0.05);
+#lab-modal.lab-modal-closed {
+  transform: scale(0.85);
   opacity: 0;
 }
-#lab-title { font-size: 15px; font-weight: 800; color: #c25f8f; margin-bottom: 8px; }
+
+#lab-header-row {
+  display: flex; align-items: center; gap: 14px;
+  margin-bottom: 16px;
+}
+#lab-title { font-size: 20px; font-weight: 800; color: #c25f8f; flex: none; }
 #lab-science-readout {
   display: inline-block;
-  background: #eaf9ff; color: #2a7f96;
+  background: linear-gradient(160deg, #fffdf8 0%, #ffe9f4 100%);
+  border: 2px solid #ffffff;
+  color: #6b4c6b;
   font-size: 13px; font-weight: 800;
-  padding: 5px 12px;
+  padding: 6px 14px;
   border-radius: 999px;
-  margin-bottom: 12px;
+  box-shadow: 0 3px 9px rgba(107, 76, 107, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  flex: 1;
 }
-#lab-menu .pause-btn { padding: 9px; font-size: 12px; margin-bottom: 0; }
+#lab-close-btn { flex: none; width: auto; padding: 9px 16px; margin-bottom: 0; }
+
+#lab-tree-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 380px;
+  overflow: auto;
+  /* Same custom scrollbar every other scrollable panel in this game uses. */
+  scrollbar-width: thin;
+  scrollbar-color: #ffb6d5 #fff0f6;
+}
+#lab-tree-wrap::-webkit-scrollbar { width: 8px; height: 8px; }
+#lab-tree-wrap::-webkit-scrollbar-track { background: #fff0f6; border-radius: 999px; }
+#lab-tree-wrap::-webkit-scrollbar-thumb { background: #ffb6d5; border-radius: 999px; }
+#lab-tree-wrap::-webkit-scrollbar-thumb:hover { background: #ff9ac4; }
+
+#lab-tree-canvas {
+  position: absolute; top: 0; left: 0;
+  pointer-events: none; /* the connector lines sit visually under the node buttons and never intercept clicks */
+}
+#lab-tree-columns {
+  position: relative;
+  display: flex;
+  gap: 48px;
+  padding: 12px 16px;
+  min-width: max-content;
+}
+.lab-tree-col {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 28px;
+  width: 170px;
+  flex: none;
+}
+
+.lab-node {
+  width: 100%;
+  background: linear-gradient(160deg, #fffdf8 0%, #fff0dc 100%);
+  border: 2px solid #ffffff;
+  border-radius: 16px;
+  padding: 10px 14px;
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 3px 8px rgba(107, 76, 107, 0.2), inset 0 2px 0 rgba(255, 255, 255, 0.7);
+  transition: transform 0.1s ease, opacity 0.15s ease;
+}
+.lab-node:hover:not(:disabled) { transform: scale(1.04); }
+.lab-node:disabled { cursor: not-allowed; }
+.lab-node.locked { opacity: 0.55; }
+.lab-node.purchased {
+  background: linear-gradient(160deg, #a8f0cb 0%, #7ad4a8 100%);
+  box-shadow: 0 3px 8px rgba(53, 145, 97, 0.3), inset 0 2px 0 rgba(255, 255, 255, 0.5);
+}
+.lab-node-name { font-size: 13px; font-weight: 800; color: #6b4c6b; }
+.lab-node.purchased .lab-node-name { color: #1f4a34; }
+.lab-node-cost { font-size: 11px; font-weight: 700; opacity: 0.75; margin-top: 3px; }
 
 #debug-overlay {
   position: fixed; bottom: 12px; left: 12px;

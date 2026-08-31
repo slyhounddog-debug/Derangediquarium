@@ -59,14 +59,18 @@ const MOUND_FAN_UNLOCK_MESSAGE = "You throw another $500 at the same lump of dir
 
 // "Tier 2.5" — same idea as the Fan's own paid step above, sitting between
 // the real Tier 1->2 crack and the real Tier 2->3 crack instead. Costs
-// AUTO_FEEDER_UNLOCK_COST ($5000) and grants only the Auto-Feeder, still
+// AUTO_FEEDER_UNLOCK_COST ($2500) and grants only the Auto-Feeder, still
 // without advancing state.level.tier past 2.
-const MOUND_AUTO_FEEDER_UNLOCK_MESSAGE = "A third crack opens up just for you, apparently — an Auto-Feeder rolls out, already smelling faintly of expired fish flakes. Somewhere, a Suckerfish weeps tears of joy.";
+const MOUND_AUTO_FEEDER_UNLOCK_MESSAGE = "A third crack opens up just for you, apparently — an Auto-Feeder rolls out, already smelling faintly of expired fish flakes.";
 
+// Per direct request, the Mound is a short on-ramp now, not the game's
+// whole arc — it only ever grants Octopus/Processor (Tier 2) before
+// shattering outright at MOUND_MAX_TIER (3) into the Science Lab, where the
+// REAL progression (Suckerfish, Electric Eel, every Electric/Advanced
+// building) lives from then on. See SCIENCE_LAB_UPGRADES in Config.js.
 const TIER_CRACK_MESSAGES = {
-  2: 'Another crack spreads wider. A Processor tumbles out, closely followed by a Suckerfish that looks personally offended by the mess.',
-  3: "A low hum starts underneath the rubble. Shockingly, it's an Electric Eel — here for the Electric Fan and the Electric Processor/Auto-Feeder, and to remind everyone who's really in charge of this power grid.",
-  4: 'The mound stops cracking and just gives up, shattering completely. Underneath: a Science Lab that has apparently been there the whole time. A Science Octopus climbs out already holding a beaker like it owns the place.',
+  2: 'Another crack spreads wider. A Processor tumbles out, closely followed by a Science Octopus that looks personally offended by the mess.',
+  3: 'The mound stops cracking and just gives up, shattering completely. Underneath: a Science Lab that has apparently been there the whole time, humming with unfinished research. Everything from here on out is going to cost Science.',
 };
 
 function pushNotification(state, text) {

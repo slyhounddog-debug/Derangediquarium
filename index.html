@@ -92,13 +92,15 @@
 </div>
 
 <div id="lab-overlay" class="hidden">
-  <div id="lab-menu-anchor">
-    <div id="lab-menu">
+  <div id="lab-modal">
+    <div id="lab-header-row">
       <div id="lab-title">Science Lab</div>
-      <div id="lab-science-readout">🔬 0</div>
-      <button id="lab-advanced-processor-btn" class="mound-throw-btn">Advanced Processor — 25 🔬</button>
-      <button id="lab-advanced-auto-feeder-btn" class="mound-throw-btn">Advanced Auto-Feeder — 25 🔬</button>
-      <button id="lab-cancel-btn" class="pause-btn">Cancel</button>
+      <div id="lab-science-readout">🔬 0 · 💰 $0</div>
+      <button id="lab-close-btn" class="pause-btn">Close</button>
+    </div>
+    <div id="lab-tree-wrap">
+      <canvas id="lab-tree-canvas"></canvas>
+      <div id="lab-tree-columns"></div>
     </div>
   </div>
 </div>

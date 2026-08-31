@@ -342,6 +342,7 @@ export const COIN_RADIUS = 10; // px, base visual radius (bronze size) — 25% b
 export const COIN_CLICK_RADIUS_MULTIPLIER = 1.4; // click hit-test radius is each coin's own (tier-scaled) radius times this — 40% bigger than the coin itself per direct request, so a click doesn't have to be pixel-perfect (and doesn't get misread as a food-placement click on a miss). tryBankCoinAt still only ever banks the first match it finds per click and returns immediately, so an overlapping pair of these bigger radii still can't bank two coins on one click.
 export const CHEAT_GRANT_AMOUNT = 10000; // $ granted by the M debug key
 export const CHEAT_TANK_POINTS_GRANT_AMOUNT = 20; // Tank Points also granted by the M debug key, so testing the Tank Upgrades panel doesn't require grinding fish growth
+export const CHEAT_SCIENCE_GRANT_AMOUNT = 500; // Science Bubbles also granted by the M debug key, so testing the Science Lab's tech tree doesn't require grinding an Octopus's real brew-and-collect cycle
 
 // Coin color + size tier by value — checked in ascending order, first match
 // wins. Entities.js's getCoinTier()/getCoinColor() do the lookup; kept here
@@ -985,19 +986,20 @@ export const AUTO_FEEDER_STATS = {
 // is what gets permanently granted into state.meta the first time that tier
 // is reached.
 //
-// Full sequence, per direct request (a full rework of the old sequence,
-// which included a wasted real crack — $1000 spent just to flip
-// state.level.tier from 1 to 2 with nothing granted, since neither Economy
-// Fish Combining nor Fish Merging has ever actually been gated by tier in
-// code): Tier 1 (start) -> Tier 1.5 tease ($150, nothing, a pure joke) ->
-// Tier 1.75 ($500, Rudimentary Fan only) -> real Tier 1->2 crack ($1000,
-// Processor + Suckerfish) -> Tier 2.5 ($5000, Auto-Feeder only) -> real
-// Tier 2->3 crack ($25000, Electric Eel/Fan/Processor/Auto-Feeder) -> real
-// Tier 3->4 crack ($50000, the Mound shatters into the Science Lab,
-// Science Octopus + every Gene-Splicing hybrid + Turbo Fan). MOUND_MAX_TIER
-// dropped from 5 to 4 accordingly — one fewer real integer tier now that the
-// old empty flip is gone.
-export const MOUND_MAX_TIER = 4; // reaching this shatters the Mound completely into the Science Lab instead of cracking further
+// Full sequence, per direct request — a second rework, this time
+// deliberately shrinking the Mound down to a short on-ramp rather than the
+// game's whole progression arc, since Science (the Lab's own branching tech
+// tree, see SCIENCE_LAB_UPGRADES below) is now meant to be "the end all game
+// goal" instead: Tier 1 (start) -> Tier 1.5 tease ($150, nothing, a pure
+// joke) -> Tier 1.75 ($500, Rudimentary Fan only) -> real Tier 1->2 crack
+// ($1000, Processor + Science Octopus) -> Tier 2.5 ($2500, Auto-Feeder
+// only) -> real Tier 2->3 crack ($5000, the Mound shatters completely,
+// revealing the Science Lab — grants nothing on its own beyond the reveal).
+// Everything past that point — Suckerfish, Electric Eel, every Electric/
+// Advanced building — moves into the Lab's own paid tech tree, no longer
+// tied to Mound progress at all. MOUND_MAX_TIER dropped from 4 to 3
+// accordingly.
+export const MOUND_MAX_TIER = 3; // reaching this shatters the Mound completely into the Science Lab instead of cracking further
 export const MOUND_TEASE_COST = 150; // unchanged — the tease is still a Tier 1 no-op regardless of how many tiers exist above it
 // "Tier 1.75" — a paid step between the tease and the real Tier 1->2 crack:
 // $500, grants ONLY the Rudimentary Fan, still without advancing
@@ -1006,12 +1008,12 @@ export const MOUND_TEASE_COST = 150; // unchanged — the tease is still a Tier 
 // getMoundNextCost/crackMound.
 export const FAN_UNLOCK_COST = 500;
 // "Tier 2.5" — the same kind of paid sub-step, but sitting between the real
-// Tier 1->2 and Tier 2->3 cracks instead: $5000, grants ONLY the
-// Auto-Feeder (split out from what the Tier 1->2 crack itself grants — see
-// TIER_UNLOCKS below), still without advancing state.level.tier past 2.
-// Tracked by state.level.autoFeederUnlockPurchased (Levels.js).
-export const AUTO_FEEDER_UNLOCK_COST = 5000;
-export const MOUND_CRACK_COST = { 1: 1000, 2: 25000, 3: 50000 };
+// Tier 1->2 and Tier 2->3 cracks instead: $2500 (was $5000 in an earlier
+// pass, cut per direct request), grants ONLY the Auto-Feeder, still without
+// advancing state.level.tier past 2. Tracked by
+// state.level.autoFeederUnlockPurchased (Levels.js).
+export const AUTO_FEEDER_UNLOCK_COST = 2500;
+export const MOUND_CRACK_COST = { 1: 1000, 2: 5000 }; // 1: Tier 1->2 (Processor + Octopus); 2: Tier 2->3 (shatters into the Science Lab, grants nothing directly)
 export const MOUND_WIDTH_TILES = 4.4; // how many seabed tiles wide its clickable footprint is — 10% bigger than the original 4
 export const MOUND_HEIGHT_PX = 62; // how far it mounds up above the seabed surface — 10% bigger than the original 56
 // Platform itself is NOT tier-gated at all — see BUILDING_TYPES'
@@ -1020,44 +1022,87 @@ export const MOUND_HEIGHT_PX = 62; // how far it mounds up above the seabed surf
 // waiting on any crack. The Rudimentary Fan isn't granted by a
 // TIER_UNLOCKS entry at all — it's granted by the Mound's paid "Tier 1.75"
 // step (FAN_UNLOCK_COST, $500); the Auto-Feeder likewise isn't granted here
-// — it's the paid "Tier 2.5" step (AUTO_FEEDER_UNLOCK_COST, $5000). Both
+// — it's the paid "Tier 2.5" step (AUTO_FEEDER_UNLOCK_COST, $2500). Both
 // are separate steps after their respective real crack, still without
 // advancing state.level.tier — see Mound.js's getMoundNextCost/crackMound.
 export const TIER_UNLOCKS = {
   2: {
-    species: ['suckerfish'],
+    species: ['octopus'], // per direct request — Octopus moved off the Science Lab (it's the one utility species that doesn't gate anything ELSE in the Lab's tree) onto the Mound itself, so the Lab's tree starts truly empty and every one of its 8 nodes is a real choice
     buildings: [TILE_COLLECTOR], // Auto-Feeder is its own separate "Tier 2.5" paid step, not part of this crack — see AUTO_FEEDER_UNLOCK_COST above
   },
-  // Species listed even though some mechanics aren't built yet (Phase 3/4
-  // alignment, not Phase 2 coding scope) — reaching them today just makes
-  // these purchasable early with no real Generator/Researcher behavior
-  // behind them yet, same inert-scaffold situation every not-yet-behavior-
-  // wired species has been in. The Electric/Turbo Fans ARE fully functional
-  // the moment they unlock, unlike those still-scaffolded species.
-  // Electric Processor/Auto-Feeder are granted in the same crack as Electric
-  // Eel — "unlocked automatically when the electric eel is unlocked," per
-  // direct request, rather than needing their own separate Tier gate.
-  3: { species: ['electric_eel'], buildings: [TILE_FAN_T3, TILE_COLLECTOR_ELECTRIC, TILE_AUTO_FEEDER_ELECTRIC] },
-  4: {
-    species: [
-      'octopus', 'scrub_guppy', 'volt_guppy', 'scholar_guppy',
-      'scrub_dartfin', 'volt_dartfin', 'scholar_dartfin',
-      'scrub_blimpfish', 'volt_blimpfish', 'scholar_blimpfish',
-      'scrub_eel', 'scrub_topus', 'volt_topus',
-    ],
-    buildings: [TILE_FAN_T4],
+  // Tier 3 has no entry here at all — the real Tier 2->3 crack's only
+  // effect is shattering the Mound (state.level.tier >= MOUND_MAX_TIER),
+  // which reveals the Science Lab (Mound.js's isPointOnScienceLab/
+  // renderScienceLab) — every further species/building unlock happens
+  // through SCIENCE_LAB_UPGRADES below instead, per direct request to
+  // "fundamentally shift from the mound being the end all game goal to
+  // science being the end all game goal."
+};
+
+// ---- Science Lab tech tree (Phase 4+) ----
+// A real branching dependency web, per direct request ("should look like a
+// web of unlocks branching from the unlocks that are barring them
+// before"), replacing the old flat "buy Gene-Splicing / buy 2 Advanced
+// buildings" list. Every node costs BOTH Science Bubbles and gold — a
+// deliberate first in this game's economy, tying the Lab's whole tree to
+// two resources at once so it reads as the game's real end-goal sink.
+// `requires` lists prerequisite node ids that must already be purchased
+// (state.meta.labUpgradesPurchased) before this one can be bought — UI.js's
+// Lab popup renders this as an actual node-link tree (one column per
+// dependency depth, connector lines drawn between related nodes), not just
+// disabled buttons, so the shape of the tree is visible at a glance. The
+// Electric Auto-Feeder deliberately requires BOTH `eel` and `suckerfish` —
+// per direct request ("make sure the two branch together so it's obviously
+// that both the eel and suckerfish are requirements") — so its node has two
+// incoming connector lines, one from each parent, instead of a single
+// linear chain. `grants` is the same { species, buildings } shape
+// TIER_UNLOCKS entries use — UI.js's buyLabUpgrade pushes each into
+// state.meta the same way Mound.js's crackMound already does.
+export const SCIENCE_LAB_UPGRADES = {
+  eel: {
+    id: 'eel', name: 'Electric Eel', icon: '🐍', scienceCost: 10, goldCost: 1000,
+    requires: [], grants: { species: ['electric_eel'] },
+  },
+  suckerfish: {
+    id: 'suckerfish', name: 'Suckerfish', icon: '🐠', scienceCost: 15, goldCost: 1000,
+    requires: [], grants: { species: ['suckerfish'] },
+  },
+  electric_fan: {
+    id: 'electric_fan', name: 'Electric Fan', icon: '💨', scienceCost: 20, goldCost: 2500,
+    requires: ['eel'], grants: { buildings: [TILE_FAN_T3] },
+  },
+  electric_collector: {
+    id: 'electric_collector', name: 'Electric Processor', icon: '🧲', scienceCost: 50, goldCost: 5000,
+    requires: ['eel'], grants: { buildings: [TILE_COLLECTOR_ELECTRIC] },
+  },
+  electric_auto_feeder: {
+    id: 'electric_auto_feeder', name: 'Electric Auto-Feeder', icon: '♻️', scienceCost: 30, goldCost: 5000,
+    requires: ['eel', 'suckerfish'], grants: { buildings: [TILE_AUTO_FEEDER_ELECTRIC] },
+  },
+  advanced_fan: {
+    id: 'advanced_fan', name: 'Advanced Fan', icon: '🌪️', scienceCost: 100, goldCost: 15000,
+    requires: ['electric_fan'], grants: { buildings: [TILE_FAN_T4] },
+  },
+  advanced_collector: {
+    id: 'advanced_collector', name: 'Advanced Processor', icon: '🧲', scienceCost: 250, goldCost: 25000,
+    requires: ['electric_collector'], grants: { buildings: [TILE_COLLECTOR_ADVANCED] },
+  },
+  advanced_auto_feeder: {
+    id: 'advanced_auto_feeder', name: 'Advanced Auto-Feeder', icon: '♻️', scienceCost: 150, goldCost: 15000,
+    requires: ['electric_auto_feeder'], grants: { buildings: [TILE_AUTO_FEEDER_ADVANCED] },
   },
 };
+export const SCIENCE_LAB_UPGRADE_LIST = Object.values(SCIENCE_LAB_UPGRADES);
 
 // ---- Phase 4: Science Lab & Gene-Splicing ----
 // The Science Lab (Mound.js's renderScienceLab/isPointOnScienceLab) replaces
-// the Mound once it shatters at MOUND_MAX_TIER. Its one purchasable tech
-// node is Gene-Splicing — once bought (state.meta.techUnlocked, a permanent
-// meta unlock like buildings/species), dragging a utility fish (Suckerfish/
-// Electric Eel/Science Octopus) onto an eligible Adult fish spawns the
-// matching hybrid — see Entities.js's canSpliceFish/spliceFish and the
-// existing T5 value-carry-over pipeline (getEconomyAdultDropValue/
-// getHybridSpeciesId/createHybridFish) it's built on top of.
+// the Mound once it shatters at MOUND_MAX_TIER — see SCIENCE_LAB_UPGRADES
+// above for its full purchasable tree. Gene-Splicing itself is dragging a
+// utility fish (Suckerfish/Electric Eel/Science Octopus) onto an eligible
+// Adult fish to spawn the matching hybrid — see Entities.js's
+// canSpliceFish/spliceFish and the existing T5 value-carry-over pipeline
+// (getEconomyAdultDropValue/getHybridSpeciesId/createHybridFish) it's built
+// on top of.
 // Once Electric Eel is unlocked, the HUD shows a live electricity readout
 // (current draw / accumulated capacity, like Food's current/cap) that
 // updates once per real sim-second — main.js samples
@@ -1068,19 +1113,13 @@ export const TIER_UNLOCKS = {
 export const POWER_HISTORY_MAX = 60;
 
 export const GENE_SPLICING_TECH_ID = 'gene_splicing';
-// Gene-Splicing is bought as a Tank Upgrade now, not in the Science Lab —
-// per direct request ("unlocked through the tank upgrades for 5 tank
-// points, instead of unlocked through mound tiers"), a one-time purchase
-// exactly like Fish Merging's own card (FISH_MERGING_UNLOCK_COST), spending
-// Tank Points instead of Science and requiring no Mound tier at all. See
+// Gene-Splicing is bought as a Tank Upgrade, not in the Science Lab — per
+// direct request ("unlocked through the tank upgrades for 5 tank points,
+// instead of unlocked through mound tiers"), a one-time purchase exactly
+// like Fish Merging's own card (FISH_MERGING_UNLOCK_COST), spending Tank
+// Points instead of Science/gold and requiring no Mound tier at all. See
 // UI.js's buildTankPanel.
 export const GENE_SPLICING_TANK_POINT_COST = 5; // Tank Points
-// Advanced Processor/Auto-Feeder are still bought in the Science Lab (still
-// only reachable once the Mound fully shatters at MOUND_MAX_TIER) — same
-// currency and same one-time-unlock-then-placeable-for-money pattern
-// Gene-Splicing itself used to follow.
-export const ADVANCED_PROCESSOR_COST = 25; // Science Bubbles
-export const ADVANCED_AUTO_FEEDER_COST = 25; // Science Bubbles
 export const SCIENCE_COLOR = '#5fc9ff';
 export const POWER_COLOR = '#ffd23f';
 // The 3 utility species — the only valid splice SOURCES (dragged onto an
