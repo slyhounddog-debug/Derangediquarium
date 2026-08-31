@@ -70,6 +70,8 @@ import {
   POWER_COLOR,
   UTILITY_SPECIES_IDS,
   GENE_SPLICING_TECH_ID,
+  SCIENCE_ITEM_RADIUS,
+  SCIENCE_PROGRESS_TICKS,
 } from './Config.js';
 import { stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemForces, updateBuildings } from './Grid.js';
 // Sound is a fire-and-forget side effect at the moment something already
@@ -168,6 +170,17 @@ export function createWaste(x, y) {
   };
 }
 
+// A physical Science Bubble — falls/routes exactly like a coin (straight
+// gravity, no sway), just lighter-looking (SCIENCE_ITEM_RADIUS, smaller than
+// a bronze coin) and much heavier (ITEM_MASS_BY_TYPE.science = 9, 3x a
+// coin's mass) — per direct request, Science is now "an actual resource,
+// like coins," not an instant number added the moment a Researcher fish's
+// timer fires. Always worth exactly 1 when banked (see bankScience below);
+// unlike a coin there's no value tier to size/color it by.
+export function createScience(x, y) {
+  return { id: nextId(), type: 'science', x, y, vx: 0, vy: 0, radius: SCIENCE_ITEM_RADIUS, mass: ITEM_MASS_BY_TYPE.science, resting: false };
+}
+
 export function createPickupText(x, y, text, color) {
   return { id: nextId(), type: 'pickupText', x, y, text, color, age: 0 };
 }
@@ -206,6 +219,9 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
     stage: stageIndexForFeeds(def, totalFeeds),
     dropTimer: 0,
     poopTimer: 0, // WASTE_POOP_INTERVAL_MS — a non-Scavenger fish poops out Waste directly on this timer, see updateFish
+    eatCooldownRemainingMs: 0, // Scavenger only — see updateFish's SCAVENGER eat branch; a growth-stage's dropInterval is reused as the eat cooldown
+    distanceAccumPx: 0, // pure-Generator only — pixels swum since the last MW produced, see updateFish's GENERATOR branch
+    researchTickIndex: 0, // pure-Researcher only — which tenth of the current brew cycle's "+0.1" progress bubbles have already fired, see updateFish's RESEARCHER branch
     wanderTimer: 0,
     tailPhase: 0, // only rendered once fully grown; advances faster the faster the fish is currently moving
     // Economy Fish Combining (Tier 2) — see CLAUDE.md's "Economy Fish
@@ -311,6 +327,32 @@ function bankMoney(state, amount) {
     notifications.push({ id: notifications.length + 1, text: MONEY_MILESTONE_1K_MESSAGE, elapsed: state.level.elapsed });
     if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
   }
+}
+
+// Science's own banked resource — level-scoped like money (state.level.science),
+// not state.meta, matching money's own scope now that Science is a real
+// collected currency rather than a permanent meta counter. No lifetime/
+// milestone tracking needed, unlike bankMoney — nothing currently reads one.
+function bankScience(state, amount) {
+  state.level.science += amount;
+}
+
+export function tryBankScienceAt(state, worldX, worldY) {
+  const items = state.level.items;
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    if (item.type !== 'science') continue;
+    const dx = item.x - worldX;
+    const dy = item.y - worldY;
+    const clickRadius = item.radius * COIN_CLICK_RADIUS_MULTIPLIER;
+    if (dx * dx + dy * dy <= clickRadius * clickRadius) {
+      bankScience(state, 1);
+      state.level.floatingTexts.push(createPickupText(item.x, item.y, '+1 🔬', SCIENCE_COLOR));
+      items.splice(i, 1);
+      return true;
+    }
+  }
+  return false;
 }
 
 export function tryBankCoinAt(state, worldX, worldY) {
@@ -502,12 +544,17 @@ export function createHybridFish(state, economyFish, utilitySpeciesId) {
 
 // Whether a fish is a legal splice-drag SOURCE — checked on mousedown,
 // before any target is even known (mirrors isCombinableFish's role for the
-// Economy Fish Combining drag). Any of the 3 utility species, any growth
-// stage — only the TARGET needs to be Adult (see canSpliceFish below).
+// Economy Fish Combining drag). Any of the 3 utility species — but now,
+// per direct request ("only the adults can be used for hybridization," now
+// that utility fish actually grow up through stages instead of spawning
+// pre-grown), the utility fish itself must also be Adult, same requirement
+// canSpliceFish already places on the TARGET below.
 export function isSpliceSource(state, fish) {
   if (!state.meta.techUnlocked.includes(GENE_SPLICING_TECH_ID)) return false;
   if (!fish || fish.type !== 'fish') return false;
-  return UTILITY_SPECIES_IDS.includes(fish.speciesId);
+  if (!UTILITY_SPECIES_IDS.includes(fish.speciesId)) return false;
+  const def = SPECIES[fish.speciesId];
+  return fish.stage === def.growthStages.length - 1;
 }
 
 export function canSpliceFish(state, utilityFish, targetFish) {
@@ -564,14 +611,8 @@ export function spliceFish(state, utilityFish, targetFish) {
 // tick (there's no "settled, stop simulating" state any more), so an item
 // that's knocked off whatever it was resting on by resolveItemCollisions
 // picks the fall back up on its very next step, the same as if a tile had
-// been removed out from under it. `spawned` collects any new items these
-// produce (Waste, on a Collector consuming this one) — pushed there instead
-// of straight into state.level.items because this runs inside
-// updateEntities's filter callback over that same array, and
-// Array.prototype.filter only visits the length it captured at the start;
-// anything pushed onto the live array mid-pass would silently be dropped
-// once the filter's result replaces it. See updateEntities below.
-function updateFood(item, state, dtMs, spawned) {
+// been removed out from under it.
+function updateFood(item, state, dtMs) {
   const dt = dtMs / 1000;
   // Food Quality Tank Upgrade: each purchased level sinks 5% slower (both
   // the acceleration and the terminal velocity scale down together, so the
@@ -595,9 +636,11 @@ function updateFood(item, state, dtMs, spawned) {
   }
   const status = stepItemOnGrid(item, state, dt, physics);
   if (status === 'consumed') {
+    // A Processor only ever accepts coins/Science now (Grid.js's
+    // updateBuildings), so Food can no longer actually reach this branch —
+    // left in place defensively rather than removed, same as any other
+    // status this switch already handles.
     state.level.gridStats.itemsRoutedTotal += 1;
-    spawned.push(createWaste(item.x, item.y)); // a basic Collector is unpowered and dirty — see Config.js's WASTE_* comment
-    adjustCleanliness(state, -CLEANLINESS_PER_WASTE_EVENT);
     return false;
   }
   if (status === 'lost') return false; // fell off the bottom of the world — gone silently, same as food already does elsewhere
@@ -612,7 +655,7 @@ function updateFood(item, state, dtMs, spawned) {
   return true;
 }
 
-function updateCoin(item, state, dtMs, spawned) {
+function updateCoin(item, state, dtMs) {
   const dt = dtMs / 1000;
   const physics = { gravity: GRAVITY, maxFallSpeed: MAX_FALL_SPEED };
   if (item.y < SEABED_FLOOR_Y) {
@@ -631,8 +674,11 @@ function updateCoin(item, state, dtMs, spawned) {
     playCoinBank();
     state.level.floatingTexts.push(createPickupText(item.x, item.y, `+$${item.value}`, getCoinColor(item.value)));
     state.level.gridStats.itemsRoutedTotal += 1;
-    spawned.push(createWaste(item.x, item.y)); // a basic Collector is unpowered and dirty — see Config.js's WASTE_* comment
-    adjustCleanliness(state, -CLEANLINESS_PER_WASTE_EVENT);
+    // Waste is no longer spawned per individual item consumed — a Processor
+    // now produces it on its own continuously-running background clock
+    // instead (Grid.js's updateBuildings, PROCESSOR_STATS' wasteEveryMs),
+    // per direct request ("produce 1 waste every N seconds it's
+    // processing," not "one waste per item").
     return false;
   }
   if (status === 'lost') {
@@ -644,6 +690,34 @@ function updateCoin(item, state, dtMs, spawned) {
     return false;
   }
   item.resting = status === 'resting'; // informational only — re-evaluated fresh every tick, doesn't stop future physics
+  return true;
+}
+
+// Mirrors updateCoin exactly (straight gravity, no sway, Fan-pushable via
+// its own heavy mass) — the only differences are what 'consumed' pays out
+// (Science, not money) and that it has no per-item value tier to read.
+function updateScience(item, state, dtMs) {
+  const dt = dtMs / 1000;
+  const physics = { gravity: GRAVITY, maxFallSpeed: MAX_FALL_SPEED };
+  if (item.y < SEABED_FLOOR_Y) {
+    const fanForce = computeFanForce(state, item);
+    integrateItemForces(item, dt, physics, fanForce);
+    item.y += item.vy * dt;
+    item.x += item.vx * dt;
+    return true;
+  }
+  const status = stepItemOnGrid(item, state, dt, physics);
+  if (status === 'consumed') {
+    bankScience(state, 1);
+    state.level.floatingTexts.push(createPickupText(item.x, item.y, '+1 🔬', SCIENCE_COLOR));
+    state.level.gridStats.itemsRoutedTotal += 1;
+    return false;
+  }
+  if (status === 'lost') {
+    state.level.floatingTexts.push(createPickupText(item.x, WORLD_H, 'Lost!', ITEM_LOST_COLOR));
+    return false;
+  }
+  item.resting = status === 'resting';
   return true;
 }
 
@@ -772,6 +846,14 @@ function updateFish(fish, state, dtMs) {
 
   const isScavenger = def.behavior.includes('SCAVENGER'); // Suckerfish (and any future SCAVENGER species) eats ONLY Waste, never Food
 
+  // A Scavenger's growth-stage dropInterval is repurposed as its EAT
+  // COOLDOWN (see Config.js's suckerfish rows) — the minimum time between
+  // two waste-eating events, ticking down every frame regardless of whether
+  // it's currently near a target. Per direct request: a baby eats less
+  // OFTEN than an adult, but hungerRate itself (checked above) never varies
+  // by stage, so starvation timing is unaffected either way.
+  if (fish.eatCooldownRemainingMs > 0) fish.eatCooldownRemainingMs = Math.max(0, fish.eatCooldownRemainingMs - dtMs);
+
   if (fish.hunger >= HUNGER_SEEK_THRESHOLD) {
     const target = isScavenger
       ? findNearestWaste(state.level.items, fish.x, fish.y)
@@ -783,7 +865,12 @@ function updateFish(fish, state, dtMs) {
       const seekSpeed = effectiveSwimSpeed(def, state) * FISH_SEEK_SPEED_MULTIPLIER; // top speed — only while actively chasing food
       fish.vx = (dx / dist) * seekSpeed;
       fish.vy = (dy / dist) * seekSpeed;
-      if (dist <= FISH_EAT_RADIUS) {
+      // A Scavenger still swims right up to a Waste item on cooldown (so it
+      // doesn't look frozen/broken) but can't actually eat it until the
+      // cooldown clears — the eat action itself is what's gated, not the
+      // seek/approach behavior above.
+      const onEatCooldown = isScavenger && fish.eatCooldownRemainingMs > 0;
+      if (dist <= FISH_EAT_RADIUS && !onEatCooldown) {
         const idx = state.level.items.indexOf(target);
         if (idx !== -1) state.level.items.splice(idx, 1);
         playEat();
@@ -796,6 +883,7 @@ function updateFish(fish, state, dtMs) {
           // per-Waste-spawn penalty above.
           fish.hunger -= WASTE_HUNGER_RELIEF;
           adjustCleanliness(state, CLEANLINESS_PER_WASTE_EVENT);
+          fish.eatCooldownRemainingMs = def.growthStages[fish.stage].dropInterval;
         } else {
           // Food Quality Tank Upgrade: relief is a flat lookup by purchased
           // level, no longer clamped to the fish's current hunger — a
@@ -806,8 +894,10 @@ function updateFish(fish, state, dtMs) {
         }
         // Eating fills the coin-drop timer too, so feeding feels like it's
         // what produces the coins — a 20s cycle fed halfway through jumps
-        // straight to a drop and restarts the cycle.
-        fish.dropTimer += def.growthStages[fish.stage].dropInterval * COIN_TIMER_FEED_BONUS_FRACTION;
+        // straight to a drop and restarts the cycle. Not meaningful for a
+        // Scavenger (it doesn't use dropTimer at all — see the eat-cooldown
+        // branch above), so skipped for it.
+        if (!isScavenger) fish.dropTimer += def.growthStages[fish.stage].dropInterval * COIN_TIMER_FEED_BONUS_FRACTION;
         fish.totalFeeds += 1;
         const wasAdult = fish.stage === def.growthStages.length - 1;
         fish.stage = stageIndexForFeeds(def, fish.totalFeeds);
@@ -840,47 +930,70 @@ function updateFish(fish, state, dtMs) {
   fish.tailPhase = (fish.tailPhase + speed * TAIL_WAG_RATE * dt) % (Math.PI * 2);
 
   const stageDef = def.growthStages[fish.stage];
-  fish.dropTimer += dtMs;
-  if (fish.dropTimer >= stageDef.dropInterval) {
-    fish.dropTimer = 0;
-    // A pure Researcher or Generator (RESEARCHER/GENERATOR without also
-    // FEEDER — Science Octopus, Electric Eel, and the utility-utility
-    // hybrids that carry one of those tags without the other: Scrub-Topus,
-    // Scrub-Eel; Volt-Topus checks RESEARCHER first and only ever produces
-    // Science, a deliberate one-resource-per-fish simplification rather
-    // than a dual-output stream) produces Science/Power directly on this
-    // same timer instead of a coin — Phase 4. A Scholar/Volt hybrid
-    // (RESEARCHER or GENERATOR *and* FEEDER — spliced from a utility fish
-    // onto a base feeder) keeps producing its carried-over coin value below
-    // instead; it doesn't also produce Science/Power on top, same
-    // simplification.
-    //
-    // Speed-scaled per direct request — "science and electricity are based
-    // on a fish's movement speed... even when it's moving towards food":
-    // `speed` (computed above for the tail-wag) is the fish's actual
-    // current velocity magnitude, already reflecting whatever's boosting it
-    // right now — the Fish Movement Tank Upgrade (via effectiveSwimSpeed)
-    // and a seek-chase's FISH_SEEK_SPEED_MULTIPLIER alike — compared against
-    // its own effectiveSwimSpeed as the baseline "normal" pace. Floored at
-    // 0.3x so a fish caught mid-wander-turn (a brief near-zero vx/vy while
-    // picking a new heading) doesn't produce a confusing flat zero.
-    const isPureResearcher = def.behavior.includes('RESEARCHER') && !def.behavior.includes('FEEDER');
-    const isPureGenerator = def.behavior.includes('GENERATOR') && !def.behavior.includes('FEEDER');
-    if (isPureResearcher || isPureGenerator) {
-      const speedMultiplier = Math.max(0.3, speed / effectiveSwimSpeed(def, state));
-      // dropValue is 0 for several of these rows (Electric Eel, Scrub-Eel) —
-      // that 0 originally meant "skip the coin drop entirely" (see the
-      // dropValue>0 guard below); repurposed here as a resource amount it
-      // would mean literally never producing anything, so it's floored at 1.
-      const amount = Math.max(1, Math.ceil(stageDef.dropValue * speedMultiplier));
-      if (isPureResearcher) {
-        state.meta.scienceTotal += amount;
-        state.level.floatingTexts.push(createPickupText(fish.x, fish.y, `+${amount} 🔬`, SCIENCE_COLOR));
-      } else {
-        state.level.powerSupply += amount;
-        state.level.floatingTexts.push(createPickupText(fish.x, fish.y, `+${amount} ⚡`, POWER_COLOR));
+  // A pure Researcher or Generator (RESEARCHER/GENERATOR without also FEEDER
+  // — Science Octopus, Electric Eel, and the utility-utility hybrids that
+  // carry one of those tags without the other: Scrub-Topus, Scrub-Eel;
+  // Volt-Topus checks RESEARCHER first and only ever produces Science, a
+  // deliberate one-resource-per-fish simplification) each get their own
+  // dedicated mechanism now, per direct request — neither is speed-scaled
+  // off a timer any more (that whole approach is superseded below). A
+  // Scholar/Volt hybrid (RESEARCHER or GENERATOR *and* FEEDER) still
+  // produces its carried-over coin value in the plain coin-drop branch
+  // instead; it doesn't also produce Science/Power on top, same as before.
+  const isPureResearcher = def.behavior.includes('RESEARCHER') && !def.behavior.includes('FEEDER');
+  const isPureGenerator = def.behavior.includes('GENERATOR') && !def.behavior.includes('FEEDER');
+
+  // Checked in this order deliberately — Volt-Topus carries BOTH tags (pure
+  // Generator and pure Researcher at once) and, per the original design,
+  // only ever produces Science, never Power, "a deliberate one-resource-
+  // per-fish simplification." Researcher must stay first for that to hold.
+  if (isPureResearcher) {
+    // A real long brew cycle now, per direct request ("a full minute at
+    // base... every 70 seconds as a baby, every 50 as an adult") — dropTimer
+    // still counts up toward stageDef.dropInterval exactly like a coin
+    // fish's does, but instead of an instant resource grant, it (a) posts a
+    // small "+0.1 🔬" progress bubble every time it crosses another tenth of
+    // the cycle (pure feedback — nothing is actually banked yet), and (b)
+    // spawns `dropValue` real, physical Science Bubbles once the cycle
+    // completes, which still have to be collected like a coin — see
+    // Entities.js's createScience/updateScience and Grid.js's Processor.
+    fish.dropTimer += dtMs;
+    const tickIntervalMs = stageDef.dropInterval / SCIENCE_PROGRESS_TICKS;
+    const currentTickIndex = Math.min(SCIENCE_PROGRESS_TICKS - 1, Math.floor(fish.dropTimer / tickIntervalMs));
+    if (currentTickIndex > fish.researchTickIndex) {
+      fish.researchTickIndex = currentTickIndex;
+      state.level.floatingTexts.push(createPickupText(fish.x, fish.y - FISH_BASE_SIZE * stageDef.scale * 0.6, '+0.1 🔬', SCIENCE_COLOR));
+    }
+    if (fish.dropTimer >= stageDef.dropInterval) {
+      fish.dropTimer = 0;
+      fish.researchTickIndex = 0;
+      for (let i = 0; i < Math.max(1, stageDef.dropValue); i++) {
+        state.level.items.push(createScience(fish.x, fish.y));
       }
-    } else {
+    }
+  } else if (isPureGenerator) {
+    // Distance-based, per direct request ("produces 1MW per 10 pixels swam
+    // as a baby, and 1MW per 5 pixels as an adult") — a literal
+    // pixels-traveled meter instead of an indirect speed-vs-baseline ratio,
+    // so a faster eel (Fish Movement upgrades, a seek-chase's speed boost)
+    // naturally generates faster with no separate multiplier needed. `speed`
+    // (computed above for the tail-wag) already reflects all of that.
+    // Accumulates every tick unconditionally, not gated behind any timer.
+    // A hybrid without its own pixelsPerMW field (Scrub-Eel, still
+    // single-stage) falls back to the eel's own adult rate.
+    const pixelsPerMW = stageDef.pixelsPerMW || 5;
+    fish.distanceAccumPx += speed * dt;
+    while (fish.distanceAccumPx >= pixelsPerMW) {
+      fish.distanceAccumPx -= pixelsPerMW;
+      state.level.powerSupply += 1;
+      state.level.floatingTexts.push(createPickupText(fish.x, fish.y, '+1 ⚡', POWER_COLOR));
+    }
+  } else if (!isScavenger) {
+    // Every plain FEEDER and Gene-Splicing hybrid (feeder-based or
+    // utility-utility) still drops a coin on this timer, unchanged.
+    fish.dropTimer += dtMs;
+    if (fish.dropTimer >= stageDef.dropInterval) {
+      fish.dropTimer = 0;
       // A hybrid's dropValueOverride (T5 value carry-over pipeline) already
       // reflects its economy parent's tier-scaled value in full — using it
       // directly, not layering the starTier multiplier on top again, since a
@@ -895,14 +1008,15 @@ function updateFish(fish, state, dtMs) {
       const dropValue = fish.dropValueOverride != null
         ? fish.dropValueOverride
         : Math.ceil(stageDef.dropValue * Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, (fish.starTier || 1) - 1));
-      // Skip entirely for a $0 drop (Suckerfish, and every other not-yet-
-      // behavior-wired utility species — see their SPECIES rows) — a
-      // worthless coin still lands on a Collector like any other, spawning
-      // real Waste for no reason, which is actively counterproductive for a
-      // Scavenger fish whose whole job is cleaning Waste up, not adding to it.
+      // Skip entirely for a $0 drop (any not-yet-behavior-wired species) — a
+      // worthless coin still lands on a Processor like any other, which is
+      // actively counterproductive busywork for no payout.
       if (dropValue > 0) state.level.items.push(createCoin(fish.x, fish.y, dropValue));
     }
   }
+  // (isScavenger falls through here with no passive drop at all — Suckerfish
+  // produces nothing on a timer; its whole job is the eat-cooldown-gated
+  // Waste consumption handled in the seek/eat branch above.)
 
   // Fish poop: any non-Scavenger fish drops a Waste item directly at its
   // own position on a flat periodic timer, independent of the
@@ -942,22 +1056,24 @@ function updateFishVanish(state, dtMs) {
 
 export function updateEntities(state, dtMs) {
   updateFishVanish(state, dtMs);
-  const spawned = []; // Waste items produced this tick — see updateFood/updateCoin's comment for why these can't be pushed straight into state.level.items mid-filter
   state.level.items = state.level.items.filter((item) => {
-    if (item.type === 'food') return updateFood(item, state, dtMs, spawned);
-    if (item.type === 'coin') return updateCoin(item, state, dtMs, spawned);
+    if (item.type === 'food') return updateFood(item, state, dtMs);
+    if (item.type === 'coin') return updateCoin(item, state, dtMs);
+    if (item.type === 'science') return updateScience(item, state, dtMs);
     if (item.type === 'waste') return updateWaste(item, state, dtMs);
     return true;
   });
-  if (spawned.length) state.level.items.push(...spawned);
 
-  // Auto-Feeder: absorbs nearby Waste, dispenses Food from its output port
-  // once processed — see Grid.js's updateBuildings. Grid.js returns spawn
-  // points rather than constructing the Food itself, to avoid a circular
-  // import (createFood lives here).
-  for (const point of updateBuildings(state, dtMs)) {
-    state.level.items.push(createFood(point.x, point.y));
-  }
+  // Processor: banks coins/Science on its own per-item hold (each item's own
+  // per-tick step above reports 'consumed'); also now produces Waste on a
+  // continuously-running background clock. Auto-Feeder: absorbs nearby
+  // Waste, dispenses Food from its output port once its tier's required
+  // number of loads have processed. See Grid.js's updateBuildings — it
+  // returns spawn points rather than constructing the items itself, to
+  // avoid a circular import (createFood/createWaste live here).
+  const { foodSpawnPoints, wasteSpawnPoints } = updateBuildings(state, dtMs);
+  for (const point of foodSpawnPoints) state.level.items.push(createFood(point.x, point.y));
+  for (const point of wasteSpawnPoints) state.level.items.push(createWaste(point.x, point.y));
 
   resolveItemCollisions(state); // items in the seabed band can't overlap — see Grid.js's module comment
 

@@ -22,6 +22,7 @@ import {
   TIER_UNLOCKS,
   NOTIFICATION_LOG_MAX,
   TILE_FAN_T2,
+  FAN_UNLOCK_COST,
 } from './Config.js';
 import { worldToScreen } from './Engine.js';
 
@@ -41,11 +42,18 @@ export function centerCameraOnMound(camera) {
   camera.x = Math.max(0, Math.min(MOUND_X - camera.viewWidth / 2, maxX));
 }
 
-// The Tier 1.5 "tease" (see getMoundNextCost/crackMound below) used to be a
-// pure joke — spend $150, get nothing. Per direct feedback it now actually
-// grants the Rudimentary Fan, so this needed a real reveal line instead of
-// a punchline about nothing happening.
-const MOUND_TEASE_MESSAGE = "You throw $150 at a suspicious lump of dirt. Something's fishy... and it works! A crack splits open and a Rudimentary Fan flops out, blades already spinning. Turns out bribery works on geology too.";
+// The Tier 1.5 "tease" — a pure joke again, per direct request: the
+// Rudimentary Fan moved off this step entirely, onto its own paid "Tier
+// 1.75" step below (MOUND_FAN_UNLOCK_MESSAGE) — so the very first "throw
+// money" attempt goes back to spending $150 for nothing but a punchline.
+const MOUND_TEASE_MESSAGE = "You throw $150 at a suspicious lump of dirt. Nothing happens. Absolutely nothing. You have been scammed by a rock.";
+
+// "Tier 1.75" — the new real reward the tease used to grant directly: a
+// second, separately-priced attempt (after the tease, before the actual
+// Tier 1->2 crack) that costs FAN_UNLOCK_COST ($500) and grants only the
+// Rudimentary Fan, still without advancing state.level.tier — see
+// getMoundNextCost/crackMound below and Config.js's FAN_UNLOCK_COST.
+const MOUND_FAN_UNLOCK_MESSAGE = "You throw another $500 at the same lump of dirt, out of spite this time. Something's fishy... and it works! A crack splits open and a Rudimentary Fan flops out, blades already spinning. Turns out bribery works on geology too — you just had to pay full price.";
 
 const TIER_CRACK_MESSAGES = {
   // Tier 2 no longer grants a building (the Rudimentary Fan moved to the
@@ -64,16 +72,16 @@ function pushNotification(state, text) {
   if (state.level.notifications.length > NOTIFICATION_LOG_MAX) state.level.notifications.shift();
 }
 
-// The very first "throw money" attempt at the Mound — "Tier 1.5" — costs
-// MOUND_TEASE_COST and grants the Rudimentary Fan (state.meta.buildingsUnlocked),
-// but does NOT advance state.level.tier: the REAL Tier 1 -> 2 crack only
-// becomes available after that, at MOUND_CRACK_COST[1] (much higher). This
-// used to be a pure no-op joke — per direct feedback it's now a real, if
-// small, reward, so the player's first click always gets them something.
-// Every other tier transition is a normal single-cost crack.
+// Three distinct steps now sit before the real Tier 1 -> 2 crack, per direct
+// request: (1) the Tier 1.5 "tease" (MOUND_TEASE_COST, a pure joke — does
+// nothing), (2) "Tier 1.75" (FAN_UNLOCK_COST, grants ONLY the Rudimentary
+// Fan), then (3) the real crack (MOUND_CRACK_COST[1]) which finally advances
+// state.level.tier. Every other tier transition beyond that is unchanged —
+// a normal single-cost crack.
 export function getMoundNextCost(state) {
   const tier = state.level.tier;
   if (tier === 1 && !state.level.moundTeased) return MOUND_TEASE_COST;
+  if (tier === 1 && !state.level.fanUnlockPurchased) return FAN_UNLOCK_COST;
   return MOUND_CRACK_COST[tier];
 }
 
@@ -89,9 +97,15 @@ export function crackMound(state) {
 
   if (state.level.tier === 1 && !state.level.moundTeased) {
     state.level.moundTeased = true;
-    if (!state.meta.buildingsUnlocked.includes(TILE_FAN_T2)) state.meta.buildingsUnlocked.push(TILE_FAN_T2);
     pushNotification(state, MOUND_TEASE_MESSAGE);
-    return true; // money spent, Fan granted — but the tier does NOT advance
+    return true; // money spent, nothing granted — the tier does NOT advance
+  }
+
+  if (state.level.tier === 1 && !state.level.fanUnlockPurchased) {
+    state.level.fanUnlockPurchased = true;
+    if (!state.meta.buildingsUnlocked.includes(TILE_FAN_T2)) state.meta.buildingsUnlocked.push(TILE_FAN_T2);
+    pushNotification(state, MOUND_FAN_UNLOCK_MESSAGE);
+    return true; // money spent, Fan granted — still no tier advance
   }
 
   state.level.tier += 1;
@@ -149,17 +163,27 @@ function getMoundTexturePattern(ctx) {
 // load (not per-render — a fresh Math.random() every frame would make the
 // cracks visibly jitter) and reused/repositioned by renderMound below.
 // MOUND_MAX_TIER-1 is the most cracks that can ever be showing at once.
+// Per-point jitter (dx) is deliberately tight (±5px, was ±8px) — several
+// independent random points in a row landing on the same side used to be
+// able to compound into a crack that visibly bowed hard toward one edge of
+// the dome ("the cracks are shifted left" bug report), even though each
+// crack's BASE x-position (see renderMound's cx below) is itself centered/
+// evenly spread. branchDir is a real coin flip now, not always-positive —
+// the old fixed `25 + random(-10..10)` range meant every branch's sin()
+// always came out positive, so every crack's fork always leaned the exact
+// same direction (right) regardless of which crack it was.
 const CRACK_SHAPES = [];
 for (let i = 0; i < 4; i++) {
   const segments = 5 + (i % 2);
   const points = [];
   for (let s = 0; s <= segments; s++) {
-    points.push({ t: s / segments, dx: (Math.random() - 0.5) * 16 });
+    points.push({ t: s / segments, dx: (Math.random() - 0.5) * 10 });
   }
   // A short branch forking off partway down — reads as a real fracture, not
   // just a wiggly line, per direct request for "more interesting" cracks.
   const branchAt = 0.35 + Math.random() * 0.3;
-  const branchAngle = (Math.random() - 0.5) * 20;
+  const branchDir = Math.random() < 0.5 ? -1 : 1;
+  const branchAngle = branchDir * (25 + Math.random() * 10);
   CRACK_SHAPES.push({ points, branchAt, branchAngle });
 }
 
@@ -179,21 +203,30 @@ export function renderMound(ctx, state) {
   ctx.closePath();
   ctx.fillStyle = '#8a7458';
   ctx.fill();
-  ctx.clip(); // constrains the texture fill (and nothing else) to the dome's own silhouette
+  // Constrains EVERYTHING drawn until ctx.restore() below (the texture fill
+  // AND the crack/branch strokes) to the dome's own silhouette — previously
+  // only wrapped the texture fill, so a branch's jittered endpoint could
+  // poke straight through the dome's edge into the water above it,
+  // especially near the top where the dome tapers to a point.
+  ctx.clip();
   ctx.fillStyle = getMoundTexturePattern(ctx);
   ctx.globalAlpha = 0.55;
   ctx.fillRect(topLeft.x, topLeft.y, w, h);
   ctx.globalAlpha = 1;
-  ctx.restore();
 
   // Crack lines scale with how many times it's already been cracked. Each
   // one is a jagged multi-segment fracture with a short forking branch (see
   // CRACK_SHAPES above) rather than a plain 3-point zigzag, plus a thin
   // offset highlight stroke alongside the dark line for a carved/engraved
-  // look instead of a flat scribble.
+  // look instead of a flat scribble. cx is spread evenly across a band well
+  // clear of the dome's tapering edges (35%-65% width, was 50%-90% — the old
+  // range crept close enough to the right edge at higher tiers to read as
+  // "everything is bunched toward one side" against the mostly-blank rest of
+  // the dome).
   for (let i = 1; i < tier; i++) {
     const shape = CRACK_SHAPES[(i - 1) % CRACK_SHAPES.length];
-    const cx = topLeft.x + w * (0.3 + 0.2 * i);
+    const spreadT = tier > 2 ? (i - 1) / (tier - 2) : 0.5; // 0..1 across however many cracks are actually showing
+    const cx = topLeft.x + w * (0.35 + 0.3 * spreadT);
     const topY = topLeft.y + h * 0.12;
     const bottomY = topLeft.y + h * 0.88;
 
@@ -226,12 +259,13 @@ export function renderMound(ctx, state) {
     const bx = cx + branchPoint.dx * camera.zoom;
     const by = topY + (bottomY - topY) * branchPoint.t;
     const branchLen = h * 0.18;
-    const angleRad = ((25 + shape.branchAngle) * Math.PI) / 180;
+    const angleRad = (shape.branchAngle * Math.PI) / 180;
     ctx.beginPath();
     ctx.moveTo(bx, by);
     ctx.lineTo(bx + Math.sin(angleRad) * branchLen, by + Math.cos(angleRad) * branchLen);
     ctx.stroke();
   }
+  ctx.restore(); // lifts the dome-silhouette clip set above, now that the texture AND every crack/branch have been drawn through it
 }
 
 // ---- Science Lab (Phase 4) ----

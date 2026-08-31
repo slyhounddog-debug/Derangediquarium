@@ -320,12 +320,16 @@ export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDire
   // Checked by exact speciesId, not a behavior tag, so every Gene-Splicing
   // hybrid (a different id, e.g. 'volt_guppy') falls through to the
   // standard shape automatically with no extra logic needed — see that
-  // function's own comment.
-  if (speciesId === 'electric_eel') {
+  // function's own comment. Per a later direct request, this unique shape
+  // now only shows at the Adult stage — as a baby/mid (utility fish grow up
+  // through the same 3-stage ladder as the base feeders now) they render via
+  // the plain drawStandardBody instead, just tinted their own species color,
+  // "so it looks like the [base] fish, but with the utility fish colors."
+  if (isFullyGrown && speciesId === 'electric_eel') {
     drawEelBody(ctx, x, y, size, facing, tailPhase, isFullyGrown, color, eyeDirection);
-  } else if (speciesId === 'octopus') {
+  } else if (isFullyGrown && speciesId === 'octopus') {
     drawOctopusBody(ctx, x, y, size, facing, tailPhase, isFullyGrown, color, eyeDirection);
-  } else if (speciesId === 'suckerfish') {
+  } else if (isFullyGrown && speciesId === 'suckerfish') {
     drawSuckerfishBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGrown, color, eyeDirection);
   } else {
     drawStandardBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGrown, color, eyeDirection);

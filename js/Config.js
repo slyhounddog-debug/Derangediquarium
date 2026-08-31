@@ -35,11 +35,15 @@ export const WASTE_FLOOR_Y = WORLD_H - 2 * TILE_SIZE;
 // every row/col calc a single division by TILE_SIZE, no offset to remember.
 export const TILE_EMPTY = 'empty'; // passable — items fall straight through
 export const TILE_PLATFORM = 'platform'; // solid — items land and rest on top. The structural anchor: every other building must be placed adjacent to a Platform (or directly on the world's bottom row) — see BUILDING_TYPES' anchoring rule and Grid.js's canPlaceTile.
-export const TILE_COLLECTOR = 'collector'; // solid — items landing here are immediately consumed (coins auto-banked)
-export const TILE_FAN_T2 = 'fan_t2'; // solid — Rudimentary Fan (Tier 2, free, short reach/low force)
+export const TILE_COLLECTOR = 'collector'; // solid — the base Processor: items landing here are immediately consumed (coins auto-banked)
+export const TILE_COLLECTOR_ELECTRIC = 'collector_electric'; // solid — Electric Processor, faster processing, draws power — see PROCESSOR_STATS
+export const TILE_COLLECTOR_ADVANCED = 'collector_advanced'; // solid — Advanced Processor, bought in the Science Lab — see PROCESSOR_STATS
+export const TILE_FAN_T2 = 'fan_t2'; // solid — Rudimentary Fan (unlocked at the Mound's Tier 1.75, free, short reach/low force)
 export const TILE_FAN_T3 = 'fan_t3'; // solid — Electric Fan (Tier 3, draws power, medium reach/force)
 export const TILE_FAN_T4 = 'fan_t4'; // solid — Turbo Fan (Tier 4, draws power, long reach/extreme force)
 export const TILE_AUTO_FEEDER = 'auto_feeder'; // solid — absorbs Waste pushed into its intake side, dispenses Food from the opposite side
+export const TILE_AUTO_FEEDER_ELECTRIC = 'auto_feeder_electric'; // solid — Electric Auto-Feeder — see AUTO_FEEDER_STATS
+export const TILE_AUTO_FEEDER_ADVANCED = 'auto_feeder_advanced'; // solid — Advanced Auto-Feeder, bought in the Science Lab — see AUTO_FEEDER_STATS
 
 // Fish stay clear of the outer edges of the water column when spawning —
 // both the random spawn position on a shop purchase in UI.js, and (for
@@ -156,11 +160,11 @@ export const FAN_T4_POWER_COST = 14;
 // aim is the OUTPUT direction; the intake sits directly opposite. Grid.js's
 // updateBuildings absorbs any Waste item that drifts within
 // AUTO_FEEDER_INTAKE_RADIUS of the intake point (typically pushed there by a
-// Fan) and, after AUTO_FEEDER_PROCESS_DURATION_MS, dispenses one Food item
-// at the output point with zero velocity — a Fan can then pick it back up
-// and launch it into the water column, same as any other item.
+// Fan) and, after however many completed AUTO_FEEDER_STATS[type].wasteProcessMs
+// holds that tier's wasteRequired calls for, dispenses one Food item at the
+// output point with zero velocity — a Fan can then pick it back up and
+// launch it into the water column, same as any other item.
 export const AUTO_FEEDER_INTAKE_RADIUS = TILE_SIZE * 0.6;
-export const AUTO_FEEDER_PROCESS_DURATION_MS = 2000;
 export const AUTO_FEEDER_PORT_OFFSET_FRACTION = 0.5; // fraction of TILE_SIZE — how far outside the tile's center the intake/output points sit, along the aim axis
 // A candidate item must not just be within the intake radius above — it also
 // has to actually be approaching from the intake side, not resting on top of
@@ -174,8 +178,9 @@ export const AUTO_FEEDER_PORT_OFFSET_FRACTION = 0.5; // fraction of TILE_SIZE �
 export const INTAKE_SIDE_MIN_DOT_FRACTION = 0.35;
 
 // A Collector doesn't bank an item the instant it lands any more — it visibly
-// draws it in toward the tile's center and holds it there for a full
-// COLLECTOR_PROCESS_DURATION_MS before actually consuming it (Grid.js's
+// draws it in toward the tile's center and holds it there for that tile's
+// PROCESSOR_STATS-derived duration (coin vs Science Bubble, tier-scaled —
+// see that table below) before actually consuming it (Grid.js's
 // stepCollectorProcessing), so the single-item-at-a-time bottleneck that was
 // always the design intent (see the "Items can't stack" note on why a
 // Collector can only receive the one item touching it) is now something the
@@ -188,7 +193,6 @@ export const INTAKE_SIDE_MIN_DOT_FRACTION = 0.35;
 // piles into it mid-process, without needing to special-case it out of
 // collision resolution entirely — new arrivals still visibly bank up around
 // it instead of overlapping it.
-export const COLLECTOR_PROCESS_DURATION_MS = 3000;
 export const COLLECTOR_PULL_STRENGTH = 10; // 1/sec ease rate toward the tile's center
 export const COLLECTOR_PROCESSING_MASS = 1000;
 export const COLLECTOR_CIRCLE_RADIUS_FRACTION = 0.32; // fraction of TILE_SIZE — the drawing-in point rendered in the tile's center
@@ -232,7 +236,10 @@ export const ITEM_LOST_COLOR = '#ff9999'; // muted red "Lost!" floating text whe
 // tier/visibility, not weight). Food is much lighter than a coin on purpose:
 // a coin barely notices bumping into a food pellet, while a food pellet
 // gets shoved completely out of the way by a coin.
-export const ITEM_MASS_BY_TYPE = { food: 0.3, coin: 3, waste: 1 };
+// science: a new physical item type (see "Science as a physical resource"
+// below) — 3x a coin's mass per direct request, so it needs real Fan muscle
+// to route, same spirit as the existing coin/food/waste hierarchy.
+export const ITEM_MASS_BY_TYPE = { food: 0.3, coin: 3, waste: 1, science: 9 };
 // vx decays by this factor every tick — without damping, a single bump
 // would leave an item drifting sideways forever instead of a jostled pile
 // settling back down, the way real friction would.
@@ -358,6 +365,28 @@ export const WASTE_HUNGER_RELIEF = 70;
 // here, tune once real playtesting exists. Scavenger fish (Suckerfish)
 // don't poop — they're the one eating this, not producing it.
 export const WASTE_POOP_INTERVAL_MS = 25000;
+
+// ---- Science (physical resource) ----
+// Per direct request, Science is no longer an instant number added straight
+// to a bank the moment a Researcher fish's timer fires — it's a real
+// falling/routable item now, exactly like a coin: it has to be banked by
+// clicking it OR pulled into a Collector's intake, same as ITEM_MASS_BY_TYPE
+// above already reflects (9 — 3x a coin's mass, so it needs real Fan muscle
+// to move). Visually a "magical bubble" — drawn with a two-tone purple/blue
+// fill plus a bright highlight ring in main.js's item-render loop, not a
+// flat single color like a coin/food/waste — SCIENCE_ITEM_COLOR_A/B are the
+// two tones that blend across it. Slightly smaller than a bronze coin
+// (COIN_RADIUS = 10) per direct request.
+export const SCIENCE_ITEM_RADIUS = 8;
+export const SCIENCE_ITEM_COLOR_A = '#b98bff'; // purple
+export const SCIENCE_ITEM_COLOR_B = '#5fc9ff'; // blue — matches the existing SCIENCE_COLOR used for floating text/HUD accents
+// While a Researcher fish (Science Octopus) is mid-cycle toward producing its
+// next physical Science bubble, a small "+0.1 🔬" floating text pops above it
+// every time it crosses another tenth of its current stage's cycle — pure
+// progress feedback, not an actual resource grant (nothing is banked until
+// the physical bubble itself is later collected) — per direct request, so a
+// full-minute-plus wait doesn't read as "nothing is happening."
+export const SCIENCE_PROGRESS_TICKS = 10;
 
 // ---- Cleanliness (Phase 3) ----
 // state.level.cleanliness (0-100, clamped) is a real, live value now instead
@@ -613,13 +642,33 @@ export const SPECIES = {
   // CLAUDE.md "Species Roster & Progression" for the full rollout schedule.
   // None of these are in speciesUnlocked yet (unlockedByDefault: false), so
   // they're inert until a later phase's unlock logic adds them.
+  // The 3 utility species now grow up through the same feed-driven 3-stage
+  // ladder the base feeders use (baby/mid/adult, feedsRequired 0/3/6) instead
+  // of a single fixed-adult stage — per direct request ("utility fish should
+  // grow up too"). Only the numbers FishRenderer.js's growth-shape switch and
+  // Entities.js's behavior-scaling read differ from a base feeder: baby and
+  // mid both use the SAME (slower/juvenile) behavior numbers — the request
+  // only ever gave a baby figure and an adult figure, never a separate mid
+  // one, so mid is grouped with baby functionally (still a juvenile) even
+  // though it's a visually distinct growth stage. Only an Adult (final
+  // stage) may be used as a Gene-Splicing source — see Entities.js's
+  // isSpliceSource.
   suckerfish: {
     id: 'suckerfish', name: 'Suckerfish', tier: 2, unlockPhase: 3, cost: 25,
     description: 'Only eats Waste, never Food — cleans up after the rest of the tank instead of adding to the mess.',
     behavior: ['SCAVENGER'], dropType: 'waste_cleared',
     swimSpeed: 30, lifespan: 300000,
-    hungerRate: 1.015, // exactly half of Guppy's 2.03, per direct request — Entities.js's updateFish targets Waste items (never Food) for any species carrying the SCAVENGER tag
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 10000, dropValue: 0 }],
+    hungerRate: 1.015, // exactly half of Guppy's 2.03, per direct request — Entities.js's updateFish targets Waste items (never Food) for any species carrying the SCAVENGER tag. Deliberately flat across all 3 stages (unlike dropInterval below) — per direct request, a baby eats less OFTEN than an adult but still starves on the same overall clock.
+    // dropInterval is repurposed for a Scavenger as its EAT COOLDOWN — the
+    // minimum time between two waste-eating events, not a coin-drop timer
+    // (dropValue stays 0, unused) — see Entities.js's updateFish SCAVENGER
+    // branch. 35s baby/mid, 25s adult, per direct request ("every 35 seconds
+    // as a baby but every 25 seconds as an adult").
+    growthStages: [
+      { feedsRequired: 0, scale: 0.5, dropInterval: 35000, dropValue: 0 },
+      { feedsRequired: 3, scale: 0.75, dropInterval: 35000, dropValue: 0 },
+      { feedsRequired: 6, scale: 1.0, dropInterval: 25000, dropValue: 0 },
+    ],
     unlockedByDefault: false,
   },
   electric_eel: {
@@ -627,15 +676,36 @@ export const SPECIES = {
     description: 'Primary MW supply. Must be fed to keep generating.',
     behavior: ['GENERATOR'], dropType: 'power',
     swimSpeed: 20, lifespan: 300000, hungerRate: 0.97, // -20%, part of a general de-pacing pass — was 1.21
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 5000, dropValue: 0 }],
+    // pixelsPerMW replaces the old timer+speed-multiplier scheme for a pure
+    // Generator, per direct request ("produces 1MW per 10 pixels swam as a
+    // baby, and 1MW per 5 pixels as an adult") — a literal distance-traveled
+    // meter instead of an indirect speed ratio, so a faster eel (upgrades,
+    // seek-chases) naturally generates faster with no separate multiplier
+    // needed. See Entities.js's updateFish GENERATOR branch/fish.distanceAccumPx.
+    growthStages: [
+      { feedsRequired: 0, scale: 0.5, pixelsPerMW: 10 },
+      { feedsRequired: 3, scale: 0.75, pixelsPerMW: 10 },
+      { feedsRequired: 6, scale: 1.0, pixelsPerMW: 5 },
+    ],
     unlockedByDefault: false,
   },
   octopus: {
     id: 'octopus', name: 'Science Octopus', tier: 3, unlockPhase: 4, cost: 90,
-    description: 'Drops Blue Science Bubbles when swimming near a Research Hub.',
+    description: 'Slowly brews one Science Bubble at a time — collect it like a coin once it drops.',
     behavior: ['RESEARCHER'], dropType: 'science_blue',
     swimSpeed: 25, lifespan: 300000, hungerRate: 0.78, // -20%, part of a general de-pacing pass — was 0.98
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 15000, dropValue: 1 }],
+    // dropInterval is now a real long brew cycle, not a short speed-scaled
+    // tick — per direct request ("a full minute at base... every 70 seconds
+    // as a baby, every 50 seconds as an adult"). dropValue is the number of
+    // physical Science bubbles spawned once the cycle completes (always 1
+    // here) — see Entities.js's updateFish RESEARCHER branch and
+    // SCIENCE_PROGRESS_TICKS for the "+0.1" progress-bubble feedback shown
+    // every tenth of the way through.
+    growthStages: [
+      { feedsRequired: 0, scale: 0.5, dropInterval: 70000, dropValue: 1 },
+      { feedsRequired: 3, scale: 0.75, dropInterval: 70000, dropValue: 1 },
+      { feedsRequired: 6, scale: 1.0, dropInterval: 50000, dropValue: 1 },
+    ],
     unlockedByDefault: false,
   },
 
@@ -792,9 +862,19 @@ export const BUILDING_TYPES = {
     color: '#dba36f', unlockedByDefault: true, // available from level start — every other building needs one to anchor to, so it can't be gated behind any Mound tier
   },
   [TILE_COLLECTOR]: {
-    id: TILE_COLLECTOR, name: 'Collector', icon: '🧲', cost: 12,
-    description: 'Auto-banks any coin pulled into its intake side — aim it like a Fan. Unpowered, so it leaves a little waste behind each time.',
+    id: TILE_COLLECTOR, name: 'Processor', icon: '🧲', cost: 12,
+    description: 'Auto-banks any coin or Science Bubble pulled into its intake side — aim it like a Fan. Unpowered, so it leaves waste behind while it works.',
     color: '#8fe0b8', unlockedByDefault: false,
+  },
+  [TILE_COLLECTOR_ELECTRIC]: {
+    id: TILE_COLLECTOR_ELECTRIC, name: 'Electric Processor', icon: '🧲', cost: 60,
+    description: 'A powered Processor — noticeably faster at both coins and Science, and produces waste more slowly. Draws power while actively holding an item.',
+    color: '#5fb8ff', unlockedByDefault: false,
+  },
+  [TILE_COLLECTOR_ADVANCED]: {
+    id: TILE_COLLECTOR_ADVANCED, name: 'Advanced Processor', icon: '🧲', cost: 150,
+    description: 'The fastest Processor money (and a little Science) can buy. Purchased once in the Science Lab, then placeable like any other building.',
+    color: '#c9a8ff', unlockedByDefault: false,
   },
   [TILE_FAN_T2]: {
     id: TILE_FAN_T2, name: 'Rudimentary Fan', icon: '🌀', cost: 15,
@@ -816,6 +896,16 @@ export const BUILDING_TYPES = {
     description: 'Absorbs Waste pushed into its intake side and dispenses Food from the opposite side — aim it the same way as a Fan.',
     color: '#c9e88f', unlockedByDefault: false,
   },
+  [TILE_AUTO_FEEDER_ELECTRIC]: {
+    id: TILE_AUTO_FEEDER_ELECTRIC, name: 'Electric Auto-Feeder', icon: '♻️', cost: 90,
+    description: 'A powered Auto-Feeder — processes each Waste load faster. Draws power while actively processing.',
+    color: '#7fd6a8', unlockedByDefault: false,
+  },
+  [TILE_AUTO_FEEDER_ADVANCED]: {
+    id: TILE_AUTO_FEEDER_ADVANCED, name: 'Advanced Auto-Feeder', icon: '♻️', cost: 200,
+    description: 'The fastest Auto-Feeder — needs the least Waste per Food output. Purchased once in the Science Lab, then placeable like any other building.',
+    color: '#ffd76f', unlockedByDefault: false,
+  },
 };
 export const BUILDING_LIST = Object.values(BUILDING_TYPES);
 // Buildings that share one shop slot instead of each getting their own icon
@@ -829,6 +919,42 @@ export const BUILDING_LIST = Object.values(BUILDING_TYPES);
 // a tile id, since no single member is "the" family.
 export const BUILDING_FAMILIES = {
   fan: [TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4],
+  collector: [TILE_COLLECTOR, TILE_COLLECTOR_ELECTRIC, TILE_COLLECTOR_ADVANCED],
+  auto_feeder: [TILE_AUTO_FEEDER, TILE_AUTO_FEEDER_ELECTRIC, TILE_AUTO_FEEDER_ADVANCED],
+};
+
+// ---- Processor (Collector) tiers & Auto-Feeder tiers ----
+// Per direct request, both buildings now have 3 tiers with real distinct
+// timing/power numbers instead of one flat behavior — Grid.js's
+// updateBuildings/beginCollectorProcessing read these by the placed tile's
+// own type. coinMs/scienceMs are how long a single held coin/Science item
+// takes to fully process (replaces the old flat COLLECTOR_PROCESS_DURATION_MS
+// — a coin and a Science bubble now take different amounts of time on the
+// same tile). wasteEveryMs is a separate, continuously-running background
+// clock: every wasteEveryMs of TOTAL time this tile has spent actively
+// holding an item (any item, running the whole time it's non-idle, not reset
+// between individual items), it spawns one Waste at the tile's center — see
+// Grid.js's updateBuildings. powerCostPerSec is drawn only while the tile is
+// actively processing something (Collector) or actively processing an
+// absorbed Waste load (Auto-Feeder) — not while idle/empty, and not gated on
+// actual power availability, same not-yet-power-gated precedent every other
+// Electric building in this codebase already follows.
+export const PROCESSOR_STATS = {
+  [TILE_COLLECTOR]: { coinMs: 6000, scienceMs: 20000, wasteEveryMs: 10000, powerCostPerSec: 0 },
+  [TILE_COLLECTOR_ELECTRIC]: { coinMs: 4000, scienceMs: 15000, wasteEveryMs: 12000, powerCostPerSec: 10 },
+  [TILE_COLLECTOR_ADVANCED]: { coinMs: 3000, scienceMs: 9000, wasteEveryMs: 15000, powerCostPerSec: 20 },
+};
+// wasteProcessMs is how long ONE absorbed Waste item takes to finish
+// processing before the next can be absorbed; wasteRequired is how many
+// completed absorptions are needed before a Food item is finally dispensed —
+// Grid.js's updateBuildings lights one of `wasteRequired` dots (per direct
+// request) each time a load finishes, resetting once Food dispenses.
+// powerCostPerSec is drawn only while actively processing an absorbed load,
+// not while idle waiting for the next one.
+export const AUTO_FEEDER_STATS = {
+  [TILE_AUTO_FEEDER]: { wasteProcessMs: 20000, wasteRequired: 3, powerCostPerSec: 0 },
+  [TILE_AUTO_FEEDER_ELECTRIC]: { wasteProcessMs: 12000, wasteRequired: 3, powerCostPerSec: 5 },
+  [TILE_AUTO_FEEDER_ADVANCED]: { wasteProcessMs: 10000, wasteRequired: 2, powerCostPerSec: 10 },
 };
 
 // ---- Tier Progression & The Mound (Phase 2) ----
@@ -846,6 +972,13 @@ export const BUILDING_FAMILIES = {
 // is reached.
 export const MOUND_MAX_TIER = 5; // reaching this shatters the Mound completely (Tier 5 reveal) instead of cracking further — shifted from 4 to make room for the new Tier 2 (Economy Fish Combining) below
 export const MOUND_TEASE_COST = 150; // unchanged — the tease is still a Tier 1 no-op regardless of how many tiers exist above it
+// "Tier 1.75" — a new paid step between the tease and the real Tier 1->2
+// crack, per direct request: the Rudimentary Fan no longer comes free with
+// the tease (it used to) — it now costs its own flat $500 and grants ONLY
+// the Fan, still without advancing state.level.tier. Tracked by a new
+// state.level.fanUnlockPurchased flag (Levels.js), checked the same way
+// moundTeased already is — see Mound.js's getMoundNextCost/crackMound.
+export const FAN_UNLOCK_COST = 500;
 // Crack costs 1/2/3 are unchanged from before the tier shift (1000/5000/25000
 // for 1->2, 2->3, 3->4); 4 (2->3... — see TIER_UNLOCKS below for exactly what
 // each transition now grants) is new, priced at the explicitly requested
@@ -886,7 +1019,10 @@ export const TIER_UNLOCKS = {
   // scaffold situation every not-yet-behavior-wired species has been in. The
   // Electric/Turbo Fans ARE fully functional the moment they unlock, unlike
   // those still-scaffolded species/behaviors.
-  4: { species: ['electric_eel'], buildings: [TILE_FAN_T3] },
+  // Electric Processor/Auto-Feeder are granted in the same crack as Electric
+  // Eel — "unlocked automatically when the electric eel is unlocked," per
+  // direct request, rather than needing their own separate Tier gate.
+  4: { species: ['electric_eel'], buildings: [TILE_FAN_T3, TILE_COLLECTOR_ELECTRIC, TILE_AUTO_FEEDER_ELECTRIC] },
   5: {
     species: [
       'octopus', 'scrub_guppy', 'volt_guppy', 'scholar_guppy',
@@ -907,8 +1043,22 @@ export const TIER_UNLOCKS = {
 // matching hybrid — see Entities.js's canSpliceFish/spliceFish and the
 // existing T5 value-carry-over pipeline (getEconomyAdultDropValue/
 // getHybridSpeciesId/createHybridFish) it's built on top of.
+// Once Electric Eel is unlocked, the HUD shows a live electricity readout
+// (current draw / accumulated capacity, like Food's current/cap) that
+// updates once per real sim-second — main.js samples
+// Grid.js's computeCurrentPowerDemand + state.level.powerSupply into
+// state.level.powerHistory every second, capped at this many entries (a
+// rolling one-minute window, one point per second) for the small graph
+// popup UI.js shows when the HUD readout is clicked. See main.js's update().
+export const POWER_HISTORY_MAX = 60;
+
 export const GENE_SPLICING_TECH_ID = 'gene_splicing';
-export const GENE_SPLICING_COST = 100; // Science — placeholder balance like every other economy constant
+export const GENE_SPLICING_COST = 25; // Science Bubbles — was 100, cut per direct request now that Science is a real collected/banked resource (state.level.science) rather than an instantly-ticking counter
+// Advanced Processor/Auto-Feeder are also bought in the Lab, same currency
+// and same one-time-unlock-then-placeable-for-money pattern as Gene-Splicing
+// itself — see UI.js's Lab popup.
+export const ADVANCED_PROCESSOR_COST = 25; // Science Bubbles
+export const ADVANCED_AUTO_FEEDER_COST = 25; // Science Bubbles
 export const SCIENCE_COLOR = '#5fc9ff';
 export const POWER_COLOR = '#ffd23f';
 // The 3 utility species — the only valid splice SOURCES (dragged onto an

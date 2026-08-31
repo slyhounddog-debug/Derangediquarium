@@ -14,19 +14,41 @@ let sfxGain = null;
 let musicStarted = false;
 let musicTimer = null;
 
+// Volume sliders in the pause menu's Settings panel (UI.js) call
+// setMusicVolume/setSfxVolume below, which need to work even before the
+// AudioContext exists yet (a slider drag before the very first user
+// gesture that unlocks audio) — these are the source of truth, applied to
+// the real gain node once ensureContext() creates it, and re-applied
+// directly any time they change after that.
+let musicVolume = 0.05; // soft, background — should never fight the SFX for attention
+let sfxVolume = 0.22;
+
 function ensureContext() {
   if (ctx) return ctx;
   const AudioContextClass = window.AudioContext || window.webkitAudioContext;
   if (!AudioContextClass) return null; // no Web Audio support — every export below just silently no-ops
   ctx = new AudioContextClass();
   musicGain = ctx.createGain();
-  musicGain.gain.value = 0.05; // soft, background — should never fight the SFX for attention
+  musicGain.gain.value = musicVolume;
   musicGain.connect(ctx.destination);
   sfxGain = ctx.createGain();
-  sfxGain.gain.value = 0.22;
+  sfxGain.gain.value = sfxVolume;
   sfxGain.connect(ctx.destination);
   return ctx;
 }
+
+// v is 0-1 — UI.js's Settings sliders call these directly on `input`, so the
+// volume updates live while dragging, not just on release.
+export function setMusicVolume(v) {
+  musicVolume = Math.max(0, Math.min(1, v));
+  if (musicGain) musicGain.gain.value = musicVolume;
+}
+export function setSfxVolume(v) {
+  sfxVolume = Math.max(0, Math.min(1, v));
+  if (sfxGain) sfxGain.gain.value = sfxVolume;
+}
+export function getMusicVolume() { return musicVolume; }
+export function getSfxVolume() { return sfxVolume; }
 
 // Called from main.js on the very first pointerdown/keydown — browsers
 // refuse to run an AudioContext until a real user gesture, and this is also
@@ -140,30 +162,45 @@ export function playTankPoint() {
 }
 
 // ---- Background music ----
-// A short looping pentatonic melody (no bad-sounding intervals possible,
-// regardless of note order — an easy way to guarantee something "cute" and
-// harmonious without hand-composing a real tune), soft triangle-wave lead
-// over a very quiet square-wave bass note per bar. Scheduled by converting
-// the whole loop's notes into absolute `when` offsets up front, then
-// rescheduling the next loop via setTimeout timed to the loop's own total
-// duration — simple, and any timer drift just means the NEXT loop's first
-// note starts a few ms late, not an audible glitch.
-const MUSIC_TEMPO_BPM = 132;
+// Reworked per direct request — the original was flagged as "annoying...
+// staccato and grating." Root causes fixed: (1) the lead used a buzzy
+// 'triangle' wave with a short 0.05s release and only 82% note-length
+// coverage, leaving an audible gap of silence between almost every note —
+// that gap IS what staccato sounds like. Now it's a warmer 'sine' lead with
+// a much longer release (0.22s) and 97% coverage, so consecutive notes
+// overlap into each other (legato) instead of clicking on and off. (2) The
+// melody itself was a fairly flat stepwise walk with no real shape — now it
+// opens with a rising 3-note flourish (an "adventure fanfare" gesture),
+// leans on longer sustained notes for a sweeping feel, and resolves with a
+// small falling cadence, still built entirely from a pentatonic scale (no
+// bad-sounding interval is possible regardless of order, so this stays safe
+// to hand-tune without needing real music theory). (3) Tempo dropped from
+// 132 to 112 BPM — unhurried, "upbeat adventure" rather than a rushed loop.
+// (4) A soft sustained triangle-wave pad note now plays under each bass hit
+// for a fuller, warmer low end instead of a single thin square-wave blip.
+// Scheduled the same way as before: the whole loop's notes are converted
+// into absolute `when` offsets up front, then the next loop is scheduled via
+// setTimeout timed to the loop's own total duration — any timer drift just
+// delays the NEXT loop's first note by a few ms, never an audible glitch
+// mid-phrase.
+const MUSIC_TEMPO_BPM = 112;
 const BEAT_S = 60 / MUSIC_TEMPO_BPM;
 // C major pentatonic, one octave: C4 D4 E4 G4 A4 C5 D5 E5
 const SCALE = [261.63, 293.66, 329.63, 392.0, 440.0, 523.25, 587.33, 659.25];
-// Scale-degree indices (0-7) and beat-lengths for one 8-bar phrase — simple,
-// mostly stepwise-and-skip motion so it reads as an actual little tune
-// rather than a random note generator.
+// Scale-degree indices (0-7) and beat-lengths for one 8-bar phrase. Opens
+// with a rising flourish (0 -> 3 -> 5, a fanfare-like leap up rather than a
+// stepwise crawl), holds longer notes at each phrase's peak/end for a
+// sweeping rather than choppy feel, and the final phrase mirrors the
+// opening flourish in reverse for a satisfying resolve back to the root.
 const MELODY = [
-  { deg: 5, beats: 1 }, { deg: 4, beats: 1 }, { deg: 3, beats: 1 }, { deg: 4, beats: 1 },
-  { deg: 5, beats: 1 }, { deg: 5, beats: 1 }, { deg: 5, beats: 2 },
-  { deg: 7, beats: 1 }, { deg: 6, beats: 1 }, { deg: 5, beats: 1 }, { deg: 4, beats: 1 },
-  { deg: 3, beats: 1 }, { deg: 3, beats: 1 }, { deg: 3, beats: 2 },
-  { deg: 4, beats: 1 }, { deg: 5, beats: 1 }, { deg: 4, beats: 1 }, { deg: 3, beats: 1 },
-  { deg: 2, beats: 1 }, { deg: 4, beats: 1 }, { deg: 0, beats: 2 },
-  { deg: 3, beats: 1 }, { deg: 5, beats: 1 }, { deg: 7, beats: 1 }, { deg: 5, beats: 1 },
-  { deg: 4, beats: 1 }, { deg: 3, beats: 1 }, { deg: 0, beats: 2 },
+  { deg: 0, beats: 0.75 }, { deg: 3, beats: 0.75 }, { deg: 5, beats: 1.5 }, { deg: 4, beats: 1 },
+  { deg: 3, beats: 1 }, { deg: 5, beats: 3 },
+  { deg: 4, beats: 0.75 }, { deg: 5, beats: 0.75 }, { deg: 7, beats: 1.5 }, { deg: 6, beats: 1 },
+  { deg: 5, beats: 1 }, { deg: 7, beats: 3 },
+  { deg: 5, beats: 1 }, { deg: 4, beats: 1 }, { deg: 3, beats: 1 }, { deg: 2, beats: 1 },
+  { deg: 3, beats: 2 }, { deg: 4, beats: 2 },
+  { deg: 5, beats: 1 }, { deg: 3, beats: 1 }, { deg: 0, beats: 1 },
+  { deg: 3, beats: 1 }, { deg: 0, beats: 4 },
 ];
 const BASS_DEGREES = [0, 3, 4, 3]; // one bass note every 2 bars (8 beats), root-ish walking pattern
 
@@ -173,11 +210,11 @@ function scheduleMusicLoop() {
   let beatCursor = 0;
   for (const note of MELODY) {
     const freq = SCALE[note.deg % SCALE.length] * (note.deg >= SCALE.length ? 2 : 1);
-    playTone(freq, note.beats * BEAT_S * 0.82, {
-      type: 'triangle',
-      gain: 0.1,
-      attack: 0.01,
-      release: 0.05,
+    playTone(freq, note.beats * BEAT_S * 0.97, {
+      type: 'sine',
+      gain: 0.12,
+      attack: 0.02,
+      release: 0.22,
       when: beatCursor * BEAT_S,
       destination: musicGain,
     });
@@ -186,11 +223,22 @@ function scheduleMusicLoop() {
   const totalBeats = beatCursor;
   let bassCursor = 0;
   for (const deg of BASS_DEGREES) {
-    playTone(SCALE[deg] / 2, BEAT_S * 1.6, {
-      type: 'square',
-      gain: 0.05,
-      attack: 0.01,
-      release: 0.15,
+    playTone(SCALE[deg] / 2, BEAT_S * 1.8, {
+      type: 'triangle',
+      gain: 0.06,
+      attack: 0.02,
+      release: 0.35,
+      when: bassCursor * BEAT_S,
+      destination: musicGain,
+    });
+    // A soft sustained pad an octave above the bass note — warms out the
+    // low end into a fuller chord tone instead of one thin blip, at a low
+    // enough gain to sit underneath the lead rather than compete with it.
+    playTone(SCALE[deg], BEAT_S * 1.8, {
+      type: 'triangle',
+      gain: 0.025,
+      attack: 0.15,
+      release: 0.4,
       when: bassCursor * BEAT_S,
       destination: musicGain,
     });

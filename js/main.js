@@ -32,6 +32,9 @@ import {
   NOTIFICATION_LOG_MAX,
   CLEANLINESS_MAX,
   GENE_SPLICING_TECH_ID,
+  SCIENCE_ITEM_COLOR_A,
+  SCIENCE_ITEM_COLOR_B,
+  POWER_HISTORY_MAX,
 } from './Config.js';
 import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop } from './Engine.js';
 import { loadLevel, LEVELS } from './Levels.js';
@@ -43,6 +46,7 @@ import {
   trySpawnFood,
   trySpawnPurchasedFish,
   tryBankCoinAt,
+  tryBankScienceAt,
   spawnFishCheat,
   getCoinColor,
   getFishPurchaseCost,
@@ -66,6 +70,7 @@ import {
   canPlaceTile,
   getBuildingCost,
   getTile,
+  computeCurrentPowerDemand,
 } from './Grid.js';
 import { isPointOnMound, crackMound, renderMound, centerCameraOnMound, isPointOnScienceLab, renderScienceLab } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
@@ -125,7 +130,6 @@ splashTitle.addEventListener('animationend', (e) => {
 // ---- Root state (§3.1) — plain, JSON-serializable, meta/level split ----
 const state = {
   meta: {
-    scienceTotal: 0,
     techUnlocked: [],
     buildingsUnlocked: BUILDING_LIST.filter((b) => b.unlockedByDefault).map((b) => b.id),
     speciesUnlocked: SPECIES_LIST.filter((s) => s.unlockedByDefault).map((s) => s.id),
@@ -198,6 +202,11 @@ let fishDragArmed = false;
 input.mouseDownHandlers.push((sx, sy) => {
   fishDragArmed = false;
   if (state.ui.paused) return;
+  // Combining/splicing now requires the dedicated Merge tool (🧤) to be
+  // selected first — per direct request, this no longer fires just because
+  // a mousedown happened to land on an eligible fish while some other tool
+  // was active (Food, a building, Demolish). See UI.js's tool-merge-btn.
+  if (state.ui.selectedTool !== 'merge') return;
   const world = screenToWorld(sx, sy, state.camera);
   const fish = findFishAt(state, world.x, world.y);
   // A fish can be a legal drag SOURCE for either interaction — Economy Fish
@@ -273,6 +282,7 @@ input.clickHandlers.push((sx, sy) => {
   if (isPointOnMound(state, world.x, world.y)) { openMoundMenu(state); return; } // opens the "Throw money at it" popup — see UI.js
   if (isPointOnScienceLab(state, world.x, world.y)) { openLabMenu(state); return; } // Phase 4 — the Mound's replacement once it's fully shattered
   if (tryBankCoinAt(state, world.x, world.y)) return; // clicking a coin always banks it, regardless of selected tool
+  if (tryBankScienceAt(state, world.x, world.y)) return; // same for a Science Bubble
   if (state.ui.selectedTool === 'food') {
     if (trySpawnFood(state, world.x, world.y) === 'capacity_full') flashFoodCapacity(state);
     return;
@@ -380,9 +390,10 @@ input.keydownHandlers.push((e) => {
       rotateBuilding(state, world.x, world.y);
       break;
     }
-    case 'KeyN': // force-crack the Mound to the next real tier, free — skips the tease if it hasn't happened yet, so this always advances a tier rather than sometimes just spending the press on the joke
+    case 'KeyN': // force-crack the Mound to the next real tier, free — skips the tease and the paid Tier 1.75 Fan-unlock step if they haven't happened yet, so this always advances a tier rather than sometimes just spending the press on one of those instead
       state.level.money += CHEAT_GRANT_AMOUNT;
       state.level.moundTeased = true;
+      state.level.fanUnlockPurchased = true;
       crackMound(state);
       refreshShopPanel(state);
       break;
@@ -406,6 +417,12 @@ let lastStepsTime = performance.now();
 let itemsRoutedLastTotal = 0;
 let itemsRoutedPerMinDisplay = 0;
 let lastItemsRoutedSampleTime = performance.now();
+
+// Electricity HUD/graph: samples current power demand once per real
+// sim-second (ticked off dtMs, so it still paces correctly under the debug
+// time-scale cheat) into state.level.powerHistory — see UI.js's electricity
+// readout/graph popup and Config.js's POWER_HISTORY_MAX.
+let powerSampleAccumMs = 0;
 
 // Places a tile at the cursor once per newly-entered cell while the left
 // button is held and a build tool is selected — see the input wiring above
@@ -473,6 +490,14 @@ function update(dtMs) {
     itemsRoutedLastTotal = state.level.gridStats.itemsRoutedTotal;
     lastItemsRoutedSampleTime = now;
   }
+
+  powerSampleAccumMs += dtMs;
+  if (powerSampleAccumMs >= 1000) {
+    powerSampleAccumMs -= 1000;
+    const history = state.level.powerHistory;
+    history.push({ demand: computeCurrentPowerDemand(state), supply: state.level.powerSupply });
+    if (history.length > POWER_HISTORY_MAX) history.shift();
+  }
 }
 
 // The open-water background — a vertical gradient (lighter at the top,
@@ -496,7 +521,27 @@ function waterBackgroundGradient(ctx, canvasHeight, cleanliness) {
   return gradient;
 }
 
+// Cursor changes to match the active tool — a hammer for Demolish, a glove
+// for the new Merge tool — per direct request. Built as a small inline SVG
+// data-URI cursor (an emoji rendered onto a tiny canvas-less SVG) rather
+// than a real cursor image asset, same "no external file, generate it"
+// spirit as this project's synthesized audio. Only ever written to the DOM
+// when the tool actually changed, not every frame.
+function emojiCursorCss(emoji) {
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'><text x='0' y='26' font-size='26'>${emoji}</text></svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}") 4 26, auto`;
+}
+const CURSOR_BY_TOOL = { demolish: emojiCursorCss('🔨'), merge: emojiCursorCss('🧤') };
+let lastCursorTool = null;
+function updateCanvasCursor() {
+  const cursorKey = CURSOR_BY_TOOL[state.ui.selectedTool] ? state.ui.selectedTool : 'default';
+  if (cursorKey === lastCursorTool) return;
+  lastCursorTool = cursorKey;
+  canvas.style.cursor = CURSOR_BY_TOOL[cursorKey] || '';
+}
+
 function render() {
+  updateCanvasCursor();
   fpsCounter++;
   const now = performance.now();
   if (now - lastFpsTime >= 1000) {
@@ -584,6 +629,34 @@ function render() {
   for (const item of state.level.items) {
     const pos = worldToScreen(item.x, item.y, state.camera);
     if (pos.x < -20 || pos.x > canvas.width + 20 || pos.y < -20 || pos.y > canvas.height + 20) continue; // cull offscreen
+
+    if (item.type === 'science') {
+      // "Magical bubble" — a purple-to-blue radial blend plus a bright rim
+      // ring, per direct request, instead of the flat single-color fill
+      // every other item type gets below. A real ctx.createRadialGradient
+      // is fine here (unlike a ctx.filter, which is the actually expensive
+      // one — see Ambience.js's seaweed blur note) since it's just one more
+      // fillStyle, no per-pixel filter pass.
+      const gradient = ctx.createRadialGradient(
+        pos.x - item.radius * 0.3, pos.y - item.radius * 0.3, item.radius * 0.1,
+        pos.x, pos.y, item.radius
+      );
+      gradient.addColorStop(0, SCIENCE_ITEM_COLOR_B);
+      gradient.addColorStop(1, SCIENCE_ITEM_COLOR_A);
+      ctx.beginPath();
+      ctx.fillStyle = gradient;
+      ctx.arc(pos.x, pos.y, item.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+      ctx.lineWidth = 1.4;
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
+      ctx.beginPath();
+      ctx.arc(pos.x - item.radius * 0.3, pos.y - item.radius * 0.3, item.radius * 0.28, 0, Math.PI * 2);
+      ctx.fill();
+      continue;
+    }
+
     const itemColor = item.type === 'food' ? FOOD_COLOR : item.type === 'waste' ? WASTE_COLOR : getCoinColor(item.value);
     ctx.beginPath();
     ctx.fillStyle = itemColor;

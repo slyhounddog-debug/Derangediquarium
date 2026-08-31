@@ -51,9 +51,12 @@ export function loadLevel(state, levelId) {
     levelId: def.id,
     levelName: def.name,
     money: def.startingMoney,
+    science: 0, // Science Bubbles banked so far — level-scoped like money now that Science is a real collected resource (see Entities.js's createScience/bankScience), not a permanent meta counter
+
     cleanliness: 100, // 0-100, clamped — real now (Phase 3): Entities.js/Grid.js adjust it whenever Waste spawns or gets cleaned up, see Config.js's CLEANLINESS_* comment. No gameplay effect from a low value yet (fish stress/toxicity is still unbuilt) — this is the live-tracked value + HUD feedback half of the system
-    powerSupply: 0,
-    powerDemand: 0,
+    powerSupply: 0, // MW capacity accumulated so far from Generator fish — see Entities.js's updateFish GENERATOR branch
+    powerDemand: 0, // unused directly any more — Grid.js's computeCurrentPowerDemand computes this live instead; kept for shape-compat with older docs
+    powerHistory: [], // rolling { demand, supply } samples, one per real sim-second, capped at POWER_HISTORY_MAX — see main.js's update()
     entities: [],
     items: [],
     floatingTexts: [], // transient "+$N" pickup readouts — not physics items, never touched by Grid.js routing
@@ -61,7 +64,8 @@ export function loadLevel(state, levelId) {
     buildingData: {}, // sparse "row,col" -> { type, angle, ... } map for buildings that need per-instance data the grid's bare type-id strings can't hold (Fans' aim angle, Auto-Feeder's absorb/process state) — see Grid.js's placeTile/removeTile
     gridStats: { itemsRoutedTotal: 0 }, // lifetime count of items consumed by a Collector tile, for the debug overlay's throughput readout
     tier: 1, // 1-5, Mound-driven progression — see Mound.js and CLAUDE.md's "Tier Progression & The Mound"; level-scoped like everything else here, even though the meta-unlocks a previous crack granted stay permanent
-    moundTeased: false, // has the Mound's first "throw money" attempt already happened this level? — see Mound.js's crackMound/getMoundNextCost. No longer a no-op joke — it grants the Rudimentary Fan (the "Tier 1.5" step), still without advancing state.level.tier
+    moundTeased: false, // has the Mound's first "throw money" attempt already happened this level? — see Mound.js's crackMound/getMoundNextCost. A pure no-op joke again — the Rudimentary Fan moved to its own paid "Tier 1.75" step below, per direct request
+    fanUnlockPurchased: false, // "Tier 1.75" — the $500 step (after the tease, before the real Tier 1->2 crack) that grants ONLY the Rudimentary Fan — see Mound.js's crackMound/getMoundNextCost and Config.js's FAN_UNLOCK_COST
     notifications: [{ id: 1, text: WELCOME_MESSAGE, elapsed: 0 }], // rolling log for UI.js's ticker — { id, text, elapsed }, capped at NOTIFICATION_LOG_MAX. Seeded with the welcome message as a real entry (not a UI fallback) so it survives in the scrollback log
     tankPoints: { total: 0, available: 0 }, // earned by Entities.js on fish adult-growth transitions, spent in UI.js's Tank Upgrades panel — see CLAUDE.md's "Tank Points & Tank Upgrades"
     upgrades: { foodQuality: 0, fishMovement: 0, foodCapacity: 0, fishMergingUnlocked: false }, // purchased Tank Upgrade levels, 0 = not yet bought; read live by Entities.js, not baked into fish/food at creation time. fishMergingUnlocked is a one-time flag, not a level — see Config.js's FISH_MERGING_UNLOCK_COST

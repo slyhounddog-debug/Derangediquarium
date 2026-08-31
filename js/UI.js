@@ -32,14 +32,21 @@ import {
   CLEANLINESS_COLOR_DIRTY,
   GENE_SPLICING_TECH_ID,
   GENE_SPLICING_COST,
+  PROCESSOR_STATS,
+  AUTO_FEEDER_STATS,
+  TILE_COLLECTOR_ADVANCED,
+  TILE_AUTO_FEEDER_ADVANCED,
+  ADVANCED_PROCESSOR_COST,
+  ADVANCED_AUTO_FEEDER_COST,
+  POWER_HISTORY_MAX,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings, loadLevel } from './Levels.js';
 import { getFishPurchaseCost, effectiveFoodCapacity, countTankFood } from './Entities.js';
-import { getTile, worldToTile, getBuildingCost } from './Grid.js';
+import { getTile, worldToTile, getBuildingCost, FAN_STATS } from './Grid.js';
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
-import { playUpgrade } from './Sound.js';
+import { playUpgrade, setMusicVolume, setSfxVolume, getMusicVolume, getSfxVolume } from './Sound.js';
 
 const MOUND_MENU_GAP_PX = 12; // screen px of breathing room between the popup's bottom edge and the Mound's top edge
 const MOUND_MENU_TRANSITION_MS = 220; // must match #mound-menu's CSS transition duration
@@ -65,6 +72,7 @@ let moundMenuCloseTimer = null;
 let labMenuOpen = false;
 let labMenuClosing = false;
 let labMenuCloseTimer = null;
+let powerGraphOpen = false; // the small rolling-graph popup under the electricity HUD readout — see #hud-power's click listener
 // familyId -> currently-selected tile id within that family (see Config.js's
 // BUILDING_FAMILIES) — reset to the highest-unlocked tier every time
 // buildBuildPalette rebuilds (init, the U cheat key, a Mound crack), then
@@ -116,20 +124,26 @@ export function initUI(state) {
     money: document.getElementById('hud-money'),
     food: document.getElementById('hud-food'),
     cleanliness: document.getElementById('hud-cleanliness'),
+    power: document.getElementById('hud-power'),
+    powerGraph: document.getElementById('hud-power-graph'),
+    powerGraphCanvas: document.getElementById('hud-power-graph-canvas'),
     shopPanel: document.getElementById('shop-panel'),
     shopCollapseBtn: document.getElementById('shop-collapse-btn'),
     shopMoney: document.getElementById('shop-money'),
     shopFood: document.getElementById('shop-food'),
     shopCleanliness: document.getElementById('shop-cleanliness'),
+    shopPower: document.getElementById('shop-power'),
     shopGrid: document.getElementById('shop-species-grid'),
     previewEmpty: document.getElementById('shop-preview-empty'),
     previewContent: document.getElementById('shop-preview-content'),
     previewCanvas: document.getElementById('shop-preview-canvas'),
     previewName: document.getElementById('shop-preview-name'),
     previewDesc: document.getElementById('shop-preview-desc'),
+    previewStats: document.getElementById('shop-preview-stats'),
     previewHint: document.getElementById('shop-preview-hint'),
     toolFoodBtn: document.getElementById('tool-food-btn'),
     toolDemolishBtn: document.getElementById('tool-demolish-btn'),
+    toolMergeBtn: document.getElementById('tool-merge-btn'),
     buildToolGrid: document.getElementById('build-tool-grid'),
     toolTooltip: document.getElementById('tool-tooltip'),
     pauseOverlay: document.getElementById('pause-overlay'),
@@ -140,6 +154,8 @@ export function initUI(state) {
     pauseRestartBtn: document.getElementById('pause-restart-btn'),
     pauseSettingsBtn: document.getElementById('pause-settings-btn'),
     pauseSettingsBackBtn: document.getElementById('pause-settings-back-btn'),
+    musicVolumeSlider: document.getElementById('music-volume-slider'),
+    sfxVolumeSlider: document.getElementById('sfx-volume-slider'),
     debugOverlay: document.getElementById('debug-overlay'),
     debugLines: document.getElementById('debug-lines'),
     notificationLatest: document.getElementById('notification-latest'),
@@ -154,6 +170,8 @@ export function initUI(state) {
     labMenu: document.getElementById('lab-menu'),
     labScienceReadout: document.getElementById('lab-science-readout'),
     labResearchBtn: document.getElementById('lab-research-btn'),
+    labAdvancedProcessorBtn: document.getElementById('lab-advanced-processor-btn'),
+    labAdvancedAutoFeederBtn: document.getElementById('lab-advanced-auto-feeder-btn'),
     labCancelBtn: document.getElementById('lab-cancel-btn'),
     tankPanel: document.getElementById('tank-panel'),
     tankCollapseBtn: document.getElementById('tank-collapse-btn'),
@@ -174,11 +192,34 @@ export function initUI(state) {
 
   els.labResearchBtn.addEventListener('click', () => {
     if (state.meta.techUnlocked.includes(GENE_SPLICING_TECH_ID)) return;
-    if (state.meta.scienceTotal < GENE_SPLICING_COST) return;
-    state.meta.scienceTotal -= GENE_SPLICING_COST;
+    if (state.level.science < GENE_SPLICING_COST) return;
+    state.level.science -= GENE_SPLICING_COST;
     state.meta.techUnlocked.push(GENE_SPLICING_TECH_ID);
     playUpgrade();
     refreshLabMenu(state);
+  });
+  // Advanced Processor/Auto-Feeder: same one-time-Lab-purchase-then-
+  // placeable-for-money pattern as Gene-Splicing itself — pushes the tile id
+  // into state.meta.buildingsUnlocked (same permanent-unlock mechanism every
+  // other building already uses) rather than a techUnlocked flag, since
+  // it's a building unlock, not a tech flag.
+  els.labAdvancedProcessorBtn.addEventListener('click', () => {
+    if (state.meta.buildingsUnlocked.includes(TILE_COLLECTOR_ADVANCED)) return;
+    if (state.level.science < ADVANCED_PROCESSOR_COST) return;
+    state.level.science -= ADVANCED_PROCESSOR_COST;
+    state.meta.buildingsUnlocked.push(TILE_COLLECTOR_ADVANCED);
+    playUpgrade();
+    refreshLabMenu(state);
+    refreshShopPanel(state);
+  });
+  els.labAdvancedAutoFeederBtn.addEventListener('click', () => {
+    if (state.meta.buildingsUnlocked.includes(TILE_AUTO_FEEDER_ADVANCED)) return;
+    if (state.level.science < ADVANCED_AUTO_FEEDER_COST) return;
+    state.level.science -= ADVANCED_AUTO_FEEDER_COST;
+    state.meta.buildingsUnlocked.push(TILE_AUTO_FEEDER_ADVANCED);
+    playUpgrade();
+    refreshLabMenu(state);
+    refreshShopPanel(state);
   });
   els.labCancelBtn.addEventListener('click', () => closeLabMenu());
   els.labOverlay.addEventListener('click', (e) => {
@@ -213,6 +254,13 @@ export function initUI(state) {
     state.ui.selectedTool = 'demolish';
     updateToolbar(state);
   });
+  // Merge tool (🧤) — combining/splicing fish now requires this to be
+  // selected first, per direct request, instead of firing on any mousedown
+  // that happened to land on an eligible fish regardless of tool.
+  els.toolMergeBtn.addEventListener('click', () => {
+    state.ui.selectedTool = 'merge';
+    updateToolbar(state);
+  });
 
   els.shopCollapseBtn.addEventListener('click', () => toggleShopCollapse(state));
   els.tankCollapseBtn.addEventListener('click', () => toggleTankPanel(state));
@@ -224,6 +272,23 @@ export function initUI(state) {
   els.pauseOverlay.addEventListener('click', (e) => {
     if (e.target === els.pauseOverlay) closePauseMenu(state); // clicked the backdrop, not the card
   });
+
+  // Electricity readout — click toggles the rolling graph popup underneath
+  // it (same dropdown-under-pill pattern #notification-log already uses).
+  // #hud (and so #hud-power inside it) is only ever visible while the shop
+  // is closed — see updateShopCollapse — so this is automatically only
+  // clickable then, per direct request ("only when the shop is closed").
+  // #shop-power is a plain, non-interactive readout.
+  els.power.addEventListener('click', () => {
+    powerGraphOpen = !powerGraphOpen;
+    els.powerGraph.classList.toggle('hidden', !powerGraphOpen);
+    if (powerGraphOpen) renderPowerGraph(state);
+  });
+
+  els.musicVolumeSlider.value = String(Math.round(getMusicVolume() * 100));
+  els.sfxVolumeSlider.value = String(Math.round(getSfxVolume() * 100));
+  els.musicVolumeSlider.addEventListener('input', () => setMusicVolume(Number(els.musicVolumeSlider.value) / 100));
+  els.sfxVolumeSlider.addEventListener('input', () => setSfxVolume(Number(els.sfxVolumeSlider.value) / 100));
 
   // Belt-and-suspenders alongside the defensive strip in updateShopCollapse:
   // clean up the flash class as soon as the animation actually finishes, so
@@ -433,16 +498,28 @@ function updateLabMenuPosition(state) {
 // Re-checked every frame the popup is open (from updateHUD) — science total
 // and the research button's afford-state can both change while it's open.
 function refreshLabMenu(state) {
+  const science = state.level.science;
   const unlocked = state.meta.techUnlocked.includes(GENE_SPLICING_TECH_ID);
-  els.labScienceReadout.textContent = `🔬 ${state.meta.scienceTotal}`;
+  els.labScienceReadout.textContent = `🔬 ${science}`;
   if (unlocked) {
     els.labResearchBtn.textContent = 'Gene-Splicing researched ✓';
     els.labResearchBtn.disabled = true;
   } else {
-    const affordable = state.meta.scienceTotal >= GENE_SPLICING_COST;
     els.labResearchBtn.textContent = `Research Gene-Splicing — ${GENE_SPLICING_COST} 🔬`;
-    els.labResearchBtn.disabled = !affordable;
+    els.labResearchBtn.disabled = science < GENE_SPLICING_COST;
   }
+
+  const advProcessorUnlocked = state.meta.buildingsUnlocked.includes(TILE_COLLECTOR_ADVANCED);
+  els.labAdvancedProcessorBtn.textContent = advProcessorUnlocked
+    ? 'Advanced Processor unlocked ✓'
+    : `Advanced Processor — ${ADVANCED_PROCESSOR_COST} 🔬`;
+  els.labAdvancedProcessorBtn.disabled = advProcessorUnlocked || science < ADVANCED_PROCESSOR_COST;
+
+  const advFeederUnlocked = state.meta.buildingsUnlocked.includes(TILE_AUTO_FEEDER_ADVANCED);
+  els.labAdvancedAutoFeederBtn.textContent = advFeederUnlocked
+    ? 'Advanced Auto-Feeder unlocked ✓'
+    : `Advanced Auto-Feeder — ${ADVANCED_AUTO_FEEDER_COST} 🔬`;
+  els.labAdvancedAutoFeederBtn.disabled = advFeederUnlocked || science < ADVANCED_AUTO_FEEDER_COST;
 }
 
 function showPauseMain() {
@@ -478,11 +555,14 @@ function restartLevel(state) {
 function updateToolbar(state) {
   const foodSelected = state.ui.selectedTool === 'food';
   const demolishSelected = state.ui.selectedTool === 'demolish';
+  const mergeSelected = state.ui.selectedTool === 'merge';
   els.toolFoodBtn.classList.toggle('selected', foodSelected);
   els.toolDemolishBtn.classList.toggle('selected', demolishSelected);
-  els.toolTooltip.classList.toggle('hidden', !foodSelected && !demolishSelected);
+  els.toolMergeBtn.classList.toggle('selected', mergeSelected);
+  els.toolTooltip.classList.toggle('hidden', !foodSelected && !demolishSelected && !mergeSelected);
   if (foodSelected) els.toolTooltip.textContent = `Food $${FOOD_COST}`;
   else if (demolishSelected) els.toolTooltip.textContent = 'Click a building to remove it — full refund';
+  else if (mergeSelected) els.toolTooltip.textContent = 'Drag one Adult fish onto a matching one to combine or splice it';
 
   for (const btn of els.buildToolGrid.children) {
     btn.classList.toggle('selected', state.ui.selectedTool === btn.dataset.tool);
@@ -807,6 +887,7 @@ function selectSpeciesForPreview(state, species) {
   els.previewContent.classList.remove('hidden');
   els.previewHint.textContent = 'Click in the tank to place it';
   els.previewDesc.textContent = species.description;
+  els.previewStats.classList.add('hidden'); // stats block is building-only — see buildingStatsHtml
   // Name/price text is set live in refreshPreviewInfo (called both here and
   // every frame from updateHUD) since an economy species' price is dynamic —
   // see Config.js's ECONOMY_FISH_COST_GROWTH_RATE.
@@ -827,10 +908,46 @@ function selectBuildingForPreview(state, building) {
   els.previewContent.classList.remove('hidden');
   els.previewHint.textContent = 'Click in the tank to place it';
   els.previewDesc.textContent = building.description;
+  const statsHtml = buildingStatsHtml(building.id);
+  els.previewStats.innerHTML = statsHtml;
+  els.previewStats.classList.toggle('hidden', !statsHtml);
   refreshPreviewInfo(state);
   renderPreviewCanvas();
   state.ui.selectedTool = `build:${building.id}`;
   updateToolbar(state);
+}
+
+// Per direct request — clicking a Processor, Auto-Feeder, or Fan in the
+// shop shows its real stats (processing speed, waste creation speed,
+// electricity cost, range) instead of just the prose description. Each
+// building type only shows the lines that actually apply to it — a Fan has
+// no processing/waste stats, a Processor/Auto-Feeder has no range.
+function buildingStatsHtml(buildingId) {
+  const p = PROCESSOR_STATS[buildingId];
+  if (p) {
+    return (
+      `<div class="building-stat">⏱️ Coin: <b>${p.coinMs / 1000}s</b></div>` +
+      `<div class="building-stat">🔬 Science: <b>${p.scienceMs / 1000}s</b></div>` +
+      `<div class="building-stat">💩 Waste: every <b>${p.wasteEveryMs / 1000}s</b> processing</div>` +
+      `<div class="building-stat">⚡ <b>${p.powerCostPerSec}</b> mw/sec</div>`
+    );
+  }
+  const a = AUTO_FEEDER_STATS[buildingId];
+  if (a) {
+    return (
+      `<div class="building-stat">⏱️ Waste: <b>${a.wasteProcessMs / 1000}s</b> per load</div>` +
+      `<div class="building-stat">💩 Needs: <b>${a.wasteRequired}</b> loads per Food</div>` +
+      `<div class="building-stat">⚡ <b>${a.powerCostPerSec}</b> mw/sec</div>`
+    );
+  }
+  const f = FAN_STATS[buildingId];
+  if (f) {
+    return (
+      `<div class="building-stat">📏 Range: <b>${f.maxRange}px</b></div>` +
+      `<div class="building-stat">⚡ <b>${f.powerCost}</b> mw/sec</div>`
+    );
+  }
+  return '';
 }
 
 // A live, idling adult-stage fish (same drawFish the real tank uses)
@@ -1005,6 +1122,66 @@ function cleanlinessColor(cleanliness) {
   return `rgb(${r}, ${g}, ${b})`;
 }
 
+// Rolling one-minute (POWER_HISTORY_MAX samples, one per second) area/line
+// graph of demand vs. accumulated supply — matches the game's own poppy
+// pastel aesthetic (cream card, pink/blue accents) rather than a generic
+// chart style. Redrawn only while the popup is actually open (from
+// updateHUD, once per second when a new sample lands).
+function renderPowerGraph(state) {
+  const canvas = els.powerGraphCanvas;
+  const ctx = canvas.getContext('2d');
+  const w = canvas.width;
+  const h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  const history = state.level.powerHistory;
+  const maxVal = Math.max(1, ...history.map((s) => Math.max(s.demand, s.supply)));
+  const padL = 4;
+  const padR = 4;
+  const padT = 6;
+  const padB = 6;
+  const plotW = w - padL - padR;
+  const plotH = h - padT - padB;
+  const stepX = history.length > 1 ? plotW / (POWER_HISTORY_MAX - 1) : 0;
+  const xForIndex = (i) => padL + (i + (POWER_HISTORY_MAX - history.length)) * stepX;
+  const yForVal = (v) => padT + plotH - (v / maxVal) * plotH;
+
+  // Supply (accumulated capacity) — a soft filled step-line, drawn first so
+  // the demand line reads on top of it.
+  if (history.length > 1) {
+    ctx.beginPath();
+    ctx.moveTo(xForIndex(0), yForVal(history[0].supply));
+    for (let i = 1; i < history.length; i++) ctx.lineTo(xForIndex(i), yForVal(history[i].supply));
+    ctx.strokeStyle = 'rgba(107, 76, 107, 0.45)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    // Demand — the live accent line, filled underneath for an area-chart
+    // read, with an emphasized dot on the most recent sample.
+    ctx.beginPath();
+    ctx.moveTo(xForIndex(0), yForVal(0));
+    for (let i = 0; i < history.length; i++) ctx.lineTo(xForIndex(i), yForVal(history[i].demand));
+    ctx.lineTo(xForIndex(history.length - 1), yForVal(0));
+    ctx.closePath();
+    ctx.fillStyle = 'rgba(255, 209, 102, 0.35)';
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.moveTo(xForIndex(0), yForVal(history[0].demand));
+    for (let i = 1; i < history.length; i++) ctx.lineTo(xForIndex(i), yForVal(history[i].demand));
+    ctx.strokeStyle = '#ffb020';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    const lastX = xForIndex(history.length - 1);
+    const lastY = yForVal(history[history.length - 1].demand);
+    ctx.beginPath();
+    ctx.arc(lastX, lastY, 3, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffb020';
+    ctx.fill();
+  }
+}
+
 export function updateHUD(state) {
   const money = state.level.money;
   const moneyText = `💰 $${Math.floor(money)}`;
@@ -1020,6 +1197,26 @@ export function updateHUD(state) {
   const foodText = `🍽️ ${countTankFood(state)}/${effectiveFoodCapacity(state)}`;
   els.food.textContent = foodText;
   els.shopFood.textContent = foodText;
+
+  // Electricity — only shown at all once Electric Eel is unlocked, per
+  // direct request. Text only updates once a real second, matching the
+  // "updates every second" request exactly, since state.level.powerHistory
+  // itself only gains a new entry once a second (see main.js's update()).
+  const eelUnlocked = state.meta.speciesUnlocked.includes('electric_eel');
+  els.power.classList.toggle('hidden', !eelUnlocked);
+  els.shopPower.classList.toggle('hidden', !eelUnlocked);
+  if (eelUnlocked) {
+    const history = state.level.powerHistory;
+    const last = history[history.length - 1];
+    const powerText = last ? `⚡ ${last.demand}/${last.supply} mw` : '⚡ 0/0 mw';
+    els.power.textContent = powerText;
+    els.shopPower.textContent = powerText;
+    if (powerGraphOpen) renderPowerGraph(state);
+  } else if (powerGraphOpen) {
+    powerGraphOpen = false;
+    els.powerGraph.classList.add('hidden');
+  }
+
   refreshPreviewInfo(state);
   if (!state.ui.shopCollapsed) refreshShopPrices(state);
   if (moundMenuOpen) refreshMoundThrowButton(state);

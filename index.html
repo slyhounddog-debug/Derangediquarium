@@ -18,6 +18,10 @@
   <div id="hud-money" class="sheen-target" title="Money — spend it on fish and food in the shop">💰 $0</div>
   <div id="hud-food" class="sheen-target" title="Food on screen — capped by your Food Capacity Tank Upgrade">🍽️ 0/2</div>
   <div id="hud-cleanliness" class="sheen-target" title="Tank cleanliness — dirty water will stress your fish (not active yet, coming in a later phase)">✨ 100%</div>
+  <div id="hud-power-wrap">
+    <button id="hud-power" class="sheen-target hidden" title="Electricity — current draw / accumulated capacity. Click for a rolling graph.">⚡ 0/0 mw</button>
+    <div id="hud-power-graph" class="hidden"><canvas id="hud-power-graph-canvas" width="220" height="90"></canvas></div>
+  </div>
 </div>
 
 <div id="notification-ticker">
@@ -38,6 +42,7 @@
     <div id="shop-money" class="sheen-target">💰 $0</div>
     <div id="shop-food" class="sheen-target">🍽️ 0/2</div>
     <div id="shop-cleanliness" class="sheen-target">✨ 100%</div>
+    <div id="shop-power" class="sheen-target hidden">⚡ 0/0 mw</div>
   </div>
 
   <div id="shop-preview" class="sheen-target">
@@ -50,6 +55,7 @@
           <div id="shop-preview-desc"></div>
         </div>
       </div>
+      <div id="shop-preview-stats" class="hidden"></div>
       <div id="shop-preview-hint">Click in the tank to place it</div>
     </div>
   </div>
@@ -61,6 +67,7 @@
       <span class="tool-icon tool-icon-food"></span>
     </button>
     <button id="tool-demolish-btn" class="tool-btn sheen-target tool-btn-emoji" title="Demolish — select this, then click a building to remove it for a full refund">🔨</button>
+    <button id="tool-merge-btn" class="tool-btn sheen-target tool-btn-emoji" title="Merge — select this, then drag one Adult fish onto a matching one to combine or splice it">🧤</button>
     <div id="build-tool-grid"></div>
   </div>
   <div id="tool-tooltip" class="tool-tooltip"></div>
@@ -89,7 +96,9 @@
     <div id="lab-menu">
       <div id="lab-title">Science Lab</div>
       <div id="lab-science-readout">🔬 0</div>
-      <button id="lab-research-btn" class="mound-throw-btn">Research Gene-Splicing — 100 🔬</button>
+      <button id="lab-research-btn" class="mound-throw-btn">Research Gene-Splicing — 25 🔬</button>
+      <button id="lab-advanced-processor-btn" class="mound-throw-btn">Advanced Processor — 25 🔬</button>
+      <button id="lab-advanced-auto-feeder-btn" class="mound-throw-btn">Advanced Auto-Feeder — 25 🔬</button>
       <button id="lab-cancel-btn" class="pause-btn">Cancel</button>
     </div>
   </div>
@@ -105,7 +114,14 @@
     </div>
     <div id="pause-settings" class="hidden">
       <div id="pause-title">Settings</div>
-      <div id="pause-settings-placeholder">More settings are coming soon!</div>
+      <div class="volume-row">
+        <label for="music-volume-slider">🎵 Music</label>
+        <input type="range" id="music-volume-slider" min="0" max="100" value="5">
+      </div>
+      <div class="volume-row">
+        <label for="sfx-volume-slider">🔊 Sounds</label>
+        <input type="range" id="sfx-volume-slider" min="0" max="100" value="22">
+      </div>
       <button id="pause-settings-back-btn" class="pause-btn sheen-target">← Back</button>
     </div>
   </div>

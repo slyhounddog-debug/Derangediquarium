@@ -13,11 +13,17 @@ import {
   TILE_EMPTY,
   TILE_PLATFORM,
   TILE_COLLECTOR,
+  TILE_COLLECTOR_ELECTRIC,
+  TILE_COLLECTOR_ADVANCED,
   TILE_FAN_T2,
   TILE_FAN_T3,
   TILE_FAN_T4,
   TILE_AUTO_FEEDER,
+  TILE_AUTO_FEEDER_ELECTRIC,
+  TILE_AUTO_FEEDER_ADVANCED,
   BUILDING_TYPES,
+  PROCESSOR_STATS,
+  AUTO_FEEDER_STATS,
   TILE_REFUND_FRACTION,
   GRID_SWEEP_SUBSTEP,
   ITEM_LOST_BELOW_WORLD_MARGIN_PX,
@@ -28,7 +34,6 @@ import {
   ITEM_MAX_PUSH_PER_STEP,
   ITEM_PUSH_IMPULSE_MIN_OVERLAP,
   ITEM_ON_ITEM_LANDING_VY_CAP,
-  COLLECTOR_PROCESS_DURATION_MS,
   COLLECTOR_PULL_STRENGTH,
   COLLECTOR_PROCESSING_MASS,
   COLLECTOR_CIRCLE_RADIUS_FRACTION,
@@ -37,7 +42,6 @@ import {
   FAN_T3_MAX_FORCE, FAN_T3_MAX_RANGE, FAN_T3_POWER_COST,
   FAN_T4_MAX_FORCE, FAN_T4_MAX_RANGE, FAN_T4_POWER_COST,
   AUTO_FEEDER_INTAKE_RADIUS,
-  AUTO_FEEDER_PROCESS_DURATION_MS,
   AUTO_FEEDER_PORT_OFFSET_FRACTION,
   COLLECTOR_INTAKE_RADIUS,
   INTAKE_SIDE_MIN_DOT_FRACTION,
@@ -62,12 +66,17 @@ function pushGridNotification(state, text) {
 }
 
 // Tiles an item's fall (or rise) is arrested by.
-const SOLID_TILES = new Set([TILE_PLATFORM, TILE_COLLECTOR, TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4, TILE_AUTO_FEEDER]);
+const COLLECTOR_TILES = new Set([TILE_COLLECTOR, TILE_COLLECTOR_ELECTRIC, TILE_COLLECTOR_ADVANCED]);
+const AUTO_FEEDER_TILES = new Set([TILE_AUTO_FEEDER, TILE_AUTO_FEEDER_ELECTRIC, TILE_AUTO_FEEDER_ADVANCED]);
+const SOLID_TILES = new Set([
+  TILE_PLATFORM, TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4,
+  ...COLLECTOR_TILES, ...AUTO_FEEDER_TILES,
+]);
 const FAN_TILES = new Set([TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4]);
 
 // Per-tier fan stats, keyed by tile id — Grid.js's own lookup table (not
 // duplicated onto BUILDING_TYPES, which is presentation/shop data).
-const FAN_STATS = {
+export const FAN_STATS = {
   [TILE_FAN_T2]: { maxForce: FAN_T2_MAX_FORCE, maxRange: FAN_T2_MAX_RANGE, powerCost: FAN_T2_POWER_COST },
   [TILE_FAN_T3]: { maxForce: FAN_T3_MAX_FORCE, maxRange: FAN_T3_MAX_RANGE, powerCost: FAN_T3_POWER_COST },
   [TILE_FAN_T4]: { maxForce: FAN_T4_MAX_FORCE, maxRange: FAN_T4_MAX_RANGE, powerCost: FAN_T4_POWER_COST },
@@ -195,10 +204,16 @@ export function placeTile(state, col, row, buildingId, angle = 0) {
   state.level.grid[row][col] = buildingId;
   if (FAN_TILES.has(buildingId)) {
     state.level.buildingData[buildingKey(col, row)] = { type: buildingId, angle };
-  } else if (buildingId === TILE_AUTO_FEEDER) {
-    state.level.buildingData[buildingKey(col, row)] = { type: buildingId, angle, absorbing: false, progressMs: 0 };
-  } else if (buildingId === TILE_COLLECTOR) {
-    state.level.buildingData[buildingKey(col, row)] = { type: buildingId, angle };
+  } else if (AUTO_FEEDER_TILES.has(buildingId)) {
+    // wasteCount tracks how many of AUTO_FEEDER_STATS[type].wasteRequired
+    // loads have been completed toward the current Food output — see
+    // updateBuildings' dot-lighting logic below.
+    state.level.buildingData[buildingKey(col, row)] = { type: buildingId, angle, absorbing: false, progressMs: 0, wasteCount: 0 };
+  } else if (COLLECTOR_TILES.has(buildingId)) {
+    // wasteAccumMs is a continuously-running background clock (only advances
+    // while this tile is actively holding an item) — see updateBuildings'
+    // Collector branch and PROCESSOR_STATS' wasteEveryMs.
+    state.level.buildingData[buildingKey(col, row)] = { type: buildingId, angle, wasteAccumMs: 0 };
   }
   if (!state.level.tutorialFlags.firstBuildingPlaced) {
     state.level.tutorialFlags.firstBuildingPlaced = true;
@@ -248,7 +263,7 @@ export function removeTile(state, col, row) {
 export function rotateBuilding(state, worldX, worldY) {
   const { col, row } = worldToTile(worldX, worldY);
   const type = getTile(state.level.grid, col, row);
-  if (type !== TILE_COLLECTOR && type !== TILE_AUTO_FEEDER) return false;
+  if (!COLLECTOR_TILES.has(type) && !AUTO_FEEDER_TILES.has(type)) return false;
   const data = state.level.buildingData[buildingKey(col, row)];
   if (!data) return false;
   data.angle += Math.PI / 2;
@@ -260,8 +275,10 @@ export function rotateBuilding(state, worldX, worldY) {
 // default to pointing straight up (toward the water column) since that's the
 // most useful direction to test filtration with.
 const CHEAT_CYCLE = [
-  TILE_EMPTY, TILE_PLATFORM, TILE_COLLECTOR,
-  TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4, TILE_AUTO_FEEDER,
+  TILE_EMPTY, TILE_PLATFORM,
+  TILE_COLLECTOR, TILE_COLLECTOR_ELECTRIC, TILE_COLLECTOR_ADVANCED,
+  TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4,
+  TILE_AUTO_FEEDER, TILE_AUTO_FEEDER_ELECTRIC, TILE_AUTO_FEEDER_ADVANCED,
 ];
 const CHEAT_DEFAULT_ANGLE = -Math.PI / 2; // straight up
 export function cycleTileCheat(state, worldX, worldY) {
@@ -272,10 +289,12 @@ export function cycleTileCheat(state, worldX, worldY) {
   const next = CHEAT_CYCLE[(idx + 1) % CHEAT_CYCLE.length];
   state.level.grid[row][col] = next;
   delete state.level.buildingData[buildingKey(col, row)];
-  if (FAN_TILES.has(next) || next === TILE_COLLECTOR) {
+  if (FAN_TILES.has(next)) {
     state.level.buildingData[buildingKey(col, row)] = { type: next, angle: CHEAT_DEFAULT_ANGLE };
-  } else if (next === TILE_AUTO_FEEDER) {
-    state.level.buildingData[buildingKey(col, row)] = { type: next, angle: CHEAT_DEFAULT_ANGLE, absorbing: false, progressMs: 0 };
+  } else if (COLLECTOR_TILES.has(next)) {
+    state.level.buildingData[buildingKey(col, row)] = { type: next, angle: CHEAT_DEFAULT_ANGLE, wasteAccumMs: 0 };
+  } else if (AUTO_FEEDER_TILES.has(next)) {
+    state.level.buildingData[buildingKey(col, row)] = { type: next, angle: CHEAT_DEFAULT_ANGLE, absorbing: false, progressMs: 0, wasteCount: 0 };
   }
 }
 
@@ -394,12 +413,12 @@ function handleLanding() {
 // fall/rise physics — eases it toward the Collector tile's stored center
 // (COLLECTOR_PULL_STRENGTH, an exponential approach so an off-center landing
 // visibly glides in rather than snapping) and counts up toward
-// COLLECTOR_PROCESS_DURATION_MS before finally reporting 'consumed'. If the
+// its own PROCESSOR_STATS-derived target before finally reporting 'consumed'. If the
 // Collector tile itself gets torn down mid-process, this bails out and hands
 // the item back to normal physics next tick, restoring its real mass, rather
 // than leaving it frozen forever at a now-empty spot.
 function stepCollectorProcessing(item, grid, dt) {
-  if (tileAt(grid, item.collectorCenterX, item.collectorCenterY) !== TILE_COLLECTOR) {
+  if (!COLLECTOR_TILES.has(tileAt(grid, item.collectorCenterX, item.collectorCenterY))) {
     item.mass = item.collectorOriginalMass;
     item.collectorProgressMs = null;
     return 'falling';
@@ -407,7 +426,10 @@ function stepCollectorProcessing(item, grid, dt) {
   item.x += (item.collectorCenterX - item.x) * COLLECTOR_PULL_STRENGTH * dt;
   item.y += (item.collectorCenterY - item.y) * COLLECTOR_PULL_STRENGTH * dt;
   item.collectorProgressMs += dt * 1000;
-  if (item.collectorProgressMs >= COLLECTOR_PROCESS_DURATION_MS) {
+  // Target duration is resolved once, at the moment processing started (see
+  // beginCollectorProcessing) — coin vs Science Bubble, and which tier of
+  // Processor tile, per PROCESSOR_STATS.
+  if (item.collectorProgressMs >= item.collectorTargetMs) {
     item.mass = item.collectorOriginalMass;
     return 'consumed';
   }
@@ -478,10 +500,14 @@ function isOnIntakeSide(centerX, centerY, angle, intakeX, intakeY, itemX, itemY,
 // (handleLanding); now triggered by updateBuildings' intake scan below
 // instead, since a Collector no longer accepts a plain top-landing as a
 // valid entry at all.
-function beginCollectorProcessing(item, centerX, centerY) {
+function beginCollectorProcessing(item, centerX, centerY, tileType) {
   item.collectorCenterX = centerX;
   item.collectorCenterY = centerY;
   item.collectorProgressMs = 0;
+  // A coin and a Science Bubble take different amounts of time on the same
+  // tile, and that time shrinks per tier — see Config.js's PROCESSOR_STATS.
+  const stats = PROCESSOR_STATS[tileType];
+  item.collectorTargetMs = item.type === 'science' ? stats.scienceMs : stats.coinMs;
   item.collectorOriginalMass = item.mass;
   item.mass = COLLECTOR_PROCESSING_MASS; // barely budges if something else piles into it mid-process — see Config.js's comment
 }
@@ -500,8 +526,13 @@ function beginCollectorProcessing(item, centerX, centerY) {
 // in place). Newly-dispensed Food is NOT created here, to avoid a circular
 // import with Entities.js's createFood — instead this returns an array of
 // spawn points `{ x, y }` for the caller to actually construct.
+// Returns { foodSpawnPoints, wasteSpawnPoints } — Entities.js constructs the
+// actual Food/Waste items from these (circular-import avoidance, same
+// reasoning as before), banking coins/Science itself when stepCollectorProcessing
+// (called from each item's own per-tick step) reports 'consumed'.
 export function updateBuildings(state, dtMs) {
-  const spawnPoints = [];
+  const foodSpawnPoints = [];
+  const wasteSpawnPoints = [];
   const items = state.level.items;
   for (const key in state.level.buildingData) {
     const data = state.level.buildingData[key];
@@ -511,28 +542,48 @@ export function updateBuildings(state, dtMs) {
     const intakeX = centerX - Math.cos(data.angle) * TILE_SIZE * AUTO_FEEDER_PORT_OFFSET_FRACTION;
     const intakeY = centerY - Math.sin(data.angle) * TILE_SIZE * AUTO_FEEDER_PORT_OFFSET_FRACTION;
 
-    if (data.type === TILE_COLLECTOR) {
-      // Only one item processes at a time per Collector — skip the scan
+    if (COLLECTOR_TILES.has(data.type)) {
+      // Only one item processes at a time per Processor tile — skip the scan
       // entirely if this tile already has one mid-hold, so a second item
       // drifting into range while the first is still easing toward center
-      // doesn't also get pulled onto the same spot.
-      const alreadyProcessing = items.some(
+      // doesn't also get pulled onto the same spot. Only coins and Science
+      // Bubbles are valid intake — per direct request, a Processor's stats
+      // are specifically "1 coin every Xs, 1 science every Ys," not a
+      // generic item eater; Food/Waste landing on top just rests there.
+      let anyProcessing = items.some(
         (it) => it.collectorProgressMs != null && it.collectorCenterX === centerX && it.collectorCenterY === centerY
       );
-      if (!alreadyProcessing) {
+      if (!anyProcessing) {
         for (let i = 0; i < items.length; i++) {
           const it = items[i];
+          if (it.type !== 'coin' && it.type !== 'science') continue;
           if (it.collectorProgressMs != null) continue;
           if (isOnIntakeSide(centerX, centerY, data.angle, intakeX, intakeY, it.x, it.y, COLLECTOR_INTAKE_RADIUS)) {
-            beginCollectorProcessing(it, centerX, centerY);
+            beginCollectorProcessing(it, centerX, centerY, data.type);
+            anyProcessing = true;
             break;
           }
+        }
+      }
+      // A continuously-running background byproduct clock — per direct
+      // request ("produce 1 waste every N seconds it's processing"), not
+      // one waste per individual item consumed any more. Only advances
+      // while genuinely active this tick; a idle Processor with nothing to
+      // process never accumulates toward it.
+      if (anyProcessing) {
+        const stats = PROCESSOR_STATS[data.type];
+        data.wasteAccumMs += dtMs;
+        if (data.wasteAccumMs >= stats.wasteEveryMs) {
+          data.wasteAccumMs -= stats.wasteEveryMs;
+          wasteSpawnPoints.push({ x: centerX, y: centerY });
+          state.level.cleanliness = Math.max(0, state.level.cleanliness - CLEANLINESS_PER_WASTE_EVENT);
         }
       }
       continue;
     }
 
-    if (data.type !== TILE_AUTO_FEEDER) continue;
+    if (!AUTO_FEEDER_TILES.has(data.type)) continue;
+    const afStats = AUTO_FEEDER_STATS[data.type];
     const outputX = centerX + Math.cos(data.angle) * TILE_SIZE * AUTO_FEEDER_PORT_OFFSET_FRACTION;
     const outputY = centerY + Math.sin(data.angle) * TILE_SIZE * AUTO_FEEDER_PORT_OFFSET_FRACTION;
 
@@ -553,14 +604,53 @@ export function updateBuildings(state, dtMs) {
       }
     } else {
       data.progressMs += dtMs;
-      if (data.progressMs >= AUTO_FEEDER_PROCESS_DURATION_MS) {
+      if (data.progressMs >= afStats.wasteProcessMs) {
         data.absorbing = false;
         data.progressMs = 0;
-        spawnPoints.push({ x: outputX, y: outputY });
+        // Lights one more of AUTO_FEEDER_STATS[type].wasteRequired dots — see
+        // Grid.js's renderAutoFeederDots — only dispensing Food once every
+        // dot is lit, per direct request.
+        data.wasteCount += 1;
+        if (data.wasteCount >= afStats.wasteRequired) {
+          data.wasteCount = 0;
+          foodSpawnPoints.push({ x: outputX, y: outputY });
+        }
       }
     }
   }
-  return spawnPoints;
+  return { foodSpawnPoints, wasteSpawnPoints };
+}
+
+// Live, moment-to-moment sum of every currently-DRAWING power-consuming
+// building — a Fan draws its cost unconditionally while placed (existing
+// precedent), a Processor/Auto-Feeder only while actively holding/processing
+// something. Recomputed fresh every call rather than tracked as a running
+// total (same "no separate bookkeeping to keep in sync" pattern as
+// getBuildingCost/countLivingFishOfSpecies elsewhere) — cheap, since
+// state.level.buildingData is never more than a few dozen entries. Not
+// gated on state.level.powerSupply at all — see Config.js's Directional Fans
+// comment for why power draw has never actually throttled anything in this
+// codebase; this is purely the "current usage" half of the HUD readout.
+export function computeCurrentPowerDemand(state) {
+  let demand = 0;
+  const items = state.level.items;
+  for (const key in state.level.buildingData) {
+    const data = state.level.buildingData[key];
+    if (FAN_TILES.has(data.type)) {
+      demand += FAN_STATS[data.type].powerCost;
+    } else if (COLLECTOR_TILES.has(data.type)) {
+      const [row, col] = key.split(',').map(Number);
+      const centerX = col * TILE_SIZE + TILE_SIZE / 2;
+      const centerY = row * TILE_SIZE + TILE_SIZE / 2;
+      const activelyProcessing = items.some(
+        (it) => it.collectorProgressMs != null && it.collectorCenterX === centerX && it.collectorCenterY === centerY
+      );
+      if (activelyProcessing) demand += PROCESSOR_STATS[data.type].powerCostPerSec;
+    } else if (AUTO_FEEDER_TILES.has(data.type)) {
+      if (data.absorbing) demand += AUTO_FEEDER_STATS[data.type].powerCostPerSec;
+    }
+  }
+  return demand;
 }
 
 // ---- Item-item collision (everywhere, not just the seabed band) —
@@ -792,8 +882,11 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
       // screen doesn't mean its effective range has too. Collector/Auto-
       // Feeder's indicators stay here — their intake radius is small enough
       // (sub-tile) that tile-culling never cuts off anything actually visible.
-      if (data && (type === TILE_AUTO_FEEDER || type === TILE_COLLECTOR)) {
+      if (data && (AUTO_FEEDER_TILES.has(type) || COLLECTOR_TILES.has(type))) {
         renderDirectionIndicator(ctx, type, screen.x, screen.y, size, data.angle, camera.zoom);
+      }
+      if (data && AUTO_FEEDER_TILES.has(type)) {
+        renderAutoFeederDots(ctx, type, screen.x, screen.y, size, data.wasteCount, camera.zoom);
       }
     }
   }
@@ -852,16 +945,43 @@ function renderSquareBevel(ctx, x, y, size) {
   ctx.fill();
 }
 
-// A Collector gets a circle in its center — the point
-// stepCollectorProcessing actually draws items into while it holds them for
-// COLLECTOR_PROCESS_DURATION_MS. A Fan/Auto-Feeder is a plain square here
-// (renderDirectionIndicator draws its aim on top). Every other building
-// type is a plain square too.
+// A small corner badge distinguishing the Electric/Advanced tier of a
+// building from its base version — per direct request that each tier "look
+// unique... but still identifiable as the same type of building." Shared by
+// both the Processor and Auto-Feeder families: a yellow lightning bolt for
+// Electric, a purple star for Advanced, nothing for the base tier — layered
+// on top of the same base shape (square+bevel, plus the Processor's own
+// center circle) rather than a bespoke silhouette per tier, which is what
+// keeps each tier reading as "still a Processor/Auto-Feeder" at a glance.
+function renderTierBadge(ctx, type, x, y, size) {
+  if (type === TILE_COLLECTOR_ELECTRIC || type === TILE_AUTO_FEEDER_ELECTRIC) {
+    ctx.fillStyle = '#fff04d';
+    ctx.font = `${Math.max(8, size * 0.34)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('⚡', x + size * 0.82, y + size * 0.2);
+  } else if (type === TILE_COLLECTOR_ADVANCED || type === TILE_AUTO_FEEDER_ADVANCED) {
+    ctx.fillStyle = '#e8c8ff';
+    ctx.font = `${Math.max(8, size * 0.34)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('✨', x + size * 0.82, y + size * 0.2);
+  }
+}
+
+// A Processor gets a circle in its center — the point
+// stepCollectorProcessing actually draws items into while it holds them
+// (duration now varies by tier/item type — see PROCESSOR_STATS). A Fan/
+// Auto-Feeder is a plain square here (renderDirectionIndicator draws its aim
+// on top). Every other building type is a plain square too. Every tier of
+// the same family shares this exact base shape — only the fill color
+// (BUILDING_TYPES[type].color) and the corner badge (renderTierBadge above)
+// tell them apart, per direct request.
 function renderTileShape(ctx, type, color, x, y, size) {
   ctx.fillStyle = color;
   ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
   ctx.beginPath();
-  if (type === TILE_COLLECTOR) {
+  if (COLLECTOR_TILES.has(type)) {
     ctx.rect(x, y, size, size);
     ctx.fill();
     ctx.stroke();
@@ -870,11 +990,35 @@ function renderTileShape(ctx, type, color, x, y, size) {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
     ctx.arc(x + size / 2, y + size / 2, size * COLLECTOR_CIRCLE_RADIUS_FRACTION, 0, Math.PI * 2);
     ctx.fill();
+    renderTierBadge(ctx, type, x, y, size);
   } else {
     ctx.rect(x, y, size, size);
     ctx.fill();
     ctx.stroke();
     renderSquareBevel(ctx, x, y, size);
+    renderTierBadge(ctx, type, x, y, size);
+  }
+}
+
+// A small row of dots on an Auto-Feeder tile — one per
+// AUTO_FEEDER_STATS[type].wasteRequired, the current wasteCount of them lit,
+// per direct request ("dots that light up... as they process the input
+// amount required for the output").
+function renderAutoFeederDots(ctx, type, x, y, size, wasteCount, zoom) {
+  const required = AUTO_FEEDER_STATS[type].wasteRequired;
+  const dotRadius = Math.max(1.5, size * 0.055);
+  const gap = dotRadius * 2.6;
+  const totalWidth = (required - 1) * gap;
+  const startX = x + size / 2 - totalWidth / 2;
+  const dotY = y + size * 0.14;
+  for (let i = 0; i < required; i++) {
+    ctx.beginPath();
+    ctx.arc(startX + i * gap, dotY, dotRadius, 0, Math.PI * 2);
+    ctx.fillStyle = i < wasteCount ? '#ffe066' : 'rgba(0, 0, 0, 0.35)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.lineWidth = Math.max(0.5, zoom * 0.5);
+    ctx.stroke();
   }
 }
 
@@ -972,7 +1116,7 @@ export function renderBuildGhost(ctx, state, worldX, worldY, buildingId, angle) 
   ctx.fillStyle = check.ok ? '#8fe0b8' : '#ff6b6b';
   ctx.fillRect(screen.x, screen.y, size, size);
   ctx.globalAlpha = 1;
-  if (check.ok && (FAN_TILES.has(buildingId) || buildingId === TILE_AUTO_FEEDER || buildingId === TILE_COLLECTOR)) {
+  if (check.ok && (FAN_TILES.has(buildingId) || AUTO_FEEDER_TILES.has(buildingId) || COLLECTOR_TILES.has(buildingId))) {
     renderDirectionIndicator(ctx, buildingId, screen.x, screen.y, size, angle, state.camera.zoom);
   }
 }

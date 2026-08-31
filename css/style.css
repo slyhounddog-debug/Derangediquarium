@@ -84,6 +84,40 @@ html, body {
 }
 #hud.hidden { display: none; } /* hidden while the shop is open — money lives in the shop panel then */
 
+/* Electricity readout — only shown once Electric Eel is unlocked (see
+   UI.js's updateHUD). #hud-power-wrap needs position:relative so the graph
+   popup can anchor directly beneath the pill, same dropdown-under-pill
+   pattern #notification-log already uses under #notification-latest below. */
+/* #hud's other children are plain text siblings sharing ONE outer pill (see
+   #hud's own background/padding) — this wrapper has no visual styling of its
+   own (no background/border), just position:relative so #hud-power-graph
+   can anchor beneath the button without looking like a second nested pill. */
+#hud-power-wrap { position: relative; display: inline-flex; align-items: center; }
+#hud-power {
+  display: block;
+  background: none;
+  color: inherit;
+  font: inherit;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  border-radius: 8px;
+  transition: opacity 0.12s ease;
+}
+#hud-power:hover { opacity: 0.7; }
+#hud-power.hidden { display: none; }
+#hud-power-graph {
+  position: absolute; top: calc(100% + 8px); right: 0;
+  background: linear-gradient(165deg, #fffaf3 0%, #fff3d9 100%);
+  border: 2px solid #ffffff;
+  border-radius: 16px;
+  padding: 10px;
+  box-shadow: 0 6px 16px rgba(107, 76, 107, 0.25), inset 0 2px 0 rgba(255, 255, 255, 0.85);
+  z-index: 12;
+}
+#hud-power-graph.hidden { display: none; }
+#hud-power-graph-canvas { display: block; }
+
 /* Rolling notification log — collapsed by default to just its latest line
    (Mound crack narration, tips, alerts once later phases write to it).
    Click the pill to expand a scrollback of recent messages. */
@@ -236,7 +270,7 @@ html, body {
   display: flex; flex-wrap: wrap; gap: 8px;
   margin-bottom: 14px;
 }
-#shop-money, #shop-food, #shop-cleanliness, #tank-points-display {
+#shop-money, #shop-food, #shop-cleanliness, #shop-power, #tank-points-display {
   display: inline-block;
   background: linear-gradient(160deg, #fffdf8 0%, #ffe9f4 100%);
   border: 2px solid #ffffff;
@@ -246,6 +280,8 @@ html, body {
   box-shadow: 0 3px 9px rgba(107, 76, 107, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.85);
 }
 #tank-points-display { margin-bottom: 14px; }
+#shop-power.hidden { display: none; }
+#shop-power { cursor: default; } /* per direct request, only the HUD copy opens the graph — this one is a plain readout */
 
 /* A soft diagonal light sweep that plays across a UI element every so often
    — per direct request, applied broadly across the HUD/shop/panels (see
@@ -506,6 +542,21 @@ html, body {
   text-align: center;
   font-size: 11px; font-weight: 700; opacity: 0.6;
 }
+/* Processor/Auto-Feeder/Fan stats block — shown instead of/alongside the
+   prose description when one of those is previewed, per direct request
+   ("show the stats associated with that building"). A small wrapped row of
+   compact stat chips rather than a paragraph, so it reads at a glance. */
+#shop-preview-stats {
+  display: flex; flex-wrap: wrap; gap: 4px 8px;
+  margin-top: 6px;
+}
+#shop-preview-stats.hidden { display: none; }
+.building-stat {
+  font-size: 10.5px;
+  color: #6b4c6b;
+  opacity: 0.85;
+}
+.building-stat b { font-weight: 800; opacity: 1; }
 
 /* Tank Upgrades panel — three cards (Food Quality, Fish Movement, locked
    Defensive Capabilities), each with a level readout, a description of the
@@ -578,11 +629,42 @@ html, body {
 #pause-resume-btn { background: linear-gradient(160deg, #a8f0cb 0%, #7ad4a8 100%); color: #1f4a34; box-shadow: 0 3px 8px rgba(53, 145, 97, 0.35), inset 0 2px 0 rgba(255, 255, 255, 0.5); }
 #pause-resume-btn:hover { background: linear-gradient(160deg, #97e8bd 0%, #68c896 100%); }
 
-#pause-settings-placeholder {
-  font-size: 13px;
-  opacity: 0.7;
-  padding: 16px 4px 24px;
-  line-height: 1.5;
+/* Music/SFX volume sliders — replaces the old "more settings coming soon"
+   placeholder now that there's something real to put here. */
+.volume-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 2px;
+  font-size: 13px; font-weight: 700;
+  color: #6b4c6b;
+}
+.volume-row label { flex: none; width: 78px; text-align: left; }
+.volume-row input[type="range"] {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 6px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #ffb6d5, #ffe0ee);
+  outline: none;
+  cursor: pointer;
+}
+.volume-row input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: #fff6ea;
+  border: 2px solid #ff6fae;
+  box-shadow: 0 1px 4px rgba(107, 76, 107, 0.3);
+  cursor: pointer;
+}
+.volume-row input[type="range"]::-moz-range-thumb {
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: #fff6ea;
+  border: 2px solid #ff6fae;
+  box-shadow: 0 1px 4px rgba(107, 76, 107, 0.3);
+  cursor: pointer;
 }
 
 /* Mound "Throw money at it" confirm popup. No dimming backdrop — #mound-overlay
