@@ -124,6 +124,17 @@ export function playEat() {
   playTone(660, 0.05, { type: 'sine', gain: 0.05, attack: 0.002, release: 0.03 });
 }
 
+// A low, grumbly "stomach growl" — a fish crossing into its second, more
+// urgent hunger stage (the "!!" indicator) for the first time since it last
+// ate enough to drop back below that threshold. Sawtooth for a grittier,
+// less musical texture than anything else in this game's SFX palette,
+// deliberately distinct from playFishDeath's own sadder, more final
+// triangle-wave phrase below.
+export function playHunger() {
+  playTone(220, 0.09, { type: 'sawtooth', gain: 0.1 }); // A3
+  playTone(185, 0.16, { type: 'sawtooth', gain: 0.09, when: 0.08 }); // F#3
+}
+
 // A short descending sad phrase — a fish starving.
 export function playFishDeath() {
   playTone(440, 0.13, { type: 'triangle', gain: 0.14 }); // A4

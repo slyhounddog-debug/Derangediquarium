@@ -69,7 +69,7 @@ export function loadLevel(state, levelId) {
     autoFeederUnlockPurchased: false, // "Tier 2.5" — the $2500 step (after the real Tier 1->2 crack, before the real Tier 2->3 crack) that grants ONLY the Auto-Feeder — see Config.js's AUTO_FEEDER_UNLOCK_COST
     notifications: [{ id: 1, text: WELCOME_MESSAGE, elapsed: 0 }], // rolling log for UI.js's ticker — { id, text, elapsed }, capped at NOTIFICATION_LOG_MAX. Seeded with the welcome message as a real entry (not a UI fallback) so it survives in the scrollback log
     tankPoints: { total: 0, available: 0 }, // earned by Entities.js on fish adult-growth transitions, spent in UI.js's Tank Upgrades panel — see CLAUDE.md's "Tank Points & Tank Upgrades"
-    upgrades: { foodQuality: 0, fishMovement: 0, foodCapacity: 0, fishMergingUnlocked: false, coinCapLevel: 0, scienceCapLevel: 0 }, // purchased Tank Upgrade levels, 0 = not yet bought; read live by Entities.js, not baked into fish/food at creation time. fishMergingUnlocked is a one-time flag, not a level — see Config.js's FISH_MERGING_UNLOCK_COST. coinCapLevel is a Tank Upgrade (COIN_CAP_UPGRADE_COSTS); scienceCapLevel is bought in the Science Lab instead (SCIENCE_CAP_UPGRADE_SCIENCE_COSTS/_GOLD_COSTS) but lives here alongside it since both index the same way into their own *_CAP_BY_LEVEL table
+    upgrades: { foodQuality: 0, fishMovement: 0, fishMergingUnlocked: false, coinCapLevel: 0, scienceCapLevel: 0 }, // purchased Tank Upgrade levels, 0 = not yet bought; read live by Entities.js, not baked into fish/food at creation time. fishMergingUnlocked is a one-time flag, not a level — see Config.js's FISH_MERGING_UNLOCK_COST. coinCapLevel is a Tank Upgrade (COIN_CAP_UPGRADE_COSTS); scienceCapLevel is bought in the Science Lab instead (SCIENCE_CAP_UPGRADE_SCIENCE_COSTS/_GOLD_COSTS) but lives here alongside it since both index the same way into their own *_CAP_BY_LEVEL table. foodCapacity retired entirely — see Config.js's FOOD_STATIONARY_TO_WASTE_MS
     // One-time story/tutorial notification gates — see CLAUDE.md's "Story &
     // Tutorial Notifications". Level-scoped like everything else here, so a
     // restart replays them (matching moundTeased/the Tank Point tutorial's
@@ -86,6 +86,7 @@ export function loadLevel(state, levelId) {
       firstChatClosed: false, // fires the "you found the chat" gag on the first CLOSE of the log, not the first open — see UI.js's notificationLatest click handler
       cleanlinessWarningShown: false, // fires once cleanliness first crosses below CLEANLINESS_WARNING_THRESHOLD — see Entities.js's adjustCleanliness
       firstSplice: false, // Phase 4 — first successful Gene-Splicing drag, see Entities.js's spliceFish
+      firstPlatformNeeded: false, // first building placement attempt refused for lacking a Platform to anchor to — see main.js's handleBuildPlacementFailure
     },
     lifetimeMoneyEarned: 0, // real in-play income only (coins banked) — NOT the starting endowment or the bankruptcy bailout gift; see Entities.js's bankMoney and Config.js's MONEY_MILESTONE_1K
     fishVanishTimer: 0, // ms remaining on the "you found the chat" gag — see Entities.js's updateEntities; every fish freezes in place (not just hidden) and stops rendering while this is > 0

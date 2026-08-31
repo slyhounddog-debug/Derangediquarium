@@ -18,10 +18,6 @@ import {
   FISH_MOVEMENT_UPGRADE_COSTS,
   FISH_MOVEMENT_UPGRADE_MAX_LEVEL,
   FISH_MOVEMENT_UPGRADE_SPEED_BONUS,
-  FOOD_CAPACITY_UPGRADE_COSTS,
-  FOOD_CAPACITY_UPGRADE_MAX_LEVEL,
-  FOOD_CAPACITY_UPGRADE_INCREMENT,
-  FOOD_MAX_ON_SCREEN_BASE,
   NOTIFICATION_LOG_MAX,
   FISH_VANISH_DURATION_MS,
   BUILDING_FAMILIES,
@@ -40,7 +36,7 @@ import {
   COIN_CAP_UPGRADE_MAX_LEVEL,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings, loadLevel } from './Levels.js';
-import { getFishPurchaseCost, effectiveFoodCapacity, countTankFood, effectiveCoinCapacity, effectiveScienceCapacity, countTankItemsByType } from './Entities.js';
+import { getFishPurchaseCost, countTankFood, effectiveCoinCapacity, effectiveScienceCapacity, countTankItemsByType } from './Entities.js';
 import { getTile, worldToTile, getBuildingCost, FAN_STATS } from './Grid.js';
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
@@ -200,6 +196,12 @@ export function initUI(state) {
     tankCollapseBtn: document.getElementById('tank-collapse-btn'),
     tankPointsDisplay: document.getElementById('tank-points-display'),
     tankUpgradeList: document.getElementById('tank-upgrade-list'),
+    startOverlay: document.getElementById('start-overlay'),
+    startPlayBtn: document.getElementById('start-play-btn'),
+    startSettingsBtn: document.getElementById('start-settings-btn'),
+    startHelpBtn: document.getElementById('start-help-btn'),
+    startHelpOverlay: document.getElementById('start-help-overlay'),
+    startHelpBackBtn: document.getElementById('start-help-back-btn'),
   };
 
   els.moundThrowBtn.addEventListener('click', () => {
@@ -263,9 +265,11 @@ export function initUI(state) {
   els.pauseResumeBtn.addEventListener('click', () => closePauseMenu(state));
   els.pauseRestartBtn.addEventListener('click', () => restartLevel(state));
   els.pauseSettingsBtn.addEventListener('click', () => { showPauseSettings(); playPanelOpen(); });
-  els.pauseSettingsBackBtn.addEventListener('click', () => { showPauseMain(); playPanelClose(); });
+  els.pauseSettingsBackBtn.addEventListener('click', () => returnFromPauseSettings(state));
   els.pauseOverlay.addEventListener('click', (e) => {
-    if (e.target === els.pauseOverlay) closePauseMenu(state); // clicked the backdrop, not the card
+    if (e.target !== els.pauseOverlay) return; // clicked the card, not the backdrop
+    if (settingsOpenedFromStartScreen) returnFromPauseSettings(state);
+    else closePauseMenu(state);
   });
 
   // Electricity readout — click toggles the rolling graph popup underneath
@@ -312,6 +316,7 @@ export function initUI(state) {
   buildBuildPalette(state);
   buildTankPanel(state);
   buildLabTree(state);
+  initLabTreeDrag(state);
   scheduleSheenAll();
 }
 
@@ -517,6 +522,69 @@ function labNodeDepth(id, memo) {
 let labNodeDepthMemo = {};
 let labNodeButtons = {}; // id -> { btn, costEl }, rebuilt by buildLabTree, read by refreshLabTree/drawLabTreeConnectors
 
+// Minimum pointer movement (px) before a mousedown-on-the-wrap counts as a
+// drag rather than the start of a plain click on whatever's underneath it —
+// below this, letting go still fires that element's own click (buying a
+// node); at or above it, the drag wins and the click that mouseup would
+// otherwise generate is swallowed (see the capture-phase 'click' listener
+// below), so panning across a node button never also spends money on it.
+const LAB_TREE_DRAG_THRESHOLD_PX = 6;
+let labTreeDrag = null; // { startX, startY, startScrollLeft, startScrollTop, moved } while a drag is in progress, else null
+let labTreeJustDragged = false; // true for exactly the one 'click' event immediately following a real drag
+
+// Click-and-drag panning for the tree, per direct request ("the science lab
+// tree can be clicked and dragged around, rather than scrolled horizontally
+// and vertically on") — wired once at init (mirrors buildLabTree's own
+// "built once, shape never changes" note), since this is pure event
+// plumbing against the wrap element, not something that needs rebuilding
+// whenever the tree's node set changes. #lab-tree-wrap's own CSS sets
+// overflow:hidden (no native scrollbar/wheel-scroll), but scrollLeft/
+// scrollTop remain fully readable and settable via JS — this just drives
+// them from mouse movement instead of the browser's own scroll handling.
+function initLabTreeDrag(state) {
+  const wrap = els.labTreeWrap;
+  wrap.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return; // left button only
+    labTreeDrag = { startX: e.clientX, startY: e.clientY, startScrollLeft: wrap.scrollLeft, startScrollTop: wrap.scrollTop, moved: false };
+  });
+  // Listened on window, not the wrap, so a drag that carries the cursor
+  // outside the wrap's own bounds (easy to do — it's not a huge box) keeps
+  // panning smoothly instead of stalling out the instant the pointer
+  // crosses the edge.
+  window.addEventListener('mousemove', (e) => {
+    if (!labTreeDrag) return;
+    const dx = e.clientX - labTreeDrag.startX;
+    const dy = e.clientY - labTreeDrag.startY;
+    if (!labTreeDrag.moved && Math.hypot(dx, dy) > LAB_TREE_DRAG_THRESHOLD_PX) {
+      labTreeDrag.moved = true;
+      wrap.classList.add('dragging');
+    }
+    if (labTreeDrag.moved) {
+      wrap.scrollLeft = labTreeDrag.startScrollLeft - dx;
+      wrap.scrollTop = labTreeDrag.startScrollTop - dy;
+      // Redraw the connector canvas live while panning — its bezier curves
+      // are computed from each node button's current getBoundingClientRect(),
+      // which moves as scrollLeft/scrollTop change, same as it already
+      // redraws on every refreshLabTree call.
+      drawLabTreeConnectors(state);
+    }
+  });
+  window.addEventListener('mouseup', () => {
+    if (labTreeDrag && labTreeDrag.moved) labTreeJustDragged = true;
+    labTreeDrag = null;
+    wrap.classList.remove('dragging');
+  });
+  // Capture phase so this runs BEFORE a .lab-node's own bubbling click
+  // handler (buyLabUpgrade) — swallows the synthetic click a mouseup
+  // generates on whatever element the drag happened to end on top of.
+  wrap.addEventListener('click', (e) => {
+    if (labTreeJustDragged) {
+      e.stopPropagation();
+      labTreeJustDragged = false;
+    }
+  }, true);
+}
+
 // Built once at init (mirrors buildTankPanel) — the tree's SHAPE (which
 // node sits in which column) never changes at runtime, only each node's
 // locked/affordable/purchased state does, so only refreshLabTree needs to
@@ -656,6 +724,63 @@ function showPauseMain() {
 function showPauseSettings() {
   els.pauseMain.classList.add('hidden');
   els.pauseSettings.classList.remove('hidden');
+}
+
+// True for exactly as long as the pause overlay's Settings sub-view is
+// showing because the START screen opened it (see initStartScreen below),
+// not because the player actually paused a running game — read by the
+// shared "Back"/backdrop-click handling right above so it returns to the
+// start screen instead of resuming gameplay that was never running.
+let settingsOpenedFromStartScreen = false;
+
+// Shared by the pause-settings Back button and a backdrop click alike (see
+// the click wiring above) — per direct request, the start screen's Settings
+// button opens this EXACT same sub-view (not a second copy of the sliders),
+// so where "Back" goes depends on which door it was opened through.
+function returnFromPauseSettings(state) {
+  if (settingsOpenedFromStartScreen) {
+    settingsOpenedFromStartScreen = false;
+    els.pauseOverlay.classList.add('hidden'); // #start-overlay was never hidden underneath it — nothing more to restore
+    playPanelClose();
+    return;
+  }
+  showPauseMain();
+  playPanelClose();
+}
+
+// ---- Start screen (first-launch menu) ----
+// Shown on load, ahead of everything else — see index.html's #start-overlay
+// and CSS's backdrop-filter blur. `onStart` is main.js's own callback
+// (kicks off the splash animation and un-gates the sim loop) — UI.js
+// doesn't reach into main.js directly, same one-directional import
+// discipline every other main.js/UI.js hookup in this file already follows.
+export function initStartScreen(state, onStart) {
+  els.startPlayBtn.addEventListener('click', () => {
+    els.startOverlay.classList.add('hidden');
+    playPanelClose();
+    onStart();
+  });
+  els.startSettingsBtn.addEventListener('click', () => {
+    // Deliberately does NOT hide #start-overlay — #pause-overlay layers on
+    // top of it instead (see its own z-index comment), so the start
+    // screen's blurred/dimmed backdrop keeps covering the game (and the
+    // not-yet-triggered splash) the whole time, exactly as it already does
+    // for the start screen's own buttons.
+    settingsOpenedFromStartScreen = true;
+    els.pauseOverlay.classList.remove('hidden');
+    showPauseSettings();
+    playPanelOpen();
+  });
+  els.startHelpBtn.addEventListener('click', () => {
+    els.startOverlay.classList.add('hidden');
+    els.startHelpOverlay.classList.remove('hidden');
+    playPanelOpen();
+  });
+  els.startHelpBackBtn.addEventListener('click', () => {
+    els.startHelpOverlay.classList.add('hidden');
+    els.startOverlay.classList.remove('hidden');
+    playPanelClose();
+  });
 }
 
 // Rebuilds state.level from scratch via the real level-load path (same one
@@ -849,15 +974,6 @@ function describeFishMovementLevel(level) {
   return `Swim speed <span class="stat-current">+${speed} px/sec</span> → <span class="stat-next">+${nextSpeed} px/sec</span>.`;
 }
 
-function describeFoodCapacityLevel(level) {
-  const cap = FOOD_MAX_ON_SCREEN_BASE + FOOD_CAPACITY_UPGRADE_INCREMENT * level;
-  if (level >= FOOD_CAPACITY_UPGRADE_MAX_LEVEL) {
-    return `Up to ${cap} food on screen at once.`;
-  }
-  const nextCap = cap + FOOD_CAPACITY_UPGRADE_INCREMENT;
-  return `Up to <span class="stat-current">${cap} food</span> → <span class="stat-next">${nextCap} food</span> on screen at once.`;
-}
-
 // COIN_CAP_BY_LEVEL is an absolute-value table, not a base+increment formula
 // (the requested progression isn't an even step), so this indexes straight
 // in rather than computing a cap like describeFoodCapacityLevel above does.
@@ -895,16 +1011,15 @@ function createUpgradeCard(name, icon) {
   return { card, levelEl, descEl, buyBtn };
 }
 
-let tankCards = null; // { foodQuality, fishMovement, foodCapacity, coinCapacity, fishMerging } — each { card, levelEl, descEl, buyBtn }. Gene-Splicing moved out of this panel entirely — see Config.js's SCIENCE_LAB_UPGRADES' gene_splicing/hybrid tree.
+let tankCards = null; // { foodQuality, fishMovement, coinCapacity, fishMerging } — each { card, levelEl, descEl, buyBtn }. Gene-Splicing moved out of this panel entirely — see Config.js's SCIENCE_LAB_UPGRADES' gene_splicing/hybrid tree. Food Capacity retired entirely — see Config.js's FOOD_STATIONARY_TO_WASTE_MS.
 
 function buildTankPanel(state) {
   els.tankUpgradeList.innerHTML = '';
   const foodQuality = createUpgradeCard('Food Quality', '🍽️');
   const fishMovement = createUpgradeCard('Fish Movement', '🏊');
-  const foodCapacity = createUpgradeCard('Food Capacity', '🧺');
   const coinCapacity = createUpgradeCard('Coin Capacity', '🪙');
   const fishMerging = createUpgradeCard('Fish Merging', '🧬');
-  tankCards = { foodQuality, fishMovement, foodCapacity, coinCapacity, fishMerging };
+  tankCards = { foodQuality, fishMovement, coinCapacity, fishMerging };
 
   // A one-time unlock, not a leveled ladder like the three above — per
   // direct request, drag-to-combine (Entities.js's isCombinableFish) is now
@@ -938,16 +1053,6 @@ function buildTankPanel(state) {
     playUpgrade();
     refreshTankPanel(state);
   });
-  foodCapacity.buyBtn.addEventListener('click', () => {
-    const level = state.level.upgrades.foodCapacity;
-    if (level >= FOOD_CAPACITY_UPGRADE_MAX_LEVEL) return;
-    const cost = FOOD_CAPACITY_UPGRADE_COSTS[level];
-    if (state.level.tankPoints.available < cost) return;
-    state.level.tankPoints.available -= cost;
-    state.level.upgrades.foodCapacity += 1;
-    playUpgrade();
-    refreshTankPanel(state);
-  });
   coinCapacity.buyBtn.addEventListener('click', () => {
     const level = state.level.upgrades.coinCapLevel;
     if (level >= COIN_CAP_UPGRADE_MAX_LEVEL) return;
@@ -959,7 +1064,7 @@ function buildTankPanel(state) {
     refreshTankPanel(state);
   });
 
-  els.tankUpgradeList.append(foodQuality.card, fishMovement.card, foodCapacity.card, coinCapacity.card, fishMerging.card);
+  els.tankUpgradeList.append(foodQuality.card, fishMovement.card, coinCapacity.card, fishMerging.card);
 
   // Defensive Capabilities: shown per the design update's Phase 2 UI-shell
   // scope, but locked — there's no alien system to upgrade yet (Phase 5).
@@ -978,7 +1083,7 @@ function buildTankPanel(state) {
 // state can all change while the player has it open.
 function refreshTankPanel(state) {
   if (!tankCards) return;
-  const { foodQuality, fishMovement, foodCapacity, coinCapacity, fishMerging } = tankCards;
+  const { foodQuality, fishMovement, coinCapacity, fishMerging } = tankCards;
   const available = state.level.tankPoints.available;
 
   const fqLevel = state.level.upgrades.foodQuality;
@@ -1003,18 +1108,6 @@ function refreshTankPanel(state) {
     const cost = FISH_MOVEMENT_UPGRADE_COSTS[fmLevel];
     fishMovement.buyBtn.textContent = `${cost} 🏆`;
     fishMovement.buyBtn.disabled = available < cost;
-  }
-
-  const fcLevel = state.level.upgrades.foodCapacity;
-  foodCapacity.levelEl.textContent = `Level ${fcLevel} / ${FOOD_CAPACITY_UPGRADE_MAX_LEVEL}`;
-  foodCapacity.descEl.innerHTML = describeFoodCapacityLevel(fcLevel);
-  if (fcLevel >= FOOD_CAPACITY_UPGRADE_MAX_LEVEL) {
-    foodCapacity.buyBtn.textContent = 'Maxed out';
-    foodCapacity.buyBtn.disabled = true;
-  } else {
-    const cost = FOOD_CAPACITY_UPGRADE_COSTS[fcLevel];
-    foodCapacity.buyBtn.textContent = `${cost} 🏆`;
-    foodCapacity.buyBtn.disabled = available < cost;
   }
 
   const ccLevel = state.level.upgrades.coinCapLevel;
@@ -1270,16 +1363,7 @@ function playFlash(el, className) {
   el.classList.add(className);
 }
 
-// Exported so main.js can trigger this specific case directly — placing
-// food while already at the Food Capacity cap doesn't change any tracked
-// value updateHUD could detect on its own (the attempt is simply refused),
-// so unlike money/cleanliness this needs an explicit call at the point of
-// failure rather than a value-comparison each frame.
-export function flashFoodCapacity(state) {
-  playFlash(state.ui.shopCollapsed ? els.food : els.shopFood, 'flash-spend');
-}
-
-// Same redirect-to-whichever-copy-is-visible pattern as flashFoodCapacity —
+// Redirects to whichever copy of the money readout is currently visible —
 // per direct request, an attempted shop purchase (food, a fish, a building)
 // that fails for lack of money shakes the money readout red instead of
 // silently doing nothing, so the failure actually reads as "you can't
@@ -1378,7 +1462,10 @@ export function updateHUD(state) {
   const cleanColor = cleanlinessColor(cleanliness);
   els.cleanliness.style.color = cleanColor;
   els.shopCleanliness.style.color = cleanColor;
-  const foodText = `🍽️ ${countTankFood(state)}/${effectiveFoodCapacity(state)}`;
+  // No more "/cap" denominator — the Food Capacity cap was retired entirely
+  // (see Entities.js's countTankFood/updateFood) in favor of the
+  // stationary-to-Waste mechanic, so this is just a live count now.
+  const foodText = `🍽️ ${countTankFood(state)}`;
   els.food.textContent = foodText;
   els.shopFood.textContent = foodText;
 

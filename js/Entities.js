@@ -8,12 +8,14 @@ import {
   SPECIES_LIST,
   FOOD_RADIUS,
   FOOD_COST,
-  FOOD_FLOOR_GRACE_MS,
+  FOOD_STATIONARY_TO_WASTE_MS,
+  FOOD_STATIONARY_MOVE_TOLERANCE_PX,
   COIN_RADIUS,
   COIN_CLICK_RADIUS_MULTIPLIER,
   FISH_EAT_RADIUS,
   HUNGER_MAX,
   HUNGER_SEEK_THRESHOLD,
+  HUNGER_CRITICAL_THRESHOLD,
   FOOD_HUNGER_RELIEF_BY_LEVEL,
   FISH_VERTICAL_DAMPING,
   WANDER_INTERVAL_MIN_S,
@@ -49,10 +51,9 @@ import {
   ITEM_LOST_COLOR,
   WORLD_H,
   ITEM_MASS_BY_TYPE,
-  FOOD_MAX_ON_SCREEN_BASE,
-  FOOD_CAPACITY_UPGRADE_INCREMENT,
   FISH_BASE_SIZE,
   ECONOMY_SPECIES_IDS,
+  DYNAMIC_PRICED_SPECIES_IDS,
   ECONOMY_FISH_COST_GROWTH_RATE,
   FISH_STAR_TIER_MAX,
   FISH_STAR_TIER_VALUE_MULTIPLIER,
@@ -80,12 +81,18 @@ import { stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemFo
 // Sound is a fire-and-forget side effect at the moment something already
 // happened — the same pattern this file already uses for floatingTexts/
 // notifications, just for audio instead of a visual/text readout.
-import { playPurchase, playFoodPlace, playEat, playFishDeath, playCoinBank, playTankPoint, playProductionBlocked } from './Sound.js';
+import { playPurchase, playFoodPlace, playEat, playFishDeath, playCoinBank, playTankPoint, playProductionBlocked, playHunger } from './Sound.js';
 
 let _nextId = 1;
 function nextId() {
   return _nextId++;
 }
+
+// Filled by updateFood, flushed into state.level.items by updateEntities
+// right after its own state.level.items.filter(...) call completes — see
+// updateFood's own comment for why it can't push a new Waste item directly
+// from inside that filter's callback.
+const pendingFoodToWasteSpawns = [];
 
 // state.level.cleanliness (0-100) — every Waste item that spawns costs
 // CLEANLINESS_PER_WASTE_EVENT, every one cleaned back up (a Scavenger fish
@@ -135,8 +142,13 @@ export function createFood(x, y) {
     vy: 0,
     radius: FOOD_RADIUS,
     mass: ITEM_MASS_BY_TYPE.food, // deliberately much lighter than a coin — see Config.js's ITEM_MASS_BY_TYPE
-    restingOnFloor: false,
-    floorTimer: 0,
+    // Stationary-to-Waste tracking (see updateFood) — stationaryOriginX/Y is
+    // the last position this pellet was seen meaningfully moving from;
+    // stationaryTimer counts up while it stays within
+    // FOOD_STATIONARY_MOVE_TOLERANCE_PX of that point.
+    stationaryOriginX: x,
+    stationaryOriginY: y,
+    stationaryTimer: 0,
     fallTime: 0,
     swayPhase: Math.random() * Math.PI * 2,
   };
@@ -225,6 +237,7 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
     eatCooldownRemainingMs: 0, // Scavenger only — see updateFish's SCAVENGER eat branch; a growth-stage's dropInterval is reused as the eat cooldown
     distanceAccumPx: 0, // pure-Generator only — pixels swum since the last MW produced, see updateFish's GENERATOR branch
     researchTickIndex: 0, // pure-Researcher only — which tenth of the current brew cycle's "+0.1" progress bubbles have already fired, see updateFish's RESEARCHER branch
+    hungerCriticalSfxPlayed: false, // plays playHunger() once per crossing into HUNGER_CRITICAL_THRESHOLD, reset once hunger drops back below it (e.g. after eating) — see updateFish
     wanderTimer: 0,
     tailPhase: 0, // only rendered once fully grown; advances faster the faster the fish is currently moving
     // Economy Fish Combining (Tier 2) — see CLAUDE.md's "Economy Fish
@@ -242,26 +255,14 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
   };
 }
 
-// Food Capacity Tank Upgrade: how many food pellets can exist at once — see
-// Config.js's FOOD_MAX_ON_SCREEN_BASE.
-export function effectiveFoodCapacity(state) {
-  return FOOD_MAX_ON_SCREEN_BASE + FOOD_CAPACITY_UPGRADE_INCREMENT * state.level.upgrades.foodCapacity;
-}
-
-// Only Food actually above SEABED_FLOOR_Y — in the open-water tank, where
-// fish can reach it — counts against the cap, per direct request: Food that's
-// fallen (or been dispensed by an Auto-Feeder) into the seabed city no longer
-// occupies a capacity "slot" at all, so it's a strategic stash rather than
-// something that has to be routed back up immediately or wasted. The instant
-// a Fan blows a piece back up past the line, it counts again — this needs no
-// extra bookkeeping since it's just a live position check, re-evaluated
-// fresh every call, same as every other "count state.level.items directly"
-// pattern in this codebase (a cached counter would drift out of sync with
-// wherever food gets removed — eaten, despawned, lost, or now, this City/
-// tank boundary crossing). This means the tank can briefly hold MORE than
-// the nominal cap at once — the cap only ever gates a fresh spawn, not an
-// existing pellet a Fan pushes back up from the city — which is the exact
-// "in theory more than cap/cap" behavior requested.
+// Purely informational now — the Food Capacity cap (and its Tank Upgrade)
+// were retired entirely per direct request, replaced by the
+// stationary-to-Waste mechanic in updateFood below. Still exported for
+// UI.js's HUD readout (just a live count, no more "/cap" denominator) and
+// still only counts Food actually above SEABED_FLOOR_Y — in the open-water
+// tank — since that's what a player watching the HUD number actually cares
+// about ("how much food is out there right now"), not food that's already
+// fallen into the seabed city.
 export function countTankFood(state) {
   let n = 0;
   for (const item of state.level.items) {
@@ -322,9 +323,9 @@ function triggerProductionBlocked(state, fish, stageDef, resource) {
 }
 
 // Returns a reason string rather than a bare bool so callers can react
-// differently to each failure — specifically, main.js flashes the HUD's
-// food readout red only on 'capacity_full' (attempting to place food past
-// the cap), not on 'no_money' or 'in_city'.
+// differently to each failure — main.js flashes the money HUD red on
+// 'no_money'. No capacity check any more — see the module comment above
+// countTankFood.
 export function trySpawnFood(state, x, y) {
   // Food can only be dropped in open water, never directly into the seabed
   // city — per direct request, after going back and forth on whether to
@@ -333,7 +334,6 @@ export function trySpawnFood(state, x, y) {
   // normal) — only where a fresh pellet can be manually placed.
   if (y >= SEABED_FLOOR_Y) return 'in_city';
   if (state.level.money < FOOD_COST) return 'no_money';
-  if (countTankFood(state) >= effectiveFoodCapacity(state)) return 'capacity_full';
   state.level.money -= FOOD_COST;
   state.level.items.push(createFood(x, y));
   playFoodPlace();
@@ -436,12 +436,15 @@ export function spawnFishCheat(state, speciesId, x, y, grown) {
 
 // ---- Economy Fish Dynamic Purchase Cost (Tier 2) ----
 // Current_Cost = base cost * (ECONOMY_FISH_COST_GROWTH_RATE ^ N), N = how
-// many living fish of that exact species (any star tier) are currently in
+// many living fish of that EXACT species (any star tier) are currently in
 // the tank — see Config.js's ECONOMY_FISH_COST_GROWTH_RATE. N is computed
 // live off state.level.entities every call rather than tracked as a running
 // counter, so a death/combine/purchase is reflected the instant it happens
-// with no separate bookkeeping to keep in sync. Non-economy species (utility
-// fish, hybrids) are unaffected — always their flat SPECIES.cost.
+// with no separate bookkeeping to keep in sync. The exact-id match is also
+// what keeps a hybrid from ever counting toward its own parent species'
+// scarcity — a Scrub Guppy's speciesId is 'scrub_guppy', never 'guppy', so
+// it simply never matches here, satisfying "hybrid fish do not count
+// towards the limit" with no extra filtering needed.
 export function countLivingFishOfSpecies(state, speciesId) {
   let n = 0;
   for (const entity of state.level.entities) {
@@ -450,9 +453,16 @@ export function countLivingFishOfSpecies(state, speciesId) {
   return n;
 }
 
+// Dynamic pricing covers every id in DYNAMIC_PRICED_SPECIES_IDS — the 3
+// economy species plus, per direct request, the 3 utility species too
+// ("make sure all the utility fish also get more expensive with each fish
+// on screen"). Hybrids were never purchasable in the shop to begin with
+// (they're pulled from the buyable grid entirely — see UI.js's
+// buildShopPanel), so this function is never even called for one; their
+// SPECIES.cost is only ever read as-is by anything that still wants it.
 export function getFishPurchaseCost(state, speciesId) {
   const def = SPECIES[speciesId];
-  if (!ECONOMY_SPECIES_IDS.includes(speciesId)) return def.cost;
+  if (!DYNAMIC_PRICED_SPECIES_IDS.includes(speciesId)) return def.cost;
   const n = countLivingFishOfSpecies(state, speciesId);
   return Math.round(def.cost * Math.pow(ECONOMY_FISH_COST_GROWTH_RATE, n));
 }
@@ -701,25 +711,48 @@ function updateFood(item, state, dtMs) {
     const swayVx = currentSwayVx(item, FOOD_SWAY_AMPLITUDE, FOOD_SWAY_FREQUENCY, FOOD_SWAY_ENVELOPE_FREQUENCY);
     item.x += (item.vx + swayVx) * dt;
     item.y += item.vy * dt;
-    return true;
-  }
-  const status = stepItemOnGrid(item, state, dt, physics);
-  if (status === 'consumed') {
-    // A Processor only ever accepts coins/Science now (Grid.js's
-    // updateBuildings), so Food can no longer actually reach this branch —
-    // left in place defensively rather than removed, same as any other
-    // status this switch already handles.
-    state.level.gridStats.itemsRoutedTotal += 1;
-    return false;
-  }
-  if (status === 'lost') return false; // fell off the bottom of the world — gone silently, same as food already does elsewhere
-
-  item.restingOnFloor = status === 'resting';
-  if (item.restingOnFloor) {
-    item.floorTimer += dtMs;
-    if (item.floorTimer >= FOOD_FLOOR_GRACE_MS) return false; // a nearby fish had its chance and didn't take it
   } else {
-    item.floorTimer = 0; // knocked around (or never landed yet) — the grace period only counts time spent genuinely settled
+    const status = stepItemOnGrid(item, state, dt, physics);
+    if (status === 'consumed') {
+      // A Processor only ever accepts coins/Science now (Grid.js's
+      // updateBuildings), so Food can no longer actually reach this branch —
+      // left in place defensively rather than removed, same as any other
+      // status this switch already handles.
+      state.level.gridStats.itemsRoutedTotal += 1;
+      return false;
+    }
+    if (status === 'lost') return false; // fell off the bottom of the world — gone silently
+  }
+
+  // Stationary-to-Waste: per direct request, replacing the old capacity cap
+  // (FOOD_MAX_ON_SCREEN_BASE/the Food Capacity Tank Upgrade, both retired)
+  // entirely — instead of limiting how much food can exist at once, a
+  // pellet that's gone FOOD_STATIONARY_TO_WASTE_MS (10s) without moving more
+  // than FOOD_STATIONARY_MOVE_TOLERANCE_PX from where it last genuinely
+  // moved turns into a real Waste item at its own position, rather than
+  // just despawning — an ignored pellet still costs the player something
+  // (a bit of cleanliness) instead of evaporating for free. Position-based,
+  // not velocity-based, so "moves within that 10 seconds restarts the
+  // countdown" falls out naturally: a Fan visibly wobbling a held pellet
+  // keeps resetting its own origin every tick it actually sways, the same
+  // as if the player had nudged it themselves; only something genuinely
+  // motionless (typically resting untouched on a tile) ever finishes the
+  // countdown. Pushes into pendingFoodToWasteSpawns rather than
+  // state.level.items directly — this function runs inside
+  // updateEntities' state.level.items.filter(...), so a direct push here
+  // wouldn't be captured by that filter's own result (see updateEntities'
+  // own foodSpawnPoints/wasteSpawnPoints for the identical reason/pattern).
+  const movedPx = Math.hypot(item.x - item.stationaryOriginX, item.y - item.stationaryOriginY);
+  if (movedPx > FOOD_STATIONARY_MOVE_TOLERANCE_PX) {
+    item.stationaryOriginX = item.x;
+    item.stationaryOriginY = item.y;
+    item.stationaryTimer = 0;
+  } else {
+    item.stationaryTimer += dtMs;
+    if (item.stationaryTimer >= FOOD_STATIONARY_TO_WASTE_MS) {
+      pendingFoodToWasteSpawns.push({ x: item.x, y: item.y });
+      return false;
+    }
   }
   return true;
 }
@@ -911,6 +944,22 @@ function updateFish(fish, state, dtMs) {
       pushStoryNotification(state, FIRST_FISH_DEATH_MESSAGE);
     }
     return false; // starves if hunger maxes out
+  }
+
+  // Plays playHunger() once per crossing INTO the second, more urgent
+  // hunger stage (HUNGER_CRITICAL_THRESHOLD — the same threshold that shows
+  // the "!!" indicator in main.js's render), per direct request. Edge-
+  // triggered, not per-frame: the flag resets once hunger drops back below
+  // the threshold (feeding, typically), so the growl can fire again next
+  // time this fish gets that hungry, but doesn't repeat every tick while it
+  // stays hungry.
+  if (fish.hunger >= HUNGER_CRITICAL_THRESHOLD) {
+    if (!fish.hungerCriticalSfxPlayed) {
+      fish.hungerCriticalSfxPlayed = true;
+      playHunger();
+    }
+  } else {
+    fish.hungerCriticalSfxPlayed = false;
   }
 
   const isScavenger = def.behavior.includes('SCAVENGER'); // Suckerfish (and any future SCAVENGER species) eats ONLY Waste, never Food
@@ -1152,6 +1201,7 @@ function updateFishVanish(state, dtMs) {
 
 export function updateEntities(state, dtMs) {
   updateFishVanish(state, dtMs);
+  pendingFoodToWasteSpawns.length = 0; // updateFood (below) fills this — see its own comment for why it can't push into state.level.items directly
   state.level.items = state.level.items.filter((item) => {
     if (item.type === 'food') return updateFood(item, state, dtMs);
     if (item.type === 'coin') return updateCoin(item, state, dtMs);
@@ -1170,6 +1220,7 @@ export function updateEntities(state, dtMs) {
   const { foodSpawnPoints, wasteSpawnPoints } = updateBuildings(state, dtMs);
   for (const point of foodSpawnPoints) state.level.items.push(createFood(point.x, point.y));
   for (const point of wasteSpawnPoints) state.level.items.push(createWaste(point.x, point.y));
+  for (const point of pendingFoodToWasteSpawns) state.level.items.push(createWaste(point.x, point.y));
 
   resolveItemCollisions(state); // items in the seabed band can't overlap — see Grid.js's module comment
 

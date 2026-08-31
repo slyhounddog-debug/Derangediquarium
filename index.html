@@ -14,9 +14,41 @@
 
 <div id="splash-screen"><div id="splash-title">Derangiquarium</div></div>
 
+<div id="start-overlay">
+  <div id="start-modal">
+    <div id="start-title">Derangiquarium</div>
+    <div id="start-subtitle">An incremental aquarium, gone a little feral</div>
+    <button id="start-play-btn" class="pause-btn sheen-target">▶️ Start</button>
+    <button id="start-settings-btn" class="pause-btn sheen-target">⚙️ Settings</button>
+    <button id="start-help-btn" class="pause-btn sheen-target">❓ Help</button>
+  </div>
+</div>
+
+<div id="start-help-overlay" class="hidden">
+  <div id="start-help-modal">
+    <div id="start-help-header-row">
+      <div id="start-help-title">How To Play</div>
+      <button id="start-help-back-btn" class="pause-btn sheen-target">← Back</button>
+    </div>
+    <div id="start-help-list">
+      <div class="help-row"><div class="help-icon">🍽️</div><div class="help-text"><b>Feed your fish.</b> Select the Food tool (bottom of the screen, or hotkey 1) and click in the water to drop a pellet. Fish swim over to eat it.</div></div>
+      <div class="help-row"><div class="help-icon">❗</div><div class="help-text"><b>Watch the hunger icons.</b> A "!" means a fish is getting hungry and hunting for food; "!!" means it's getting desperate — leave it too long and it starves.</div></div>
+      <div class="help-row"><div class="help-icon">🧱</div><div class="help-text"><b>Platforms first.</b> Every other building has to be placed touching a Platform (or resting on the very bottom of the tank) — build a Platform before anything else down there.</div></div>
+      <div class="help-row"><div class="help-icon">💨</div><div class="help-text"><b>Fans</b> blow coins, Food, and Waste back up into the water column so your fish (and you) can reach them, instead of everything piling up out of sight.</div></div>
+      <div class="help-row"><div class="help-icon">🧲</div><div class="help-text"><b>Processors</b> automatically pull in and bank any coin or Science Bubble that drifts into their intake side — no clicking required.</div></div>
+      <div class="help-row"><div class="help-icon">♻️</div><div class="help-text"><b>Auto-Feeders</b> absorb Waste on one side and dispense fresh Food out the other, once they've processed enough loads.</div></div>
+      <div class="help-row"><div class="help-icon">💰</div><div class="help-text"><b>Click a coin to bank it</b> yourself any time — Processors are a convenience, not a requirement. Waste can be left for a Suckerfish or an Auto-Feeder to clean up.</div></div>
+      <div class="help-row"><div class="help-icon">⛰️</div><div class="help-text"><b>The Mound</b> (seabed, early game) cracks open for gold, unlocking new buildings and fish as you feed it money. It eventually shatters into...</div></div>
+      <div class="help-row"><div class="help-icon">🔬</div><div class="help-text"><b>...the Science Lab</b> — the long-term goal. Spend Science Bubbles (dropped by the Science Octopus) and gold on its branching tree to unlock the Electric Eel, Suckerfish, Advanced buildings, and every Gene-Spliced hybrid fish.</div></div>
+      <div class="help-row"><div class="help-icon">🧤</div><div class="help-text"><b>The Merge tool</b> (hotkey 3) lets you drag one Adult fish onto a matching one to combine them into a bigger, shinier fish, or drag an Adult Suckerfish/Eel/Octopus onto another Adult fish to splice a hybrid.</div></div>
+      <div class="help-row"><div class="help-icon">🏆</div><div class="help-text"><b>Tank Points</b> (earned every time a fish grows to an adult) buy permanent upgrades in the Tank Upgrades panel — faster fish, better food, bigger coin caps, and more.</div></div>
+    </div>
+  </div>
+</div>
+
 <div id="hud">
   <div id="hud-money" class="sheen-target" title="Money — spend it on fish and food in the shop">💰 $0</div>
-  <div id="hud-food" class="sheen-target" title="Food on screen — capped by your Food Capacity Tank Upgrade">🍽️ 0/2</div>
+  <div id="hud-food" class="sheen-target" title="Food currently in the tank, uncollected — a pellet that sits still for too long turns into Waste">🍽️ 0</div>
   <div id="hud-coin-cap" class="sheen-target" title="Coins currently sitting in the tank, uncollected — capped by your Coin Capacity Tank Upgrade">🪙 0/10</div>
   <div id="hud-science-cap" class="sheen-target hidden" title="Science Bubbles currently sitting in the tank, uncollected — capped by the Science Lab's Bubble Capacity upgrade">🔬 0/5</div>
   <div id="hud-cleanliness" class="sheen-target" title="Tank cleanliness — dirty water will stress your fish (not active yet, coming in a later phase)">✨ 100%</div>
@@ -42,7 +74,7 @@
   </div>
   <div id="shop-hud">
     <div id="shop-money" class="sheen-target">💰 $0</div>
-    <div id="shop-food" class="sheen-target">🍽️ 0/2</div>
+    <div id="shop-food" class="sheen-target">🍽️ 0</div>
     <div id="shop-coin-cap" class="sheen-target">🪙 0/10</div>
     <div id="shop-science-cap" class="sheen-target hidden">🔬 0/5</div>
     <div id="shop-cleanliness" class="sheen-target">✨ 100%</div>

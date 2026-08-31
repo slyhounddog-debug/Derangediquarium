@@ -372,7 +372,18 @@ export const ITEM_PUSH_IMPULSE_SPEED = 3;
 export const FOOD_COST = 3; // $ per food pellet, matches the Buy Food shop entry — lowered from 5 so the early economy isn't so punishing to get rolling
 export const FOOD_RADIUS = 6; // px, visual + despawn-on-floor check
 export const FOOD_COLOR = '#ffb238'; // orange — was a green (#8bc34a) close enough to WASTE_COLOR's olive-green to be hard to tell apart at a glance; per direct request, distinct now
-export const FOOD_FLOOR_GRACE_MS = 1000; // ms an uneaten pellet rests on the floor before despawning — a last chance for a nearby hungry fish instead of an instant, silent loss of the cost
+// Stationary-to-Waste (Entities.js's updateFood): replaces the old
+// FOOD_FLOOR_GRACE_MS despawn-on-the-floor mechanic and the Food Capacity
+// cap alike, per direct request — instead of limiting how much food can
+// exist or silently despawning an ignored pellet, a pellet that hasn't
+// moved more than FOOD_STATIONARY_MOVE_TOLERANCE_PX from its own last
+// "genuinely moving" position in FOOD_STATIONARY_TO_WASTE_MS turns into a
+// real Waste item at its own spot instead — "if it moves within that 10
+// seconds it restarts the countdown" falls out of the tolerance check
+// directly (a Fan visibly wobbling a held pellet keeps resetting it, the
+// same as if the player nudged it themselves).
+export const FOOD_STATIONARY_TO_WASTE_MS = 10000;
+export const FOOD_STATIONARY_MOVE_TOLERANCE_PX = 4; // small enough to still catch real movement, large enough to ignore sub-pixel collision-resolution jitter on something genuinely resting
 export const COIN_RADIUS = 10; // px, base visual radius (bronze size) — 25% bigger than the original 8, easier to see and aim at
 export const COIN_CLICK_RADIUS_MULTIPLIER = 1.6; // click hit-test radius is each coin's own (tier-scaled) radius times this — 60% bigger than the coin itself (was 40%, bumped again per direct request so coins are "even easier to click"), so a click doesn't have to be pixel-perfect (and doesn't get misread as a food-placement click on a miss). tryBankCoinAt still only ever banks the first match it finds per click and returns immediately, so an overlapping pair of these bigger radii still can't bank two coins on one click.
 export const CHEAT_GRANT_AMOUNT = 10000; // $ granted by the M debug key
@@ -560,10 +571,10 @@ export const FOOD_QUALITY_SINK_SPEED_REDUCTION_PER_LEVEL = 0.10; // 10% slower f
 // trickle of small wins rather than Food Quality's steeper climb. Index 0 =
 // cost of level 1 (must already be at level N-1 to buy level N — UI.js
 // enforces this, not Config.js). Placeholder balance, same as every other
-// economy constant here — tune once real playtesting exists.
-export const FISH_MOVEMENT_FOOD_CAPACITY_UPGRADE_COSTS = [1, 3, 6, 10, 15, 20, 25, 30, 35]; // Tank Points
-
-export const FISH_MOVEMENT_UPGRADE_COSTS = FISH_MOVEMENT_FOOD_CAPACITY_UPGRADE_COSTS;
+// economy constant here — tune once real playtesting exists. (Used to be
+// shared with Food Capacity's own cost table, back when that upgrade
+// existed — see the retired-mechanic note further down.)
+export const FISH_MOVEMENT_UPGRADE_COSTS = [1, 3, 6, 10, 15, 20, 25, 30, 35]; // Tank Points
 export const FISH_MOVEMENT_UPGRADE_MAX_LEVEL = FISH_MOVEMENT_UPGRADE_COSTS.length;
 // Every SPECIES row's swimSpeed below is already reduced by exactly this
 // much from its originally-tuned value — buying Level 1 restores the
@@ -581,19 +592,11 @@ export const FISH_MOVEMENT_UPGRADE_SPEED_BONUS = 5; // px/sec per level
 // the base stat).
 export const FISH_SPEED_MULTIPLIER = 1.1;
 
-// Food Capacity: how many food pellets can exist in state.level.items at
-// once (checked in Entities.js's trySpawnFood — spawning is refused past
-// this, regardless of money, same as any other affordability gate). Starts
-// deliberately tight (FOOD_MAX_ON_SCREEN_BASE) so early-game feeding is a
-// real constraint the player has to work around, not just spam; each
-// purchased level raises the cap by FOOD_CAPACITY_UPGRADE_INCREMENT — cut
-// from 2 to 1 per level now that there are 9 levels instead of 5, so the cap
-// still tops out at a comparable place (2 -> 11 at max level) rather than
-// nearly doubling.
-export const FOOD_MAX_ON_SCREEN_BASE = 3; // start with 3 placeable pellets per direct request — was 2
-export const FOOD_CAPACITY_UPGRADE_INCREMENT = 1; // per level — base 2 -> 3 -> 4 -> ... -> 11 at max level (9 levels)
-export const FOOD_CAPACITY_UPGRADE_COSTS = FISH_MOVEMENT_FOOD_CAPACITY_UPGRADE_COSTS;
-export const FOOD_CAPACITY_UPGRADE_MAX_LEVEL = FOOD_CAPACITY_UPGRADE_COSTS.length;
+// Food Capacity cap and its Tank Upgrade (FOOD_MAX_ON_SCREEN_BASE,
+// FOOD_CAPACITY_UPGRADE_*) are retired entirely, per direct request —
+// replaced below by FOOD_STATIONARY_TO_WASTE_MS, a mechanic that doesn't
+// limit how much food can exist at all, just how long an ignored pellet
+// sticks around before it stops being food.
 
 // Coin Cap: how many Coin items can exist in state.level.items at once — per
 // direct request, now that the Rocky Shelf keeps every coin in the tank
@@ -678,7 +681,7 @@ export const FISH_COLORS = {
 export const SPECIES = {
   // ---- Tier 1 — Feeding (Phase 1, unlocked from the start) ----
   guppy: {
-    id: 'guppy', name: 'Guppy', tier: 1, cost: 20,
+    id: 'guppy', name: 'Guppy', tier: 1, cost: 15, // cut from 20 per direct request
     description: 'The baseline. Cheap, sturdy, drops coins steadily.',
     behavior: ['FEEDER'], dropType: 'coin',
     swimSpeed: 35, // px/sec — 5 below the original 40; the Level 1 Fish Movement Tank Upgrade restores it, see Config.js's FISH_MOVEMENT_UPGRADE_SPEED_BONUS
@@ -692,7 +695,7 @@ export const SPECIES = {
     unlockedByDefault: true,
   },
   dartfin: {
-    id: 'dartfin', name: 'Dartfin', tier: 1, cost: 12,
+    id: 'dartfin', name: 'Dartfin', tier: 1, cost: 10, // cut from 12 per direct request
     description: 'Cheaper and faster. Frequent low-value coins reward density.',
     behavior: ['FEEDER'], dropType: 'coin',
     swimSpeed: 65, // -5, see FISH_MOVEMENT_UPGRADE_SPEED_BONUS
@@ -706,7 +709,7 @@ export const SPECIES = {
     unlockedByDefault: true,
   },
   blimpfish: {
-    id: 'blimpfish', name: 'Blimpfish', tier: 1, cost: 60,
+    id: 'blimpfish', name: 'Blimpfish', tier: 1, cost: 40, // cut from 60 per direct request
     description: 'Expensive and sluggish. Voracious appetite, rare high-value coins.',
     behavior: ['FEEDER'], dropType: 'coin',
     swimSpeed: 17, // 10% faster than the original 20, then -5, see FISH_MOVEMENT_UPGRADE_SPEED_BONUS
@@ -737,7 +740,7 @@ export const SPECIES = {
   // stage) may be used as a Gene-Splicing source — see Entities.js's
   // isSpliceSource.
   suckerfish: {
-    id: 'suckerfish', name: 'Suckerfish', tier: 2, unlockPhase: 3, cost: 25,
+    id: 'suckerfish', name: 'Suckerfish', tier: 2, unlockPhase: 3, cost: 20, // cut from 25 per direct request
     description: 'Only eats Waste, never Food — cleans up after the rest of the tank instead of adding to the mess.',
     behavior: ['SCAVENGER'], dropType: 'waste_cleared',
     swimSpeed: 30, lifespan: 300000,
@@ -755,7 +758,7 @@ export const SPECIES = {
     unlockedByDefault: false,
   },
   electric_eel: {
-    id: 'electric_eel', name: 'Electric Eel', tier: 2, unlockPhase: 3, cost: 80,
+    id: 'electric_eel', name: 'Electric Eel', tier: 2, unlockPhase: 3, cost: 35, // cut from 80 per direct request
     description: 'Primary MW supply. Must be fed to keep generating.',
     behavior: ['GENERATOR'], dropType: 'power',
     swimSpeed: 20, lifespan: 300000, hungerRate: 0.776, // a further 20% slower per direct request — was 0.97
@@ -773,7 +776,7 @@ export const SPECIES = {
     unlockedByDefault: false,
   },
   octopus: {
-    id: 'octopus', name: 'Science Octopus', tier: 3, unlockPhase: 4, cost: 90,
+    id: 'octopus', name: 'Science Octopus', tier: 3, unlockPhase: 4, cost: 60, // cut from 90 per direct request
     description: 'Slowly brews one Science Bubble at a time — collect it like a coin once it drops.',
     behavior: ['RESEARCHER'], dropType: 'science_blue',
     swimSpeed: 25, lifespan: 300000, hungerRate: 0.624, // a further 20% slower per direct request — was 0.78
@@ -1341,18 +1344,30 @@ export const PRODUCTION_BLOCKED_COLOR = '#9fb0c2';
 export const UTILITY_SPECIES_IDS = ['suckerfish', 'electric_eel', 'octopus'];
 
 // ---- Economy Fish Combining/Splicing (Tier 2) ----
-// The 3 base feeder species — the only ones dynamic pricing and star-tier
-// combining apply to. Named "economy fish" in the design spec to
-// distinguish them from the utility species (Suckerfish/Electric Eel/
-// Science Octopus) and their hybrids, which are priced/handled normally.
+// The 3 base feeder species — the only ones star-tier COMBINING applies to
+// (dynamic PRICING is broader, see DYNAMIC_PRICED_SPECIES_IDS below).
+// Named "economy fish" in the design spec to distinguish them from the
+// utility species (Suckerfish/Electric Eel/Science Octopus) and their
+// hybrids, which never combine.
 export const ECONOMY_SPECIES_IDS = ['guppy', 'dartfin', 'blimpfish'];
+// Dynamic pricing (see ECONOMY_FISH_COST_GROWTH_RATE below) — originally
+// just the 3 economy species, extended per direct request to also cover the
+// 3 utility species ("make sure all the utility fish also get more
+// expensive with each fish on screen"). Deliberately NOT the hybrids —
+// Entities.js's countLivingFishOfSpecies already only ever matches a fish's
+// own EXACT speciesId, so a Scrub Guppy (id 'scrub_guppy') was never going
+// to count toward Guppy's own scarcity anyway; nothing extra needed to
+// enforce "hybrid fish do not count towards the limit."
+export const DYNAMIC_PRICED_SPECIES_IDS = [...ECONOMY_SPECIES_IDS, ...UTILITY_SPECIES_IDS];
 // Current_Cost = species.cost * (ECONOMY_FISH_COST_GROWTH_RATE ^ N), where N
 // is how many living fish of that exact species (any star tier) are
 // currently in state.level.entities — see Entities.js's
-// getEconomyFishCost(). Buying one immediately raises the cost of the next;
+// getFishPurchaseCost. Buying one immediately raises the cost of the next;
 // one dying, starving, or being consumed by a combine lowers N (and so the
 // cost) again, since N is always computed live off the current entity list
-// rather than tracked as a running counter.
+// rather than tracked as a running counter. Applies to every id in
+// DYNAMIC_PRICED_SPECIES_IDS, economy and utility alike — the name predates
+// utility fish getting the same treatment, kept as-is rather than renamed.
 export const ECONOMY_FISH_COST_GROWTH_RATE = 1.25; // was 1.4, reduced per direct request for a gentler cost curve
 
 // Two Adult economy fish of the exact same species AND exact same star tier

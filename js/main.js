@@ -37,6 +37,7 @@ import {
   SCIENCE_ITEM_COLOR_B,
   POWER_HISTORY_MAX,
   SCIENCE_CAP_BY_LEVEL,
+  MOUND_MAX_TIER,
 } from './Config.js';
 import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop } from './Engine.js';
 import { loadLevel, LEVELS } from './Levels.js';
@@ -91,9 +92,9 @@ import {
   openLabMenu,
   closeLabMenu,
   isLabMenuOpen,
-  flashFoodCapacity,
   flashMoneyInsufficient,
   selectTool,
+  initStartScreen,
 } from './UI.js';
 
 const canvas = document.getElementById('game-canvas');
@@ -114,6 +115,12 @@ window.addEventListener('keydown', resumeAudio, { once: true });
 // stays just the word itself. GROW_IN_DURATION_S must match splash-grow-fade's
 // own 25% keyframe (4.5s total * 0.25) so letters don't start bouncing until
 // the word has actually finished growing in.
+//
+// The per-letter spans are still built eagerly here at load — but per
+// direct request, the animation itself no longer starts automatically: the
+// CSS only defines it on #splash-title.play (see style.css), added by
+// triggerSplash() below once the player actually clicks Start on the new
+// start screen, not on page load.
 const splashScreen = document.getElementById('splash-screen');
 const splashTitle = splashScreen.querySelector('#splash-title');
 const SPLASH_GROW_IN_DURATION_S = 1.125;
@@ -130,6 +137,9 @@ for (const [i, char] of splashLetters.entries()) {
 splashTitle.addEventListener('animationend', (e) => {
   if (e.target === splashTitle) splashScreen.remove(); // ignore bubbled per-letter animationend events, only the title's own grow-fade ending means it's done
 });
+function triggerSplash() {
+  splashTitle.classList.add('play');
+}
 
 // ---- Root state (§3.1) — plain, JSON-serializable, meta/level split ----
 const state = {
@@ -151,6 +161,13 @@ const state = {
     shopCollapsed: true, // shop starts tucked away — just the toggle button — so it doesn't clutter the view
     tankPanelCollapsed: true, // Tank Upgrades panel starts tucked away too — shares the shop's on-screen slot, only one is ever expanded (see UI.js's toggleShopCollapse/toggleTankPanel)
     paused: false, // pause menu open/closed (Escape); update() below skips simulating entirely while true
+    // False until the player clicks "Start" on the new first-launch start
+    // screen (UI.js's initStartScreen) — update() below checks this ahead of
+    // (and independently from) `paused`, so the tank sits fully frozen (but
+    // still rendered, blurred behind the start overlay) until then. Ambience
+    // (bubbles/seaweed) is deliberately NOT gated on this — see update()'s
+    // own comment — so the blurred tank still reads as alive behind the menu.
+    gameStarted: false,
     // Set by Entities.js's updateFish the instant a fish's coin-drop cycle is
     // blocked by the Coin Cap — a plain cross-module state flag rather than
     // Entities.js importing UI.js directly (which would be circular, since
@@ -158,6 +175,13 @@ const state = {
     // UI.js's updateHUD on its very next frame to trigger the "shake red"
     // flash on the Coin HUD readout. See Config.js's COIN_CAP_BY_LEVEL.
     coinCapFlashPending: false,
+    // Small red reason text shown just above the cursor after a failed
+    // building-placement attempt ("Can't afford" / "Needs Platform") — see
+    // showBuildError/handleBuildPlacementFailure and render()'s draw call.
+    // null (or elapsed past BUILD_ERROR_TEXT_DURATION_MS) means nothing's
+    // shown right now.
+    buildErrorText: null,
+    buildErrorElapsedMs: 0,
   },
   debug: {
     overlayVisible: false,
@@ -272,9 +296,8 @@ input.clickHandlers.push((sx, sy) => {
         // wherever the cursor is NOW, not necessarily back over that cell)
         // and actually place the tile.
         const angle = angleFromTileToPoint(fanAimingCell.col, fanAimingCell.row, world.x, world.y);
-        if (canPlaceTile(state, fanAimingCell.col, fanAimingCell.row, buildingId).reason === 'cannot afford') {
-          flashMoneyInsufficient(state);
-        }
+        const confirmCheck = canPlaceTile(state, fanAimingCell.col, fanAimingCell.row, buildingId);
+        if (!confirmCheck.ok) handleBuildPlacementFailure(confirmCheck.reason);
         placeTile(state, fanAimingCell.col, fanAimingCell.row, buildingId, angle);
         fanAimingCell = null;
         return;
@@ -284,7 +307,7 @@ input.clickHandlers.push((sx, sy) => {
       const { col, row } = worldToTile(world.x, world.y);
       const check = canPlaceTile(state, col, row, buildingId);
       if (check.ok) fanAimingCell = { col, row, buildingId };
-      else if (check.reason === 'cannot afford') flashMoneyInsufficient(state);
+      else handleBuildPlacementFailure(check.reason);
       return; // either way, a fan-tool click never falls through to mound/coin/food
     }
   }
@@ -301,8 +324,7 @@ input.clickHandlers.push((sx, sy) => {
   if (tryBankScienceAt(state, world.x, world.y)) return; // same for a Science Bubble
   if (state.ui.selectedTool === 'food') {
     const reason = trySpawnFood(state, world.x, world.y);
-    if (reason === 'capacity_full') flashFoodCapacity(state);
-    else if (reason === 'no_money') flashMoneyInsufficient(state);
+    if (reason === 'no_money') flashMoneyInsufficient(state);
     return;
   }
   // A purchased fish is placed with a click, exactly like a building — see
@@ -349,7 +371,41 @@ function pushMainNotification(text) {
   if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
 }
 
+// Per direct request: any failed building-placement attempt shows a small
+// red reason above the cursor ("Can't afford" / "Needs Platform"), and the
+// very first time a placement fails specifically for lacking a Platform to
+// anchor to, that also posts a one-time explanatory HUD notification —
+// mirrors every other "first X" story beat's pattern (see CLAUDE.md's
+// "Story & Tutorial Notifications"). Shared by every placement-attempt call
+// site (the Fan's two-click aim flow and updateBuildDrag's single-click-or-
+// drag flow below) so the behavior can't drift between them.
+const PLATFORM_NEEDED_MESSAGE =
+  "You're gonna need platform for that. Can't have your buildings floating, we are all about our commitment to realistic physics";
+const BUILD_ERROR_TEXT_DURATION_MS = 1100; // how long the cursor text stays up before render() stops drawing it
+
+function showBuildError(text) {
+  state.ui.buildErrorText = text;
+  state.ui.buildErrorElapsedMs = 0;
+}
+
+function handleBuildPlacementFailure(reason) {
+  if (reason === 'cannot afford') {
+    flashMoneyInsufficient(state);
+    showBuildError("Can't afford");
+  } else if (reason === 'must be anchored to a Platform or the seabed floor') {
+    showBuildError('Needs Platform');
+    if (!state.level.tutorialFlags.firstPlatformNeeded) {
+      state.level.tutorialFlags.firstPlatformNeeded = true;
+      pushMainNotification(PLATFORM_NEEDED_MESSAGE);
+    }
+  }
+}
+
 input.keydownHandlers.push((e) => {
+  // Nothing's running yet — the start screen (or its Settings/Help
+  // sub-views) is the only thing on screen, and it has its own buttons for
+  // navigating back, not Escape.
+  if (!state.ui.gameStarted) return;
   if (e.code === 'Escape') { // opens/closes any time, even while paused
     if (!state.level.tutorialFlags.escapePressed) {
       state.level.tutorialFlags.escapePressed = true;
@@ -426,18 +482,46 @@ input.keydownHandlers.push((e) => {
       rotateBuilding(state, world.x, world.y);
       break;
     }
-    case 'KeyN': // force-crack the Mound to the next real tier, free — skips the tease and the paid Tier 1.75/2.5 sub-steps if they haven't happened yet, so this always advances a tier rather than sometimes just spending the press on one of those instead
-      state.level.money += CHEAT_GRANT_AMOUNT;
-      state.level.moundTeased = true;
-      state.level.fanUnlockPurchased = true;
-      state.level.autoFeederUnlockPurchased = true;
-      crackMound(state);
+    case 'KeyN': { // force-crack the Mound to the next real tier, free
+      // Previously pre-set moundTeased/fanUnlockPurchased/autoFeederUnlockPurchased
+      // to true and called crackMound() once — but crackMound's own grant
+      // branches are each gated on the matching flag still being FALSE
+      // (`!state.level.fanUnlockPurchased`, etc.), so forcing them true
+      // first made every one of those branches skip itself, and crackMound
+      // fell straight through to a bare tier increment with nothing
+      // granted. That silently ate the Rudimentary Fan/Auto-Feeder grants
+      // every time this cheat was used — a real bug, not just a testing
+      // quirk, since it made the debug cheat lie about what a real
+      // playthrough actually unlocks. Fixed by calling the REAL
+      // crackMound() repeatedly (topping up money before each call so
+      // affordability is never the blocker) until the tier genuinely
+      // advances — this walks through the tease/Fan-grant/Auto-Feeder-grant
+      // sub-steps for real, exactly like a player clicking the Mound
+      // several times would, with zero duplicated knowledge of what each
+      // step grants.
+      const startTier = state.level.tier;
+      let guard = 0;
+      while (state.level.tier === startTier && state.level.tier < MOUND_MAX_TIER && guard < 10) {
+        state.level.money += CHEAT_GRANT_AMOUNT;
+        crackMound(state);
+        guard++;
+      }
       refreshShopPanel(state);
       break;
+    }
   }
 });
 
 initUI(state);
+
+// First-launch start screen (index.html's #start-overlay) — Start un-gates
+// the sim loop (state.ui.gameStarted, checked in update() below) and kicks
+// off the title splash, which used to play automatically on load but per
+// direct request now waits for this instead.
+initStartScreen(state, () => {
+  state.ui.gameStarted = true;
+  triggerSplash();
+});
 
 // ---- Perf counters for the debug overlay ----
 let fpsCounter = 0;
@@ -482,7 +566,8 @@ function updateBuildDrag() {
   // at the moment it's placed — see Grid.js's angleFromTileToPoint. Ignored
   // for every other building type.
   const angle = angleFromTileToPoint(col, row, world.x, world.y);
-  if (canPlaceTile(state, col, row, buildingId).reason === 'cannot afford') flashMoneyInsufficient(state);
+  const check = canPlaceTile(state, col, row, buildingId);
+  if (!check.ok) handleBuildPlacementFailure(check.reason);
   placeTile(state, col, row, buildingId, angle);
 }
 
@@ -504,12 +589,17 @@ function updateFishDrag() {
 }
 
 function update(dtMs) {
-  updateAmbience(dtMs); // pure decoration (bubbles/seaweed) — keeps drifting even through pause/game-over, ahead of both early returns below
+  updateAmbience(dtMs); // pure decoration (bubbles/seaweed) — keeps drifting even through pause/game-over/the start screen, ahead of every early return below, so the blurred tank still reads as alive behind the start overlay
+  if (!state.ui.gameStarted) return; // frozen until the player clicks Start on the first-launch start screen — render() still runs, same "frozen but visible" pattern the pause menu already uses
   if (state.ui.paused) return; // frozen behind the pause menu — render() still runs so the tank stays visible
   if (state.level.gameOver) return; // lost — frozen the same way, but via a separate flag so Escape still reaches the pause menu's Restart without also un-freezing a lost game (see Systems.js's updateBankruptcy)
 
   updateCamera(state.camera, input, canvas, dtMs);
   updateBuildDrag();
+  if (state.ui.buildErrorText) {
+    state.ui.buildErrorElapsedMs += dtMs;
+    if (state.ui.buildErrorElapsedMs >= BUILD_ERROR_TEXT_DURATION_MS) state.ui.buildErrorText = null;
+  }
   updateEntities(state, dtMs);
   updateFishDrag();
   updateStoryTriggers(state);
@@ -820,6 +910,26 @@ function render() {
       ctx.font = '10px sans-serif';
       ctx.fillText('!', pos.x - 2, pos.y - size * 0.5 - 4);
     }
+  }
+
+  // Small red "Can't afford"/"Needs Platform" reason text, glued to the
+  // cursor's own screen position (not a world point — this is pure UI
+  // feedback, drawn in plain screen space like every other ctx.fillText
+  // call in this function already is) — see handleBuildPlacementFailure.
+  // Fades out over its last third of BUILD_ERROR_TEXT_DURATION_MS rather
+  // than cutting off abruptly.
+  if (state.ui.buildErrorText && input.mouse.inside) {
+    const fadeStart = BUILD_ERROR_TEXT_DURATION_MS * 0.66;
+    const alpha = state.ui.buildErrorElapsedMs <= fadeStart
+      ? 1
+      : Math.max(0, 1 - (state.ui.buildErrorElapsedMs - fadeStart) / (BUILD_ERROR_TEXT_DURATION_MS - fadeStart));
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = '#ff3b3b';
+    ctx.font = 'bold 13px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(state.ui.buildErrorText, input.mouse.x, input.mouse.y - 22);
+    ctx.restore();
   }
 
   updateHUD(state);

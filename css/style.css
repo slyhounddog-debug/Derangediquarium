@@ -17,16 +17,19 @@ html, body {
   cursor: crosshair;
 }
 
-/* One-shot title splash, played once on load, per direct request — two
-   layers of animation working together: #splash-title itself fades/grows in,
-   holds, then fades back out (splash-grow-fade, on the whole word so the
-   letters' own bounce doesn't fight a separate opacity change); each
-   .splash-letter span (built by main.js from the title's plain text) plays
-   its own independent bounce (splash-letter-bounce), staggered by
-   animation-delay so they hop in sequence rather than all at once — timed to
-   start only once the grow-in has finished (see main.js's growInDuration).
-   Pure decoration throughout: pointer-events none so it never blocks the
-   very first click, and main.js removes the element entirely once
+/* One-shot title splash — used to play automatically on load; now gated
+   behind the player clicking "Start" on the new start screen instead (per
+   direct request), so the animation itself only begins once main.js adds
+   the .play class to #splash-title (see initStartScreen's onStart
+   callback). Two layers of animation working together: #splash-title itself
+   fades/grows in, holds, then fades back out (splash-grow-fade, on the
+   whole word so the letters' own bounce doesn't fight a separate opacity
+   change); each .splash-letter span (built by main.js from the title's
+   plain text) plays its own independent bounce (splash-letter-bounce),
+   staggered by animation-delay so they hop in sequence rather than all at
+   once — timed to start only once the grow-in has finished (see main.js's
+   growInDuration). Pure decoration throughout: pointer-events none so it
+   never blocks a click, and main.js removes the element entirely once
    #splash-title's own animation finishes (its 'animationend' listener
    filters to e.target === title, since child letter animations also bubble
    the same event) rather than leaving a hidden node sitting on top forever. */
@@ -40,6 +43,8 @@ html, body {
   font-size: 64px; font-weight: 900;
   color: #fff6ea;
   text-shadow: 0 0 24px rgba(255, 111, 174, 0.8), 0 6px 0 #c25f8f, 0 10px 18px rgba(0, 0, 0, 0.35);
+}
+#splash-title.play {
   animation: splash-grow-fade 4.5s ease forwards;
 }
 @keyframes splash-grow-fade {
@@ -48,8 +53,7 @@ html, body {
   75% { transform: scale(1); opacity: 1; }
   100% { transform: scale(1); opacity: 0; }
 }
-.splash-letter {
-  display: inline-block;
+#splash-title.play .splash-letter {
   animation: splash-letter-bounce 0.6s ease both;
 }
 @keyframes splash-letter-bounce {
@@ -212,7 +216,7 @@ html, body {
 
 #shop-panel, #tank-panel {
   position: fixed; top: 14px; right: 14px; bottom: 14px;
-  width: 260px;
+  width: 286px; /* 10% wider than the original 260px, per direct request, so building stats have more room before wrapping */
   background: linear-gradient(165deg, #fff8f0 0%, #ffe4f2 100%);
   color: #6b4c6b;
   padding: 14px;
@@ -491,13 +495,17 @@ html, body {
   white-space: nowrap;
 }
 
-/* Fixed height so switching between species (or the empty state) never
-   resizes the panel and shoves the icon grid below it up/down. Both the
-   empty placeholder and the populated content fill this same box; the Buy
-   button is pinned to its bottom via margin-top:auto regardless of how
-   many lines the description wraps to. */
+/* A floor height so switching between species (or the empty state) doesn't
+   shove the icon grid below it up/down for anything short enough to fit —
+   min-height, not a hard height, per direct request ("make sure the shop
+   window fits all the stats for the building"): a building whose stats
+   block genuinely needs more room than 180px (e.g. the Processor family's 4
+   stat lines) now grows the box instead of clipping/overflowing past its
+   bottom edge. Both the empty placeholder and the populated content fill
+   this same box; the hint line is pinned to its bottom via margin-top:auto
+   regardless of how tall the box ends up being. */
 #shop-preview {
-  height: 180px;
+  min-height: 180px;
   display: flex;
   flex-direction: column;
   background: linear-gradient(165deg, #fffaf3 0%, #fff0f6 100%);
@@ -600,7 +608,13 @@ html, body {
   position: fixed; inset: 0;
   display: flex; align-items: center; justify-content: center;
   background: rgba(107, 76, 107, 0.35);
-  z-index: 200; /* above the shop panel (10) and debug overlay (20) */
+  /* Above the shop panel (10) and debug overlay (20) — and, per direct
+     request, above the start screen (600) too: opening Settings from the
+     start screen shows this SAME overlay layered on top of #start-overlay
+     rather than swapping it out (see UI.js's initStartScreen), so the
+     latter's own blurred/dimmed backdrop keeps covering the game and the
+     not-yet-triggered splash underneath both. */
+  z-index: 650;
 }
 #pause-overlay.hidden { display: none; }
 
@@ -672,6 +686,90 @@ html, body {
   box-shadow: 0 1px 4px rgba(107, 76, 107, 0.3);
   cursor: pointer;
 }
+
+/* First-launch start screen — shown on page load, ahead of everything else
+   (highest z-index in the game), with a blurred/dimmed view of the tank
+   behind it via backdrop-filter (a compositor-level blur on this one static
+   overlay, nothing like the per-frame ctx.filter cost this codebase
+   otherwise avoids on the canvas itself). Settings opened from here reuses
+   the EXACT SAME #pause-settings sub-view the real pause menu uses (see
+   UI.js's initStartScreen/returnFromPauseSettings) rather than a second copy
+   of the sliders, so "Settings with the same settings as the pause menu" is
+   literally true, not just visually similar. */
+#start-overlay {
+  position: fixed; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(11, 37, 64, 0.45);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 600; /* above the splash (500) — the splash only ever starts animating once this closes */
+}
+#start-overlay.hidden { display: none; }
+#start-modal {
+  width: 300px;
+  background: linear-gradient(165deg, #fffaf3 0%, #ffe4f2 100%);
+  color: #6b4c6b;
+  border-radius: 28px;
+  border: 3px solid #ffffff;
+  padding: 32px 26px 26px;
+  box-shadow: 0 20px 50px rgba(11, 37, 64, 0.5), inset 0 2px 0 rgba(255, 255, 255, 0.7);
+  text-align: center;
+}
+#start-title { font-size: 30px; font-weight: 900; color: #c25f8f; text-shadow: 0 2px 0 rgba(255, 255, 255, 0.6); }
+#start-subtitle { font-size: 12px; font-weight: 700; opacity: 0.65; margin: 6px 0 22px; }
+#start-play-btn { background: linear-gradient(160deg, #a8f0cb 0%, #7ad4a8 100%); color: #1f4a34; box-shadow: 0 3px 8px rgba(53, 145, 97, 0.35), inset 0 2px 0 rgba(255, 255, 255, 0.5); }
+#start-play-btn:hover { background: linear-gradient(160deg, #97e8bd 0%, #68c896 100%); }
+
+/* How-To-Play tutorial page — a scrollable list of icon+text rows, opened
+   from the start screen's Help button. Same centered-modal language as
+   every other popup in this game. */
+#start-help-overlay {
+  position: fixed; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(11, 37, 64, 0.45);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 600;
+}
+#start-help-overlay.hidden { display: none; }
+#start-help-modal {
+  width: 520px;
+  max-width: 92vw;
+  max-height: 84vh;
+  background: linear-gradient(165deg, #fffaf3 0%, #ffe4f2 100%);
+  color: #6b4c6b;
+  border-radius: 28px;
+  border: 3px solid #ffffff;
+  padding: 22px 24px;
+  box-shadow: 0 20px 50px rgba(11, 37, 64, 0.5), inset 0 2px 0 rgba(255, 255, 255, 0.7);
+  display: flex;
+  flex-direction: column;
+}
+#start-help-header-row { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+#start-help-title { font-size: 20px; font-weight: 800; color: #c25f8f; flex: 1; }
+#start-help-back-btn { flex: none; width: auto; padding: 9px 16px; margin-bottom: 0; }
+#start-help-list {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #ffb6d5 #fff0f6;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+#start-help-list::-webkit-scrollbar { width: 8px; }
+#start-help-list::-webkit-scrollbar-track { background: #fff0f6; border-radius: 999px; }
+#start-help-list::-webkit-scrollbar-thumb { background: #ffb6d5; border-radius: 999px; }
+.help-row {
+  display: flex; align-items: center; gap: 14px;
+  background: linear-gradient(160deg, #fffdf8 0%, #fff0dc 100%);
+  border: 2px solid #ffffff;
+  border-radius: 16px;
+  padding: 10px 14px;
+  box-shadow: 0 3px 8px rgba(107, 76, 107, 0.14), inset 0 2px 0 rgba(255, 255, 255, 0.7);
+}
+.help-icon { flex: none; font-size: 26px; width: 36px; text-align: center; }
+.help-text { font-size: 12.5px; line-height: 1.45; }
+.help-text b { color: #c25f8f; }
 
 /* Mound "Throw money at it" confirm popup. No dimming backdrop — #mound-overlay
    stays fully transparent, it's only there as a full-viewport invisible
@@ -785,19 +883,25 @@ html, body {
 }
 #lab-close-btn { flex: none; width: auto; padding: 9px 16px; margin-bottom: 0; }
 
+/* Click-and-drag panning instead of scrolling, per direct request — the
+   tree grew too large (the Gene-Splicing hybrid sub-tree) for scrollbars/
+   wheel-scroll to stay a pleasant way to explore it. overflow:hidden hides
+   any native scrollbar and blocks wheel-scroll, but scrollLeft/scrollTop
+   are still fully readable/settable via JS (see UI.js's initLabTreeDrag) —
+   panning just sets them directly from a mousedown-drag instead of the
+   browser's own scroll handling. drawLabTreeConnectors already reads
+   scrollLeft/scrollTop for its connector math, so panning this way needs no
+   further change there. user-select:none stops a drag from also
+   highlighting node text the way a click-drag normally would on a page. */
 #lab-tree-wrap {
   position: relative;
   flex: 1;
   min-height: 380px;
-  overflow: auto;
-  /* Same custom scrollbar every other scrollable panel in this game uses. */
-  scrollbar-width: thin;
-  scrollbar-color: #ffb6d5 #fff0f6;
+  overflow: hidden;
+  cursor: grab;
+  user-select: none;
 }
-#lab-tree-wrap::-webkit-scrollbar { width: 8px; height: 8px; }
-#lab-tree-wrap::-webkit-scrollbar-track { background: #fff0f6; border-radius: 999px; }
-#lab-tree-wrap::-webkit-scrollbar-thumb { background: #ffb6d5; border-radius: 999px; }
-#lab-tree-wrap::-webkit-scrollbar-thumb:hover { background: #ff9ac4; }
+#lab-tree-wrap.dragging { cursor: grabbing; }
 
 #lab-tree-canvas {
   position: absolute; top: 0; left: 0;
