@@ -155,6 +155,16 @@ export function playUpgrade() {
   notes.forEach((freq, i) => playTone(freq, 0.09, { type: 'square', gain: 0.14, when: i * 0.07 }));
 }
 
+// A soft, muted "thud" — a fish's drop cycle completed but its resource
+// (coin or Science) was already at its active cap, so nothing was actually
+// produced. Deliberately dull and low, sliding down rather than up, so it
+// reads as "nope, capped" rather than any of this game's other "you got
+// something" blips — the one SFX in the game meant to feel like a non-event.
+export function playProductionBlocked() {
+  playTone(220, 0.05, { type: 'triangle', gain: 0.09 }); // A3
+  playTone(164.81, 0.09, { type: 'triangle', gain: 0.07, when: 0.045 }); // E3
+}
+
 // A small sparkle — a fish reaching adulthood and awarding a Tank Point.
 export function playTankPoint() {
   playTone(1174.7, 0.06, { type: 'triangle', gain: 0.12 }); // D6

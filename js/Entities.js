@@ -72,12 +72,15 @@ import {
   GENE_SPLICING_TECH_ID,
   SCIENCE_ITEM_RADIUS,
   SCIENCE_PROGRESS_TICKS,
+  COIN_CAP_BY_LEVEL,
+  SCIENCE_CAP_BY_LEVEL,
+  PRODUCTION_BLOCKED_COLOR,
 } from './Config.js';
 import { stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemForces, updateBuildings } from './Grid.js';
 // Sound is a fire-and-forget side effect at the moment something already
 // happened — the same pattern this file already uses for floatingTexts/
 // notifications, just for audio instead of a visual/text readout.
-import { playPurchase, playFoodPlace, playEat, playFishDeath, playCoinBank, playTankPoint } from './Sound.js';
+import { playPurchase, playFoodPlace, playEat, playFishDeath, playCoinBank, playTankPoint, playProductionBlocked } from './Sound.js';
 
 let _nextId = 1;
 function nextId() {
@@ -265,6 +268,57 @@ export function countTankFood(state) {
     if (item.type === 'food' && item.y < SEABED_FLOOR_Y) n++;
   }
   return n;
+}
+
+// Coin/Science Cap: how many of that item type may exist in state.level.items
+// at once — unlike Food's own cap (countTankFood above), this counts EVERY
+// item of the type anywhere in the tank, seabed city included, since the
+// whole point is "how many currently-unbanked drops exist in the world," not
+// "how many are still reachable by a fish." Checked by updateFish right
+// before a coin/Science Bubble would spawn — see triggerProductionBlocked
+// below for what happens when the cap's already been hit.
+export function countTankItemsByType(state, type) {
+  let n = 0;
+  for (const item of state.level.items) {
+    if (item.type === type) n++;
+  }
+  return n;
+}
+
+// Coin Cap Tank Upgrade — state.level.upgrades.coinCapLevel indexes straight
+// into COIN_CAP_BY_LEVEL (an array of absolute values, not a base+increment
+// formula, since the requested progression — 10/25/50/100/250/500 — isn't an
+// even arithmetic step).
+export function effectiveCoinCapacity(state) {
+  return COIN_CAP_BY_LEVEL[state.level.upgrades.coinCapLevel];
+}
+
+// Science Cap — bought in the Science Lab instead of as a Tank Upgrade (see
+// UI.js's Lab modal), but reads the exact same way.
+export function effectiveScienceCapacity(state) {
+  return SCIENCE_CAP_BY_LEVEL[state.level.upgrades.scienceCapLevel];
+}
+
+// Called the instant a fish's drop cycle completes but its resource is
+// already at its active cap, per direct request ("do NOT spawn the item...
+// render a brief bubble-pop/full-belly indicator... play a distinct muted/
+// blocked sound effect"). Reuses the existing floatingText particle system
+// (same one every other "something happened here" readout in this file
+// already uses) rather than a new render path — a muted "🫧" above the
+// fish's head instead of a normal +$/+🔬 gain readout. `resource` is only
+// ever 'coin' or 'science'; only the coin case also arms the HUD's "shake
+// red" cue (state.ui.coinCapFlashPending, read and cleared by UI.js's
+// updateHUD next frame — Entities.js has no reason to import UI.js just for
+// this one flag, so it's a plain state write, same as every other
+// system-to-system signal in this codebase that isn't a direct function
+// call) — per direct request, only the Coin HUD element shakes on a blocked
+// coin, Science has no equivalent HUD-shake ask.
+function triggerProductionBlocked(state, fish, stageDef, resource) {
+  state.level.floatingTexts.push(
+    createPickupText(fish.x, fish.y - FISH_BASE_SIZE * stageDef.scale * 0.6, '🫧', PRODUCTION_BLOCKED_COLOR)
+  );
+  playProductionBlocked();
+  if (resource === 'coin') state.ui.coinCapFlashPending = true;
 }
 
 // Returns a reason string rather than a bare bool so callers can react
@@ -973,8 +1027,19 @@ function updateFish(fish, state, dtMs) {
     if (fish.dropTimer >= stageDef.dropInterval) {
       fish.dropTimer = 0;
       fish.researchTickIndex = 0;
-      for (let i = 0; i < Math.max(1, stageDef.dropValue); i++) {
-        state.level.items.push(createScience(fish.x, fish.y));
+      // Science Cap: if the tank's already full, the whole brew is blocked —
+      // nothing spawns, the fish gets the blocked feedback once. Otherwise
+      // it spawns up to dropValue bubbles but stops early the instant the
+      // cap fills mid-batch (a partial payout isn't itself a "blocked"
+      // event, so no extra feedback fires for that case).
+      const scienceRoom = effectiveScienceCapacity(state) - countTankItemsByType(state, 'science');
+      if (scienceRoom <= 0) {
+        triggerProductionBlocked(state, fish, stageDef, 'science');
+      } else {
+        const spawnCount = Math.min(Math.max(1, stageDef.dropValue), scienceRoom);
+        for (let i = 0; i < spawnCount; i++) {
+          state.level.items.push(createScience(fish.x, fish.y));
+        }
       }
     }
   } else if (isPureGenerator) {
@@ -1018,8 +1083,16 @@ function updateFish(fish, state, dtMs) {
         : Math.ceil(stageDef.dropValue * Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, (fish.starTier || 1) - 1));
       // Skip entirely for a $0 drop (any not-yet-behavior-wired species) — a
       // worthless coin still lands on a Processor like any other, which is
-      // actively counterproductive busywork for no payout.
-      if (dropValue > 0) state.level.items.push(createCoin(fish.x, fish.y, dropValue));
+      // actively counterproductive busywork for no payout. A genuine drop is
+      // then gated by the Coin Cap — at the cap, nothing spawns and the fish
+      // shows the blocked feedback instead.
+      if (dropValue > 0) {
+        if (countTankItemsByType(state, 'coin') >= effectiveCoinCapacity(state)) {
+          triggerProductionBlocked(state, fish, stageDef, 'coin');
+        } else {
+          state.level.items.push(createCoin(fish.x, fish.y, dropValue));
+        }
+      }
     }
   }
   // (isScavenger falls through here with no passive drop at all — Suckerfish

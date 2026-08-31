@@ -269,7 +269,7 @@ html, body {
   display: flex; flex-wrap: wrap; gap: 8px;
   margin-bottom: 14px;
 }
-#shop-money, #shop-food, #shop-cleanliness, #shop-power, #tank-points-display {
+#shop-money, #shop-food, #shop-coin-cap, #shop-science-cap, #shop-cleanliness, #shop-power, #tank-points-display {
   display: inline-block;
   background: linear-gradient(160deg, #fffdf8 0%, #ffe9f4 100%);
   border: 2px solid #ffffff;
@@ -281,6 +281,7 @@ html, body {
 #tank-points-display { margin-bottom: 14px; }
 #shop-power.hidden { display: none; }
 #shop-power { cursor: default; } /* per direct request, only the HUD copy opens the graph — this one is a plain readout */
+#hud-science-cap.hidden, #shop-science-cap.hidden { display: none; } /* only shown once the Science Octopus is unlocked, same "hidden until relevant" precedent as #hud-power/electric Eel */
 
 /* A soft diagonal light sweep that plays across a UI element every so often
    — per direct request, applied broadly across the HUD/shop/panels (see
@@ -783,6 +784,19 @@ html, body {
   flex: 1;
 }
 #lab-close-btn { flex: none; width: auto; padding: 9px 16px; margin-bottom: 0; }
+
+/* Bubble Capacity — a leveled upgrade card (same DOM shape/CSS class as a
+   Tank Upgrade card, built by the same createUpgradeCard helper in UI.js)
+   sitting above the branching tree rather than inside it, since a capacity
+   bump doesn't gate any species/building unlock and so has no natural node
+   in that dependency web. */
+#lab-capacity-wrap {
+  flex: none;
+  margin-bottom: 16px;
+}
+#lab-capacity-wrap .tank-upgrade-card {
+  padding: 12px 14px;
+}
 
 #lab-tree-wrap {
   position: relative;

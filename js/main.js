@@ -152,6 +152,13 @@ const state = {
     shopCollapsed: true, // shop starts tucked away — just the toggle button — so it doesn't clutter the view
     tankPanelCollapsed: true, // Tank Upgrades panel starts tucked away too — shares the shop's on-screen slot, only one is ever expanded (see UI.js's toggleShopCollapse/toggleTankPanel)
     paused: false, // pause menu open/closed (Escape); update() below skips simulating entirely while true
+    // Set by Entities.js's updateFish the instant a fish's coin-drop cycle is
+    // blocked by the Coin Cap — a plain cross-module state flag rather than
+    // Entities.js importing UI.js directly (which would be circular, since
+    // UI.js already imports plenty from Entities.js), read and cleared by
+    // UI.js's updateHUD on its very next frame to trigger the "shake red"
+    // flash on the Coin HUD readout. See Config.js's COIN_CAP_BY_LEVEL.
+    coinCapFlashPending: false,
   },
   debug: {
     overlayVisible: false,

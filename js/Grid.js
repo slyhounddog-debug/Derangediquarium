@@ -8,7 +8,7 @@ import {
   WORLD_TILES_W,
   WORLD_TILES_H,
   WORLD_H,
-  WASTE_FLOOR_Y,
+  ROCK_SHELF_Y,
   SEABED_ROW_START,
   TILE_EMPTY,
   TILE_PLATFORM,
@@ -378,21 +378,27 @@ function sweepVertical(item, grid, dy) {
       item.vy = 0;
       return { landed: true, tile, row, col: colAt(item.x) };
     }
-    // Waste-only virtual floor, WASTE_FLOOR_Y (2 tiles above the world's
-    // absolute bottom) — nothing built here, just a hard stop so uncaught
-    // Waste always comes to rest at a fixed, visible height (see
-    // renderSeabedGrid's break line) instead of falling off the bottom of
-    // the world and being lost, per direct request. Only triggers while
-    // actually falling into it (stepY > 0) — an item already resting here
-    // that a Fan built in the 2 rows underneath is actively pushing back up
-    // has stepY < 0 and sails right through, unaffected. A real tile placed
-    // anywhere above this line (a Collector, another Platform) still catches
-    // Waste first via the isSolid check above, same as always — this is only
-    // the fallback for whatever nothing else caught.
-    if (item.type === 'waste' && stepY > 0 && nextBottom >= WASTE_FLOOR_Y) {
-      item.y = WASTE_FLOOR_Y - item.radius;
+    // The Rocky Shelf, ROCK_SHELF_Y (4 tiles above the world's absolute
+    // bottom) — nothing built here, just a hard stop so EVERY uncaught item
+    // (coin, Science, Food, or Waste — used to be Waste only) always comes
+    // to rest at a fixed, visible height (see renderRockShelf below) instead
+    // of falling off the bottom of the world and being permanently lost, per
+    // direct request ("the rocky shelf is now a hard barrier for all
+    // objects... all drops stop on it and don't pass to the bottom of the
+    // tank"). Only triggers while actually falling into it (stepY > 0) — an
+    // item already resting here that a Fan built in the rows underneath is
+    // actively pushing back up has stepY < 0 and sails right through,
+    // unaffected. A real tile placed anywhere above this line (a Collector,
+    // another Platform) still catches an item first via the isSolid check
+    // above, same as always — this is only the fallback for whatever
+    // nothing else caught, which — per this same direct request — is now
+    // also the reason stepItemOnGrid's 'lost' status below is effectively
+    // unreachable through normal gravity any more: it's kept purely as a
+    // defensive fallback (see its own comment).
+    if (stepY > 0 && nextBottom >= ROCK_SHELF_Y) {
+      item.y = ROCK_SHELF_Y - item.radius;
       item.vy = 0;
-      return { landed: true, tile: null, row: rowAt(WASTE_FLOOR_Y), col: colAt(item.x) };
+      return { landed: true, tile: null, row: rowAt(ROCK_SHELF_Y), col: colAt(item.x) };
     }
     item.y += stepY;
   }
@@ -453,7 +459,17 @@ function stepCollectorProcessing(item, grid, dt) {
 //   'resting'    — has support directly beneath it *this tick* (re-evaluated every tick, not a one-way flip)
 //   'processing' — being drawn into a Collector's center, not yet consumed — caller leaves it alone
 //   'consumed'   — a Collector finished processing it; caller removes it from the array
-//   'lost'       — fell off the bottom of the world; caller removes it from the array, no payout
+//   'lost'       — fell off the bottom of the world; caller removes it from the array, no payout.
+//                  Effectively unreachable through normal gravity any more —
+//                  sweepVertical's Rocky Shelf stop (ROCK_SHELF_Y, see
+//                  Config.js) now catches every item type well above
+//                  WORLD_H, per direct request that nothing ever falls off
+//                  the bottom of the tank and gets lost. Left in place
+//                  purely as a defensive fallback (an item somehow ending up
+//                  with a NaN/out-of-range position bypasses tile physics
+//                  entirely), same "leave the safety net in place even once
+//                  the normal path can't reach it" precedent as every other
+//                  defensively-retained branch in this codebase.
 export function stepItemOnGrid(item, state, dt, physics) {
   if (item.y > WORLD_H + ITEM_LOST_BELOW_WORLD_MARGIN_PX) return 'lost';
 
@@ -815,11 +831,13 @@ function getCityTexturePattern(ctx) {
   return cityTexturePattern;
 }
 
-// A jagged rocky shelf at WASTE_FLOOR_Y, the fixed height uncaught Waste
-// rests at (see that constant's comment in Config.js) — replaces the old
-// plain dashed line per direct request, so it reads as a physical rock ledge
-// Waste is piling up against instead of an abstract marker. Draws on top of
-// the base seabed fill but underneath any real tiles.
+// A jagged rocky shelf at ROCK_SHELF_Y, the fixed height EVERY uncaught item
+// rests at now (see that constant's comment in Config.js — originally Waste
+// only, generalized to coins/Science/Food/Waste alike per direct request
+// that it "is now a hard barrier for all objects"). Replaces the old plain
+// dashed line, so it reads as a physical rock ledge things are piling up
+// against instead of an abstract marker. Draws on top of the base seabed
+// fill but underneath any real tiles.
 //
 // The jagged top edge is a fixed set of world-space (x, yOffset) points
 // spanning the full world width, generated once at module load — NOT
@@ -843,9 +861,9 @@ const ROCK_SHELF_POINTS = (() => {
   return points;
 })();
 
-function renderWasteFloorBreak(ctx, camera, canvasWidth, canvasHeight) {
-  const topScreenY = worldToScreen(0, WASTE_FLOOR_Y - ROCK_SHELF_JAG_PX, camera).y;
-  const bottomScreenY = worldToScreen(0, WASTE_FLOOR_Y + ROCK_SHELF_THICKNESS, camera).y;
+function renderRockShelf(ctx, camera, canvasWidth, canvasHeight) {
+  const topScreenY = worldToScreen(0, ROCK_SHELF_Y - ROCK_SHELF_JAG_PX, camera).y;
+  const bottomScreenY = worldToScreen(0, ROCK_SHELF_Y + ROCK_SHELF_THICKNESS, camera).y;
   if (topScreenY > canvasHeight || bottomScreenY < 0) return;
 
   const worldLeft = camera.x;
@@ -854,14 +872,14 @@ function renderWasteFloorBreak(ctx, camera, canvasWidth, canvasHeight) {
   const visible = ROCK_SHELF_POINTS.filter((p) => p.x >= worldLeft - margin && p.x <= worldRight + margin);
   if (visible.length === 0) return;
 
-  const screenPoints = visible.map((p) => worldToScreen(p.x, WASTE_FLOOR_Y + p.y, camera));
+  const screenPoints = visible.map((p) => worldToScreen(p.x, ROCK_SHELF_Y + p.y, camera));
   const bottomY = bottomScreenY;
 
   ctx.save();
 
   // Rock body: a shaded fill under the jagged top edge, extending down to a
-  // flat bottom well past WASTE_FLOOR_Y so it reads as a solid ledge rather
-  // than a thin line waste happens to rest on.
+  // flat bottom well past ROCK_SHELF_Y so it reads as a solid ledge rather
+  // than a thin line items happen to rest on.
   ctx.beginPath();
   ctx.moveTo(-4, screenPoints[0].y);
   for (const sp of screenPoints) ctx.lineTo(sp.x, sp.y);
@@ -929,7 +947,7 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
   ctx.fillRect(0, Math.max(0, topOfSeabed.y) + 4, canvasWidth, canvasHeight);
   ctx.restore();
 
-  renderWasteFloorBreak(ctx, camera, canvasWidth, canvasHeight);
+  renderRockShelf(ctx, camera, canvasWidth, canvasHeight);
   renderCameraBottomBuffer(ctx, camera, canvasWidth, canvasHeight);
 
   // The real tile loop is skipped (not the whole function) once every real

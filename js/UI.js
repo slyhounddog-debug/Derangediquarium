@@ -38,9 +38,16 @@ import {
   SCIENCE_LAB_UPGRADES,
   SCIENCE_LAB_UPGRADE_LIST,
   SPECIES_LIST,
+  COIN_CAP_BY_LEVEL,
+  COIN_CAP_UPGRADE_COSTS,
+  COIN_CAP_UPGRADE_MAX_LEVEL,
+  SCIENCE_CAP_BY_LEVEL,
+  SCIENCE_CAP_UPGRADE_SCIENCE_COSTS,
+  SCIENCE_CAP_UPGRADE_GOLD_COSTS,
+  SCIENCE_CAP_UPGRADE_MAX_LEVEL,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings, loadLevel } from './Levels.js';
-import { getFishPurchaseCost, effectiveFoodCapacity, countTankFood } from './Entities.js';
+import { getFishPurchaseCost, effectiveFoodCapacity, countTankFood, effectiveCoinCapacity, effectiveScienceCapacity, countTankItemsByType } from './Entities.js';
 import { getTile, worldToTile, getBuildingCost, FAN_STATS } from './Grid.js';
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
@@ -144,6 +151,8 @@ export function initUI(state) {
     hud: document.getElementById('hud'),
     money: document.getElementById('hud-money'),
     food: document.getElementById('hud-food'),
+    coinCap: document.getElementById('hud-coin-cap'),
+    scienceCap: document.getElementById('hud-science-cap'),
     cleanliness: document.getElementById('hud-cleanliness'),
     power: document.getElementById('hud-power'),
     powerGraph: document.getElementById('hud-power-graph'),
@@ -152,6 +161,8 @@ export function initUI(state) {
     shopCollapseBtn: document.getElementById('shop-collapse-btn'),
     shopMoney: document.getElementById('shop-money'),
     shopFood: document.getElementById('shop-food'),
+    shopCoinCap: document.getElementById('shop-coin-cap'),
+    shopScienceCap: document.getElementById('shop-science-cap'),
     shopCleanliness: document.getElementById('shop-cleanliness'),
     shopPower: document.getElementById('shop-power'),
     shopGrid: document.getElementById('shop-species-grid'),
@@ -189,6 +200,7 @@ export function initUI(state) {
     labModal: document.getElementById('lab-modal'),
     labScienceReadout: document.getElementById('lab-science-readout'),
     labCloseBtn: document.getElementById('lab-close-btn'),
+    labCapacityWrap: document.getElementById('lab-capacity-wrap'),
     labTreeWrap: document.getElementById('lab-tree-wrap'),
     labTreeCanvas: document.getElementById('lab-tree-canvas'),
     labTreeColumns: document.getElementById('lab-tree-columns'),
@@ -292,6 +304,8 @@ export function initUI(state) {
   els.cleanliness.addEventListener('animationend', clearFlashClass);
   els.shopFood.addEventListener('animationend', clearFlashClass);
   els.shopCleanliness.addEventListener('animationend', clearFlashClass);
+  els.coinCap.addEventListener('animationend', clearFlashClass);
+  els.shopCoinCap.addEventListener('animationend', clearFlashClass);
 
   // No Buy button any more — picking a species arms it as the active
   // click-tool (state.ui.selectedTool = 'fish:<id>'), exactly like picking a
@@ -305,6 +319,7 @@ export function initUI(state) {
   buildShopPanel(state);
   buildBuildPalette(state);
   buildTankPanel(state);
+  buildLabCapacityCard(state);
   buildLabTree(state);
   scheduleSheenAll();
 }
@@ -338,9 +353,11 @@ function updateShopCollapse(state) {
   els.money.classList.remove('flash-pickup', 'flash-spend');
   els.food.classList.remove('flash-pickup', 'flash-spend');
   els.cleanliness.classList.remove('flash-pickup', 'flash-spend');
+  els.coinCap.classList.remove('flash-pickup', 'flash-spend');
   els.shopMoney.classList.remove('flash-pickup', 'flash-spend');
   els.shopFood.classList.remove('flash-pickup', 'flash-spend');
   els.shopCleanliness.classList.remove('flash-pickup', 'flash-spend');
+  els.shopCoinCap.classList.remove('flash-pickup', 'flash-spend');
   // The preview canvas is invisible while collapsed — no point animating
   // it. Resume on expand if a species is already selected; a building
   // preview has no animation to resume, just redraw its static swatch.
@@ -508,6 +525,49 @@ function labNodeDepth(id, memo) {
 
 let labNodeDepthMemo = {};
 let labNodeButtons = {}; // id -> { btn, costEl }, rebuilt by buildLabTree, read by refreshLabTree/drawLabTreeConnectors
+let labCapacityCard = null; // { card, levelEl, descEl, buyBtn } — Bubble Capacity, built once alongside the tree
+
+// Bubble (Science) Capacity — a leveled upgrade card sitting above the
+// branching tree, not a node inside it (see Config.js's SCIENCE_CAP_BY_LEVEL
+// for why). Built once at init, same "shape never changes, only its
+// level/cost/afford state does" pattern buildTankPanel's cards use.
+function buildLabCapacityCard(state) {
+  els.labCapacityWrap.innerHTML = '';
+  labCapacityCard = createUpgradeCard('Bubble Capacity', '🫧');
+  labCapacityCard.buyBtn.addEventListener('click', () => {
+    const level = state.level.upgrades.scienceCapLevel;
+    if (level >= SCIENCE_CAP_UPGRADE_MAX_LEVEL) return;
+    const scienceCost = SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[level];
+    const goldCost = SCIENCE_CAP_UPGRADE_GOLD_COSTS[level];
+    if (state.level.science < scienceCost || state.level.money < goldCost) return;
+    state.level.science -= scienceCost;
+    state.level.money -= goldCost;
+    state.level.upgrades.scienceCapLevel += 1;
+    playUpgrade();
+    refreshLabCapacityCard(state);
+  });
+  els.labCapacityWrap.appendChild(labCapacityCard.card);
+  refreshLabCapacityCard(state);
+}
+
+// Called from refreshLabTree below so every existing call site (openLabMenu,
+// updateHUD while the Lab's open) picks this up for free, same as the tree
+// itself — Science/money/level can all change while the modal's open.
+function refreshLabCapacityCard(state) {
+  if (!labCapacityCard) return;
+  const level = state.level.upgrades.scienceCapLevel;
+  labCapacityCard.levelEl.textContent = `Level ${level} / ${SCIENCE_CAP_UPGRADE_MAX_LEVEL}`;
+  labCapacityCard.descEl.innerHTML = describeScienceCapacityLevel(level);
+  if (level >= SCIENCE_CAP_UPGRADE_MAX_LEVEL) {
+    labCapacityCard.buyBtn.textContent = 'Maxed out';
+    labCapacityCard.buyBtn.disabled = true;
+  } else {
+    const scienceCost = SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[level];
+    const goldCost = SCIENCE_CAP_UPGRADE_GOLD_COSTS[level];
+    labCapacityCard.buyBtn.textContent = `${scienceCost} 🔬 · $${goldCost}`;
+    labCapacityCard.buyBtn.disabled = state.level.science < scienceCost || state.level.money < goldCost;
+  }
+}
 
 // Built once at init (mirrors buildTankPanel) — the tree's SHAPE (which
 // node sits in which column) never changes at runtime, only each node's
@@ -572,6 +632,7 @@ function buyLabUpgrade(state, id) {
 // Re-checked every frame the popup is open (from updateHUD) — Science/money
 // and every node's prerequisite state can all change while it's open.
 function refreshLabTree(state) {
+  refreshLabCapacityCard(state);
   const science = state.level.science;
   els.labScienceReadout.textContent = `🔬 ${science} · 💰 $${Math.floor(state.level.money)}`;
   for (const node of SCIENCE_LAB_UPGRADE_LIST) {
@@ -845,6 +906,28 @@ function describeFoodCapacityLevel(level) {
   return `Up to <span class="stat-current">${cap} food</span> → <span class="stat-next">${nextCap} food</span> on screen at once.`;
 }
 
+// COIN_CAP_BY_LEVEL/SCIENCE_CAP_BY_LEVEL are absolute-value tables, not a
+// base+increment formula (the requested progression isn't an even step), so
+// these two just index straight in rather than computing a cap like
+// describeFoodCapacityLevel above does.
+function describeCoinCapacityLevel(level) {
+  const cap = COIN_CAP_BY_LEVEL[level];
+  if (level >= COIN_CAP_UPGRADE_MAX_LEVEL) {
+    return `Up to ${cap} coins can sit in the tank uncollected at once.`;
+  }
+  const nextCap = COIN_CAP_BY_LEVEL[level + 1];
+  return `Up to <span class="stat-current">${cap} coins</span> → <span class="stat-next">${nextCap} coins</span> can sit in the tank uncollected at once.`;
+}
+
+function describeScienceCapacityLevel(level) {
+  const cap = SCIENCE_CAP_BY_LEVEL[level];
+  if (level >= SCIENCE_CAP_UPGRADE_MAX_LEVEL) {
+    return `Up to ${cap} Science Bubbles can sit in the tank uncollected at once.`;
+  }
+  const nextCap = SCIENCE_CAP_BY_LEVEL[level + 1];
+  return `Up to <span class="stat-current">${cap} bubbles</span> → <span class="stat-next">${nextCap} bubbles</span> can sit in the tank uncollected at once.`;
+}
+
 // Builds a single card's DOM once and returns references to the parts that
 // change over time (level readout, description, buy button) — refreshTankPanel
 // mutates these in place every frame the panel's open, rather than rebuilding
@@ -867,16 +950,17 @@ function createUpgradeCard(name, icon) {
   return { card, levelEl, descEl, buyBtn };
 }
 
-let tankCards = null; // { foodQuality, fishMovement, foodCapacity, fishMerging } — each { card, levelEl, descEl, buyBtn }
+let tankCards = null; // { foodQuality, fishMovement, foodCapacity, coinCapacity, fishMerging } — each { card, levelEl, descEl, buyBtn }
 
 function buildTankPanel(state) {
   els.tankUpgradeList.innerHTML = '';
   const foodQuality = createUpgradeCard('Food Quality', '🍽️');
   const fishMovement = createUpgradeCard('Fish Movement', '🏊');
   const foodCapacity = createUpgradeCard('Food Capacity', '🧺');
+  const coinCapacity = createUpgradeCard('Coin Capacity', '🪙');
   const fishMerging = createUpgradeCard('Fish Merging', '🧬');
   const geneSplicing = createUpgradeCard('Gene-Splicing', '🧪');
-  tankCards = { foodQuality, fishMovement, foodCapacity, fishMerging, geneSplicing };
+  tankCards = { foodQuality, fishMovement, foodCapacity, coinCapacity, fishMerging, geneSplicing };
 
   // A one-time unlock, not a leveled ladder like the three above — per
   // direct request, drag-to-combine (Entities.js's isCombinableFish) is now
@@ -944,8 +1028,18 @@ function buildTankPanel(state) {
     playUpgrade();
     refreshTankPanel(state);
   });
+  coinCapacity.buyBtn.addEventListener('click', () => {
+    const level = state.level.upgrades.coinCapLevel;
+    if (level >= COIN_CAP_UPGRADE_MAX_LEVEL) return;
+    const cost = COIN_CAP_UPGRADE_COSTS[level];
+    if (state.level.tankPoints.available < cost) return;
+    state.level.tankPoints.available -= cost;
+    state.level.upgrades.coinCapLevel += 1;
+    playUpgrade();
+    refreshTankPanel(state);
+  });
 
-  els.tankUpgradeList.append(foodQuality.card, fishMovement.card, foodCapacity.card, fishMerging.card, geneSplicing.card);
+  els.tankUpgradeList.append(foodQuality.card, fishMovement.card, foodCapacity.card, coinCapacity.card, fishMerging.card, geneSplicing.card);
 
   // Defensive Capabilities: shown per the design update's Phase 2 UI-shell
   // scope, but locked — there's no alien system to upgrade yet (Phase 5).
@@ -964,7 +1058,7 @@ function buildTankPanel(state) {
 // state can all change while the player has it open.
 function refreshTankPanel(state) {
   if (!tankCards) return;
-  const { foodQuality, fishMovement, foodCapacity, fishMerging, geneSplicing } = tankCards;
+  const { foodQuality, fishMovement, foodCapacity, coinCapacity, fishMerging, geneSplicing } = tankCards;
   const available = state.level.tankPoints.available;
 
   const fqLevel = state.level.upgrades.foodQuality;
@@ -1001,6 +1095,18 @@ function refreshTankPanel(state) {
     const cost = FOOD_CAPACITY_UPGRADE_COSTS[fcLevel];
     foodCapacity.buyBtn.textContent = `${cost} 🏆`;
     foodCapacity.buyBtn.disabled = available < cost;
+  }
+
+  const ccLevel = state.level.upgrades.coinCapLevel;
+  coinCapacity.levelEl.textContent = `Level ${ccLevel} / ${COIN_CAP_UPGRADE_MAX_LEVEL}`;
+  coinCapacity.descEl.innerHTML = describeCoinCapacityLevel(ccLevel);
+  if (ccLevel >= COIN_CAP_UPGRADE_MAX_LEVEL) {
+    coinCapacity.buyBtn.textContent = 'Maxed out';
+    coinCapacity.buyBtn.disabled = true;
+  } else {
+    const cost = COIN_CAP_UPGRADE_COSTS[ccLevel];
+    coinCapacity.buyBtn.textContent = `${cost} 🏆`;
+    coinCapacity.buyBtn.disabled = available < cost;
   }
 
   const merged = state.level.upgrades.fishMergingUnlocked;
@@ -1367,6 +1473,33 @@ export function updateHUD(state) {
   const foodText = `🍽️ ${countTankFood(state)}/${effectiveFoodCapacity(state)}`;
   els.food.textContent = foodText;
   els.shopFood.textContent = foodText;
+
+  // Coin Cap — always shown (coins exist from the very start), unlike
+  // Science below. Counts EVERY coin currently in state.level.items, seabed
+  // city included — see Entities.js's countTankItemsByType.
+  const coinCapText = `🪙 ${countTankItemsByType(state, 'coin')}/${effectiveCoinCapacity(state)}`;
+  els.coinCap.textContent = coinCapText;
+  els.shopCoinCap.textContent = coinCapText;
+  // Set by Entities.js's updateFish the instant a coin-drop cycle is blocked
+  // by the cap — a plain flag read-and-cleared here rather than a direct
+  // function call, since Entities.js has no reason to import UI.js. Per
+  // direct request, only the Coin HUD shakes on a blocked coin; Science has
+  // no equivalent ask.
+  if (state.ui.coinCapFlashPending) {
+    state.ui.coinCapFlashPending = false;
+    playFlash(state.ui.shopCollapsed ? els.coinCap : els.shopCoinCap, 'flash-spend');
+  }
+
+  // Science Cap — hidden until the Science Octopus is unlocked, same
+  // "hidden until relevant" precedent as the electricity readout below.
+  const octopusUnlocked = state.meta.speciesUnlocked.includes('octopus');
+  els.scienceCap.classList.toggle('hidden', !octopusUnlocked);
+  els.shopScienceCap.classList.toggle('hidden', !octopusUnlocked);
+  if (octopusUnlocked) {
+    const scienceCapText = `🔬 ${countTankItemsByType(state, 'science')}/${effectiveScienceCapacity(state)}`;
+    els.scienceCap.textContent = scienceCapText;
+    els.shopScienceCap.textContent = scienceCapText;
+  }
 
   // Electricity — only shown at all once Electric Eel is unlocked, per
   // direct request. Text only updates once a real second, matching the

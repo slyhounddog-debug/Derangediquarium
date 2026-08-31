@@ -8,12 +8,22 @@
 // ---- World & coordinate constants (§3.3) ----
 export const TILE_SIZE = 32; // px per tile — every coordinate transform is built on this
 export const WORLD_TILES_W = 160; // world width in tiles
-export const WORLD_TILES_H = 45; // world height in tiles
+// World height in tiles — 47, up from 45 per direct request ("allow for 4
+// lines of buildings under the rocky shelf line instead of 2"). The water
+// column (SEABED_ROW_START and up) is untouched; the 2 extra rows are pure
+// seabed, added below the existing bottom edge specifically so ROCK_SHELF_Y
+// below lands at the exact same absolute pixel height it always has (see its
+// own comment) — the tank's visible silhouette doesn't shift at all, there's
+// just more real floor beneath the shelf now. CAMERA_BOTTOM_BUFFER_PX is
+// shrunk by the same 2 tiles' worth of px below so the combined scrollable
+// depth (WORLD_H + the buffer) stays exactly what it was before, per direct
+// request to "keep the height of the tank and visual buffer the same."
+export const WORLD_TILES_H = 47;
 export const WORLD_W = WORLD_TILES_W * TILE_SIZE; // 5120px
-export const WORLD_H = WORLD_TILES_H * TILE_SIZE; // 1440px
+export const WORLD_H = WORLD_TILES_H * TILE_SIZE; // 1504px
 
 export const SEABED_ROW_START = 27; // first seabed tile row; rows 0-26 are water column
-export const SEABED_ROW_END = WORLD_TILES_H - 1; // last seabed tile row (44)
+export const SEABED_ROW_END = WORLD_TILES_H - 1; // last seabed tile row (46)
 export const SEABED_FLOOR_Y = SEABED_ROW_START * TILE_SIZE; // world-y of the water/seabed boundary — Phase 1 renders this as a flat floor, Phase 2 replaces it with real tiles, but everything reads this one constant
 // A pure-visual strip the camera can scroll past the world's real bottom
 // edge (WORLD_H) into, per direct request — a permanent home for the fixed
@@ -27,20 +37,31 @@ export const SEABED_FLOOR_Y = SEABED_ROW_START * TILE_SIZE; // world-y of the wa
 // so this buffer reads as "the same city floor" for free; the only new
 // render step is the black gradient Grid.js's renderCameraBottomBuffer adds
 // on top, fading to black exactly at the buffer's own bottom edge (not
-// bleeding up into the real seabed above it).
-export const CAMERA_BOTTOM_BUFFER_PX = 220;
-// A fixed rest height for unrouted Waste, 2 tiles above the world's absolute
-// bottom row — per direct request, so Waste never just vanishes off the
-// bottom of the world (see "Items can't stack, and can fall off the bottom")
-// or piles invisibly out of view. Grid.js's stepItemOnGrid treats this as a
-// virtual floor for Waste ONLY (Food/Coin still fall through to a real tile
-// or off the bottom, unchanged) — it doesn't occupy or block a real grid
-// tile, so the two rows underneath it stay fully buildable: a Fan built
-// there and aimed up can still blow resting Waste back off this line into
-// the water column, same as it would push it off any real solid tile.
-// Grid.js's renderSeabedGrid also draws a visible break line at this height
-// so the rest line doesn't just look like Waste floating in empty space.
-export const WASTE_FLOOR_Y = WORLD_H - 2 * TILE_SIZE;
+// bleeding up into the real seabed above it). Cut from 220 to 156 (2 tiles'
+// worth of px) per direct request that the buffer "is a little too tall" —
+// those 2 tiles moved into WORLD_TILES_H above instead, as real buildable
+// seabed rather than dead visual padding.
+export const CAMERA_BOTTOM_BUFFER_PX = 156;
+// A fixed rest height, 4 tiles above the world's absolute bottom row, that
+// NOTHING falls past — coins, Science Bubbles, Food, and Waste alike, per
+// direct request ("the rocky shelf is now a hard barrier for all objects...
+// don't pass to the bottom of the tank"). Previously this was a Waste-only
+// virtual floor (everything else could fall through an unbuilt gap all the
+// way past the world's bottom and be permanently lost — see "Items can't
+// stack, and can fall off the bottom"); Grid.js's sweepVertical now applies
+// it to every item type unconditionally, so nothing the player produces can
+// ever just vanish any more. Bumped from 2 tiles above the bottom to 4 (see
+// WORLD_TILES_H above) so the 2 real rows underneath it stay fully
+// buildable — 4 now, not 2 — while landing at the exact same absolute pixel
+// height (WORLD_H - 4*TILE_SIZE == the OLD WORLD_H - 2*TILE_SIZE) it always
+// rendered at, so the shelf itself doesn't visibly move at all. It doesn't
+// occupy or block a real grid tile, so a Fan built underneath it and aimed
+// up can still blow a resting item back off this line into the water
+// column, same as it would push one off any real solid tile. Grid.js's
+// renderSeabedGrid also draws a jagged rock-shelf visual at this height (see
+// its renderRockShelf) so the rest line reads as a physical ledge, not items
+// floating in empty space.
+export const ROCK_SHELF_Y = WORLD_H - 4 * TILE_SIZE;
 
 // ---- Seabed grid tile types (Phase 2) ----
 // state.level.grid is a full WORLD_TILES_H x WORLD_TILES_W array of these
@@ -573,6 +594,36 @@ export const FOOD_MAX_ON_SCREEN_BASE = 3; // start with 3 placeable pellets per 
 export const FOOD_CAPACITY_UPGRADE_INCREMENT = 1; // per level — base 2 -> 3 -> 4 -> ... -> 11 at max level (9 levels)
 export const FOOD_CAPACITY_UPGRADE_COSTS = FISH_MOVEMENT_FOOD_CAPACITY_UPGRADE_COSTS;
 export const FOOD_CAPACITY_UPGRADE_MAX_LEVEL = FOOD_CAPACITY_UPGRADE_COSTS.length;
+
+// Coin Cap: how many Coin items can exist in state.level.items at once — per
+// direct request, now that the Rocky Shelf keeps every coin in the tank
+// forever instead of letting an uncaught one eventually fall off the bottom
+// and vanish, there needs to be an explicit ceiling instead or a fish's
+// passive production could pile up unboundedly. Checked in Entities.js's
+// updateFish right before a coin would spawn (effectiveCoinCapacity(state) —
+// state.level.upgrades.coinCapLevel indexes straight into COIN_CAP_BY_LEVEL,
+// same "array of absolute values, not a base+increment formula" shape as
+// FOOD_HUNGER_RELIEF_BY_LEVEL uses, since these steps aren't an even
+// arithmetic progression). Upgraded exclusively through a Tank Upgrade (Tank
+// Points) — see COIN_CAP_UPGRADE_COSTS, mirroring Food Capacity's own
+// leveled-cap pattern exactly, just gating Coins instead of Food and with no
+// "only while in open water" carve-out (a coin resting in the seabed city
+// still very much counts as an "active drop" the player hasn't banked yet).
+export const COIN_CAP_BY_LEVEL = [10, 25, 50, 100, 250, 500]; // index 0 = unupgraded default
+export const COIN_CAP_UPGRADE_COSTS = [3, 8, 20, 45, 80]; // Tank Points — placeholder balance, tune once real playtesting exists, same as every other economy constant here
+export const COIN_CAP_UPGRADE_MAX_LEVEL = COIN_CAP_UPGRADE_COSTS.length;
+
+// Science Cap: the same idea as Coin Cap above, but for Science Bubble items
+// and upgraded exclusively through the Science Lab instead of Tank Points —
+// per direct request. Priced like every other Lab node (both Science AND
+// gold at once, UI.js's Lab modal), but shown as its own small leveled card
+// above the branching tree rather than a node inside SCIENCE_LAB_UPGRADES —
+// a capacity bump doesn't gate any species/building unlock, so it has no
+// natural place in that dependency web.
+export const SCIENCE_CAP_BY_LEVEL = [5, 10, 20, 30, 40, 50]; // index 0 = unupgraded default
+export const SCIENCE_CAP_UPGRADE_SCIENCE_COSTS = [10, 20, 35, 60, 100]; // placeholder balance, tune once real playtesting exists
+export const SCIENCE_CAP_UPGRADE_GOLD_COSTS = [500, 1500, 3500, 7500, 15000];
+export const SCIENCE_CAP_UPGRADE_MAX_LEVEL = SCIENCE_CAP_UPGRADE_SCIENCE_COSTS.length;
 
 // Fish Merging (Economy Fish Combining's drag-to-combine interaction) is a
 // Tank Upgrade now, not a Tier unlock — a one-time, unleveled purchase
@@ -1136,6 +1187,14 @@ export const GENE_SPLICING_TECH_ID = 'gene_splicing';
 export const GENE_SPLICING_TANK_POINT_COST = 5; // Tank Points
 export const SCIENCE_COLOR = '#5fc9ff';
 export const POWER_COLOR = '#ffd23f';
+// A muted blue-grey "🫧" floating bubble-pop, planted above a fish's head the
+// instant its drop cycle completes while its resource (coin or Science) is
+// already at its active cap — per direct request, a "full-belly" visual cue
+// that production was blocked rather than the item just silently not
+// appearing. Deliberately desaturated/muted compared to every other floating
+// text color in this game (all of which signal a genuine gain) so it reads
+// as "nothing happened" at a glance, not another reward.
+export const PRODUCTION_BLOCKED_COLOR = '#9fb0c2';
 // The 3 utility species — the only valid splice SOURCES (dragged onto an
 // eligible target, never the other way around, to keep the interaction
 // symmetric with Economy Fish Combining's own single-direction drag). Also
