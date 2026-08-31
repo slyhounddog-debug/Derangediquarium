@@ -67,6 +67,10 @@ import {
   CLEANLINESS_WARNING_MESSAGE,
 } from './Config.js';
 import { stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemForces, updateBuildings } from './Grid.js';
+// Sound is a fire-and-forget side effect at the moment something already
+// happened — the same pattern this file already uses for floatingTexts/
+// notifications, just for audio instead of a visual/text readout.
+import { playPurchase, playFoodPlace, playEat, playFishDeath, playCoinBank, playTankPoint } from './Sound.js';
 
 let _nextId = 1;
 function nextId() {
@@ -236,12 +240,31 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
 }
 
 // Food Capacity Tank Upgrade: how many food pellets can exist at once — see
-// Config.js's FOOD_MAX_ON_SCREEN_BASE. Counts state.level.items directly
-// rather than tracking a running total, since food is removed from that
-// array in several different places (eaten, despawned, lost) and a cached
-// counter would drift out of sync with any of them.
+// Config.js's FOOD_MAX_ON_SCREEN_BASE.
 export function effectiveFoodCapacity(state) {
   return FOOD_MAX_ON_SCREEN_BASE + FOOD_CAPACITY_UPGRADE_INCREMENT * state.level.upgrades.foodCapacity;
+}
+
+// Only Food actually above SEABED_FLOOR_Y — in the open-water tank, where
+// fish can reach it — counts against the cap, per direct request: Food that's
+// fallen (or been dispensed by an Auto-Feeder) into the seabed city no longer
+// occupies a capacity "slot" at all, so it's a strategic stash rather than
+// something that has to be routed back up immediately or wasted. The instant
+// a Fan blows a piece back up past the line, it counts again — this needs no
+// extra bookkeeping since it's just a live position check, re-evaluated
+// fresh every call, same as every other "count state.level.items directly"
+// pattern in this codebase (a cached counter would drift out of sync with
+// wherever food gets removed — eaten, despawned, lost, or now, this City/
+// tank boundary crossing). This means the tank can briefly hold MORE than
+// the nominal cap at once — the cap only ever gates a fresh spawn, not an
+// existing pellet a Fan pushes back up from the city — which is the exact
+// "in theory more than cap/cap" behavior requested.
+export function countTankFood(state) {
+  let n = 0;
+  for (const item of state.level.items) {
+    if (item.type === 'food' && item.y < SEABED_FLOOR_Y) n++;
+  }
+  return n;
 }
 
 // Returns a reason string rather than a bare bool so callers can react
@@ -256,10 +279,10 @@ export function trySpawnFood(state, x, y) {
   // normal) — only where a fresh pellet can be manually placed.
   if (y >= SEABED_FLOOR_Y) return 'in_city';
   if (state.level.money < FOOD_COST) return 'no_money';
-  const currentFoodCount = state.level.items.reduce((n, item) => n + (item.type === 'food' ? 1 : 0), 0);
-  if (currentFoodCount >= effectiveFoodCapacity(state)) return 'capacity_full';
+  if (countTankFood(state) >= effectiveFoodCapacity(state)) return 'capacity_full';
   state.level.money -= FOOD_COST;
   state.level.items.push(createFood(x, y));
+  playFoodPlace();
   return 'spawned';
 }
 
@@ -279,6 +302,7 @@ export function trySpawnPurchasedFish(state, speciesId, x, y) {
   if (state.level.money < cost) return 'no_money';
   state.level.money -= cost;
   state.level.entities.push(createFish(speciesId, x, y, state, { grown: false }));
+  playPurchase();
   if (!state.level.tutorialFlags.firstFishBought) {
     state.level.tutorialFlags.firstFishBought = true;
     pushStoryNotification(state, FIRST_FISH_BOUGHT_MESSAGE);
@@ -315,6 +339,7 @@ export function tryBankCoinAt(state, worldX, worldY) {
     const clickRadius = item.radius * COIN_CLICK_RADIUS_MULTIPLIER;
     if (dx * dx + dy * dy <= clickRadius * clickRadius) {
       bankMoney(state, item.value);
+      playCoinBank();
       const color = getCoinColor(item.value);
       state.level.floatingTexts.push(createPickupText(item.x, item.y, `+$${item.value}`, color));
       items.splice(i, 1);
@@ -557,6 +582,7 @@ function updateCoin(item, state, dtMs, spawned) {
   const status = stepItemOnGrid(item, state, dt, physics);
   if (status === 'consumed') {
     bankMoney(state, item.value);
+    playCoinBank();
     state.level.floatingTexts.push(createPickupText(item.x, item.y, `+$${item.value}`, getCoinColor(item.value)));
     state.level.gridStats.itemsRoutedTotal += 1;
     spawned.push(createWaste(item.x, item.y)); // a basic Collector is unpowered and dirty — see Config.js's WASTE_* comment
@@ -672,6 +698,7 @@ function awardTankPoint(state, fish) {
   state.level.tankPoints.total += TANK_POINT_PER_ADULT_FISH;
   state.level.tankPoints.available += TANK_POINT_PER_ADULT_FISH;
   state.level.floatingTexts.push(createPickupText(fish.x, fish.y, '+1 Tank Point!', TANK_POINT_COLOR));
+  playTankPoint();
   if (isFirst) pushStoryNotification(state, TANK_POINT_TUTORIAL_MESSAGE);
 }
 
@@ -687,6 +714,7 @@ function updateFish(fish, state, dtMs) {
   const hungerRate = def.hungerRate * Math.pow(FISH_STAR_TIER_HUNGER_MULTIPLIER, (fish.starTier || 1) - 1);
   fish.hunger = Math.min(HUNGER_MAX, fish.hunger + hungerRate * dt);
   if (fish.hunger >= HUNGER_MAX) {
+    playFishDeath();
     if (!state.level.tutorialFlags.firstFishDied) {
       state.level.tutorialFlags.firstFishDied = true;
       pushStoryNotification(state, FIRST_FISH_DEATH_MESSAGE);
@@ -710,6 +738,7 @@ function updateFish(fish, state, dtMs) {
       if (dist <= FISH_EAT_RADIUS) {
         const idx = state.level.items.indexOf(target);
         if (idx !== -1) state.level.items.splice(idx, 1);
+        playEat();
         if (isScavenger) {
           // Flat relief, deliberately not tied to the Food Quality Tank
           // Upgrade tree — that tree is themed around player-bought Food

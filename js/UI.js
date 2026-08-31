@@ -27,13 +27,17 @@ import {
   BUILDING_FAMILIES,
   BUILDING_TYPES,
   FISH_MERGING_UNLOCK_COST,
+  CLEANLINESS_MAX,
+  CLEANLINESS_COLOR_CLEAN,
+  CLEANLINESS_COLOR_DIRTY,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings, loadLevel } from './Levels.js';
-import { getFishPurchaseCost, effectiveFoodCapacity } from './Entities.js';
+import { getFishPurchaseCost, effectiveFoodCapacity, countTankFood } from './Entities.js';
 import { getTile, worldToTile, getBuildingCost } from './Grid.js';
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
+import { playUpgrade } from './Sound.js';
 
 const MOUND_MENU_GAP_PX = 12; // screen px of breathing room between the popup's bottom edge and the Mound's top edge
 const MOUND_MENU_TRANSITION_MS = 220; // must match #mound-menu's CSS transition duration
@@ -68,6 +72,36 @@ let previewTailPhase = 0;
 let previewFacing = 1;
 let previewFlipTimer = 0;
 let previewLastFrameTime = null;
+
+// A soft light sweep plays across every `.sheen-target` element on its own
+// random 5-30s cycle — per direct request, applied broadly across the HUD/
+// shop/panels (see index.html/UI.js for which elements carry the class).
+// Each element gets its own independent setTimeout chain (not a single
+// shared ticker) so they visibly glimmer out of sync with each other rather
+// than all sweeping in lockstep. `dataset.sheenScheduled` guards against
+// double-scheduling the same still-alive element across repeated
+// scheduleSheenAll() calls (every shop/palette/panel rebuild calls it again
+// for whatever's new); `el.isConnected` is what actually stops a chain once
+// its element has been torn out by one of those same rebuilds (innerHTML =
+// '' disconnects the old nodes, so their chains just quietly stop
+// rescheduling themselves instead of needing explicit teardown).
+const SHEEN_MIN_INTERVAL_MS = 5000;
+const SHEEN_MAX_INTERVAL_MS = 30000;
+function scheduleSheen(el) {
+  if (!el || el.dataset.sheenScheduled) return;
+  el.dataset.sheenScheduled = '1';
+  const fire = () => {
+    if (!el.isConnected) return;
+    el.classList.remove('sheen-play');
+    void el.offsetWidth; // forced reflow — restarts the CSS animation even if it's somehow still attached
+    el.classList.add('sheen-play');
+    setTimeout(fire, SHEEN_MIN_INTERVAL_MS + Math.random() * (SHEEN_MAX_INTERVAL_MS - SHEEN_MIN_INTERVAL_MS));
+  };
+  setTimeout(fire, SHEEN_MIN_INTERVAL_MS + Math.random() * (SHEEN_MAX_INTERVAL_MS - SHEEN_MIN_INTERVAL_MS));
+}
+function scheduleSheenAll() {
+  document.querySelectorAll('.sheen-target').forEach(scheduleSheen);
+}
 
 export function initUI(state) {
   els = {
@@ -187,6 +221,7 @@ export function initUI(state) {
   buildShopPanel(state);
   buildBuildPalette(state);
   buildTankPanel(state);
+  scheduleSheenAll();
 }
 
 // Called by the collapse button and the S hotkey (wired in main.js) alike,
@@ -404,7 +439,7 @@ function refreshFamilyButton(state, familyId) {
 
 function buildFamilyButton(state, familyId, memberIds) {
   const btn = document.createElement('button');
-  btn.className = 'tool-btn tool-btn-build';
+  btn.className = 'tool-btn tool-btn-build sheen-target';
   const dotsWrap = document.createElement('div');
   dotsWrap.className = 'tool-btn-family-dots';
   btn.appendChild(dotsWrap);
@@ -433,7 +468,7 @@ function buildFamilyButton(state, familyId, memberIds) {
 
 function buildSingleBuildingButton(state, building) {
   const btn = document.createElement('button');
-  btn.className = 'tool-btn tool-btn-build';
+  btn.className = 'tool-btn tool-btn-build sheen-target';
   btn.title = building.name;
   btn.textContent = building.icon;
   btn.dataset.tool = `build:${building.id}`;
@@ -528,7 +563,7 @@ function describeFoodCapacityLevel(level) {
 // which ones exist, only their level/cost).
 function createUpgradeCard(name, icon) {
   const card = document.createElement('div');
-  card.className = 'tank-upgrade-card';
+  card.className = 'tank-upgrade-card sheen-target';
   const nameEl = document.createElement('div');
   nameEl.className = 'tank-upgrade-name';
   nameEl.textContent = `${icon} ${name}`;
@@ -560,6 +595,7 @@ function buildTankPanel(state) {
     if (state.level.tankPoints.available < FISH_MERGING_UNLOCK_COST) return;
     state.level.tankPoints.available -= FISH_MERGING_UNLOCK_COST;
     state.level.upgrades.fishMergingUnlocked = true;
+    playUpgrade();
     refreshTankPanel(state);
   });
 
@@ -570,6 +606,7 @@ function buildTankPanel(state) {
     if (state.level.tankPoints.available < cost) return;
     state.level.tankPoints.available -= cost;
     state.level.upgrades.foodQuality += 1;
+    playUpgrade();
     refreshTankPanel(state);
   });
   fishMovement.buyBtn.addEventListener('click', () => {
@@ -579,6 +616,7 @@ function buildTankPanel(state) {
     if (state.level.tankPoints.available < cost) return;
     state.level.tankPoints.available -= cost;
     state.level.upgrades.fishMovement += 1;
+    playUpgrade();
     refreshTankPanel(state);
   });
   foodCapacity.buyBtn.addEventListener('click', () => {
@@ -588,6 +626,7 @@ function buildTankPanel(state) {
     if (state.level.tankPoints.available < cost) return;
     state.level.tankPoints.available -= cost;
     state.level.upgrades.foodCapacity += 1;
+    playUpgrade();
     refreshTankPanel(state);
   });
 
@@ -596,7 +635,7 @@ function buildTankPanel(state) {
   // Defensive Capabilities: shown per the design update's Phase 2 UI-shell
   // scope, but locked — there's no alien system to upgrade yet (Phase 5).
   const defensive = document.createElement('div');
-  defensive.className = 'tank-upgrade-card locked';
+  defensive.className = 'tank-upgrade-card locked sheen-target';
   defensive.innerHTML =
     '<div class="tank-upgrade-name">🛡️ Defensive Capabilities</div>' +
     '<div class="tank-upgrade-desc">Boosts click damage against invading aliens. Unlocks once alien waves do (a future update).</div>';
@@ -788,7 +827,7 @@ function buildShopPanel(state) {
   speciesPriceTags = {};
   for (const species of getAvailableSpecies(state)) {
     const btn = document.createElement('button');
-    btn.className = 'species-icon-btn';
+    btn.className = 'species-icon-btn sheen-target';
     btn.title = species.name;
     btn.dataset.tool = `fish:${species.id}`;
     btn.style.setProperty('--species-color', FISH_COLORS[species.id] || '#ffffff');
@@ -831,6 +870,7 @@ export function refreshShopPanel(state) {
   buildShopPanel(state);
   buildBuildPalette(state);
   updateToolbar(state);
+  scheduleSheenAll(); // picks up whatever newly-unlocked buttons this rebuild just created
 }
 
 // Restarts a CSS animation even if it's already playing (e.g. two quick
@@ -854,6 +894,24 @@ export function flashFoodCapacity(state) {
   playFlash(state.ui.shopCollapsed ? els.food : els.shopFood, 'flash-spend');
 }
 
+// Bright blue at 100% cleanliness, fading to olive green (WASTE_COLOR's own
+// hex — a dirty tank literally reads the color of what's dirtying it) at 0%
+// — a straight per-channel RGB lerp, recomputed fresh every frame in
+// updateHUD rather than cached, since cleanliness can move every tick.
+function hexToRgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+const CLEANLINESS_RGB_CLEAN = hexToRgb(CLEANLINESS_COLOR_CLEAN);
+const CLEANLINESS_RGB_DIRTY = hexToRgb(CLEANLINESS_COLOR_DIRTY);
+function cleanlinessColor(cleanliness) {
+  const t = Math.max(0, Math.min(1, cleanliness / CLEANLINESS_MAX));
+  const r = Math.round(CLEANLINESS_RGB_DIRTY.r + (CLEANLINESS_RGB_CLEAN.r - CLEANLINESS_RGB_DIRTY.r) * t);
+  const g = Math.round(CLEANLINESS_RGB_DIRTY.g + (CLEANLINESS_RGB_CLEAN.g - CLEANLINESS_RGB_DIRTY.g) * t);
+  const b = Math.round(CLEANLINESS_RGB_DIRTY.b + (CLEANLINESS_RGB_CLEAN.b - CLEANLINESS_RGB_DIRTY.b) * t);
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
 export function updateHUD(state) {
   const money = state.level.money;
   const moneyText = `💰 $${Math.floor(money)}`;
@@ -863,8 +921,10 @@ export function updateHUD(state) {
   const cleanlinessText = `✨ ${Math.round(cleanliness)}%`;
   els.cleanliness.textContent = cleanlinessText;
   els.shopCleanliness.textContent = cleanlinessText;
-  const currentFoodCount = state.level.items.reduce((n, item) => n + (item.type === 'food' ? 1 : 0), 0);
-  const foodText = `🍽️ ${currentFoodCount}/${effectiveFoodCapacity(state)}`;
+  const cleanColor = cleanlinessColor(cleanliness);
+  els.cleanliness.style.color = cleanColor;
+  els.shopCleanliness.style.color = cleanColor;
+  const foodText = `🍽️ ${countTankFood(state)}/${effectiveFoodCapacity(state)}`;
   els.food.textContent = foodText;
   els.shopFood.textContent = foodText;
   refreshPreviewInfo(state);

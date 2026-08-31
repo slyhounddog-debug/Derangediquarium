@@ -34,6 +34,8 @@ import {
 import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop } from './Engine.js';
 import { loadLevel, LEVELS } from './Levels.js';
 import { updateStoryTriggers } from './Systems.js';
+import { updateAmbience, renderAmbience } from './Ambience.js';
+import { resumeAudio } from './Sound.js';
 import {
   updateEntities,
   trySpawnFood,
@@ -79,12 +81,37 @@ import {
 const canvas = document.getElementById('game-canvas');
 const ctx = canvas.getContext('2d');
 
-// One-shot title splash (see index.html/style.css's #splash-screen) — pure
-// CSS animation, this just removes the element once it's done playing
-// rather than leaving a hidden pointer-events:none node parked on top of
-// everything forever.
+// Browsers refuse to let an AudioContext make sound until a real user
+// gesture — resumeAudio() also kicks off the looping background music the
+// first time it's called, so this single pair of one-time listeners is all
+// both SFX and music need to unlock.
+window.addEventListener('pointerdown', resumeAudio, { once: true });
+window.addEventListener('keydown', resumeAudio, { once: true });
+
+// One-shot title splash (see index.html/style.css's #splash-screen). The
+// title itself grows/fades in and back out via a pure CSS animation on
+// #splash-title; each letter ALSO gets its own independent bounce, which
+// needs a per-letter <span> to animate individually — built here from the
+// element's plain text rather than hardcoded in index.html, so the markup
+// stays just the word itself. GROW_IN_DURATION_S must match splash-grow-fade's
+// own 25% keyframe (4.5s total * 0.25) so letters don't start bouncing until
+// the word has actually finished growing in.
 const splashScreen = document.getElementById('splash-screen');
-splashScreen.querySelector('#splash-title').addEventListener('animationend', () => splashScreen.remove());
+const splashTitle = splashScreen.querySelector('#splash-title');
+const SPLASH_GROW_IN_DURATION_S = 1.125;
+const SPLASH_LETTER_STAGGER_S = 0.06;
+const splashLetters = [...splashTitle.textContent];
+splashTitle.textContent = '';
+for (const [i, char] of splashLetters.entries()) {
+  const span = document.createElement('span');
+  span.className = 'splash-letter';
+  span.textContent = char;
+  span.style.animationDelay = `${SPLASH_GROW_IN_DURATION_S + i * SPLASH_LETTER_STAGGER_S}s`;
+  splashTitle.appendChild(span);
+}
+splashTitle.addEventListener('animationend', (e) => {
+  if (e.target === splashTitle) splashScreen.remove(); // ignore bubbled per-letter animationend events, only the title's own grow-fade ending means it's done
+});
 
 // ---- Root state (§3.1) — plain, JSON-serializable, meta/level split ----
 const state = {
@@ -399,6 +426,7 @@ function updateFishDrag() {
 }
 
 function update(dtMs) {
+  updateAmbience(dtMs); // pure decoration (bubbles/seaweed) — keeps drifting even through pause/game-over, ahead of both early returns below
   if (state.ui.paused) return; // frozen behind the pause menu — render() still runs so the tank stays visible
   if (state.level.gameOver) return; // lost — frozen the same way, but via a separate flag so Escape still reaches the pause menu's Restart without also un-freezing a lost game (see Systems.js's updateBankruptcy)
 
@@ -438,6 +466,7 @@ function render() {
 
   renderSeabedGrid(ctx, state, canvas.width, canvas.height);
   renderMound(ctx, state);
+  renderAmbience(ctx, state, canvas.width, canvas.height);
 
   if (isFanAimingActive() && input.mouse.inside && !state.ui.paused) {
     // Click 1 already happened — the ghost stays fixed at the armed cell
@@ -476,19 +505,28 @@ function render() {
       ctx.fillText(`+$${refund}`, screen.x + 2, screen.y - 4);
     }
   } else if (state.ui.selectedTool.startsWith('fish:') && input.mouse.inside && !state.ui.paused) {
-    // Same visual language as a building ghost — translucent, green if this
-    // click would actually place the fish, red if not (unaffordable, or
-    // inside the seabed city where a fish could never actually reach/stay).
+    // A real baby (hatchling-stage) fish of the selected species, at reduced
+    // opacity, instead of a plain colored circle — per direct request, so
+    // the ghost actually previews what's about to spawn. Validity is still
+    // shown the same way a building ghost's red/green tint works: a soft
+    // colored ring behind the fish (red if this click wouldn't actually
+    // place it — unaffordable, or inside the seabed city where a fish could
+    // never reach/stay; green if it would).
     const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
     const speciesId = state.ui.selectedTool.slice('fish:'.length);
     const affordable = state.level.money >= getFishPurchaseCost(state, speciesId);
     const ok = affordable && world.y < SEABED_FLOOR_Y;
     const screen = worldToScreen(world.x, world.y, state.camera);
-    ctx.globalAlpha = 0.5;
-    ctx.fillStyle = ok ? (FISH_COLORS[speciesId] || '#ffffff') : '#ff6b6b';
+    const hatchlingScale = SPECIES[speciesId].growthStages[0].scale;
+    const size = FISH_BASE_SIZE * hatchlingScale * state.camera.zoom;
+    ctx.globalAlpha = 0.3;
+    ctx.fillStyle = ok ? '#4dff88' : '#ff4d4d';
     ctx.beginPath();
-    ctx.arc(screen.x, screen.y, (FISH_BASE_SIZE / 2) * state.camera.zoom, 0, Math.PI * 2);
+    ctx.arc(screen.x, screen.y, size * 0.7, 0, Math.PI * 2);
     ctx.fill();
+    ctx.globalAlpha = 0.75;
+    const ghostTailPhase = (performance.now() / 300) % (Math.PI * 2);
+    drawFish(ctx, screen.x, screen.y, speciesId, 0, 1, ghostTailPhase, { x: 1, y: 0 });
     ctx.globalAlpha = 1;
   }
 

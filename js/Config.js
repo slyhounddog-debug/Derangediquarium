@@ -125,7 +125,7 @@ export const RAMP_NUDGE_DISTANCE = TILE_SIZE;
 // are. The cone is a fixed-direction blow (uniform along the fan's aim
 // angle, not radiating outward from its center like an explosion), narrowing
 // force linearly to 0 at max range.
-export const FAN_CONE_HALF_ANGLE_DEG = 20; // total cone width = 2x this = 40° (was 15/30° — widened slightly per direct request)
+export const FAN_CONE_HALF_ANGLE_DEG = 25; // total cone width = 2x this = 50° (was 15/30°, then 20/40° — widened slightly again per direct request)
 // Placeholder balance per tier, same as every other economy/physics constant
 // in this file — tune once real playtesting exists. Power cost is only
 // tracked into state.level.powerDemand for now (Systems.js's real power
@@ -133,13 +133,13 @@ export const FAN_CONE_HALF_ANGLE_DEG = 20; // total cone width = 2x this = 40° 
 // header), so an Electric/Turbo Fan still runs unconditionally today, same
 // as every other not-yet-power-gated Electric building in the codebase.
 export const FAN_T2_MAX_FORCE = 260; // Rudimentary Fan — force magnitude at the emitter (see Grid.js's a = F/mass integration)
-export const FAN_T2_MAX_RANGE = 224; // px — 7 tiles (was 3, then 5, then 6; +1 more tile per direct request, the 5th such increase this session)
+export const FAN_T2_MAX_RANGE = 288; // px — 9 tiles (was 3, then 5, then 6, then 7; +2 more tiles per direct request, the 6th such increase this session)
 export const FAN_T2_POWER_COST = 0;
 export const FAN_T3_MAX_FORCE = 520; // Electric Fan
-export const FAN_T3_MAX_RANGE = 336; // px — 10.5 tiles (was 5.5, then 8.5, then 9.5; +1 more tile)
+export const FAN_T3_MAX_RANGE = 432; // px — 13.5 tiles (was 5.5, then 8.5, then 9.5, then 10.5; +3 more tiles)
 export const FAN_T3_POWER_COST = 5;
 export const FAN_T4_MAX_FORCE = 1100; // Turbo Fan — extreme thrust, enough to clear a heavy coin across a ledge on its own
-export const FAN_T4_MAX_RANGE = 480; // px — 15 tiles (was 10, then 13, then 14; +1 more tile)
+export const FAN_T4_MAX_RANGE = 576; // px — 18 tiles (was 10, then 13, then 14, then 15; +3 more tiles)
 export const FAN_T4_POWER_COST = 14;
 
 // ---- Auto-Feeder ----
@@ -377,6 +377,14 @@ export const CLEANLINESS_PER_WASTE_EVENT = 0.5; // was 4 — cut per direct requ
 export const CLEANLINESS_WARNING_THRESHOLD = 90;
 export const CLEANLINESS_WARNING_MESSAGE =
   'Looking a little dirty in there champ. The dirtier your tank is, the less often your fish produce money. If only there was a way to clean it......';
+// The #hud-cleanliness/#shop-cleanliness readout's text color is a live
+// gradient between these two, per direct request — bright blue at 100%
+// fading to an olive green at 0%. CLEANLINESS_COLOR_DIRTY is deliberately
+// the exact same hex as WASTE_COLOR above — a dirty tank reading the color
+// of the Waste causing it is a nice, free bit of visual reinforcement.
+// UI.js's cleanlinessColor(pct) does the actual RGB lerp every frame.
+export const CLEANLINESS_COLOR_CLEAN = '#4fc3f7';
+export const CLEANLINESS_COLOR_DIRTY = '#6b8e4e';
 
 // ---- Floating pickup text ----
 export const PICKUP_TEXT_LIFETIME_MS = 900; // how long a "+$N" pickup readout stays on screen after a coin is banked

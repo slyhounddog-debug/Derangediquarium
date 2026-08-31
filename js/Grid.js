@@ -51,6 +51,7 @@ import {
   CLEANLINESS_PER_WASTE_EVENT,
 } from './Config.js';
 import { worldToScreen } from './Engine.js';
+import { playBuildPlace, playDemolish } from './Sound.js';
 
 // One-time story/tutorial notifications — see state.level.tutorialFlags and
 // CLAUDE.md's "Story & Tutorial Notifications" section.
@@ -213,6 +214,7 @@ export function placeTile(state, col, row, buildingId, angle = 0) {
     state.level.tutorialFlags.firstFanPlaced = true;
     pushGridNotification(state, FIRST_FAN_PLACED_MESSAGE);
   }
+  playBuildPlace();
   return true;
 }
 
@@ -233,6 +235,7 @@ export function removeTile(state, col, row) {
   state.level.grid[row][col] = TILE_EMPTY;
   delete state.level.buildingData[buildingKey(col, row)];
   if (building) state.level.money += Math.floor(liveCost * TILE_REFUND_FRACTION);
+  playDemolish();
   return true;
 }
 
@@ -711,6 +714,34 @@ export function resolveItemCollisions(state) {
 }
 
 // ---- Rendering ----
+// A small speckled noise tile, generated once and cached as a repeating
+// CanvasPattern — gives the flat seabed fill some grain/texture instead of
+// reading as a single flat color, per direct request. Deliberately simple:
+// tiled in plain screen space (not re-anchored to world coordinates as the
+// camera pans), since the speckle is subtle/low-opacity background noise —
+// a perfectly world-locked version would need to track the pattern's own
+// transform against camera.x/zoom every frame for a purely decorative
+// texture nobody is meant to consciously track while panning.
+let cityTexturePattern = null;
+function getCityTexturePattern(ctx) {
+  if (cityTexturePattern) return cityTexturePattern;
+  const tile = document.createElement('canvas');
+  tile.width = 48;
+  tile.height = 48;
+  const tctx = tile.getContext('2d');
+  for (let i = 0; i < 55; i++) {
+    const x = Math.random() * 48;
+    const y = Math.random() * 48;
+    const r = 0.6 + Math.random() * 1.7;
+    tctx.fillStyle = Math.random() < 0.5 ? 'rgba(0, 0, 0, 0.16)' : 'rgba(255, 255, 255, 0.09)';
+    tctx.beginPath();
+    tctx.arc(x, y, r, 0, Math.PI * 2);
+    tctx.fill();
+  }
+  cityTexturePattern = ctx.createPattern(tile, 'repeat');
+  return cityTexturePattern;
+}
+
 // A dashed horizontal line at WASTE_FLOOR_Y, the fixed height uncaught Waste
 // rests at (see that constant's comment in Config.js) — purely decorative,
 // draws on top of the base seabed fill but underneath any real tiles so it
@@ -754,6 +785,12 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
   ctx.fillStyle = '#6b4f34';
   ctx.fillRect(0, Math.max(0, topOfSeabed.y), canvasWidth, 4); // seabed surface highlight line
 
+  ctx.save();
+  ctx.fillStyle = getCityTexturePattern(ctx);
+  ctx.globalAlpha = 0.55;
+  ctx.fillRect(0, Math.max(0, topOfSeabed.y) + 4, canvasWidth, canvasHeight);
+  ctx.restore();
+
   renderWasteFloorBreak(ctx, camera, canvasWidth, canvasHeight);
 
   for (let row = rowStart; row <= rowEnd; row++) {
@@ -766,10 +803,48 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
       const size = TILE_SIZE * camera.zoom;
       const data = state.level.buildingData[buildingKey(col, row)];
       renderTileShape(ctx, type, building.color, screen.x, screen.y, size, data);
-      if (data && (FAN_TILES.has(type) || type === TILE_AUTO_FEEDER || type === TILE_COLLECTOR)) {
+      // Fans are drawn separately below (renderFanIndicators), over EVERY
+      // fan in state.level.buildingData rather than just the on-screen-tile-
+      // culled ones this loop already skipped past — a Fan's cone can reach
+      // tiles/water well beyond its own tile, so its own tile scrolling off
+      // screen doesn't mean its effective range has too. Collector/Auto-
+      // Feeder's indicators stay here — their intake radius is small enough
+      // (sub-tile) that tile-culling never cuts off anything actually visible.
+      if (data && (type === TILE_AUTO_FEEDER || type === TILE_COLLECTOR)) {
         renderDirectionIndicator(ctx, type, screen.x, screen.y, size, data.angle, camera.zoom);
       }
     }
+  }
+
+  renderFanIndicators(ctx, state, canvasWidth, canvasHeight);
+}
+
+// Draws every Fan's cone + aim arrow regardless of whether its own tile is
+// currently within the viewport's tile-culled range (see renderSeabedGrid's
+// loop above) — a Fan's cone can reach FAN_T2/T3/T4_MAX_RANGE well past its
+// own tile, so scrolling the fan itself off screen shouldn't make an
+// on-screen portion of its push area disappear too, per direct bug report.
+// Culled by a simple bounding-box check (the fan's screen center plus/minus
+// its max range against the canvas rect) rather than per-tile visibility —
+// cheap, and only over-draws a little for a fan whose full circle could
+// reach the viewport but whose actual narrow cone doesn't quite, which is
+// visually harmless.
+function renderFanIndicators(ctx, state, canvasWidth, canvasHeight) {
+  const { camera } = state;
+  for (const key in state.level.buildingData) {
+    const data = state.level.buildingData[key];
+    if (!FAN_TILES.has(data.type)) continue;
+    const [row, col] = key.split(',').map(Number);
+    const centerX = col * TILE_SIZE + TILE_SIZE / 2;
+    const centerY = row * TILE_SIZE + TILE_SIZE / 2;
+    const screen = worldToScreen(centerX, centerY, camera);
+    const range = FAN_STATS[data.type].maxRange * camera.zoom;
+    if (
+      screen.x + range < 0 || screen.x - range > canvasWidth ||
+      screen.y + range < 0 || screen.y - range > canvasHeight
+    ) continue;
+    const size = TILE_SIZE * camera.zoom;
+    renderDirectionIndicator(ctx, data.type, screen.x - size / 2, screen.y - size / 2, size, data.angle, camera.zoom);
   }
 }
 
