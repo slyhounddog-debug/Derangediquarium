@@ -69,7 +69,7 @@ import {
   SCIENCE_COLOR,
   POWER_COLOR,
   UTILITY_SPECIES_IDS,
-  GENE_SPLICING_TECH_ID,
+  GENE_SPLICING_LAB_ID,
   SCIENCE_ITEM_RADIUS,
   SCIENCE_PROGRESS_TICKS,
   COIN_CAP_BY_LEVEL,
@@ -603,8 +603,16 @@ export function createHybridFish(state, economyFish, utilitySpeciesId) {
 // that utility fish actually grow up through stages instead of spawning
 // pre-grown), the utility fish itself must also be Adult, same requirement
 // canSpliceFish already places on the TARGET below.
+//
+// Gene-Splicing is a Science Lab purchase now, not a standalone Tank
+// Upgrade flag — GENE_SPLICING_LAB_ID is only the tree's ROOT node (grants
+// nothing by itself, see Config.js's SCIENCE_LAB_UPGRADES), so this is
+// deliberately just a coarse "has splicing been unlocked at all" pre-check.
+// The fine-grained "is THIS specific hybrid combination unlocked" check
+// can't happen here — there's no target yet — so it lives in canSpliceFish
+// below instead, once both fish are known.
 export function isSpliceSource(state, fish) {
-  if (!state.meta.techUnlocked.includes(GENE_SPLICING_TECH_ID)) return false;
+  if (!state.meta.labUpgradesPurchased.includes(GENE_SPLICING_LAB_ID)) return false;
   if (!fish || fish.type !== 'fish') return false;
   if (!UTILITY_SPECIES_IDS.includes(fish.speciesId)) return false;
   const def = SPECIES[fish.speciesId];
@@ -620,7 +628,14 @@ export function canSpliceFish(state, utilityFish, targetFish) {
   // target's own adult dropValue, so a hatchling/juvenile target has
   // nothing meaningful to carry over yet.
   if (targetFish.stage !== targetDef.growthStages.length - 1) return false;
-  return getHybridSpeciesId(targetFish.speciesId, utilityFish.speciesId) != null;
+  const hybridId = getHybridSpeciesId(targetFish.speciesId, utilityFish.speciesId);
+  if (!hybridId) return false;
+  // Per direct request, each hybrid combination is its own individual
+  // Science Lab purchase now (see SCIENCE_LAB_UPGRADES' scrub_*/volt_*/
+  // scholar_* leaf nodes) — pushed into speciesUnlocked the exact same way
+  // eel/suckerfish/octopus already are, so this is the one place that
+  // actually needs to check, rather than a blanket "splicing exists" flag.
+  return state.meta.speciesUnlocked.includes(hybridId);
 }
 
 const FIRST_SPLICE_MESSAGE =

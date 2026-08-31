@@ -30,21 +30,14 @@ import {
   CLEANLINESS_MAX,
   CLEANLINESS_COLOR_CLEAN,
   CLEANLINESS_COLOR_DIRTY,
-  GENE_SPLICING_TECH_ID,
-  GENE_SPLICING_TANK_POINT_COST,
   PROCESSOR_STATS,
   AUTO_FEEDER_STATS,
   POWER_HISTORY_MAX,
   SCIENCE_LAB_UPGRADES,
   SCIENCE_LAB_UPGRADE_LIST,
-  SPECIES_LIST,
   COIN_CAP_BY_LEVEL,
   COIN_CAP_UPGRADE_COSTS,
   COIN_CAP_UPGRADE_MAX_LEVEL,
-  SCIENCE_CAP_BY_LEVEL,
-  SCIENCE_CAP_UPGRADE_SCIENCE_COSTS,
-  SCIENCE_CAP_UPGRADE_GOLD_COSTS,
-  SCIENCE_CAP_UPGRADE_MAX_LEVEL,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings, loadLevel } from './Levels.js';
 import { getFishPurchaseCost, effectiveFoodCapacity, countTankFood, effectiveCoinCapacity, effectiveScienceCapacity, countTankItemsByType } from './Entities.js';
@@ -200,7 +193,6 @@ export function initUI(state) {
     labModal: document.getElementById('lab-modal'),
     labScienceReadout: document.getElementById('lab-science-readout'),
     labCloseBtn: document.getElementById('lab-close-btn'),
-    labCapacityWrap: document.getElementById('lab-capacity-wrap'),
     labTreeWrap: document.getElementById('lab-tree-wrap'),
     labTreeCanvas: document.getElementById('lab-tree-canvas'),
     labTreeColumns: document.getElementById('lab-tree-columns'),
@@ -319,7 +311,6 @@ export function initUI(state) {
   buildShopPanel(state);
   buildBuildPalette(state);
   buildTankPanel(state);
-  buildLabCapacityCard(state);
   buildLabTree(state);
   scheduleSheenAll();
 }
@@ -525,49 +516,6 @@ function labNodeDepth(id, memo) {
 
 let labNodeDepthMemo = {};
 let labNodeButtons = {}; // id -> { btn, costEl }, rebuilt by buildLabTree, read by refreshLabTree/drawLabTreeConnectors
-let labCapacityCard = null; // { card, levelEl, descEl, buyBtn } — Bubble Capacity, built once alongside the tree
-
-// Bubble (Science) Capacity — a leveled upgrade card sitting above the
-// branching tree, not a node inside it (see Config.js's SCIENCE_CAP_BY_LEVEL
-// for why). Built once at init, same "shape never changes, only its
-// level/cost/afford state does" pattern buildTankPanel's cards use.
-function buildLabCapacityCard(state) {
-  els.labCapacityWrap.innerHTML = '';
-  labCapacityCard = createUpgradeCard('Bubble Capacity', '🫧');
-  labCapacityCard.buyBtn.addEventListener('click', () => {
-    const level = state.level.upgrades.scienceCapLevel;
-    if (level >= SCIENCE_CAP_UPGRADE_MAX_LEVEL) return;
-    const scienceCost = SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[level];
-    const goldCost = SCIENCE_CAP_UPGRADE_GOLD_COSTS[level];
-    if (state.level.science < scienceCost || state.level.money < goldCost) return;
-    state.level.science -= scienceCost;
-    state.level.money -= goldCost;
-    state.level.upgrades.scienceCapLevel += 1;
-    playUpgrade();
-    refreshLabCapacityCard(state);
-  });
-  els.labCapacityWrap.appendChild(labCapacityCard.card);
-  refreshLabCapacityCard(state);
-}
-
-// Called from refreshLabTree below so every existing call site (openLabMenu,
-// updateHUD while the Lab's open) picks this up for free, same as the tree
-// itself — Science/money/level can all change while the modal's open.
-function refreshLabCapacityCard(state) {
-  if (!labCapacityCard) return;
-  const level = state.level.upgrades.scienceCapLevel;
-  labCapacityCard.levelEl.textContent = `Level ${level} / ${SCIENCE_CAP_UPGRADE_MAX_LEVEL}`;
-  labCapacityCard.descEl.innerHTML = describeScienceCapacityLevel(level);
-  if (level >= SCIENCE_CAP_UPGRADE_MAX_LEVEL) {
-    labCapacityCard.buyBtn.textContent = 'Maxed out';
-    labCapacityCard.buyBtn.disabled = true;
-  } else {
-    const scienceCost = SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[level];
-    const goldCost = SCIENCE_CAP_UPGRADE_GOLD_COSTS[level];
-    labCapacityCard.buyBtn.textContent = `${scienceCost} 🔬 · $${goldCost}`;
-    labCapacityCard.buyBtn.disabled = state.level.science < scienceCost || state.level.money < goldCost;
-  }
-}
 
 // Built once at init (mirrors buildTankPanel) — the tree's SHAPE (which
 // node sits in which column) never changes at runtime, only each node's
@@ -624,6 +572,11 @@ function buyLabUpgrade(state, id) {
       if (!state.meta.buildingsUnlocked.includes(bid)) state.meta.buildingsUnlocked.push(bid);
     }
   }
+  // The Bubble Capacity chain (science_cap_1..5) grants this instead of a
+  // species/building — see Config.js's SCIENCE_LAB_UPGRADES comment.
+  if (node.grants.scienceCapLevel) {
+    state.level.upgrades.scienceCapLevel += node.grants.scienceCapLevel;
+  }
   playUpgrade();
   refreshLabTree(state);
   refreshShopPanel(state);
@@ -632,7 +585,6 @@ function buyLabUpgrade(state, id) {
 // Re-checked every frame the popup is open (from updateHUD) — Science/money
 // and every node's prerequisite state can all change while it's open.
 function refreshLabTree(state) {
-  refreshLabCapacityCard(state);
   const science = state.level.science;
   els.labScienceReadout.textContent = `🔬 ${science} · 💰 $${Math.floor(state.level.money)}`;
   for (const node of SCIENCE_LAB_UPGRADE_LIST) {
@@ -906,10 +858,12 @@ function describeFoodCapacityLevel(level) {
   return `Up to <span class="stat-current">${cap} food</span> → <span class="stat-next">${nextCap} food</span> on screen at once.`;
 }
 
-// COIN_CAP_BY_LEVEL/SCIENCE_CAP_BY_LEVEL are absolute-value tables, not a
-// base+increment formula (the requested progression isn't an even step), so
-// these two just index straight in rather than computing a cap like
-// describeFoodCapacityLevel above does.
+// COIN_CAP_BY_LEVEL is an absolute-value table, not a base+increment formula
+// (the requested progression isn't an even step), so this indexes straight
+// in rather than computing a cap like describeFoodCapacityLevel above does.
+// (Science's own cap has no equivalent leveled-card description any more —
+// it moved into the branching Lab tree as 5 individual nodes instead, see
+// SCIENCE_LAB_UPGRADES' science_cap_1..5.)
 function describeCoinCapacityLevel(level) {
   const cap = COIN_CAP_BY_LEVEL[level];
   if (level >= COIN_CAP_UPGRADE_MAX_LEVEL) {
@@ -917,15 +871,6 @@ function describeCoinCapacityLevel(level) {
   }
   const nextCap = COIN_CAP_BY_LEVEL[level + 1];
   return `Up to <span class="stat-current">${cap} coins</span> → <span class="stat-next">${nextCap} coins</span> can sit in the tank uncollected at once.`;
-}
-
-function describeScienceCapacityLevel(level) {
-  const cap = SCIENCE_CAP_BY_LEVEL[level];
-  if (level >= SCIENCE_CAP_UPGRADE_MAX_LEVEL) {
-    return `Up to ${cap} Science Bubbles can sit in the tank uncollected at once.`;
-  }
-  const nextCap = SCIENCE_CAP_BY_LEVEL[level + 1];
-  return `Up to <span class="stat-current">${cap} bubbles</span> → <span class="stat-next">${nextCap} bubbles</span> can sit in the tank uncollected at once.`;
 }
 
 // Builds a single card's DOM once and returns references to the parts that
@@ -950,7 +895,7 @@ function createUpgradeCard(name, icon) {
   return { card, levelEl, descEl, buyBtn };
 }
 
-let tankCards = null; // { foodQuality, fishMovement, foodCapacity, coinCapacity, fishMerging } — each { card, levelEl, descEl, buyBtn }
+let tankCards = null; // { foodQuality, fishMovement, foodCapacity, coinCapacity, fishMerging } — each { card, levelEl, descEl, buyBtn }. Gene-Splicing moved out of this panel entirely — see Config.js's SCIENCE_LAB_UPGRADES' gene_splicing/hybrid tree.
 
 function buildTankPanel(state) {
   els.tankUpgradeList.innerHTML = '';
@@ -959,8 +904,7 @@ function buildTankPanel(state) {
   const foodCapacity = createUpgradeCard('Food Capacity', '🧺');
   const coinCapacity = createUpgradeCard('Coin Capacity', '🪙');
   const fishMerging = createUpgradeCard('Fish Merging', '🧬');
-  const geneSplicing = createUpgradeCard('Gene-Splicing', '🧪');
-  tankCards = { foodQuality, fishMovement, foodCapacity, coinCapacity, fishMerging, geneSplicing };
+  tankCards = { foodQuality, fishMovement, foodCapacity, coinCapacity, fishMerging };
 
   // A one-time unlock, not a leveled ladder like the three above — per
   // direct request, drag-to-combine (Entities.js's isCombinableFish) is now
@@ -970,30 +914,6 @@ function buildTankPanel(state) {
     if (state.level.tankPoints.available < FISH_MERGING_UNLOCK_COST) return;
     state.level.tankPoints.available -= FISH_MERGING_UNLOCK_COST;
     state.level.upgrades.fishMergingUnlocked = true;
-    playUpgrade();
-    refreshTankPanel(state);
-  });
-
-  // Gene-Splicing (Entities.js's isSpliceSource/canSpliceFish/spliceFish) —
-  // moved here from a Science Lab purchase, per direct request ("unlocked
-  // through the tank upgrades for 5 tank points, instead of unlocked
-  // through mound tiers"). Same one-time-unlock pattern as Fish Merging,
-  // just writing into state.meta.techUnlocked instead of a level upgrade
-  // flag, since that's the field Entities.js's isSpliceSource already reads.
-  geneSplicing.buyBtn.addEventListener('click', () => {
-    if (state.meta.techUnlocked.includes(GENE_SPLICING_TECH_ID)) return;
-    if (state.level.tankPoints.available < GENE_SPLICING_TANK_POINT_COST) return;
-    state.level.tankPoints.available -= GENE_SPLICING_TANK_POINT_COST;
-    state.meta.techUnlocked.push(GENE_SPLICING_TECH_ID);
-    // Every hybrid row also goes into speciesUnlocked here — not strictly
-    // required for the splice interaction itself (isSpliceSource/
-    // canSpliceFish never check a hybrid's own unlock status, only its
-    // utility parent's), but keeps state.meta consistent with how a Mound
-    // crack used to grant them, and is what a future shop/species-list
-    // pass would read.
-    for (const s of SPECIES_LIST) {
-      if (s.parents && !state.meta.speciesUnlocked.includes(s.id)) state.meta.speciesUnlocked.push(s.id);
-    }
     playUpgrade();
     refreshTankPanel(state);
   });
@@ -1039,7 +959,7 @@ function buildTankPanel(state) {
     refreshTankPanel(state);
   });
 
-  els.tankUpgradeList.append(foodQuality.card, fishMovement.card, foodCapacity.card, coinCapacity.card, fishMerging.card, geneSplicing.card);
+  els.tankUpgradeList.append(foodQuality.card, fishMovement.card, foodCapacity.card, coinCapacity.card, fishMerging.card);
 
   // Defensive Capabilities: shown per the design update's Phase 2 UI-shell
   // scope, but locked — there's no alien system to upgrade yet (Phase 5).
@@ -1058,7 +978,7 @@ function buildTankPanel(state) {
 // state can all change while the player has it open.
 function refreshTankPanel(state) {
   if (!tankCards) return;
-  const { foodQuality, fishMovement, foodCapacity, coinCapacity, fishMerging, geneSplicing } = tankCards;
+  const { foodQuality, fishMovement, foodCapacity, coinCapacity, fishMerging } = tankCards;
   const available = state.level.tankPoints.available;
 
   const fqLevel = state.level.upgrades.foodQuality;
@@ -1119,18 +1039,6 @@ function refreshTankPanel(state) {
   } else {
     fishMerging.buyBtn.textContent = `Unlock — ${FISH_MERGING_UNLOCK_COST} 🏆`;
     fishMerging.buyBtn.disabled = available < FISH_MERGING_UNLOCK_COST;
-  }
-
-  const spliced = state.meta.techUnlocked.includes(GENE_SPLICING_TECH_ID);
-  geneSplicing.levelEl.textContent = spliced ? 'Unlocked' : 'Locked';
-  geneSplicing.descEl.textContent =
-    'Lets you drag an Adult Suckerfish/Electric Eel/Science Octopus onto another Adult fish to splice a hybrid — no Mound progress needed.';
-  if (spliced) {
-    geneSplicing.buyBtn.textContent = 'Unlocked';
-    geneSplicing.buyBtn.disabled = true;
-  } else {
-    geneSplicing.buyBtn.textContent = `Unlock — ${GENE_SPLICING_TANK_POINT_COST} 🏆`;
-    geneSplicing.buyBtn.disabled = available < GENE_SPLICING_TANK_POINT_COST;
   }
 
   els.tankPointsDisplay.textContent = `🏆 ${available}`;

@@ -785,19 +785,6 @@ html, body {
 }
 #lab-close-btn { flex: none; width: auto; padding: 9px 16px; margin-bottom: 0; }
 
-/* Bubble Capacity — a leveled upgrade card (same DOM shape/CSS class as a
-   Tank Upgrade card, built by the same createUpgradeCard helper in UI.js)
-   sitting above the branching tree rather than inside it, since a capacity
-   bump doesn't gate any species/building unlock and so has no natural node
-   in that dependency web. */
-#lab-capacity-wrap {
-  flex: none;
-  margin-bottom: 16px;
-}
-#lab-capacity-wrap .tank-upgrade-card {
-  padding: 12px 14px;
-}
-
 #lab-tree-wrap {
   position: relative;
   flex: 1;

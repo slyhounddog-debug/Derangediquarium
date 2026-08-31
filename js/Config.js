@@ -616,14 +616,16 @@ export const COIN_CAP_UPGRADE_MAX_LEVEL = COIN_CAP_UPGRADE_COSTS.length;
 // Science Cap: the same idea as Coin Cap above, but for Science Bubble items
 // and upgraded exclusively through the Science Lab instead of Tank Points —
 // per direct request. Priced like every other Lab node (both Science AND
-// gold at once, UI.js's Lab modal), but shown as its own small leveled card
-// above the branching tree rather than a node inside SCIENCE_LAB_UPGRADES —
-// a capacity bump doesn't gate any species/building unlock, so it has no
-// natural place in that dependency web.
+// gold at once). Originally a single leveled card above the branching tree;
+// per a later direct request ("change the max science upgrades so each one
+// is a separate icon... instead of 5 times on the same icon") it's now 5
+// chained one-time nodes INSIDE the tree instead (`science_cap_1..5` below,
+// in SCIENCE_LAB_UPGRADES) — these two cost arrays are what those 5 nodes'
+// scienceCost/goldCost read from, one index each, so the progression itself
+// is unchanged, just its presentation.
 export const SCIENCE_CAP_BY_LEVEL = [5, 10, 20, 30, 40, 50]; // index 0 = unupgraded default
 export const SCIENCE_CAP_UPGRADE_SCIENCE_COSTS = [10, 20, 35, 60, 100]; // placeholder balance, tune once real playtesting exists
 export const SCIENCE_CAP_UPGRADE_GOLD_COSTS = [500, 1500, 3500, 7500, 15000];
-export const SCIENCE_CAP_UPGRADE_MAX_LEVEL = SCIENCE_CAP_UPGRADE_SCIENCE_COSTS.length;
 
 // Fish Merging (Economy Fish Combining's drag-to-combine interaction) is a
 // Tank Upgrade now, not a Tier unlock — a one-time, unleveled purchase
@@ -632,7 +634,7 @@ export const SCIENCE_CAP_UPGRADE_MAX_LEVEL = SCIENCE_CAP_UPGRADE_SCIENCE_COSTS.l
 // this flag before anything else; dynamic economy-fish pricing itself is
 // unaffected (that was never actually tier-gated in code, only in an older
 // doc pass — see CLAUDE.md) — only the drag-combine interaction is gated.
-export const FISH_MERGING_UNLOCK_COST = 10; // Tank Points, flat, one-time
+export const FISH_MERGING_UNLOCK_COST = 5; // Tank Points, flat, one-time — cut from 10 per direct request
 
 // Defensive Capabilities (click damage/offense vs invading aliens) has no
 // system to upgrade yet — Phase 5 aliens don't exist. The Tank Upgrades
@@ -1121,8 +1123,10 @@ export const TIER_UNLOCKS = {
 // that both the eel and suckerfish are requirements") — so its node has two
 // incoming connector lines, one from each parent, instead of a single
 // linear chain. `grants` is the same { species, buildings } shape
-// TIER_UNLOCKS entries use — UI.js's buyLabUpgrade pushes each into
-// state.meta the same way Mound.js's crackMound already does.
+// TIER_UNLOCKS entries use (plus a newer `scienceCapLevel` field the
+// `science_cap_*` chain below uses — see its own comment) — UI.js's
+// buyLabUpgrade pushes each into state.meta/state.level the same way
+// Mound.js's crackMound already does for species/buildings.
 export const SCIENCE_LAB_UPGRADES = {
   eel: {
     id: 'eel', name: 'Electric Eel', icon: '🐍', scienceCost: 10, goldCost: 1000,
@@ -1156,18 +1160,148 @@ export const SCIENCE_LAB_UPGRADES = {
     id: 'advanced_auto_feeder', name: 'Advanced Auto-Feeder', icon: '♻️', scienceCost: 150, goldCost: 15000,
     requires: ['electric_auto_feeder'], grants: { buildings: [TILE_AUTO_FEEDER_ADVANCED] },
   },
+
+  // ---- Gene-Splicing hybrid tree ----
+  // Splicing used to be a single flat Tank Upgrade purchase that unlocked
+  // every hybrid species at once (GENE_SPLICING_TANK_POINT_COST, now
+  // retired); per direct request it's this whole sub-tree instead.
+  // `gene_splicing` is the root — costs Science/gold like every other node
+  // but grants nothing on its own, purely a prerequisite gate ("the first
+  // upgrade is just a pre-requisite to unlocking each hybrid fish") —
+  // requires `eel` AND `suckerfish` already purchased, which transitively
+  // gates every hybrid purchase behind both utility species ("make the
+  // purchase of the suckerfish and eel as requirements for all the hybrid
+  // purchases") without repeating that pair on all 12 leaf nodes below: once
+  // gene_splicing is bought, eel/suckerfish are guaranteed already owned, so
+  // nothing further down the tree needs to re-check them. The 3 "track"
+  // nodes beneath it (one per hybrid combination type, grouped the same way
+  // their species ids already are — `scrub_*` = Suckerfish-parented,
+  // `volt_*` = Electric Eel-parented, `scholar_*` = Octopus-parented) also
+  // grant nothing by themselves, just gate access to their own individual
+  // hybrid nodes ("each locked behind an upgrade... that doesn't unlock
+  // anything by itself, just gives access to those hybrid tracks"). Every
+  // individual hybrid node costs a flat 25 Science / $5000 and grants
+  // exactly its one species into speciesUnlocked, mirroring `eel`/
+  // `suckerfish` above — Entities.js's canSpliceFish checks that array
+  // directly for the specific resulting hybrid id, not a blanket flag.
+  gene_splicing: {
+    id: 'gene_splicing', name: 'Gene-Splicing', icon: '🧬', scienceCost: 10, goldCost: 1000,
+    requires: ['eel', 'suckerfish'], grants: {},
+  },
+  suckerfish_hybrids: {
+    id: 'suckerfish_hybrids', name: 'Suckerfish Hybrids', icon: '🧹', scienceCost: 10, goldCost: 1000,
+    requires: ['gene_splicing'], grants: {},
+  },
+  electric_hybrids: {
+    id: 'electric_hybrids', name: 'Electric Hybrids', icon: '🔌', scienceCost: 10, goldCost: 1000,
+    requires: ['gene_splicing'], grants: {},
+  },
+  // Per direct request, Science Hybrids is also gated behind at least one
+  // Bubble Capacity purchase — requiring `science_cap_1` specifically (the
+  // first node of the chain below) already means "at least one," since
+  // science_cap_2+ each require the previous node in that same sequence.
+  science_hybrids: {
+    id: 'science_hybrids', name: 'Science Hybrids', icon: '🎓', scienceCost: 10, goldCost: 1000,
+    requires: ['gene_splicing', 'science_cap_1'], grants: {},
+  },
+  scrub_guppy: {
+    id: 'scrub_guppy', name: 'Scrub Guppy', icon: '🧹', scienceCost: 25, goldCost: 5000,
+    requires: ['suckerfish_hybrids'], grants: { species: ['scrub_guppy'] },
+  },
+  scrub_dartfin: {
+    id: 'scrub_dartfin', name: 'Scrub Dartfin', icon: '🧹', scienceCost: 25, goldCost: 5000,
+    requires: ['suckerfish_hybrids'], grants: { species: ['scrub_dartfin'] },
+  },
+  scrub_blimpfish: {
+    id: 'scrub_blimpfish', name: 'Scrub Blimpfish', icon: '🧹', scienceCost: 25, goldCost: 5000,
+    requires: ['suckerfish_hybrids'], grants: { species: ['scrub_blimpfish'] },
+  },
+  scrub_eel: {
+    id: 'scrub_eel', name: 'Scrub-Eel', icon: '🧹', scienceCost: 25, goldCost: 5000,
+    requires: ['suckerfish_hybrids'], grants: { species: ['scrub_eel'] },
+  },
+  scrub_topus: {
+    id: 'scrub_topus', name: 'Scrub-Topus', icon: '🧹', scienceCost: 25, goldCost: 5000,
+    requires: ['suckerfish_hybrids'], grants: { species: ['scrub_topus'] },
+  },
+  volt_guppy: {
+    id: 'volt_guppy', name: 'Volt Guppy', icon: '🔌', scienceCost: 25, goldCost: 5000,
+    requires: ['electric_hybrids'], grants: { species: ['volt_guppy'] },
+  },
+  volt_dartfin: {
+    id: 'volt_dartfin', name: 'Volt Dartfin', icon: '🔌', scienceCost: 25, goldCost: 5000,
+    requires: ['electric_hybrids'], grants: { species: ['volt_dartfin'] },
+  },
+  volt_blimpfish: {
+    id: 'volt_blimpfish', name: 'Volt Blimpfish', icon: '🔌', scienceCost: 25, goldCost: 5000,
+    requires: ['electric_hybrids'], grants: { species: ['volt_blimpfish'] },
+  },
+  volt_topus: {
+    id: 'volt_topus', name: 'Volt-Topus', icon: '🔌', scienceCost: 25, goldCost: 5000,
+    requires: ['electric_hybrids'], grants: { species: ['volt_topus'] },
+  },
+  scholar_guppy: {
+    id: 'scholar_guppy', name: 'Scholar Guppy', icon: '🎓', scienceCost: 25, goldCost: 5000,
+    requires: ['science_hybrids'], grants: { species: ['scholar_guppy'] },
+  },
+  scholar_dartfin: {
+    id: 'scholar_dartfin', name: 'Scholar Dartfin', icon: '🎓', scienceCost: 25, goldCost: 5000,
+    requires: ['science_hybrids'], grants: { species: ['scholar_dartfin'] },
+  },
+  scholar_blimpfish: {
+    id: 'scholar_blimpfish', name: 'Scholar Blimpfish', icon: '🎓', scienceCost: 25, goldCost: 5000,
+    requires: ['science_hybrids'], grants: { species: ['scholar_blimpfish'] },
+  },
+
+  // ---- Bubble (Science) Capacity chain ----
+  // Per direct request ("change the max science upgrades so each one is a
+  // separate icon to upgrade along the science lab upgrade path, instead of
+  // 5 times on the same icon") — replaces the old standalone leveled Bubble
+  // Capacity card with 5 chained one-time nodes, each requiring the previous
+  // and raising state.level.upgrades.scienceCapLevel by 1 via this new
+  // `grants.scienceCapLevel` field (UI.js's buyLabUpgrade applies it the
+  // same way it already applies grants.species/grants.buildings). Costs
+  // read straight from SCIENCE_CAP_UPGRADE_SCIENCE_COSTS/_GOLD_COSTS above —
+  // the exact same 5-level progression, just expressed as 5 nodes instead of
+  // one button pressed 5 times.
+  science_cap_1: {
+    id: 'science_cap_1', name: 'Bubble Cap 10', icon: '🫧',
+    scienceCost: SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[0], goldCost: SCIENCE_CAP_UPGRADE_GOLD_COSTS[0],
+    requires: [], grants: { scienceCapLevel: 1 },
+  },
+  science_cap_2: {
+    id: 'science_cap_2', name: 'Bubble Cap 20', icon: '🫧',
+    scienceCost: SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[1], goldCost: SCIENCE_CAP_UPGRADE_GOLD_COSTS[1],
+    requires: ['science_cap_1'], grants: { scienceCapLevel: 1 },
+  },
+  science_cap_3: {
+    id: 'science_cap_3', name: 'Bubble Cap 30', icon: '🫧',
+    scienceCost: SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[2], goldCost: SCIENCE_CAP_UPGRADE_GOLD_COSTS[2],
+    requires: ['science_cap_2'], grants: { scienceCapLevel: 1 },
+  },
+  science_cap_4: {
+    id: 'science_cap_4', name: 'Bubble Cap 40', icon: '🫧',
+    scienceCost: SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[3], goldCost: SCIENCE_CAP_UPGRADE_GOLD_COSTS[3],
+    requires: ['science_cap_3'], grants: { scienceCapLevel: 1 },
+  },
+  science_cap_5: {
+    id: 'science_cap_5', name: 'Bubble Cap 50', icon: '🫧',
+    scienceCost: SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[4], goldCost: SCIENCE_CAP_UPGRADE_GOLD_COSTS[4],
+    requires: ['science_cap_4'], grants: { scienceCapLevel: 1 },
+  },
 };
 export const SCIENCE_LAB_UPGRADE_LIST = Object.values(SCIENCE_LAB_UPGRADES);
 
 // ---- Phase 4: Science Lab & Gene-Splicing ----
 // The Science Lab (Mound.js's renderScienceLab/isPointOnScienceLab) replaces
 // the Mound once it shatters at MOUND_MAX_TIER — see SCIENCE_LAB_UPGRADES
-// above for its full purchasable tree. Gene-Splicing itself is dragging a
-// utility fish (Suckerfish/Electric Eel/Science Octopus) onto an eligible
-// Adult fish to spawn the matching hybrid — see Entities.js's
-// canSpliceFish/spliceFish and the existing T5 value-carry-over pipeline
-// (getEconomyAdultDropValue/getHybridSpeciesId/createHybridFish) it's built
-// on top of.
+// above for its full purchasable tree, including the Gene-Splicing hybrid
+// sub-tree (root + 3 tracks + 12 individual hybrid nodes). Gene-Splicing
+// itself is dragging a utility fish (Suckerfish/Electric Eel/Science
+// Octopus) onto an eligible Adult fish to spawn the matching hybrid — see
+// Entities.js's canSpliceFish/spliceFish and the existing T5 value-carry-over
+// pipeline (getEconomyAdultDropValue/getHybridSpeciesId/createHybridFish) it's
+// built on top of.
 // Once Electric Eel is unlocked, the HUD shows a live electricity readout
 // (current draw / accumulated capacity, like Food's current/cap) that
 // updates once per real sim-second — main.js samples
@@ -1177,14 +1311,16 @@ export const SCIENCE_LAB_UPGRADE_LIST = Object.values(SCIENCE_LAB_UPGRADES);
 // popup UI.js shows when the HUD readout is clicked. See main.js's update().
 export const POWER_HISTORY_MAX = 60;
 
-export const GENE_SPLICING_TECH_ID = 'gene_splicing';
-// Gene-Splicing is bought as a Tank Upgrade, not in the Science Lab — per
-// direct request ("unlocked through the tank upgrades for 5 tank points,
-// instead of unlocked through mound tiers"), a one-time purchase exactly
-// like Fish Merging's own card (FISH_MERGING_UNLOCK_COST), spending Tank
-// Points instead of Science/gold and requiring no Mound tier at all. See
-// UI.js's buildTankPanel.
-export const GENE_SPLICING_TANK_POINT_COST = 5; // Tank Points
+// The root node of the Gene-Splicing hybrid tree (see SCIENCE_LAB_UPGRADES
+// above) — Entities.js's isSpliceSource checks
+// state.meta.labUpgradesPurchased.includes(GENE_SPLICING_LAB_ID) as its
+// coarse "has splicing been unlocked AT ALL" gate before a utility fish can
+// even be picked up for a drag; canSpliceFish then checks the SPECIFIC
+// resulting hybrid's own species-unlock status for the fine-grained gate.
+// Replaces the old GENE_SPLICING_TECH_ID/state.meta.techUnlocked flag now
+// that splicing is a Science Lab purchase, not a standalone Tank Upgrade.
+export const GENE_SPLICING_LAB_ID = 'gene_splicing';
+
 export const SCIENCE_COLOR = '#5fc9ff';
 export const POWER_COLOR = '#ffd23f';
 // A muted blue-grey "🫧" floating bubble-pop, planted above a fish's head the

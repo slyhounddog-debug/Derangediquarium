@@ -32,11 +32,11 @@ import {
   TILE_REFUND_FRACTION,
   NOTIFICATION_LOG_MAX,
   CLEANLINESS_MAX,
-  GENE_SPLICING_TECH_ID,
   SCIENCE_LAB_UPGRADES,
   SCIENCE_ITEM_COLOR_A,
   SCIENCE_ITEM_COLOR_B,
   POWER_HISTORY_MAX,
+  SCIENCE_CAP_BY_LEVEL,
 } from './Config.js';
 import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop } from './Engine.js';
 import { loadLevel, LEVELS } from './Levels.js';
@@ -134,7 +134,6 @@ splashTitle.addEventListener('animationend', (e) => {
 // ---- Root state (§3.1) — plain, JSON-serializable, meta/level split ----
 const state = {
   meta: {
-    techUnlocked: [],
     buildingsUnlocked: BUILDING_LIST.filter((b) => b.unlockedByDefault).map((b) => b.id),
     speciesUnlocked: SPECIES_LIST.filter((s) => s.unlockedByDefault).map((s) => s.id),
     labUpgradesPurchased: [], // ids from Config.js's SCIENCE_LAB_UPGRADES — permanent like every other meta unlock, tracked separately from what each node actually grants so UI.js's tree can check prerequisites uniformly regardless of whether a node grants a species or a building
@@ -387,11 +386,16 @@ input.keydownHandlers.push((e) => {
       spawnFishCheat(state, state.debug.selectedSpecies, world.x, world.y, e.shiftKey);
       break;
     }
-    case 'KeyU': // unlock all species, buildings, tech, and every Science Lab tree node
+    case 'KeyU': // unlock all species, buildings, and every Science Lab tree node (including the whole Gene-Splicing hybrid tree)
       state.meta.speciesUnlocked = SPECIES_LIST.map((s) => s.id);
       state.meta.buildingsUnlocked = BUILDING_LIST.map((b) => b.id);
-      if (!state.meta.techUnlocked.includes(GENE_SPLICING_TECH_ID)) state.meta.techUnlocked.push(GENE_SPLICING_TECH_ID);
       state.meta.labUpgradesPurchased = Object.keys(SCIENCE_LAB_UPGRADES);
+      // Marking every science_cap_* node "purchased" above doesn't itself
+      // apply their grants (that side effect only lives in UI.js's
+      // buyLabUpgrade, which this cheat deliberately bypasses) — set the
+      // level directly too so the cheat's "everything unlocked" promise
+      // actually holds for the Bubble Cap chain, not just its tree buttons.
+      state.level.upgrades.scienceCapLevel = SCIENCE_CAP_BY_LEVEL.length - 1;
       refreshShopPanel(state);
       break;
     case 'KeyK': // clear all items
