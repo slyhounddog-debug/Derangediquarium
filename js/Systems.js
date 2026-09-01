@@ -30,6 +30,7 @@ import {
   ALIEN_WARNING_MESSAGE_2,
   ALIEN_FIRST_WAVE_TIP_MESSAGE,
   ALIEN_PORTAL_STAGGER_MS,
+  ALIEN_MAX_ALIVE,
   FISH_MIN_X,
   FISH_MAX_X,
   FISH_MIN_Y,
@@ -128,9 +129,20 @@ function spawnAlienWave(state) {
   const t = alienDifficultyT(state.level.alienWavesSpawned);
   const countMin = Math.round(ALIEN_WAVE_COUNT_EARLY_MIN + (ALIEN_WAVE_COUNT_LATE_MIN - ALIEN_WAVE_COUNT_EARLY_MIN) * t);
   const countMax = Math.round(ALIEN_WAVE_COUNT_EARLY_MAX + (ALIEN_WAVE_COUNT_LATE_MAX - ALIEN_WAVE_COUNT_EARLY_MAX) * t);
-  const count = countMin + Math.floor(Math.random() * (countMax - countMin + 1));
+  const rolledCount = countMin + Math.floor(Math.random() * (countMax - countMin + 1));
   const hpMin = Math.round(ALIEN_HP_EARLY_MIN + (ALIEN_HP_LATE_MIN - ALIEN_HP_EARLY_MIN) * t);
   const hpMax = Math.round(ALIEN_HP_EARLY_MAX + (ALIEN_HP_LATE_MAX - ALIEN_HP_EARLY_MAX) * t);
+
+  // ALIEN_MAX_ALIVE is a hard ceiling on simultaneously-alive aliens, not a
+  // per-wave size limit — a neglected tank that already has a screenful of
+  // aliens gets a smaller wave (or none at all, still counted as "spawned"
+  // for the difficulty ramp) rather than piling on top without bound. Any
+  // not-yet-opened portal from THIS wave's own stagger counts too, so a
+  // wave can't sneak a burst past the cap between the count check and the
+  // portals actually opening.
+  const aliveCount = state.level.entities.reduce((n, e) => n + (e.type === 'alien' && e.hp > 0 ? 1 : 0), 0)
+    + state.level.alienPortals.filter((p) => !p.spawned).length;
+  const count = Math.max(0, Math.min(rolledCount, ALIEN_MAX_ALIVE - aliveCount));
 
   for (let i = 0; i < count; i++) {
     state.level.alienPortals.push({

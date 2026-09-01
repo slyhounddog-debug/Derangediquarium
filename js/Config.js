@@ -1524,6 +1524,18 @@ export const ALIEN_HP_EARLY_MIN = 20;
 export const ALIEN_HP_EARLY_MAX = 30;
 export const ALIEN_HP_LATE_MIN = 60;
 export const ALIEN_HP_LATE_MAX = 100;
+// Hard ceiling on simultaneously-alive aliens (plus any not-yet-opened
+// portal, so a burst can't sneak past it) — nothing about "waves ramp up to
+// 10-15 aliens" was ever meant to mean aliens stack UNBOUNDED across
+// multiple un-cleared waves. Without this, a neglected tank's alien count
+// (each one pooping a Waste item every ALIEN_POOP_INTERVAL_MS forever, see
+// below) climbs without limit over a long session, and Grid.js's
+// resolveItemCollisions is O(items^2) per tick — that combination is what
+// causes the framerate to gradually collapse the longer aliens go
+// un-fought. See Systems.js's spawnAlienWave, which shrinks (or skips) a
+// wave's spawn count to whatever room is left under this cap rather than
+// always spawning its full rolled amount.
+export const ALIEN_MAX_ALIVE = 20;
 
 // Warnings + the on-screen countdown — per direct request ("plenty of HUD
 // chat message warnings, and a countdown timer from 10 seconds that shows up
