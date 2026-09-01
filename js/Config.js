@@ -1208,13 +1208,13 @@ export const SCIENCE_LAB_UPGRADES = {
     id: 'electric_hybrids', name: 'Electric Hybrids', icon: '🔌', scienceCost: 10, goldCost: 1000,
     requires: ['gene_splicing'], grants: {},
   },
-  // Per direct request, Science Hybrids is also gated behind at least one
-  // Bubble Capacity purchase — requiring `science_cap_1` specifically (the
-  // first node of the chain below) already means "at least one," since
-  // science_cap_2+ each require the previous node in that same sequence.
+  // No longer gated behind Bubble Capacity — per direct request, only
+  // Eel/Suckerfish (science_cap_1) and Gene-Splicing (science_cap_2, see
+  // above) require a Bubble Cap purchase; Science Hybrids just needs
+  // Gene-Splicing itself, same as its Suckerfish/Electric sibling tracks.
   science_hybrids: {
     id: 'science_hybrids', name: 'Science Hybrids', icon: '🎓', scienceCost: 10, goldCost: 1000,
-    requires: ['gene_splicing', 'science_cap_1'], grants: {},
+    requires: ['gene_splicing'], grants: {},
   },
   scrub_guppy: {
     id: 'scrub_guppy', name: 'Scrub Guppy', icon: '🧹', scienceCost: 25, goldCost: 5000,
