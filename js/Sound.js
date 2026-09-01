@@ -200,114 +200,123 @@ export function playPanelClose() {
 }
 
 // ---- Background music ----
-// Reworked a second time per direct request — the previous pass fixed the
-// "staccato/grating" complaint (legato articulation, a warm sine lead) but
-// landed too slow/sparse to read as "cute and upbeat... a hero on a new
-// adventure" (Stardew Valley's Summer theme, Yoshi's Island, SMW's Special
-// World music were the reference points given) — those all share a bouncy,
-// skipping rhythm (lots of paired eighth notes, not long held whole notes)
-// and a fuller arrangement (a moving bassline, not one note every two bars).
-// This pass keeps the legato articulation fix (still 'sine' lead, still a
-// long release/near-full note coverage — no staccato gaps reappear) but:
-// (1) tempo back up to 128 BPM, a genuine bounce rather than a slow sweep;
-// (2) the melody rewritten with dense paired-eighth "hop" phrasing and a
-// rising three-phrase call-and-response shape (each phrase answers the last
-// a step higher) before a confident low resolve, still pure C major
-// pentatonic (no bad-sounding interval possible regardless of order); (3)
-// the bass now WALKS — 8 moving hits across the loop instead of 4 static
-// ones, a real root-sixth-fifth pattern instead of a single held drone,
-// for the "more substantial" fuller low end; (4) a new quiet rhythmic
-// "bounce" pulse (a tiny soft square blip on the off-beat of every bass
-// hit) layered underneath — the same trick Yoshi's Island/SMW's upbeat
-// tracks lean on, a light percussive skip nobody consciously hears as an
-// instrument but that makes the whole loop feel like it's hopping forward
-// instead of just floating. Scheduled the same way as before: the whole
-// loop's notes are converted into absolute `when` offsets up front, then
-// the next loop is scheduled via setTimeout timed to the loop's own total
-// duration — any timer drift just delays the NEXT loop's first note by a
-// few ms, never an audible glitch mid-phrase.
-const MUSIC_TEMPO_BPM = 128;
+// Reworked a third time, per direct request ("I hate it... more melodic,
+// upbeat and adventurous feeling, with more substance, and no random
+// clicks in the song"). The "random clicks" were almost certainly the
+// previous version's own rhythmic "bounce" pulse — a bare, fast-attack
+// square-wave tick layered under the bass, described in that version's own
+// comment as exactly that ("a tiny... square-wave tick"). It's gone
+// entirely this time, not just quieted — nothing in this track is a bare
+// percussive blip any more, only tuned notes.
+//
+// The bigger change is real harmonic "substance": the previous two passes
+// were melody-plus-single-bass-note, built entirely off one pentatonic
+// scale so nothing could ever clash. This version is hand-composed (never
+// randomized) over an actual I-V-vi-IV chord progression (C-G-Am-F,
+// repeated twice across an 8-bar loop) — the single most common
+// "hopeful/adventurous" progression in game and pop music (it's the
+// backbone of a huge fraction of upbeat anthems) — using the full C major
+// scale rather than just its pentatonic subset, so the melody can leap
+// along real chord tones (full triads, not just neighboring scale steps)
+// for a much more "fanfare" contour: e.g. bar 1 arpeggiates straight up the
+// C major triad, bar 7 leaps up to the loop's highest note (A5) right
+// before the final turnaround. Three real, independent voices now play
+// every bar: the lead melody, a moving root-then-fifth bass line (a classic
+// "oom-pah" pattern, not a static drone), and a soft sustained pad holding
+// the FULL triad (root+third+fifth) underneath — that pad is what actually
+// makes a chord change audible as a chord change, not just a bass note
+// change. All three stay 'sine'/'triangle' (never 'square' at a fast
+// attack) specifically to keep everything smooth — a square wave's sharp
+// edges are what read as "clicky" at a short, fast-attack duration. Scheduled
+// the same way as every prior version: the whole loop's notes are converted
+// into absolute `when` offsets up front, then the next loop is scheduled via
+// setTimeout timed to the loop's own total duration, so any timer drift only
+// ever delays the NEXT loop's first note by a few ms, never an audible glitch
+// mid-phrase.
+const MUSIC_TEMPO_BPM = 132;
 const BEAT_S = 60 / MUSIC_TEMPO_BPM;
-// C major pentatonic, ~1.5 octaves: C4 D4 E4 G4 A4 C5 D5 E5 G5 A5
-const SCALE = [261.63, 293.66, 329.63, 392.0, 440.0, 523.25, 587.33, 659.25, 783.99, 880.0];
-// Three answering phrases (each a step higher than the last, a classic
-// "call and response climbing" shape) built from dense paired-eighth hops
-// with a one-beat landing every 4 notes, then a confident low resolve back
-// to the root to close the loop.
-const MELODY = [
-  // Phrase A — the opening hop, grounded near the root.
-  { deg: 0, beats: 0.5 }, { deg: 2, beats: 0.5 }, { deg: 3, beats: 0.5 }, { deg: 5, beats: 0.5 },
-  { deg: 6, beats: 1 }, { deg: 5, beats: 0.5 }, { deg: 3, beats: 0.5 }, { deg: 6, beats: 2 },
-  // Phrase B — the same hop, answered a step higher.
-  { deg: 5, beats: 0.5 }, { deg: 6, beats: 0.5 }, { deg: 7, beats: 0.5 }, { deg: 6, beats: 0.5 },
-  { deg: 8, beats: 1 }, { deg: 7, beats: 0.5 }, { deg: 6, beats: 0.5 }, { deg: 7, beats: 2 },
-  // Phrase C — a bouncy descending skip-run back down, energetic and busy.
-  { deg: 6, beats: 0.5 }, { deg: 5, beats: 0.5 }, { deg: 6, beats: 0.5 }, { deg: 4, beats: 0.5 },
-  { deg: 5, beats: 0.5 }, { deg: 3, beats: 0.5 }, { deg: 4, beats: 0.5 }, { deg: 2, beats: 0.5 },
-  { deg: 3, beats: 1 }, { deg: 5, beats: 1 },
-  // Phrase D — confident resolve, a last little flourish up before landing
-  // hard on the root to close the loop cleanly.
-  { deg: 3, beats: 0.5 }, { deg: 5, beats: 0.5 }, { deg: 6, beats: 0.5 }, { deg: 8, beats: 0.5 },
-  { deg: 7, beats: 1.5 }, { deg: 5, beats: 0.5 }, { deg: 3, beats: 0.5 }, { deg: 0, beats: 3 },
+const BAR_BEATS = 4;
+// Full C major scale across 2+ octaves (not just the pentatonic subset) —
+// index 0 = C4 ... index 14 = C6. Every melody/chord note below is chosen
+// deliberately against the chord progression, so using the full scale (with
+// its 4th/7th degrees available) carries no dissonance risk the way
+// generating notes programmatically would.
+const SCALE = [
+  261.63, 293.66, 329.63, 349.23, 392.0, 440.0, 493.88, // C4 D4 E4 F4 G4 A4 B4
+  523.25, 587.33, 659.25, 698.46, 783.99, 880.0, 987.77, 1046.5, // C5 D5 E5 F5 G5 A5 B5 C6
 ];
-// A real walking bass — 8 moving hits (root-sixth-fifth-sixth, twice) across
-// the loop instead of 4 static ones, per direct request for "a more
-// substantial sound."
-const BASS_DEGREES = [0, 4, 3, 4, 0, 3, 4, 3];
-const BASS_STEP_BEATS = 3; // spacing between bass hits — dense enough to feel like real movement, not a drone
+// I-V-vi-IV, repeated twice across the loop — [root, third, fifth] as SCALE
+// indices. The classic "hopeful anthem" progression; F -> C across the loop
+// boundary (bar 8 back to bar 1) is a plagal ("amen") cadence, which is why
+// the loop point itself feels like a satisfying resolve rather than a hard
+// cut.
+const CHORDS = {
+  C: [0, 2, 4],
+  G: [4, 6, 8],
+  Am: [5, 7, 9],
+  F: [3, 5, 7],
+};
+const CHORD_PROGRESSION = ['C', 'G', 'Am', 'F', 'C', 'G', 'Am', 'F'];
+// One bar (4 beats) of melody per chord above, chosen to outline that
+// chord's own triad on the strong beats — an ascending arpeggio hop over
+// the opening C, a full run up to the octave over G, a slightly more
+// syncopated minor-tinged bar over Am, climbing to a high point over F, a
+// mirrored/descending echo of bar 1 for the "return" (bar 5), then a real
+// climax (A5, the loop's highest note) over the second Am before a
+// four-note descending close leads back into the loop.
+const MELODY_BARS = [
+  [{ deg: 0, beats: 0.5 }, { deg: 2, beats: 0.5 }, { deg: 4, beats: 0.5 }, { deg: 7, beats: 0.5 }, { deg: 9, beats: 0.5 }, { deg: 7, beats: 0.5 }, { deg: 4, beats: 0.5 }, { deg: 2, beats: 0.5 }],
+  [{ deg: 4, beats: 0.5 }, { deg: 6, beats: 0.5 }, { deg: 8, beats: 0.5 }, { deg: 11, beats: 0.5 }, { deg: 8, beats: 0.5 }, { deg: 6, beats: 0.5 }, { deg: 4, beats: 1 }],
+  [{ deg: 5, beats: 0.5 }, { deg: 7, beats: 0.5 }, { deg: 9, beats: 0.5 }, { deg: 7, beats: 0.5 }, { deg: 5, beats: 0.5 }, { deg: 2, beats: 0.5 }, { deg: 3, beats: 0.5 }, { deg: 5, beats: 0.5 }],
+  [{ deg: 3, beats: 1 }, { deg: 5, beats: 0.5 }, { deg: 7, beats: 0.5 }, { deg: 10, beats: 1 }, { deg: 7, beats: 0.5 }, { deg: 5, beats: 0.5 }],
+  [{ deg: 7, beats: 0.5 }, { deg: 9, beats: 0.5 }, { deg: 11, beats: 0.5 }, { deg: 9, beats: 0.5 }, { deg: 7, beats: 0.5 }, { deg: 4, beats: 0.5 }, { deg: 2, beats: 0.5 }, { deg: 0, beats: 0.5 }],
+  [{ deg: 4, beats: 0.5 }, { deg: 6, beats: 0.5 }, { deg: 8, beats: 0.5 }, { deg: 6, beats: 0.5 }, { deg: 4, beats: 1 }, { deg: 2, beats: 1 }],
+  [{ deg: 5, beats: 0.5 }, { deg: 7, beats: 0.5 }, { deg: 9, beats: 0.5 }, { deg: 12, beats: 0.5 }, { deg: 9, beats: 0.5 }, { deg: 7, beats: 0.5 }, { deg: 5, beats: 1 }],
+  [{ deg: 10, beats: 0.5 }, { deg: 7, beats: 0.5 }, { deg: 5, beats: 0.5 }, { deg: 3, beats: 0.5 }, { deg: 5, beats: 1 }, { deg: 3, beats: 1 }],
+];
 
 function scheduleMusicLoop() {
   const audioCtx = ensureContext();
   if (!audioCtx) return;
   let beatCursor = 0;
-  for (const note of MELODY) {
-    const freq = SCALE[note.deg % SCALE.length] * (note.deg >= SCALE.length ? 2 : 1);
-    playTone(freq, note.beats * BEAT_S * 0.97, {
-      type: 'sine',
-      gain: 0.12,
-      attack: 0.015,
-      release: 0.16,
-      when: beatCursor * BEAT_S,
-      destination: musicGain,
-    });
-    beatCursor += note.beats;
+  for (const bar of MELODY_BARS) {
+    for (const note of bar) {
+      playTone(SCALE[note.deg], note.beats * BEAT_S * 0.97, {
+        type: 'sine',
+        gain: 0.13,
+        attack: 0.015,
+        release: 0.16,
+        when: beatCursor * BEAT_S,
+        destination: musicGain,
+      });
+      beatCursor += note.beats;
+    }
   }
   const totalBeats = beatCursor;
-  let bassCursor = 0;
-  for (const deg of BASS_DEGREES) {
-    playTone(SCALE[deg] / 2, BEAT_S * 1.4, {
-      type: 'triangle',
-      gain: 0.065,
-      attack: 0.015,
-      release: 0.22,
-      when: bassCursor * BEAT_S,
-      destination: musicGain,
+
+  CHORD_PROGRESSION.forEach((chordName, barIndex) => {
+    const [rootIdx, thirdIdx, fifthIdx] = CHORDS[chordName];
+    const barStart = barIndex * BAR_BEATS * BEAT_S;
+
+    // Bass: a real "oom-pah" — the root on beat 1 (the longer, anchoring
+    // hit) and the fifth on beat 3 (shorter), one octave down.
+    playTone(SCALE[rootIdx] / 2, BEAT_S * 1.6, {
+      type: 'triangle', gain: 0.09, attack: 0.012, release: 0.22, when: barStart, destination: musicGain,
     });
-    // A soft sustained pad an octave above the bass note — warms out the
-    // low end into a fuller chord tone instead of one thin blip, at a low
-    // enough gain to sit underneath the lead rather than compete with it.
-    playTone(SCALE[deg], BEAT_S * 1.4, {
-      type: 'triangle',
-      gain: 0.025,
-      attack: 0.1,
-      release: 0.25,
-      when: bassCursor * BEAT_S,
-      destination: musicGain,
+    playTone(SCALE[fifthIdx] / 2, BEAT_S * 1.0, {
+      type: 'triangle', gain: 0.07, attack: 0.012, release: 0.18, when: barStart + 2 * BEAT_S, destination: musicGain,
     });
-    // The rhythmic "bounce" — a tiny, quiet square-wave tick on the
-    // off-beat between this bass hit and the next, purely percussive
-    // texture (not a melodic statement) to give the loop a skipping,
-    // forward-hopping pulse.
-    playTone(SCALE[5], 0.045, {
-      type: 'square',
-      gain: 0.03,
-      attack: 0.002,
-      release: 0.03,
-      when: (bassCursor + BASS_STEP_BEATS / 2) * BEAT_S,
-      destination: musicGain,
-    });
-    bassCursor += BASS_STEP_BEATS;
-  }
+
+    // The pad: the full triad, held for nearly the whole bar at a low
+    // gain — this is what makes each chord change actually read as a chord
+    // change (a harmony shift) rather than just the bass note moving.
+    for (const idx of [rootIdx, thirdIdx, fifthIdx]) {
+      playTone(SCALE[idx], BAR_BEATS * BEAT_S * 0.95, {
+        type: 'triangle', gain: 0.028, attack: 0.12, release: 0.3, when: barStart, destination: musicGain,
+      });
+    }
+  });
+
   musicTimer = setTimeout(scheduleMusicLoop, totalBeats * BEAT_S * 1000);
 }
 

@@ -637,6 +637,11 @@ export const COIN_CAP_BY_LEVEL = [10, 25, 50, 100, 250, 500]; // index 0 = unupg
 export const COIN_CAP_UPGRADE_COSTS = [3, 8, 20, 45, 80]; // Tank Points — placeholder balance, tune once real playtesting exists, same as every other economy constant here
 export const COIN_CAP_UPGRADE_MAX_LEVEL = COIN_CAP_UPGRADE_COSTS.length;
 
+// Shared by both the Coin Cap and Science Cap HUD readouts (UI.js's
+// updateHUD) — the live count/max ratio at or above which the readout
+// pulses red continuously, per direct request.
+export const CAP_WARNING_THRESHOLD_FRACTION = 0.8;
+
 // Science Cap: the same idea as Coin Cap above, but for Science Bubble items
 // and upgraded exclusively through the Science Lab instead of Tank Points —
 // per direct request. Priced like every other Lab node (both Science AND
@@ -709,10 +714,14 @@ export const SPECIES = {
     lifespan: 300000, // ms, not enforced until a later phase
     hungerRate: 1.218, // hunger points/sec — 25% slower again per direct request ("all fish get hungrier 25% slower"); was 1.624
     growthStages: [
-      { feedsRequired: 0, scale: 0.5, dropInterval: 37284, dropValue: 5 }, // stage 1: hatchling — money production 10% slower again per direct request (dropInterval / 0.9); was 33556; feeding fills the timer, see COIN_TIMER_FEED_BONUS_FRACTION
-      { feedsRequired: 3, scale: 0.75, dropInterval: 29877, dropValue: 5 }, // stage 2: juvenile — was 26889
-      { feedsRequired: 6, scale: 1.0, dropInterval: 19382, dropValue: 5 }, // stage 3: adult — was 17444
+      { feedsRequired: 0, scale: 0.5, dropInterval: 37284, dropValue: 6.25 }, // stage 1: hatchling — money production 10% slower again per direct request (dropInterval / 0.9); was 33556; feeding fills the timer, see COIN_TIMER_FEED_BONUS_FRACTION. dropValue *1.25 per direct request ("guppies give 25% more gold, so they give more money than the dartfin") — was 5; the fractional value is intentional, Math.ceil'd at drop time same as every star-tier-scaled drop already is
+      { feedsRequired: 3, scale: 0.75, dropInterval: 29877, dropValue: 6.25 }, // stage 2: juvenile — was 26889 / dropValue 5
+      { feedsRequired: 6, scale: 1.0, dropInterval: 19382, dropValue: 6.25 }, // stage 3: adult — was 17444 / dropValue 5
     ],
+    // Per-species multiplier on the flat WASTE_POOP_INTERVAL_MS fish-poop
+    // timer (Entities.js's updateFish) — omitted here since Guppy IS the
+    // baseline every other multiplier below is described relative to (an
+    // implicit 1, via `|| 1` at the read site).
     unlockedByDefault: true,
   },
   dartfin: {
@@ -727,6 +736,13 @@ export const SPECIES = {
       { feedsRequired: 3, scale: 0.75, dropInterval: 14074, dropValue: 3 }, // was 12667
       { feedsRequired: 6, scale: 1.0, dropInterval: 9382, dropValue: 3 }, // was 8444 — still the high-frequency coin firehose of the three, just slightly less so
     ],
+    // 10% slower waste production than Guppy, per direct request — same
+    // "÷(1-x)" convention this codebase already uses for "X% slower"
+    // (see e.g. WASTE_POOP_INTERVAL_MS's own ÷0.7 "30% slower" comment
+    // elsewhere in this file), applied as a per-species multiplier on the
+    // shared WASTE_POOP_INTERVAL_MS baseline instead of a flat override, so
+    // it stays correctly relative if that shared constant is ever retuned.
+    wastePoopIntervalMultiplier: 1 / 0.9,
     unlockedByDefault: true,
   },
   blimpfish: {
@@ -741,6 +757,10 @@ export const SPECIES = {
       { feedsRequired: 3, scale: 0.8, dropInterval: 35802, dropValue: 17 }, // was 32222
       { feedsRequired: 6, scale: 1.0, dropInterval: 29259, dropValue: 22 }, // was 26333
     ],
+    // 5% faster waste production than Guppy, per direct request — same
+    // per-species multiplier mechanism as Dartfin's own (slower) one above,
+    // just the "faster" ("*(1-x)") side of the same convention.
+    wastePoopIntervalMultiplier: 0.95,
     unlockedByDefault: true,
   },
 
@@ -1564,12 +1584,30 @@ export const ALIEN_WANDER_INTERVAL_MIN_S = 1;
 export const ALIEN_WANDER_INTERVAL_MAX_S = 2.5;
 
 export const ALIEN_CLICK_DAMAGE = 1; // per direct request — "clicking on them for 1 damage each"
-export const ALIEN_POOP_INTERVAL_MS = 1000; // "poop out 1 waste every second" while alive
+export const ALIEN_POOP_INTERVAL_MS = 2000; // was 1000 ("poop out 1 waste every second") — halved per direct request, and it also softens the population cap's own worst-case waste-production rate (see ALIEN_MAX_ALIVE's comment)
 export const ALIEN_INCOME_BLOCK_RADIUS = 90; // px — a fish this close to a LIVING alien produces no coin on its drop timer at all, see Entities.js's updateFish
 export const ALIEN_RADIUS = 16; // px, base visual/hit-test size
 export const ALIEN_COLOR = '#5a2d6b'; // dark purple, visually distinct from every fish color
 export const ALIEN_HEALTH_BAR_WIDTH = 30;
 export const ALIEN_HEALTH_BAR_HEIGHT = 4;
+
+// Hit feedback + death animation, per direct request ("aliens flash red and
+// bounce when they take damage, which a visual animation when they get
+// killed"). Set on the alien itself (Entities.js's createAlien/updateAlien)
+// the moment either damage source (Grid.js's Turret branch, main.js's
+// click handler) reduces its hp — main.js's render reads it back to blend
+// the body color toward ALIEN_HIT_FLASH_COLOR and apply a brief scale-punch
+// "bounce," both decaying to nothing over this same window.
+export const ALIEN_HIT_FLASH_MS = 220;
+export const ALIEN_HIT_FLASH_COLOR = { r: 255, g: 59, b: 59 }; // #ff3b3b, pre-split for main.js's per-frame RGB lerp
+export const ALIEN_HIT_BOUNCE_SCALE = 0.35; // peak extra scale (1 + this, at the midpoint of the flash) during the hit bounce
+// A short expanding/fading burst played at an alien's last position the
+// instant it dies (Entities.js's updateAlien pushes one into
+// state.level.alienDeathEffects, main.js renders and ages them) — fully
+// decoupled from the alien entity itself, which is removed from
+// state.level.entities immediately, same "independent particle" pattern
+// state.level.floatingTexts already uses for pickup text.
+export const ALIEN_DEATH_EFFECT_DURATION_MS = 500;
 
 // A fish tints gray under two conditions — per direct request ("make fish
 // visually turn a gray color when they aren't producing coins, and make

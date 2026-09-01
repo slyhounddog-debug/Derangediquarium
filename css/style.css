@@ -408,6 +408,27 @@ html, body {
 .flash-pickup { animation: flash-pickup 0.33s ease; }
 .flash-spend { animation: flash-spend 0.33s ease; }
 
+/* Coin/Science Cap warning — toggled by UI.js's updateHUD once the live
+   count reaches CAP_WARNING_THRESHOLD_FRACTION (80%) of the active cap, on
+   whichever of the HUD/Shop/Tank copies is currently visible. A continuous
+   color pulse (not a one-shot animation like flash-pickup/-spend above) so
+   it keeps reading as "still full," not just a blip the moment it crosses
+   the threshold. */
+@keyframes cap-warning-pulse {
+  0%, 100% { color: #6b4c6b; }
+  50% { color: #ff4757; }
+}
+.cap-warning { animation: cap-warning-pulse 1s ease-in-out infinite; }
+/* Both classes can land on the same element at once (near the cap AND the
+   count just rose) — listing both animations explicitly here (rather than
+   relying on plain cascade order between the two single-animation rules
+   above) is what lets the one-shot shake actually play instead of being
+   silently overridden by the continuous pulse for its whole 0.33s run; once
+   flash-spend's single iteration finishes, the still-infinite pulse
+   naturally takes back over for the shared `color` property with no extra
+   code needed. */
+.cap-warning.flash-spend { animation: cap-warning-pulse 1s ease-in-out infinite, flash-spend 0.33s ease; }
+
 /* Every building slot shares ONE 3-columns-per-row grid — per direct
    request ("3 max buildings/tools to a row"). Food/Demolish/Merge used to
    live in here too but moved out to the fixed #bottom-tool-bar below, per a

@@ -40,6 +40,7 @@ import {
   FISH_SPEED_MULTIPLIER,
   GENE_SPLICING_LAB_ID,
   ALIEN_COUNTDOWN_START_MS,
+  CAP_WARNING_THRESHOLD_FRACTION,
   TURRET_STATS,
   TURRET_RANGE,
   TILE_TURRET_WASTE,
@@ -73,6 +74,8 @@ let currentPreviewSpecies = null; // species currently shown in the in-panel pre
 let currentPreviewBuilding = null; // building currently shown in the in-panel preview, if any — mutually exclusive with currentPreviewSpecies
 let lastMoney = null; // previous frame's money, to detect gain vs spend for the flash animation
 let lastCleanliness = null; // previous frame's cleanliness, same purpose
+let lastCoinCapCount = null; // previous frame's live coin count, to detect a rise for the shake-red cue below
+let lastScienceCapCount = null; // same, for Science Bubbles
 let notificationLogExpanded = false;
 let lastRenderedNotificationCount = -1; // rebuild the log list only when it actually changes, not every frame
 let lastPillNotificationCount = null; // separate from the above — tracks the pill's own bounce/shimmer trigger regardless of whether the log is expanded; null means "not yet initialized," so the very first real notification on page load doesn't bounce
@@ -1935,15 +1938,31 @@ export function updateHUD(state) {
   // Coin Cap — always shown (coins exist from the very start), unlike
   // Science below. Counts EVERY coin currently in state.level.items, seabed
   // city included — see Entities.js's countTankItemsByType.
-  const coinCapText = `🪙 ${countTankItemsByType(state, 'coin')}/${effectiveCoinCapacity(state)}`;
+  const coinCapCount = countTankItemsByType(state, 'coin');
+  const coinCapMax = effectiveCoinCapacity(state);
+  const coinCapText = `🪙 ${coinCapCount}/${coinCapMax}`;
   els.coinCap.textContent = coinCapText;
   els.shopCoinCap.textContent = coinCapText;
   els.tankCoinCap.textContent = coinCapText;
-  // Set by Entities.js's updateFish the instant a coin-drop cycle is blocked
-  // by the cap — a plain flag read-and-cleared here rather than a direct
-  // function call, since Entities.js has no reason to import UI.js. Per
-  // direct request, only the Coin HUD shakes on a blocked coin; Science has
-  // no equivalent ask.
+  // Per direct request: pulse red continuously once the live count reaches
+  // CAP_WARNING_THRESHOLD_FRACTION (80%) of the active cap, and shake red
+  // (the same one-shot flash-spend every other HUD readout already uses)
+  // every time the count itself goes UP — both are "this is filling up,
+  // pay attention" cues, just one continuous and one per-event.
+  const coinCapWarning = coinCapCount / coinCapMax >= CAP_WARNING_THRESHOLD_FRACTION;
+  els.coinCap.classList.toggle('cap-warning', coinCapWarning);
+  els.shopCoinCap.classList.toggle('cap-warning', coinCapWarning);
+  els.tankCoinCap.classList.toggle('cap-warning', coinCapWarning);
+  if (lastCoinCapCount !== null && coinCapCount > lastCoinCapCount) {
+    playFlash(visibleHudEl(state, els.coinCap, els.shopCoinCap, els.tankCoinCap), 'flash-spend');
+  }
+  lastCoinCapCount = coinCapCount;
+  // Set by Entities.js's updateFish the instant a coin-drop cycle is
+  // blocked by the cap — a plain flag read-and-cleared here rather than a
+  // direct function call, since Entities.js has no reason to import UI.js.
+  // A blocked drop never actually raises the count, so this can't double up
+  // with the increase-triggered shake above — it's the one case that still
+  // needs its own explicit trigger.
   if (state.ui.coinCapFlashPending) {
     state.ui.coinCapFlashPending = false;
     playFlash(visibleHudEl(state, els.coinCap, els.shopCoinCap, els.tankCoinCap), 'flash-spend');
@@ -1956,10 +1975,20 @@ export function updateHUD(state) {
   els.shopScienceCap.classList.toggle('hidden', !octopusUnlocked);
   els.tankScienceCap.classList.toggle('hidden', !octopusUnlocked);
   if (octopusUnlocked) {
-    const scienceCapText = `🔬 ${countTankItemsByType(state, 'science')}/${effectiveScienceCapacity(state)}`;
+    const scienceCapCount = countTankItemsByType(state, 'science');
+    const scienceCapMax = effectiveScienceCapacity(state);
+    const scienceCapText = `🔬 ${scienceCapCount}/${scienceCapMax}`;
     els.scienceCap.textContent = scienceCapText;
     els.shopScienceCap.textContent = scienceCapText;
     els.tankScienceCap.textContent = scienceCapText;
+    const scienceCapWarning = scienceCapCount / scienceCapMax >= CAP_WARNING_THRESHOLD_FRACTION;
+    els.scienceCap.classList.toggle('cap-warning', scienceCapWarning);
+    els.shopScienceCap.classList.toggle('cap-warning', scienceCapWarning);
+    els.tankScienceCap.classList.toggle('cap-warning', scienceCapWarning);
+    if (lastScienceCapCount !== null && scienceCapCount > lastScienceCapCount) {
+      playFlash(visibleHudEl(state, els.scienceCap, els.shopScienceCap, els.tankScienceCap), 'flash-spend');
+    }
+    lastScienceCapCount = scienceCapCount;
   }
 
   // Electricity — only shown at all once Electric Eel is unlocked, per

@@ -102,6 +102,7 @@ export function loadLevel(state, levelId) {
     alienWarning1Shown: false,
     alienWarning2Shown: false,
     alienPortals: [], // { x, y, hp, openAtMs, spawned, spawnedAtMs } — see Systems.js's spawnAlienWave/Entities.js's updateEntities
+    alienDeathEffects: [], // { x, y, age } — a short expanding/fading burst pushed by Entities.js's updateAlien the instant an alien's hp hits 0, aged out by updateAlienDeathEffects; purely decorative, rendered by main.js
     lifetimeMoneyEarned: 0, // real in-play income only (coins banked) — NOT the starting endowment or the bankruptcy bailout gift; see Entities.js's bankMoney and Config.js's MONEY_MILESTONE_1K
     fishVanishTimer: 0, // ms remaining on the "you found the chat" gag — see Entities.js's updateEntities; every fish freezes in place (not just hidden) and stops rendering while this is > 0
     fishVanishDelayMs: 0, // ms remaining before fishVanishTimer above actually starts — see Entities.js's updateFishVanish/Config.js's FISH_VANISH_DELAY_MS

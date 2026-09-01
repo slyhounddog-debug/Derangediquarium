@@ -89,6 +89,7 @@ import {
   ALIEN_PORTAL_OPEN_MS,
   ALIEN_PORTAL_CLOSE_MS,
   FISH_BLOCKED_TINT_MS,
+  ALIEN_DEATH_EFFECT_DURATION_MS,
 } from './Config.js';
 import { stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemForces, updateBuildings } from './Grid.js';
 // Sound is a fire-and-forget side effect at the moment something already
@@ -233,6 +234,7 @@ export function createAlien(x, y, hp) {
     maxHp: hp,
     wanderTimer: 0, // 0 so the very first tick immediately picks a heading, same as fish's own wanderTimer
     poopTimer: 0,
+    hitFlashMs: 0, // counts down from ALIEN_HIT_FLASH_MS whenever damage is applied (Grid.js's Turret branch, main.js's click handler) — drives the red-flash/bounce read by main.js's render
   };
 }
 
@@ -274,8 +276,17 @@ function findNearestAlienWithin(entities, x, y, radius) {
 // the nearest fish at all; when it does, the new heading is biased toward
 // it by a random angle offset rather than aimed dead-on.
 function updateAlien(alien, state, dtMs) {
-  if (alien.hp <= 0) return false;
+  if (alien.hp <= 0) {
+    // Per direct request, killing an alien gets its own visual instead of
+    // just vanishing — a short expanding/fading burst, fully decoupled from
+    // the alien entity itself (which is removed right here), same
+    // independent-particle pattern state.level.floatingTexts already uses.
+    state.level.alienDeathEffects.push({ x: alien.x, y: alien.y, age: 0 });
+    return false;
+  }
   const dt = dtMs / 1000;
+
+  if (alien.hitFlashMs > 0) alien.hitFlashMs = Math.max(0, alien.hitFlashMs - dtMs);
 
   alien.wanderTimer -= dt;
   if (alien.wanderTimer <= 0) {
@@ -1350,13 +1361,18 @@ function updateFish(fish, state, dtMs) {
   // Waste consumption handled in the seek/eat branch above.)
 
   // Fish poop: any non-Scavenger fish drops a Waste item directly at its
-  // own position on a flat periodic timer, independent of the
-  // Collector-byproduct path above — literal fish poop, per direct
-  // request. Suckerfish (and any other SCAVENGER species) don't poop —
-  // they're the ones cleaning this up, not producing it.
+  // own position on a periodic timer, independent of the Collector-byproduct
+  // path above — literal fish poop, per direct request. Suckerfish (and any
+  // other SCAVENGER species) don't poop — they're the ones cleaning this up,
+  // not producing it. The interval is WASTE_POOP_INTERVAL_MS scaled by an
+  // optional per-species wastePoopIntervalMultiplier (Config.js — Dartfin
+  // 10% slower, Blimpfish 5% faster than Guppy, per direct request);
+  // defaults to 1 (Guppy's own baseline, and every species without an
+  // explicit override) via the `|| 1` fallback.
   if (!isScavenger) {
     fish.poopTimer += dtMs;
-    if (fish.poopTimer >= WASTE_POOP_INTERVAL_MS) {
+    const wastePoopInterval = WASTE_POOP_INTERVAL_MS * (def.wastePoopIntervalMultiplier || 1);
+    if (fish.poopTimer >= wastePoopInterval) {
       fish.poopTimer = 0;
       state.level.items.push(createWaste(fish.x, fish.y));
       adjustCleanliness(state, -CLEANLINESS_PER_WASTE_EVENT);
@@ -1421,9 +1437,20 @@ function updateAlienPortals(state) {
   );
 }
 
+// Ages/culls the death-burst effects updateAlien pushes on an alien's last
+// tick — pure decoration, no gameplay meaning, same "age past a fixed
+// lifetime and drop" pattern updatePickupText already uses for floatingTexts.
+function updateAlienDeathEffects(state, dtMs) {
+  state.level.alienDeathEffects = state.level.alienDeathEffects.filter((effect) => {
+    effect.age += dtMs;
+    return effect.age < ALIEN_DEATH_EFFECT_DURATION_MS;
+  });
+}
+
 export function updateEntities(state, dtMs) {
   updateFishVanish(state, dtMs);
   updateAlienPortals(state);
+  updateAlienDeathEffects(state, dtMs);
   pendingFoodToWasteSpawns.length = 0; // updateFood (below) fills this — see its own comment for why it can't push into state.level.items directly
   state.level.items = state.level.items.filter((item) => {
     if (item.type === 'food') return updateFood(item, state, dtMs);

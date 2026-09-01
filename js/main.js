@@ -47,6 +47,10 @@ import {
   ALIEN_PORTAL_OPEN_MS,
   ALIEN_PORTAL_CLOSE_MS,
   ALIEN_PORTAL_RADIUS,
+  ALIEN_HIT_FLASH_MS,
+  ALIEN_HIT_FLASH_COLOR,
+  ALIEN_HIT_BOUNCE_SCALE,
+  ALIEN_DEATH_EFFECT_DURATION_MS,
 } from './Config.js';
 import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop } from './Engine.js';
 import { loadLevel, LEVELS } from './Levels.js';
@@ -313,6 +317,7 @@ input.clickHandlers.push((sx, sy) => {
     if (entity.type !== 'alien' || entity.hp <= 0) continue;
     if (Math.hypot(entity.x - world.x, entity.y - world.y) <= ALIEN_RADIUS) {
       entity.hp -= ALIEN_CLICK_DAMAGE;
+      entity.hitFlashMs = ALIEN_HIT_FLASH_MS; // per direct request — a hit flashes red and "bounces," read back by the render loop below
       return;
     }
   }
@@ -689,6 +694,24 @@ function waterBackgroundGradient(ctx, canvasHeight, cleanliness) {
   return gradient;
 }
 
+// Alien hit-flash — per direct request ("aliens flash red and bounce when
+// they take damage"). ALIEN_COLOR is a hex string everywhere else it's used
+// (Grid.js's tier badges, etc.), so it's parsed to an {r,g,b} triple once
+// here rather than adding a shared hex-parsing helper for this one call
+// site — same "computed once at module scope" precedent as WATER_TOP_CLEAN
+// above.
+const ALIEN_COLOR_RGB = {
+  r: parseInt(ALIEN_COLOR.slice(1, 3), 16),
+  g: parseInt(ALIEN_COLOR.slice(3, 5), 16),
+  b: parseInt(ALIEN_COLOR.slice(5, 7), 16),
+};
+function lerpRgbToString(from, to, t) {
+  const r = Math.round(from.r + (to.r - from.r) * t);
+  const g = Math.round(from.g + (to.g - from.g) * t);
+  const b = Math.round(from.b + (to.b - from.b) * t);
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
 // Cursor changes to match the active tool — a hammer for Demolish, a glove
 // for the new Merge tool — per direct request. Built as a small inline SVG
 // data-URI cursor (an emoji rendered onto a tiny canvas-less SVG) rather
@@ -1017,9 +1040,20 @@ function render() {
     if (alien.type !== 'alien' || alien.hp <= 0) continue;
     const pos = worldToScreen(alien.x, alien.y, state.camera);
     if (pos.x < -40 || pos.x > canvas.width + 40 || pos.y < -40 || pos.y > canvas.height + 40) continue;
-    const radius = ALIEN_RADIUS * state.camera.zoom;
+    const baseRadius = ALIEN_RADIUS * state.camera.zoom;
+    // Hit flash + "bounce": both decay together over ALIEN_HIT_FLASH_MS —
+    // flashFrac (1 at the instant of a hit, decaying to 0) drives the red
+    // color blend directly; the bounce is a scale-punch (grows then
+    // shrinks back to 1x, peaking at the midpoint) rather than a position
+    // offset, since displacing an already-moving alien would just read as a
+    // stutter. Only the body/eyes scale with it — the health bar stays
+    // anchored off the unscaled baseRadius so it doesn't jitter.
+    const flashFrac = alien.hitFlashMs / ALIEN_HIT_FLASH_MS;
+    const bounceProgress = 1 - flashFrac; // 0 (just hit) -> 1 (flash fully decayed)
+    const bounceScaleMul = alien.hitFlashMs > 0 ? 1 + ALIEN_HIT_BOUNCE_SCALE * Math.sin(bounceProgress * Math.PI) : 1;
+    const radius = baseRadius * bounceScaleMul;
     ctx.beginPath();
-    ctx.fillStyle = ALIEN_COLOR;
+    ctx.fillStyle = flashFrac > 0 ? lerpRgbToString(ALIEN_COLOR_RGB, ALIEN_HIT_FLASH_COLOR, flashFrac) : ALIEN_COLOR;
     ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
@@ -1034,11 +1068,42 @@ function render() {
     const barW = ALIEN_HEALTH_BAR_WIDTH * state.camera.zoom;
     const barH = ALIEN_HEALTH_BAR_HEIGHT * state.camera.zoom;
     const barX = pos.x - barW / 2;
-    const barY = pos.y - radius - barH - 6;
+    const barY = pos.y - baseRadius - barH - 6;
     ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
     ctx.fillRect(barX, barY, barW, barH);
     ctx.fillStyle = '#ff4d4d';
     ctx.fillRect(barX, barY, barW * Math.max(0, alien.hp / alien.maxHp), barH);
+  }
+
+  // Alien death burst — a short expanding ring plus a handful of outward
+  // particles at fixed angles (no per-effect random state needs storing;
+  // the angles alone already read as an even burst), fading out over
+  // ALIEN_DEATH_EFFECT_DURATION_MS. Purely decorative — see Entities.js's
+  // updateAlien/updateAlienDeathEffects for the age-and-cull side of this.
+  for (const effect of state.level.alienDeathEffects) {
+    const pos = worldToScreen(effect.x, effect.y, state.camera);
+    if (pos.x < -40 || pos.x > canvas.width + 40 || pos.y < -40 || pos.y > canvas.height + 40) continue;
+    const t = effect.age / ALIEN_DEATH_EFFECT_DURATION_MS; // 0 -> 1
+    const alpha = 1 - t;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    const ringRadius = ALIEN_RADIUS * state.camera.zoom * (1 + t * 1.6);
+    ctx.strokeStyle = `rgb(${ALIEN_HIT_FLASH_COLOR.r}, ${ALIEN_HIT_FLASH_COLOR.g}, ${ALIEN_HIT_FLASH_COLOR.b})`;
+    ctx.lineWidth = Math.max(1, 2.5 * state.camera.zoom * (1 - t));
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, ringRadius, 0, Math.PI * 2);
+    ctx.stroke();
+    const particleDist = ALIEN_RADIUS * state.camera.zoom * (0.4 + t * 1.8);
+    ctx.fillStyle = 'rgba(90, 45, 107, 0.9)'; // ALIEN_COLOR, flat — the burst reads as the alien itself scattering
+    for (let i = 0; i < 6; i++) {
+      const angle = (i / 6) * Math.PI * 2;
+      const px = pos.x + Math.cos(angle) * particleDist;
+      const py = pos.y + Math.sin(angle) * particleDist;
+      ctx.beginPath();
+      ctx.arc(px, py, Math.max(1, 3 * state.camera.zoom * (1 - t)), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
   }
 
   // Small red "Can't afford"/"Needs Platform" reason text, glued to the

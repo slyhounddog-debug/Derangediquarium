@@ -33,6 +33,7 @@ import {
   WASTE_TURRET_SHOTS_PER_WASTE,
   WASTE_TURRET_MAX_AMMO,
   WASTE_TURRET_MAX_WASTE,
+  ALIEN_HIT_FLASH_MS,
   TILE_REFUND_FRACTION,
   GRID_SWEEP_SUBSTEP,
   ITEM_LOST_BELOW_WORLD_MARGIN_PX,
@@ -657,6 +658,7 @@ export function updateBuildings(state, dtMs) {
         }
         if (nearestAlien) {
           nearestAlien.hp -= turretStats.damage;
+          nearestAlien.hitFlashMs = ALIEN_HIT_FLASH_MS; // per direct request — a hit flashes red and "bounces," read back by main.js's render
           data.cooldownMs = 1000 / turretStats.shotsPerSec;
           if (data.type === TILE_TURRET_WASTE) data.ammo -= 1;
           firedThisTick = true;
