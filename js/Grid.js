@@ -28,12 +28,10 @@ import {
   PROCESSOR_STATS,
   AUTO_FEEDER_STATS,
   TURRET_STATS,
-  TURRET_RANGE,
   TURRET_INTAKE_RADIUS,
   WASTE_TURRET_SHOTS_PER_WASTE,
   WASTE_TURRET_MAX_AMMO,
   WASTE_TURRET_MAX_WASTE,
-  ALIEN_HIT_FLASH_MS,
   TILE_REFUND_FRACTION,
   GRID_SWEEP_SUBSTEP,
   ITEM_LOST_BELOW_WORLD_MARGIN_PX,
@@ -555,13 +553,16 @@ function beginCollectorProcessing(item, centerX, centerY, tileType) {
 // in place). Newly-dispensed Food is NOT created here, to avoid a circular
 // import with Entities.js's createFood — instead this returns an array of
 // spawn points `{ x, y }` for the caller to actually construct.
-// Returns { foodSpawnPoints, wasteSpawnPoints } — Entities.js constructs the
-// actual Food/Waste items from these (circular-import avoidance, same
-// reasoning as before), banking coins/Science itself when stepCollectorProcessing
-// (called from each item's own per-tick step) reports 'consumed'.
+// Returns { foodSpawnPoints, wasteSpawnPoints, turretShots } — Entities.js
+// constructs the actual Food/Waste items and turret projectiles from these
+// (circular-import avoidance, same reasoning as before — createTurretProjectile
+// lives in Entities.js alongside createFood/createWaste), banking coins/Science
+// itself when stepCollectorProcessing (called from each item's own per-tick
+// step) reports 'consumed'.
 export function updateBuildings(state, dtMs) {
   const foodSpawnPoints = [];
   const wasteSpawnPoints = [];
+  const turretShots = [];
   const items = state.level.items;
   for (const key in state.level.buildingData) {
     const data = state.level.buildingData[key];
@@ -627,27 +628,27 @@ export function updateBuildings(state, dtMs) {
         }
       }
 
-      // Fire — cooldown-gated, auto-targets the NEAREST living alien within
-      // TURRET_RANGE (no player-chosen aim at all, per direct request that
-      // buildings shouldn't need one any more). Aliens live in
-      // state.level.entities, same array fish do; Grid.js reading their
-      // positions for a plain distance check is the same kind of thing this
-      // function already does reading state.level.items for an intake scan,
-      // not "fish logic" in the sense CLAUDE.md's module boundary forbids.
-      // data.firing (read by computeCurrentPowerDemand above) is
-      // recomputed fresh every tick, true only on a tick a shot actually
-      // fires — an alien's hp is reduced directly here; the ENTITIES filter
-      // loop in Entities.js's updateEntities (which runs AFTER this
-      // function, every tick) is what actually removes it once hp <= 0,
-      // same "Grid.js mutates in place, the real owner reconciles" split
-      // resolveItemCollisions already uses for items.
+      // Fire — cooldown-gated, auto-targets the NEAREST living alien
+      // anywhere in the level (no player-chosen aim, and — per direct
+      // request — no range cutoff at all any more; see TURRET_STATS' own
+      // comment for why). Aliens live in state.level.entities, same array
+      // fish do; Grid.js reading their positions for a plain nearest-search
+      // is the same kind of thing this function already does reading
+      // state.level.items for an intake scan, not "fish logic" in the sense
+      // CLAUDE.md's module boundary forbids. Unlike the old hitscan version,
+      // this does NOT touch alien.hp directly any more — it only records
+      // that a shot fired (pushed into turretShots, returned below) for
+      // Entities.js to spawn a real homing projectile from; damage lands
+      // only once that projectile actually connects. data.firing (read by
+      // computeCurrentPowerDemand above) is still recomputed fresh every
+      // tick, true only on a tick a shot actually fires.
       data.cooldownMs = Math.max(0, data.cooldownMs - dtMs);
       const turretStats = TURRET_STATS[data.type];
       const hasAmmo = data.type !== TILE_TURRET_WASTE || data.ammo > 0;
       let firedThisTick = false;
       if (data.cooldownMs <= 0 && hasAmmo) {
         let nearestAlien = null;
-        let nearestDist = TURRET_RANGE;
+        let nearestDist = Infinity;
         for (const entity of state.level.entities) {
           if (entity.type !== 'alien' || entity.hp <= 0) continue;
           const d = Math.hypot(entity.x - centerX, entity.y - centerY);
@@ -657,8 +658,7 @@ export function updateBuildings(state, dtMs) {
           }
         }
         if (nearestAlien) {
-          nearestAlien.hp -= turretStats.damage;
-          nearestAlien.hitFlashMs = ALIEN_HIT_FLASH_MS; // per direct request — a hit flashes red and "bounces," read back by main.js's render
+          turretShots.push({ x: centerX, y: centerY, targetId: nearestAlien.id, damage: turretStats.damage });
           data.cooldownMs = 1000 / turretStats.shotsPerSec;
           if (data.type === TILE_TURRET_WASTE) data.ammo -= 1;
           firedThisTick = true;
@@ -709,7 +709,7 @@ export function updateBuildings(state, dtMs) {
       }
     }
   }
-  return { foodSpawnPoints, wasteSpawnPoints };
+  return { foodSpawnPoints, wasteSpawnPoints, turretShots };
 }
 
 // Live, moment-to-moment sum of every currently-DRAWING power-consuming

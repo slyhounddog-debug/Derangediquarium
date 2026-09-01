@@ -714,9 +714,9 @@ export const SPECIES = {
     lifespan: 300000, // ms, not enforced until a later phase
     hungerRate: 1.218, // hunger points/sec — 25% slower again per direct request ("all fish get hungrier 25% slower"); was 1.624
     growthStages: [
-      { feedsRequired: 0, scale: 0.5, dropInterval: 37284, dropValue: 6.25 }, // stage 1: hatchling — money production 10% slower again per direct request (dropInterval / 0.9); was 33556; feeding fills the timer, see COIN_TIMER_FEED_BONUS_FRACTION. dropValue *1.25 per direct request ("guppies give 25% more gold, so they give more money than the dartfin") — was 5; the fractional value is intentional, Math.ceil'd at drop time same as every star-tier-scaled drop already is
-      { feedsRequired: 3, scale: 0.75, dropInterval: 29877, dropValue: 6.25 }, // stage 2: juvenile — was 26889 / dropValue 5
-      { feedsRequired: 6, scale: 1.0, dropInterval: 19382, dropValue: 6.25 }, // stage 3: adult — was 17444 / dropValue 5
+      { feedsRequired: 0, scale: 0.5, dropInterval: 37284, dropValue: 7.5 }, // stage 1: hatchling — money production 10% slower again per direct request (dropInterval / 0.9); was 33556; feeding fills the timer, see COIN_TIMER_FEED_BONUS_FRACTION. dropValue *1.25 then *1.2 again per two direct requests ("guppies give 25% more gold, so they give more money than the dartfin", then "guppies produce 20% more valuable coins still") — was 5, then 6.25; the fractional value is intentional, Math.ceil'd at drop time same as every star-tier-scaled drop already is
+      { feedsRequired: 3, scale: 0.75, dropInterval: 29877, dropValue: 7.5 }, // stage 2: juvenile — was 26889 / dropValue 5, then 6.25
+      { feedsRequired: 6, scale: 1.0, dropInterval: 19382, dropValue: 7.5 }, // stage 3: adult — was 17444 / dropValue 5, then 6.25
     ],
     // Per-species multiplier on the flat WASTE_POOP_INTERVAL_MS fish-poop
     // timer (Entities.js's updateFish) — omitted here since Guppy IS the
@@ -1105,15 +1105,22 @@ export const AUTO_FEEDER_STATS = {
 // second, that do 4 damage each shot... The electric turret takes 2mw per
 // shot, shoots 2 times per second, and does 6 damage per shot. The advanced
 // turret takes 3mw per shot, shoots three times a second, and does 8 damage
-// per shot." `range` (how far a turret can auto-target an alien) isn't
-// spec'd explicitly — set generously, comparable to a mid-tier Fan's own
-// reach, since a seabed-anchored turret still needs to hit aliens loitering
-// up in the open water column where fish are. `powerCostPerSec` for the
-// electric tiers is derived from their own per-shot cost × fire rate (2mw ×
-// 2/sec = 4, 3mw × 3/sec = 9) so it slots into computeCurrentPowerDemand the
-// same way every other Electric building's "while actively doing something"
-// draw already does — the Waste Turret has none, it runs on ammo instead.
-export const TURRET_RANGE = 480; // px, all three tiers — only fire rate/damage/cost differ by tier
+// per shot." `powerCostPerSec` for the electric tiers is derived from their
+// own per-shot cost × fire rate (2mw × 2/sec = 4, 3mw × 3/sec = 9) so it
+// slots into computeCurrentPowerDemand the same way every other Electric
+// building's "while actively doing something" draw already does — the
+// Waste Turret has none, it runs on ammo instead.
+//
+// Range used to be a hard TURRET_RANGE (480px) cutoff on target search — per
+// direct report ("the waste turrets don't currently shoot at the aliens
+// unless they are super close") and direct request ("make it so turrets
+// have global range"), that's gone entirely: a turret now always targets
+// the nearest LIVING alien anywhere in the level, full stop (Grid.js's
+// updateBuildings, no distance check on the search at all). What used to
+// provide "reach" is now a real projectile instead (see the
+// TURRET_PROJECTILE_* constants below) — the travel time is what makes a
+// far-off shot feel like it has distance to cover, not a range gate that
+// silently refuses to fire.
 export const TURRET_STATS = {
   [TILE_TURRET_WASTE]: { shotsPerSec: 1.5, damage: 4, powerCostPerSec: 0 },
   [TILE_TURRET_ELECTRIC]: { shotsPerSec: 2, damage: 6, powerCostPerSec: 4 },
@@ -1129,6 +1136,24 @@ export const WASTE_TURRET_SHOTS_PER_WASTE = 10;
 export const WASTE_TURRET_MAX_WASTE = 5; // -> 50 max stored shots
 export const WASTE_TURRET_MAX_AMMO = WASTE_TURRET_SHOTS_PER_WASTE * WASTE_TURRET_MAX_WASTE;
 export const TURRET_INTAKE_RADIUS = TILE_SIZE * 0.65; // same as COLLECTOR_INTAKE_RADIUS — a Waste item has to genuinely touch the tile to get sucked in as ammo
+
+// A turret's shot is a real, visible, homing projectile (Entities.js's
+// createTurretProjectile/updateTurretProjectiles) — Grid.js's updateBuildings
+// only ever decides a shot fired (target, damage, cooldown, ammo) and hands
+// that off via a spawn-point-style return value (the same "Grid.js returns
+// data, the real owner constructs it" split already used for Food/Waste
+// spawn points), rather than applying damage instantly the way the old
+// hitscan version did. Per direct request ("it should never miss") the
+// projectile HOMES on its target's live position every tick rather than
+// flying a fixed straight line, so a moving alien can't dodge it — damage
+// only actually applies the tick it visually reaches the target (within
+// TURRET_PROJECTILE_HIT_RADIUS), and if that target is somehow already dead
+// by then (e.g. a second turret/a click killed it first), the shot just
+// fizzles with no damage rather than erroring or double-counting.
+export const TURRET_PROJECTILE_SPEED = 900; // px/sec — fast enough that even a full-tank-width shot arrives well under a second
+export const TURRET_PROJECTILE_HIT_RADIUS = 14; // px — "arrived" tolerance, a little larger than a bare point so it doesn't need frame-perfect overlap
+export const TURRET_PROJECTILE_RADIUS = 4; // px, visual size of the bolt itself
+export const TURRET_PROJECTILE_COLOR = '#ffe066'; // a bright, easy-to-track yellow — distinct from every alien/fish/item color already in use
 
 // ---- Tier Progression & The Mound (Phase 2) ----
 // See CLAUDE.md's "Tier Progression & The Mound" section for the full
@@ -1584,6 +1609,12 @@ export const ALIEN_WANDER_INTERVAL_MIN_S = 1;
 export const ALIEN_WANDER_INTERVAL_MAX_S = 2.5;
 
 export const ALIEN_CLICK_DAMAGE = 1; // per direct request — "clicking on them for 1 damage each"
+// Same "hit-test radius bigger than the drawn radius" pattern as
+// COIN_CLICK_RADIUS_MULTIPLIER — per direct request ("the clickable area
+// for the aliens is 50% larger than the actual visual radius... so they are
+// easier to click"). Purely a hit-test change; ALIEN_RADIUS (the drawn/
+// collision size) is untouched.
+export const ALIEN_CLICK_RADIUS_MULTIPLIER = 1.5;
 export const ALIEN_POOP_INTERVAL_MS = 2000; // was 1000 ("poop out 1 waste every second") — halved per direct request, and it also softens the population cap's own worst-case waste-production rate (see ALIEN_MAX_ALIVE's comment)
 export const ALIEN_INCOME_BLOCK_RADIUS = 90; // px — a fish this close to a LIVING alien produces no coin on its drop timer at all, see Entities.js's updateFish
 export const ALIEN_RADIUS = 16; // px, base visual/hit-test size

@@ -42,7 +42,6 @@ import {
   ALIEN_COUNTDOWN_START_MS,
   CAP_WARNING_THRESHOLD_FRACTION,
   TURRET_STATS,
-  TURRET_RANGE,
   TILE_TURRET_WASTE,
   WASTE_TURRET_SHOTS_PER_WASTE,
   WASTE_TURRET_MAX_WASTE,
@@ -192,17 +191,7 @@ export function initUI(state) {
     powerGraphCanvas: document.getElementById('hud-power-graph-canvas'),
     shopPanel: document.getElementById('shop-panel'),
     shopCollapseBtn: document.getElementById('shop-collapse-btn'),
-    shopMoney: document.getElementById('shop-money'),
-    shopCoinCap: document.getElementById('shop-coin-cap'),
-    shopScienceCap: document.getElementById('shop-science-cap'),
-    shopCleanliness: document.getElementById('shop-cleanliness'),
-    shopPower: document.getElementById('shop-power'),
     shopGrid: document.getElementById('shop-species-grid'),
-    tankMoney: document.getElementById('tank-money'),
-    tankCoinCap: document.getElementById('tank-coin-cap'),
-    tankScienceCap: document.getElementById('tank-science-cap'),
-    tankCleanliness: document.getElementById('tank-cleanliness'),
-    tankPower: document.getElementById('tank-power'),
     previewEmpty: document.getElementById('shop-preview-empty'),
     previewContent: document.getElementById('shop-preview-content'),
     previewCanvas: document.getElementById('shop-preview-canvas'),
@@ -355,10 +344,8 @@ export function initUI(state) {
 
   // Electricity readout — click toggles the rolling graph popup underneath
   // it (same dropdown-under-pill pattern #notification-log already uses).
-  // #hud (and so #hud-power inside it) is only ever visible while the shop
-  // is closed — see updateShopCollapse — so this is automatically only
-  // clickable then, per direct request ("only when the shop is closed").
-  // #shop-power is a plain, non-interactive readout.
+  // #hud is always visible now (top-right, never hidden while a panel is
+  // open — see updateHUD's own comment), so this is clickable at any time.
   els.power.addEventListener('click', () => {
     powerGraphOpen = !powerGraphOpen;
     els.powerGraph.classList.toggle('hidden', !powerGraphOpen);
@@ -376,14 +363,8 @@ export function initUI(state) {
   // it's never sitting there waiting to be accidentally replayed later.
   const clearFlashClass = (e) => e.target.classList.remove('flash-pickup', 'flash-spend');
   els.money.addEventListener('animationend', clearFlashClass);
-  els.shopMoney.addEventListener('animationend', clearFlashClass);
-  els.tankMoney.addEventListener('animationend', clearFlashClass);
   els.cleanliness.addEventListener('animationend', clearFlashClass);
-  els.shopCleanliness.addEventListener('animationend', clearFlashClass);
-  els.tankCleanliness.addEventListener('animationend', clearFlashClass);
   els.coinCap.addEventListener('animationend', clearFlashClass);
-  els.shopCoinCap.addEventListener('animationend', clearFlashClass);
-  els.tankCoinCap.addEventListener('animationend', clearFlashClass);
 
   // No Buy button any more — picking a species arms it as the active
   // click-tool (state.ui.selectedTool = 'fish:<id>'), exactly like picking a
@@ -429,34 +410,6 @@ export function toggleShopCollapse(state) {
   (state.ui.shopCollapsed ? playPanelClose : playPanelOpen)();
 }
 
-// #hud is hidden whenever EITHER the Shop or the Tank Upgrades panel is
-// expanded — both now carry their own copy of every readout it shows (see
-// the big comment above #shop-hud/#tank-hud in style.css), per direct
-// request that #hud "can be gone when either the shop or tank upgrade is
-// open," not just the shop. Called from both updateShopCollapse and
-// updateTankPanelCollapse, since either one toggling can change the answer.
-function updateHudVisibility(state) {
-  els.hud.classList.toggle('hidden', !(state.ui.shopCollapsed && state.ui.tankPanelCollapsed));
-}
-
-// CSS animations don't run on a display:none element, and if the flash
-// class is still attached when a panel is redisplayed, the animation
-// restarts from scratch — so toggling a panel could replay a stale
-// pickup/spend flash that has nothing to do with this toggle. Stripped
-// defensively on every shop/tank toggle rather than relying solely on it
-// finishing naturally. Covers all three copies of each readout (#hud,
-// #shop-hud, #tank-hud) regardless of which panel is actually toggling,
-// since either one's visibility change can affect which copy was mid-flash.
-function stripHudFlashClasses() {
-  for (const el of [
-    els.money, els.shopMoney, els.tankMoney,
-    els.cleanliness, els.shopCleanliness, els.tankCleanliness,
-    els.coinCap, els.shopCoinCap, els.tankCoinCap,
-  ]) {
-    el.classList.remove('flash-pickup', 'flash-spend');
-  }
-}
-
 function updateShopCollapse(state) {
   // Per direct request ("if a fish is selected and you close the shop, have
   // it deselect the fish and default to the food") — checked here, the one
@@ -469,8 +422,6 @@ function updateShopCollapse(state) {
   }
   els.shopPanel.classList.toggle('collapsed', state.ui.shopCollapsed);
   els.shopCollapseBtn.classList.toggle('panel-toggle-active', !state.ui.shopCollapsed); // which of the two toggle buttons is "pressed" needs to be obvious at a glance since both stay visible regardless of panel state
-  updateHudVisibility(state);
-  stripHudFlashClasses();
   // The preview canvas is invisible while collapsed — no point animating
   // it. Resume on expand if a species is already selected; a building
   // preview has no animation to resume, just redraw its static swatch.
@@ -494,8 +445,6 @@ export function toggleTankPanel(state) {
 function updateTankPanelCollapse(state) {
   els.tankPanel.classList.toggle('collapsed', state.ui.tankPanelCollapsed);
   els.tankCollapseBtn.classList.toggle('panel-toggle-active', !state.ui.tankPanelCollapsed);
-  updateHudVisibility(state);
-  stripHudFlashClasses();
   if (!state.ui.tankPanelCollapsed) refreshTankPanel(state); // populate it fresh the moment it opens, not just on the next frame's updateHUD
 }
 
@@ -990,7 +939,14 @@ function fishEconomyStatsHtml(speciesId) {
     html += `<div class="building-stat">🪙 Money: <b>$${moneyPerMin.toFixed(2)}/min</b></div>`;
   }
   if (!s.behavior.includes('SCAVENGER')) {
-    const wastePerMin = 60000 / WASTE_POOP_INTERVAL_MS;
+    // Real bug fix: this used to read the flat global WASTE_POOP_INTERVAL_MS
+    // directly, so every species showed the exact same waste/min regardless
+    // of its own per-species multiplier (Dartfin 10% slower, Blimpfish 5%
+    // faster than Guppy — see Config.js's wastePoopIntervalMultiplier and
+    // Entities.js's updateFish, which already applies it correctly for the
+    // actual poop timer; only this display-side stat had drifted out of
+    // sync with it).
+    const wastePerMin = 60000 / (WASTE_POOP_INTERVAL_MS * (s.wastePoopIntervalMultiplier || 1));
     html += `<div class="building-stat">💩 Waste: <b>${wastePerMin.toFixed(2)}/min</b></div>`;
   }
   // Per direct request ("add in the fish speed stat"). The base swimSpeed
@@ -1657,7 +1613,7 @@ function buildingStatsHtml(buildingId) {
     let html =
       `<div class="building-stat">🔫 Fire rate: <b>${t.shotsPerSec}/sec</b></div>` +
       `<div class="building-stat">💥 Damage: <b>${t.damage}/shot</b></div>` +
-      `<div class="building-stat">📏 Range: <b>${TURRET_RANGE}px</b></div>`;
+      `<div class="building-stat">📏 Range: <b>Global</b></div>`;
     html += buildingId === TILE_TURRET_WASTE
       ? `<div class="building-stat">🗑️ Ammo: <b>${WASTE_TURRET_SHOTS_PER_WASTE}/waste, holds ${WASTE_TURRET_MAX_WASTE}</b></div>`
       : `<div class="building-stat">⚡ <b>${t.powerCostPerSec}</b> mw/sec</div>`;
@@ -1818,25 +1774,14 @@ function playFlash(el, className) {
   el.classList.add(className);
 }
 
-// Picks whichever copy of a given HUD readout (main #hud / #shop-hud /
-// #tank-hud) is actually visible right now — shop takes priority (the two
-// panels are mutually exclusive already, but this stays correct even if
-// that ever changes), then Tank Upgrades, then the main HUD. Shared by
-// every flash/redirect site below so a readout always animates the copy
-// the player can actually see.
-function visibleHudEl(state, mainEl, shopEl, tankEl) {
-  if (!state.ui.shopCollapsed) return shopEl;
-  if (!state.ui.tankPanelCollapsed) return tankEl;
-  return mainEl;
-}
-
-// Redirects to whichever copy of the money readout is currently visible —
-// per direct request, an attempted shop purchase (food, a fish, a building)
-// that fails for lack of money shakes the money readout red instead of
-// silently doing nothing, so the failure actually reads as "you can't
-// afford that" rather than "nothing happened, did my click even register."
+// An attempted shop purchase (food, a fish, a building) that fails for lack
+// of money shakes the money readout red instead of silently doing nothing,
+// so the failure actually reads as "you can't afford that" rather than
+// "nothing happened, did my click even register." #hud is the only copy of
+// the money readout now (see updateHUD's own comment), so this no longer
+// needs to pick between several — it always targets els.money directly.
 export function flashMoneyInsufficient(state) {
-  playFlash(visibleHudEl(state, els.money, els.shopMoney, els.tankMoney), 'flash-spend');
+  playFlash(els.money, 'flash-spend');
 }
 
 // Bright blue at 100% cleanliness, fading to olive green (WASTE_COLOR's own
@@ -1921,40 +1866,32 @@ export function updateHUD(state) {
   // Keeps the Demolish/Merge gray-out live every frame — see updateToolbar's
   // own comment on why this can't just wait for the next tool-select event.
   updateToolbar(state);
+  // Per direct request, #hud is the ONE copy of every readout now — the
+  // Shop/Tank Upgrades panels no longer carry their own duplicate set (see
+  // this file's removed #shopHud/#tankHud els and style.css's removed
+  // #shop-hud/#tank-hud rule) — it stays fixed top-right and visible at all
+  // times, including while either panel is open.
   const money = state.level.money;
   const moneyText = `💰 $${Math.floor(money)}`;
   els.money.textContent = moneyText;
-  els.shopMoney.textContent = moneyText;
-  els.tankMoney.textContent = moneyText;
   const cleanliness = state.level.cleanliness;
   const cleanlinessText = `✨ ${Math.round(cleanliness)}%`;
   els.cleanliness.textContent = cleanlinessText;
-  els.shopCleanliness.textContent = cleanlinessText;
-  els.tankCleanliness.textContent = cleanlinessText;
-  const cleanColor = cleanlinessColor(cleanliness);
-  els.cleanliness.style.color = cleanColor;
-  els.shopCleanliness.style.color = cleanColor;
-  els.tankCleanliness.style.color = cleanColor;
+  els.cleanliness.style.color = cleanlinessColor(cleanliness);
   // Coin Cap — always shown (coins exist from the very start), unlike
   // Science below. Counts EVERY coin currently in state.level.items, seabed
   // city included — see Entities.js's countTankItemsByType.
   const coinCapCount = countTankItemsByType(state, 'coin');
   const coinCapMax = effectiveCoinCapacity(state);
-  const coinCapText = `🪙 ${coinCapCount}/${coinCapMax}`;
-  els.coinCap.textContent = coinCapText;
-  els.shopCoinCap.textContent = coinCapText;
-  els.tankCoinCap.textContent = coinCapText;
+  els.coinCap.textContent = `🪙 ${coinCapCount}/${coinCapMax}`;
   // Per direct request: pulse red continuously once the live count reaches
   // CAP_WARNING_THRESHOLD_FRACTION (80%) of the active cap, and shake red
   // (the same one-shot flash-spend every other HUD readout already uses)
   // every time the count itself goes UP — both are "this is filling up,
   // pay attention" cues, just one continuous and one per-event.
-  const coinCapWarning = coinCapCount / coinCapMax >= CAP_WARNING_THRESHOLD_FRACTION;
-  els.coinCap.classList.toggle('cap-warning', coinCapWarning);
-  els.shopCoinCap.classList.toggle('cap-warning', coinCapWarning);
-  els.tankCoinCap.classList.toggle('cap-warning', coinCapWarning);
+  els.coinCap.classList.toggle('cap-warning', coinCapCount / coinCapMax >= CAP_WARNING_THRESHOLD_FRACTION);
   if (lastCoinCapCount !== null && coinCapCount > lastCoinCapCount) {
-    playFlash(visibleHudEl(state, els.coinCap, els.shopCoinCap, els.tankCoinCap), 'flash-spend');
+    playFlash(els.coinCap, 'flash-spend');
   }
   lastCoinCapCount = coinCapCount;
   // Set by Entities.js's updateFish the instant a coin-drop cycle is
@@ -1965,28 +1902,20 @@ export function updateHUD(state) {
   // needs its own explicit trigger.
   if (state.ui.coinCapFlashPending) {
     state.ui.coinCapFlashPending = false;
-    playFlash(visibleHudEl(state, els.coinCap, els.shopCoinCap, els.tankCoinCap), 'flash-spend');
+    playFlash(els.coinCap, 'flash-spend');
   }
 
   // Science Cap — hidden until the Science Octopus is unlocked, same
   // "hidden until relevant" precedent as the electricity readout below.
   const octopusUnlocked = state.meta.speciesUnlocked.includes('octopus');
   els.scienceCap.classList.toggle('hidden', !octopusUnlocked);
-  els.shopScienceCap.classList.toggle('hidden', !octopusUnlocked);
-  els.tankScienceCap.classList.toggle('hidden', !octopusUnlocked);
   if (octopusUnlocked) {
     const scienceCapCount = countTankItemsByType(state, 'science');
     const scienceCapMax = effectiveScienceCapacity(state);
-    const scienceCapText = `🔬 ${scienceCapCount}/${scienceCapMax}`;
-    els.scienceCap.textContent = scienceCapText;
-    els.shopScienceCap.textContent = scienceCapText;
-    els.tankScienceCap.textContent = scienceCapText;
-    const scienceCapWarning = scienceCapCount / scienceCapMax >= CAP_WARNING_THRESHOLD_FRACTION;
-    els.scienceCap.classList.toggle('cap-warning', scienceCapWarning);
-    els.shopScienceCap.classList.toggle('cap-warning', scienceCapWarning);
-    els.tankScienceCap.classList.toggle('cap-warning', scienceCapWarning);
+    els.scienceCap.textContent = `🔬 ${scienceCapCount}/${scienceCapMax}`;
+    els.scienceCap.classList.toggle('cap-warning', scienceCapCount / scienceCapMax >= CAP_WARNING_THRESHOLD_FRACTION);
     if (lastScienceCapCount !== null && scienceCapCount > lastScienceCapCount) {
-      playFlash(visibleHudEl(state, els.scienceCap, els.shopScienceCap, els.tankScienceCap), 'flash-spend');
+      playFlash(els.scienceCap, 'flash-spend');
     }
     lastScienceCapCount = scienceCapCount;
   }
@@ -1997,15 +1926,10 @@ export function updateHUD(state) {
   // itself only gains a new entry once a second (see main.js's update()).
   const eelUnlocked = state.meta.speciesUnlocked.includes('electric_eel');
   els.power.classList.toggle('hidden', !eelUnlocked);
-  els.shopPower.classList.toggle('hidden', !eelUnlocked);
-  els.tankPower.classList.toggle('hidden', !eelUnlocked);
   if (eelUnlocked) {
     const history = state.level.powerHistory;
     const last = history[history.length - 1];
-    const powerText = last ? `⚡ ${last.demand}/${last.supply} mw` : '⚡ 0/0 mw';
-    els.power.textContent = powerText;
-    els.shopPower.textContent = powerText;
-    els.tankPower.textContent = powerText;
+    els.power.textContent = last ? `⚡ ${last.demand}/${last.supply} mw` : '⚡ 0/0 mw';
     if (powerGraphOpen) renderPowerGraph(state);
   } else if (powerGraphOpen) {
     powerGraphOpen = false;
@@ -2019,18 +1943,13 @@ export function updateHUD(state) {
   if (labMenuOpen) refreshLabTree(state); // no position-tracking needed any more — it's a centered modal now, not anchored to the Mound's screen position
   if (!state.ui.tankPanelCollapsed) refreshTankPanel(state);
 
-  // The Shop and Tank Upgrades panel each carry their own copy of every
-  // readout that flashes — only flash whichever copy is actually visible
-  // right now, since a display:none element doesn't run CSS animations at
-  // all and would just leave the class stuck there unfired, waiting to
-  // wrongly replay the next time a panel toggles.
   if (lastMoney !== null && money !== lastMoney) {
-    playFlash(visibleHudEl(state, els.money, els.shopMoney, els.tankMoney), money > lastMoney ? 'flash-pickup' : 'flash-spend');
+    playFlash(els.money, money > lastMoney ? 'flash-pickup' : 'flash-spend');
   }
   lastMoney = money;
 
   if (lastCleanliness !== null && cleanliness !== lastCleanliness) {
-    playFlash(visibleHudEl(state, els.cleanliness, els.shopCleanliness, els.tankCleanliness), cleanliness > lastCleanliness ? 'flash-pickup' : 'flash-spend');
+    playFlash(els.cleanliness, cleanliness > lastCleanliness ? 'flash-pickup' : 'flash-spend');
   }
   lastCleanliness = cleanliness;
 

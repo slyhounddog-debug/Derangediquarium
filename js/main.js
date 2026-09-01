@@ -51,6 +51,9 @@ import {
   ALIEN_HIT_FLASH_COLOR,
   ALIEN_HIT_BOUNCE_SCALE,
   ALIEN_DEATH_EFFECT_DURATION_MS,
+  ALIEN_CLICK_RADIUS_MULTIPLIER,
+  TURRET_PROJECTILE_RADIUS,
+  TURRET_PROJECTILE_COLOR,
 } from './Config.js';
 import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop } from './Engine.js';
 import { loadLevel, LEVELS } from './Levels.js';
@@ -315,7 +318,7 @@ input.clickHandlers.push((sx, sy) => {
   // early-return branches.
   for (const entity of state.level.entities) {
     if (entity.type !== 'alien' || entity.hp <= 0) continue;
-    if (Math.hypot(entity.x - world.x, entity.y - world.y) <= ALIEN_RADIUS) {
+    if (Math.hypot(entity.x - world.x, entity.y - world.y) <= ALIEN_RADIUS * ALIEN_CLICK_RADIUS_MULTIPLIER) {
       entity.hp -= ALIEN_CLICK_DAMAGE;
       entity.hitFlashMs = ALIEN_HIT_FLASH_MS; // per direct request — a hit flashes red and "bounces," read back by the render loop below
       return;
@@ -1073,6 +1076,35 @@ function render() {
     ctx.fillRect(barX, barY, barW, barH);
     ctx.fillStyle = '#ff4d4d';
     ctx.fillRect(barX, barY, barW * Math.max(0, alien.hp / alien.maxHp), barH);
+  }
+
+  // Turret projectiles — a small bright bolt plus a short motion trail
+  // (a fading line back toward where it came from, cheap to compute since
+  // the trail is just the bolt's own current heading, no extra state kept
+  // per projectile). state.level.turretProjectiles is plain data (Entities.js's
+  // updateTurretProjectiles), not entities.
+  for (const shot of state.level.turretProjectiles) {
+    const pos = worldToScreen(shot.x, shot.y, state.camera);
+    if (pos.x < -30 || pos.x > canvas.width + 30 || pos.y < -30 || pos.y > canvas.height + 30) continue;
+    const target = state.level.entities.find((e) => e.id === shot.targetId && e.type === 'alien');
+    const radius = TURRET_PROJECTILE_RADIUS * state.camera.zoom;
+    if (target) {
+      const dx = target.x - shot.x;
+      const dy = target.y - shot.y;
+      const dist = Math.hypot(dx, dy) || 1;
+      const trailX = pos.x - (dx / dist) * radius * 3;
+      const trailY = pos.y - (dy / dist) * radius * 3;
+      ctx.strokeStyle = 'rgba(255, 224, 102, 0.5)';
+      ctx.lineWidth = Math.max(1, radius);
+      ctx.beginPath();
+      ctx.moveTo(trailX, trailY);
+      ctx.lineTo(pos.x, pos.y);
+      ctx.stroke();
+    }
+    ctx.beginPath();
+    ctx.fillStyle = TURRET_PROJECTILE_COLOR;
+    ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   // Alien death burst — a short expanding ring plus a handful of outward

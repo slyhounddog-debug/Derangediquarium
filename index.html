@@ -62,21 +62,9 @@
   <div id="notification-log" class="hidden"></div>
 </div>
 
-<div id="panel-toggle-cluster">
-  <button id="shop-collapse-btn" title="Shop (S)">🛍️</button>
-  <button id="tank-collapse-btn" title="Tank Upgrades (P)">🏆</button>
-</div>
-
 <div id="shop-panel">
   <div id="shop-header-row">
     <div id="shop-header">Shop</div>
-  </div>
-  <div id="shop-hud">
-    <div id="shop-money" class="sheen-target">💰 $0</div>
-    <div id="shop-coin-cap" class="sheen-target">🪙 0/10</div>
-    <div id="shop-science-cap" class="sheen-target hidden">🔬 0/5</div>
-    <div id="shop-cleanliness" class="sheen-target">✨ 100%</div>
-    <div id="shop-power" class="sheen-target hidden">⚡ 0/0 mw</div>
   </div>
 
   <div id="shop-preview" class="sheen-target">
@@ -104,13 +92,6 @@
 <div id="tank-panel" class="collapsed">
   <div id="tank-header-row">
     <div id="tank-header">Tank Upgrades</div>
-  </div>
-  <div id="tank-hud">
-    <div id="tank-money" class="sheen-target">💰 $0</div>
-    <div id="tank-coin-cap" class="sheen-target">🪙 0/10</div>
-    <div id="tank-science-cap" class="sheen-target hidden">🔬 0/5</div>
-    <div id="tank-cleanliness" class="sheen-target">✨ 100%</div>
-    <div id="tank-power" class="sheen-target hidden">⚡ 0/0 mw</div>
   </div>
   <div id="tank-points-display" class="sheen-target">🏆 0</div>
   <div id="tank-upgrade-list"></div>
@@ -183,12 +164,16 @@
   </div>
 </div>
 
-<div id="bottom-tool-bar">
-  <button id="tool-food-btn" class="tool-btn sheen-target" title="Food — $3 (1)">
-    <span class="tool-icon tool-icon-food"></span>
-  </button>
-  <button id="tool-demolish-btn" class="tool-btn sheen-target tool-btn-emoji" title="Demolish — select this, then click a building to remove it for a full refund (2)">🔨</button>
-  <button id="tool-merge-btn" class="tool-btn sheen-target tool-btn-emoji" title="Merge — select this, then drag one Adult fish onto a matching one to combine or splice it (3)">🧤</button>
+<div id="bottom-bar-row">
+  <button id="shop-collapse-btn" title="Shop (S)">🛍️</button>
+  <div id="bottom-tool-bar">
+    <button id="tool-food-btn" class="tool-btn sheen-target" title="Food — $3 (1)">
+      <span class="tool-icon tool-icon-food"></span>
+    </button>
+    <button id="tool-demolish-btn" class="tool-btn sheen-target tool-btn-emoji" title="Demolish — select this, then click a building to remove it for a full refund (2)">🔨</button>
+    <button id="tool-merge-btn" class="tool-btn sheen-target tool-btn-emoji" title="Merge — select this, then drag one Adult fish onto a matching one to combine or splice it (3)">🧤</button>
+  </div>
+  <button id="tank-collapse-btn" title="Tank Upgrades (P)">🏆</button>
 </div>
 
 <div id="debug-overlay" class="hidden">

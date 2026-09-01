@@ -80,10 +80,14 @@ html, body {
 }
 
 #hud {
-  /* right offset clears the collapsed shop panel — it renders a bit wider
-     than its 56px width due to the reserved scrollbar gutter, so this
-     leaves real breathing room rather than cutting it close */
-  position: fixed; top: 14px; right: 100px;
+  /* Always visible now, top-right — per direct request, the Shop/Tank
+     Upgrades panels no longer carry their own duplicate HUD copy (see the
+     removed #shop-hud/#tank-hud rule further down), so this is the one
+     place money/caps/cleanliness/power live, and it never hides itself
+     while either panel is open any more. Both toggle buttons moved down to
+     #bottom-bar-row, so the old "clear the collapsed shop panel" right
+     offset isn't needed either — plain 14px like every other corner pill. */
+  position: fixed; top: 14px; right: 14px;
   display: flex; gap: 14px; align-items: center;
   padding: 9px 18px;
   /* Poppy, non-flat pass, per direct request — a soft diagonal gradient plus
@@ -98,10 +102,9 @@ html, body {
   border-radius: 999px;
   border: 2px solid #ffffff;
   box-shadow: 0 6px 16px rgba(107, 76, 107, 0.25), inset 0 2px 0 rgba(255, 255, 255, 0.9), inset 0 -3px 6px rgba(255, 173, 209, 0.3);
-  pointer-events: auto; /* needs to receive hover for its title tooltips — was none, but that also blocks hover */
+  pointer-events: auto; /* needs to receive hover for its title tooltips */
   z-index: 10;
 }
-#hud.hidden { display: none; } /* hidden while the shop is open — money lives in the shop panel then */
 
 /* Electricity readout — only shown once Electric Eel is unlocked (see
    UI.js's updateHUD). #hud-power-wrap needs position:relative so the graph
@@ -216,20 +219,12 @@ html, body {
 }
 .notification-line:last-child { border-bottom: none; }
 
-/* Both side panels (Shop, Tank Upgrades) share this exact slot — top:14,
-   right:14, bottom:14 — since only one is ever expanded at a time (opening
-   either auto-collapses the other, see UI.js). Their own toggle buttons no
-   longer live inside them (a collapsed panel used to just be a 56px-wide
-   colored strip with the button floating in it — fine for one panel, but
-   with two sharing the same slot that strip would double up/overlap), so
-   collapsing now shrinks a panel to nothing (width:0) instead. */
-#panel-toggle-cluster {
-  position: fixed; top: 14px; right: 14px;
-  display: flex; flex-direction: column; gap: 8px;
-  z-index: 15; /* above both panels — always visible/clickable no matter which (if either) is expanded */
-}
-/* 50% bigger than the original 36px/18px, per direct request ("make the
-   shop and tank upgrade icons 50% bigger" — these two toggle buttons). */
+/* 50% bigger than the original 36px/18px (a later "50% bigger" pass from an
+   earlier request), per direct request ("make the shop and tank upgrade
+   icons 50% bigger" — these two toggle buttons). Now flex children of
+   #bottom-bar-row (see the bottom-tool-bar section below) instead of a
+   standalone top-right cluster — per direct request, Shop moved to the left
+   of the bottom toolbar, Tank Upgrades to the right of it. */
 #shop-collapse-btn, #tank-collapse-btn {
   flex: none;
   width: 54px; height: 54px;
@@ -255,9 +250,29 @@ html, body {
 }
 #shop-collapse-btn.panel-toggle-active:hover, #tank-collapse-btn.panel-toggle-active:hover { background: #ff5aa0; }
 
+/* Shop and Tank Upgrades are now fly-out modals anchored to their own
+   toggle button in #bottom-bar-row, per direct request ("should look the
+   same as they do now, but only half as tall") — same look/content as
+   before (gradient card, rounded corners, custom scrollbar), just:
+   (1) positioned above its own corner icon instead of docked the full
+   height of the viewport, (2) HEIGHT halved — half of the previous
+   `100vh - 28px` full-height slot, via the same calc so it stays exactly
+   proportional at any viewport size, and (3) animated with a scale+opacity
+   "fly out of/back into its icon" transition (transform-origin pinned to
+   the bottom corner nearest that icon) instead of the old width:0 collapse
+   — the same mechanism Mound.js's own popup (#mound-menu) already
+   established, just permanently unhidden (display never toggles here,
+   only scale/opacity/pointer-events) since UI.js's existing collapsed-class
+   toggle logic needed no changes to keep working. No dimmed/click-catching
+   backdrop, unlike the Mound/Lab popups — per current gameplay, the Shop
+   stays open WHILE actively playing (banking coins, watching fish) far more
+   than the Mound/Lab's rare deliberate visits, so a full-screen click-eater
+   would break that; closing still only ever happens via the toggle
+   button/hotkey/opening the other panel, unchanged. */
 #shop-panel, #tank-panel {
-  position: fixed; top: 14px; right: 14px; bottom: 14px;
-  width: 286px; /* 10% wider than the original 260px, per direct request, so building stats have more room before wrapping */
+  position: fixed; bottom: 96px; /* clears #bottom-bar-row's own 14px bottom offset + its ~72px height + a little breathing room */
+  width: 286px;
+  height: calc((100vh - 28px) / 2); /* half of the previous full-height slot (100vh - 14px top - 14px bottom) */
   background: linear-gradient(165deg, #fff8f0 0%, #ffe4f2 100%);
   color: #6b4c6b;
   padding: 14px;
@@ -267,7 +282,7 @@ html, body {
   border-radius: 26px;
   border: 2px solid #ffffff;
   box-shadow: 0 8px 26px rgba(107, 76, 107, 0.25), inset 0 2px 0 rgba(255, 255, 255, 0.7);
-  transition: width 0.18s ease, padding 0.18s ease, opacity 0.12s ease;
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.18s ease;
   /* Custom scrollbar — matches #notification-log's pink/rounded style
      instead of the browser's plain default, per direct request that no
      scrollbar in the game should look ugly. */
@@ -278,26 +293,12 @@ html, body {
 #shop-panel::-webkit-scrollbar-track, #tank-panel::-webkit-scrollbar-track { background: #fff0f6; border-radius: 999px; }
 #shop-panel::-webkit-scrollbar-thumb, #tank-panel::-webkit-scrollbar-thumb { background: #ffb6d5; border-radius: 999px; }
 #shop-panel::-webkit-scrollbar-thumb:hover, #tank-panel::-webkit-scrollbar-thumb:hover { background: #ff9ac4; }
+#shop-panel { left: 14px; transform-origin: 0% 100%; } /* grows from/shrinks into its bottom-LEFT icon */
+#tank-panel { right: 14px; transform-origin: 100% 100%; } /* grows from/shrinks into its bottom-RIGHT icon */
 #shop-panel.collapsed, #tank-panel.collapsed {
-  width: 0;
-  padding: 14px 0; /* keeps vertical padding so nothing inside reflows oddly right before it's hidden; horizontal collapses to 0 */
+  transform: scale(0.05);
   opacity: 0;
-  overflow: hidden;
-  box-shadow: none;
   pointer-events: none;
-}
-#shop-panel.collapsed #shop-header,
-#shop-panel.collapsed #shop-hud,
-#shop-panel.collapsed #shop-preview,
-#shop-panel.collapsed #tool-bar,
-#shop-panel.collapsed #shop-species-grid {
-  display: none;
-}
-#tank-panel.collapsed #tank-header,
-#tank-panel.collapsed #tank-hud,
-#tank-panel.collapsed #tank-points-display,
-#tank-panel.collapsed #tank-upgrade-list {
-  display: none;
 }
 
 #shop-header-row, #tank-header-row {
@@ -306,19 +307,6 @@ html, body {
 }
 #shop-header, #tank-header { font-size: 17px; font-weight: 800; color: #c25f8f; }
 
-/* The shop AND the Tank Upgrades panel each carry their own copy of every
-   main-HUD readout (money/coin cap/science cap/cleanliness/power) now — per
-   direct request, so #hud (hidden whenever EITHER panel is expanded — see
-   UI.js's updateHudVisibility) is never the only place to see them. UI.js's
-   updateHUD writes to whichever set(s) exist every frame and redirects the
-   flash-pickup/flash-spend animations to whichever one is actually visible
-   (visibleHudEl) — #shop-hud was first, #tank-hud mirrors it exactly. */
-#shop-hud, #tank-hud {
-  display: flex; flex-wrap: wrap; gap: 8px;
-  margin-bottom: 14px;
-}
-#shop-money, #shop-coin-cap, #shop-science-cap, #shop-cleanliness, #shop-power,
-#tank-money, #tank-coin-cap, #tank-science-cap, #tank-cleanliness, #tank-power,
 #tank-points-display {
   display: inline-block;
   background: linear-gradient(160deg, #fffdf8 0%, #ffe9f4 100%);
@@ -327,11 +315,9 @@ html, body {
   padding: 7px 12px;
   border-radius: 999px;
   box-shadow: 0 3px 9px rgba(107, 76, 107, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.85);
+  margin-bottom: 14px;
 }
-#tank-points-display { margin-bottom: 14px; }
-#shop-power.hidden, #tank-power.hidden { display: none; }
-#shop-power, #tank-power { cursor: default; } /* per direct request, only the HUD copy opens the graph — these are plain readouts */
-#hud-science-cap.hidden, #shop-science-cap.hidden, #tank-science-cap.hidden { display: none; } /* only shown once the Science Octopus is unlocked, same "hidden until relevant" precedent as #hud-power/electric Eel */
+#hud-science-cap.hidden { display: none; } /* only shown once the Science Octopus is unlocked, same "hidden until relevant" precedent as #hud-power/electric Eel */
 
 /* A soft diagonal light sweep that plays across a UI element every so often
    — per direct request, applied broadly across the HUD/shop/panels (see
@@ -384,10 +370,11 @@ html, body {
 /* Generic "good change: green flash + bouncy pop" / "bad change: red flash +
    multi-axis shake" pair (translate AND rotate, not just side to side) —
    originally money-only, now shared by any HUD readout that needs the same
-   feedback: #hud-money/#shop-money on every money change, #hud-coin-cap when
-   a coin production cycle is blocked by the Coin Cap, #hud-cleanliness
-   whenever cleanliness moves up or down. UI.js re-triggers these by removing then
-   re-adding the class so rapid, repeated changes each restart the animation. */
+   feedback: #hud-money on every money change, #hud-coin-cap/#hud-science-cap
+   when a production cycle is blocked by their cap or the count rises,
+   #hud-cleanliness whenever cleanliness moves up or down. UI.js re-triggers
+   these by removing then re-adding the class so rapid, repeated changes each
+   restart the animation. */
 @keyframes flash-pickup {
   0% { transform: scale(1) translateY(0); color: #6b4c6b; }
   25% { transform: scale(1.24) translateY(-6.4px); color: #2ecc71; }
@@ -518,10 +505,23 @@ html, body {
    descriptive text (cost, what each tool does) moved from the shop's old
    #tool-tooltip line onto each button's own native `title` attribute
    instead — a real hover tooltip, not a separate always-visible line. */
-#bottom-tool-bar {
+/* #bottom-bar-row is the fixed, centered, always-on-top row — the Shop
+   toggle on the left, Tank Upgrades toggle on the right, flanking the
+   food/demolish/merge pill in the middle, per direct request. #bottom-tool-bar
+   itself is no longer independently fixed-positioned — it's just a plain
+   flex child of the row now, keeping its own pill background/padding so it
+   still reads as a distinct group from the two circular toggle buttons
+   beside it. */
+#bottom-bar-row {
   position: fixed;
   bottom: 14px; left: 50%;
   transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  z-index: 15; /* always visible/clickable no matter what else is open */
+}
+#bottom-tool-bar {
   display: flex;
   gap: 10px;
   padding: 8px;
@@ -529,7 +529,6 @@ html, body {
   border: 2px solid #ffffff;
   border-radius: 22px;
   box-shadow: 0 8px 22px rgba(107, 76, 107, 0.28), inset 0 2px 0 rgba(255, 255, 255, 0.7);
-  z-index: 15; /* same tier as #panel-toggle-cluster — always visible/clickable no matter what else is open */
 }
 
 #shop-species-grid {

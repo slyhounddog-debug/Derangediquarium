@@ -90,6 +90,7 @@ export function loadLevel(state, levelId) {
       foodRotWarningShown: false, // fires once on whichever comes first — 5 Food items existing at once, or the first Food-to-Waste conversion — see Entities.js's maybeWarnFoodRot
       firstShopOpened: false, // set the first time the Shop panel is ever expanded — until then, UI.js's scheduleShopButtonReminder keeps bouncing the shop toggle button as a reminder it exists
       firstAlienWaveTipShown: false, // fires the alien-combat tip the moment the very first wave's aliens actually spawn — see Systems.js's spawnAlienWave
+      firstAlienWarning1Shown: false, // gates ALIEN_WARNING_MESSAGE_1 ("Something's stirring...") to only ever post once, ever — see Systems.js's updateAlienWaves
     },
     // Alien Invasion (see Config.js's ALIEN_* constants, Systems.js's updateAlienWaves,
     // Entities.js's createAlien/updateAlien) — all level-scoped/reset on restart like
@@ -103,6 +104,7 @@ export function loadLevel(state, levelId) {
     alienWarning2Shown: false,
     alienPortals: [], // { x, y, hp, openAtMs, spawned, spawnedAtMs } — see Systems.js's spawnAlienWave/Entities.js's updateEntities
     alienDeathEffects: [], // { x, y, age } — a short expanding/fading burst pushed by Entities.js's updateAlien the instant an alien's hp hits 0, aged out by updateAlienDeathEffects; purely decorative, rendered by main.js
+    turretProjectiles: [], // { id, x, y, targetId, damage } — a turret's homing shot, see Grid.js's updateBuildings (fires) / Entities.js's updateTurretProjectiles (homes + applies damage on impact) / main.js (renders)
     lifetimeMoneyEarned: 0, // real in-play income only (coins banked) — NOT the starting endowment or the bankruptcy bailout gift; see Entities.js's bankMoney and Config.js's MONEY_MILESTONE_1K
     fishVanishTimer: 0, // ms remaining on the "you found the chat" gag — see Entities.js's updateEntities; every fish freezes in place (not just hidden) and stops rendering while this is > 0
     fishVanishDelayMs: 0, // ms remaining before fishVanishTimer above actually starts — see Entities.js's updateFishVanish/Config.js's FISH_VANISH_DELAY_MS

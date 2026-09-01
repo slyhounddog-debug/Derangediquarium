@@ -90,6 +90,9 @@ import {
   ALIEN_PORTAL_CLOSE_MS,
   FISH_BLOCKED_TINT_MS,
   ALIEN_DEATH_EFFECT_DURATION_MS,
+  ALIEN_HIT_FLASH_MS,
+  TURRET_PROJECTILE_SPEED,
+  TURRET_PROJECTILE_HIT_RADIUS,
 } from './Config.js';
 import { stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemForces, updateBuildings } from './Grid.js';
 // Sound is a fire-and-forget side effect at the moment something already
@@ -1437,6 +1440,43 @@ function updateAlienPortals(state) {
   );
 }
 
+// A turret's shot — see Config.js's TURRET_PROJECTILE_* comment for why
+// this exists instead of the old instant-hitscan damage. Grid.js's
+// updateBuildings only ever decides a shot fired and hands back
+// { x, y, targetId, damage } (the same "Grid.js returns data, the real
+// owner constructs it" split already used for Food/Waste spawn points);
+// this is that data turned into a real, independently-ticked projectile.
+export function createTurretProjectile({ x, y, targetId, damage }) {
+  return { id: nextId(), type: 'turretProjectile', x, y, targetId, damage };
+}
+
+// Homes on its target alien's LIVE position every tick — per direct request
+// ("it should never miss") — rather than flying a fixed straight line, so a
+// moving alien can't dodge it. Damage only actually applies once the
+// projectile visually reaches the target (within TURRET_PROJECTILE_HIT_RADIUS);
+// if the target's already dead/gone by then (a second turret or a click
+// killed it first), the shot just fizzles with no damage rather than
+// erroring or double-counting.
+function updateTurretProjectiles(state, dtMs) {
+  const dt = dtMs / 1000;
+  state.level.turretProjectiles = state.level.turretProjectiles.filter((shot) => {
+    const target = state.level.entities.find((e) => e.id === shot.targetId && e.type === 'alien' && e.hp > 0);
+    if (!target) return false; // target already gone — fizzle, no damage, no error
+    const dx = target.x - shot.x;
+    const dy = target.y - shot.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist <= TURRET_PROJECTILE_HIT_RADIUS) {
+      target.hp -= shot.damage;
+      target.hitFlashMs = ALIEN_HIT_FLASH_MS; // per direct request — a hit flashes red and "bounces," read back by main.js's render
+      return false; // consumed on impact
+    }
+    const travel = Math.min(dist, TURRET_PROJECTILE_SPEED * dt);
+    shot.x += (dx / dist) * travel;
+    shot.y += (dy / dist) * travel;
+    return true;
+  });
+}
+
 // Ages/culls the death-burst effects updateAlien pushes on an alien's last
 // tick — pure decoration, no gameplay meaning, same "age past a fixed
 // lifetime and drop" pattern updatePickupText already uses for floatingTexts.
@@ -1467,10 +1507,15 @@ export function updateEntities(state, dtMs) {
   // number of loads have processed. See Grid.js's updateBuildings — it
   // returns spawn points rather than constructing the items itself, to
   // avoid a circular import (createFood/createWaste live here).
-  const { foodSpawnPoints, wasteSpawnPoints } = updateBuildings(state, dtMs);
+  const { foodSpawnPoints, wasteSpawnPoints, turretShots } = updateBuildings(state, dtMs);
   for (const point of foodSpawnPoints) state.level.items.push(createFood(point.x, point.y));
   for (const point of wasteSpawnPoints) state.level.items.push(createWaste(point.x, point.y));
   for (const point of pendingFoodToWasteSpawns) state.level.items.push(createWaste(point.x, point.y));
+  for (const shot of turretShots) state.level.turretProjectiles.push(createTurretProjectile(shot));
+  // Runs before the entities filter loop below, same as the old direct-
+  // mutation turret code did, so a lethal hit lands and gets cleaned up in
+  // the same tick rather than lingering a frame at 0 hp.
+  updateTurretProjectiles(state, dtMs);
 
   resolveItemCollisions(state); // items in the seabed band can't overlap — see Grid.js's module comment
 

@@ -178,7 +178,16 @@ function updateAlienWaves(state) {
 
   if (!state.level.alienWarning1Shown && elapsed >= nextWaveAt - ALIEN_WARNING_MS_1) {
     state.level.alienWarning1Shown = true;
-    pushNotification(state, ALIEN_WARNING_MESSAGE_1);
+    // Per direct request, ALIEN_WARNING_MESSAGE_1 ("Something's stirring...")
+    // only ever posts once, ever — the per-wave alienWarning1Shown flag above
+    // still gates this 60s-mark from re-checking every tick within the same
+    // wave cycle (and still resets each new wave below), but the actual
+    // notification text is separately gated on a one-time tutorialFlags
+    // entry so every wave after the first stays silent at this mark.
+    if (!state.level.tutorialFlags.firstAlienWarning1Shown) {
+      state.level.tutorialFlags.firstAlienWarning1Shown = true;
+      pushNotification(state, ALIEN_WARNING_MESSAGE_1);
+    }
   }
   if (!state.level.alienWarning2Shown && elapsed >= nextWaveAt - ALIEN_WARNING_MS_2) {
     state.level.alienWarning2Shown = true;
