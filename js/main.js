@@ -54,6 +54,8 @@ import {
   ALIEN_CLICK_RADIUS_MULTIPLIER,
   TURRET_PROJECTILE_RADIUS,
   TURRET_PROJECTILE_COLOR,
+  COIN_RADIUS,
+  COIN_BLOCKED_EFFECT_DURATION_MS,
 } from './Config.js';
 import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop } from './Engine.js';
 import { loadLevel, LEVELS } from './Levels.js';
@@ -1135,6 +1137,67 @@ function render() {
       ctx.arc(px, py, Math.max(1, 3 * state.camera.zoom * (1 - t)), 0, Math.PI * 2);
       ctx.fill();
     }
+    ctx.restore();
+  }
+
+  // "Coin on fire, disintegrating" — per direct request, replacing the old
+  // plain bubble-pop icon for a blocked COIN drop specifically (a blocked
+  // Science brew still uses the original bubble floatingText). A shrinking
+  // gold coin with a couple of flickering flame licks above it and a few
+  // dark ember/ash flecks drifting up and outward as it crumbles, all
+  // fading together over COIN_BLOCKED_EFFECT_DURATION_MS. Purely
+  // decorative — see Entities.js's triggerProductionBlocked/
+  // updateCoinBlockedEffects for the trigger and age-and-cull side of this.
+  for (const effect of state.level.coinBlockedEffects) {
+    const pos = worldToScreen(effect.x, effect.y, state.camera);
+    if (pos.x < -30 || pos.x > canvas.width + 30 || pos.y < -30 || pos.y > canvas.height + 30) continue;
+    const t = effect.age / COIN_BLOCKED_EFFECT_DURATION_MS; // 0 -> 1
+    const alpha = 1 - t;
+    const radius = COIN_RADIUS * state.camera.zoom * (1 - t * 0.5); // shrinks as it burns down
+    ctx.save();
+    ctx.globalAlpha = alpha;
+
+    // A couple of flickering flame licks fanned above the coin — a radial
+    // gradient teardrop per flame, no ctx.filter (see Ambience.js's own
+    // blur-filter perf note — a real filter here would be the same mistake).
+    for (let i = 0; i < 3; i++) {
+      const angle = -Math.PI / 2 + (i - 1) * 0.6;
+      const flicker = Math.sin(effect.age * 0.02 + i * 2.1) * radius * 0.25;
+      const flameLen = radius * (1.1 + 0.35 * Math.sin(effect.age * 0.03 + i));
+      const fx = pos.x + Math.cos(angle) * radius * 0.3 + flicker;
+      const fy = pos.y + Math.sin(angle) * radius * 0.3 - flameLen * 0.5;
+      const flameGradient = ctx.createRadialGradient(fx, fy, 0, fx, fy, flameLen);
+      flameGradient.addColorStop(0, 'rgba(255, 235, 130, 0.9)');
+      flameGradient.addColorStop(0.5, 'rgba(255, 140, 40, 0.75)');
+      flameGradient.addColorStop(1, 'rgba(200, 40, 20, 0)');
+      ctx.fillStyle = flameGradient;
+      ctx.beginPath();
+      ctx.ellipse(fx, fy, flameLen * 0.4, flameLen, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // The coin itself — a plain gold disc with a darker rim, shrinking.
+    ctx.fillStyle = '#ffd23f';
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(120, 70, 10, 0.6)';
+    ctx.lineWidth = Math.max(1, radius * 0.15);
+    ctx.stroke();
+
+    // Crumbling ash/ember flecks, drifting up and outward from the coin as
+    // it disintegrates (t drives both how far out and how far up).
+    ctx.fillStyle = `rgba(90, 60, 30, ${alpha})`;
+    for (let i = 0; i < 5; i++) {
+      const angle = (i / 5) * Math.PI * 2 + 0.4;
+      const dist = radius * (0.6 + t * 1.8);
+      const px = pos.x + Math.cos(angle) * dist;
+      const py = pos.y + Math.sin(angle) * dist - t * 10 * state.camera.zoom;
+      ctx.beginPath();
+      ctx.arc(px, py, Math.max(0.5, 2 * state.camera.zoom * (1 - t)), 0, Math.PI * 2);
+      ctx.fill();
+    }
+
     ctx.restore();
   }
 

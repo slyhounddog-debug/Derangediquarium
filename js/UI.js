@@ -1889,7 +1889,23 @@ export function updateHUD(state) {
   // (the same one-shot flash-spend every other HUD readout already uses)
   // every time the count itself goes UP — both are "this is filling up,
   // pay attention" cues, just one continuous and one per-event.
-  els.coinCap.classList.toggle('cap-warning', coinCapCount / coinCapMax >= CAP_WARNING_THRESHOLD_FRACTION);
+  const coinCapWarningActive = coinCapCount / coinCapMax >= CAP_WARNING_THRESHOLD_FRACTION;
+  els.coinCap.classList.toggle('cap-warning', coinCapWarningActive);
+  // One-time notification the first time the coin count ever reaches this
+  // threshold, per direct request — "make it more obvious when the coin
+  // limit is reached." Same inline push-then-cap pattern every other
+  // notification writer in this codebase uses (see CLAUDE.md's Rolling
+  // Notification Log section) rather than a shared helper.
+  if (coinCapWarningActive && !state.level.tutorialFlags.firstCoinCapWarningShown) {
+    state.level.tutorialFlags.firstCoinCapWarningShown = true;
+    const notifications = state.level.notifications;
+    notifications.push({
+      id: notifications.length + 1,
+      text: `Pick up those coins, you can only have ${coinCapMax} on screen at once`,
+      elapsed: state.level.elapsed,
+    });
+    if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
+  }
   if (lastCoinCapCount !== null && coinCapCount > lastCoinCapCount) {
     playFlash(els.coinCap, 'flash-spend');
   }

@@ -959,7 +959,10 @@ function getUndergroundTexturePattern(ctx) {
 // performance note), just a real linear gradient plus a flat highlight strip
 // and one cheap stroke along the jagged underside for shadow/depth.
 const ROCK_SHELF_POINT_SPACING = TILE_SIZE * 0.4;
-const ROCK_SHELF_JAG_PX = 14;
+// Cut roughly in half per direct request ("not quite so dramatic between
+// the upper city and lower city sections") — was 14, a gentler undulation
+// along the jagged underside instead of a sharp, spiky one.
+const ROCK_SHELF_JAG_PX = 7;
 const ROCK_SHELF_THICKNESS = TILE_SIZE * 0.9; // average distance from the flat top down to the jagged underside
 const ROCK_SHELF_POINTS = (() => {
   const points = [];
@@ -1001,10 +1004,17 @@ function renderRockShelf(ctx, camera, canvasWidth, canvasHeight) {
   for (let i = screenPoints.length - 1; i >= 0; i--) ctx.lineTo(screenPoints[i].x, screenPoints[i].y);
   ctx.lineTo(-4, screenPoints[0].y);
   ctx.closePath();
+  // Colors softened per direct request ("not quite so dramatic between the
+  // upper city and lower city sections") — the gradient used to run from a
+  // bright tan top down to a near-black bottom, a much harder jump than the
+  // city fill (#4a3624) above or the underground fill (softened alongside
+  // this, see renderSeabedGrid below) it hands off to on either side. Now a
+  // narrower range that sits closer to both neighbors, so the shelf still
+  // reads as a distinct boundary without the stark light-to-black plunge.
   const bodyGradient = ctx.createLinearGradient(0, topY, 0, bottomScreenY);
-  bodyGradient.addColorStop(0, '#8a7256');
-  bodyGradient.addColorStop(0.4, '#6b5a42');
-  bodyGradient.addColorStop(1, '#3c3226');
+  bodyGradient.addColorStop(0, '#77644c');
+  bodyGradient.addColorStop(0.4, '#5f5140');
+  bodyGradient.addColorStop(1, '#463a2c');
   ctx.fillStyle = bodyGradient;
   ctx.fill();
 
@@ -1012,16 +1022,19 @@ function renderRockShelf(ctx, camera, canvasWidth, canvasHeight) {
   // the same "solid fill plus a thin lighter strip" treatment
   // renderSeabedGrid uses for the tank/city surface line, so this reads as
   // the same kind of boundary rather than a different visual language.
-  ctx.fillStyle = '#a68a68';
-  ctx.fillRect(-4, topY, canvasWidth + 8, Math.max(2, 4 * camera.zoom));
+  // Dimmed and thinned alongside the gradient softening above.
+  ctx.fillStyle = '#8f7a5e';
+  ctx.fillRect(-4, topY, canvasWidth + 8, Math.max(2, 3 * camera.zoom));
 
   // A darker shadow stroke along the jagged underside, selling depth where
-  // the shelf's rock hangs down into the underground biome beneath it.
+  // the shelf's rock hangs down into the underground biome beneath it —
+  // lightened alongside the rest of this pass, so it reads as soft shading
+  // rather than a hard cut line.
   ctx.beginPath();
   ctx.moveTo(screenPoints[0].x, screenPoints[0].y);
   for (const sp of screenPoints) ctx.lineTo(sp.x, sp.y);
-  ctx.strokeStyle = 'rgba(20, 14, 10, 0.55)';
-  ctx.lineWidth = Math.max(1, 2 * camera.zoom);
+  ctx.strokeStyle = 'rgba(20, 14, 10, 0.32)';
+  ctx.lineWidth = Math.max(1, 1.5 * camera.zoom);
   ctx.lineJoin = 'round';
   ctx.stroke();
 
@@ -1067,9 +1080,13 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
   // of the same dirt. renderRockShelf (below) then draws its jagged
   // underside on top of this boundary, so the rock visibly hangs down into
   // the underground fill rather than the fill starting at a hard edge.
+  // Lightened from #352a1f, alongside the Rocky Shelf's own softened colors
+  // above, per direct request that the upper/lower city boundary "not be
+  // quite so dramatic" — still visibly darker/cooler than the city fill
+  // (#4a3624) above it, just a smaller jump than before.
   const undergroundTop = worldToScreen(0, ROCK_SHELF_Y, camera).y;
   if (undergroundTop < canvasHeight) {
-    ctx.fillStyle = '#352a1f';
+    ctx.fillStyle = '#3d3122';
     ctx.fillRect(0, Math.max(0, undergroundTop), canvasWidth, canvasHeight);
     ctx.save();
     ctx.fillStyle = getUndergroundTexturePattern(ctx);
@@ -1124,18 +1141,20 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
 // for the fixed bottom tool-bar that never covers real gameplay content.
 // The seabed fill/texture above already covers it for free (that fill runs
 // to the bottom of the canvas regardless of true world bounds), so the only
-// thing this adds is a black gradient fading in exactly across the buffer's
-// own world-Y span — not bleeding up into the real seabed above it, per
-// direct request ("the gradient shouldn't go over the entire city part,
-// just the new part added onto the bottom").
+// thing this adds is solid black across the buffer's own world-Y span — not
+// bleeding up into the real seabed above it, per the original direct
+// request ("the gradient shouldn't go over the entire city part, just the
+// new part added onto the bottom"). A later direct request changed this
+// from a fade to a hard break — "the gradient to black that currently
+// transitions into the toolbar at the bottom should be changed to a hard
+// break from the bottom tank to the toolbar" — so it's now a flat fill, no
+// gradient object at all: the underground/city fill directly above stops
+// dead at WORLD_H and solid black starts immediately, right at that line.
 function renderCameraBottomBuffer(ctx, camera, canvasWidth, canvasHeight) {
   const topScreenY = worldToScreen(0, WORLD_H, camera).y;
   const bottomScreenY = worldToScreen(0, WORLD_H + CAMERA_BOTTOM_BUFFER_PX, camera).y;
   if (topScreenY > canvasHeight || bottomScreenY < 0) return; // buffer strip entirely off-screen
-  const gradient = ctx.createLinearGradient(0, topScreenY, 0, bottomScreenY);
-  gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
-  gradient.addColorStop(1, 'rgba(0, 0, 0, 1)');
-  ctx.fillStyle = gradient;
+  ctx.fillStyle = '#000000';
   const clampedTop = Math.max(0, topScreenY);
   const clampedBottom = Math.min(canvasHeight, bottomScreenY);
   ctx.fillRect(0, clampedTop, canvasWidth, clampedBottom - clampedTop);

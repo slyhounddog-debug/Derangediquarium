@@ -1458,13 +1458,23 @@ export const GENE_SPLICING_LAB_ID = 'gene_splicing';
 export const SCIENCE_COLOR = '#5fc9ff';
 export const POWER_COLOR = '#ffd23f';
 // A muted blue-grey "🫧" floating bubble-pop, planted above a fish's head the
-// instant its drop cycle completes while its resource (coin or Science) is
-// already at its active cap — per direct request, a "full-belly" visual cue
-// that production was blocked rather than the item just silently not
-// appearing. Deliberately desaturated/muted compared to every other floating
-// text color in this game (all of which signal a genuine gain) so it reads
-// as "nothing happened" at a glance, not another reward.
+// instant a blocked-by-cap SCIENCE brew completes — per direct request, a
+// "full-belly" visual cue that production was blocked rather than the item
+// just silently not appearing. Deliberately desaturated/muted compared to
+// every other floating text color in this game (all of which signal a
+// genuine gain) so it reads as "nothing happened" at a glance, not another
+// reward. The equivalent blocked-COIN cue no longer uses this at all — see
+// COIN_BLOCKED_EFFECT_DURATION_MS below.
 export const PRODUCTION_BLOCKED_COLOR = '#9fb0c2';
+// A blocked COIN drop gets its own dedicated "coin on fire, disintegrating"
+// effect instead of the plain bubble above — per direct request ("instead
+// of the bubble icon that shows up when the fish can't spawn coins, make it
+// look like a coin on fire that disintegrates"). Entities.js's
+// triggerProductionBlocked pushes a { x, y, age } record into
+// state.level.coinBlockedEffects; this is how long it lives before aging
+// out, same "detached particle, independent of the fish" pattern
+// ALIEN_DEATH_EFFECT_DURATION_MS already established.
+export const COIN_BLOCKED_EFFECT_DURATION_MS = 800;
 // The 3 utility species — the only valid splice SOURCES (dragged onto an
 // eligible target, never the other way around, to keep the interaction
 // symmetric with Economy Fish Combining's own single-direction drag). Also
