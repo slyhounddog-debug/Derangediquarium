@@ -92,6 +92,8 @@ import {
   openLabMenu,
   closeLabMenu,
   isLabMenuOpen,
+  closeLabPurchaseModal,
+  isLabPurchaseModalOpen,
   flashMoneyInsufficient,
   selectTool,
   initStartScreen,
@@ -416,6 +418,7 @@ input.keydownHandlers.push((e) => {
       if (state.level.tutorialFlags.escapeDareShown) pushMainNotification(MADE_YA_LOOK_MESSAGE);
     }
     if (isMoundMenuOpen()) { closeMoundMenu(); return; } // close whatever's on top first, rather than opening the pause menu behind/over it
+    if (isLabPurchaseModalOpen()) { closeLabPurchaseModal(); return; } // closes the confirmation modal first — it sits on top of the tree
     if (isLabMenuOpen()) { closeLabMenu(); return; } // same, for the Science Lab's popup
     if (isFanAimingActive()) { fanAimingCell = null; return; } // cancel the pending Fan placement instead of opening the pause menu on top of it
     togglePauseMenu(state);

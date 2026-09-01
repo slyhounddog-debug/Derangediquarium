@@ -985,7 +985,7 @@ export const BUILDING_TYPES = {
   [TILE_AUTO_FEEDER_ELECTRIC]: {
     id: TILE_AUTO_FEEDER_ELECTRIC, name: 'Electric Auto-Feeder', icon: '♻️', cost: 90,
     description: 'A powered Auto-Feeder — processes each Waste load faster. Draws power while actively processing.',
-    color: '#7fd6a8', unlockedByDefault: false,
+    color: '#4fd6e0', unlockedByDefault: false, // was #7fd6a8 — too close to the base Processor's own #8fe0b8 (both light minty greens), per direct report; this is a distinct cyan/teal instead
   },
   [TILE_AUTO_FEEDER_ADVANCED]: {
     id: TILE_AUTO_FEEDER_ADVANCED, name: 'Advanced Auto-Feeder', icon: '♻️', cost: 200,

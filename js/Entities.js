@@ -255,29 +255,15 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
   };
 }
 
-// Purely informational now — the Food Capacity cap (and its Tank Upgrade)
-// were retired entirely per direct request, replaced by the
-// stationary-to-Waste mechanic in updateFood below. Still exported for
-// UI.js's HUD readout (just a live count, no more "/cap" denominator) and
-// still only counts Food actually above SEABED_FLOOR_Y — in the open-water
-// tank — since that's what a player watching the HUD number actually cares
-// about ("how much food is out there right now"), not food that's already
-// fallen into the seabed city.
-export function countTankFood(state) {
-  let n = 0;
-  for (const item of state.level.items) {
-    if (item.type === 'food' && item.y < SEABED_FLOOR_Y) n++;
-  }
-  return n;
-}
-
 // Coin/Science Cap: how many of that item type may exist in state.level.items
-// at once — unlike Food's own cap (countTankFood above), this counts EVERY
-// item of the type anywhere in the tank, seabed city included, since the
-// whole point is "how many currently-unbanked drops exist in the world," not
-// "how many are still reachable by a fish." Checked by updateFish right
-// before a coin/Science Bubble would spawn — see triggerProductionBlocked
-// below for what happens when the cap's already been hit.
+// at once — counts EVERY item of the type anywhere in the tank, seabed city
+// included, since the whole point is "how many currently-unbanked drops
+// exist in the world," not "how many are still reachable by a fish." Checked
+// by updateFish right before a coin/Science Bubble would spawn — see
+// triggerProductionBlocked below for what happens when the cap's already
+// been hit. (Food has no equivalent cap or HUD readout any more — both were
+// retired per direct request, the cap replaced entirely by the
+// stationary-to-Waste mechanic in updateFood below.)
 export function countTankItemsByType(state, type) {
   let n = 0;
   for (const item of state.level.items) {
@@ -322,10 +308,24 @@ function triggerProductionBlocked(state, fish, stageDef, resource) {
   if (resource === 'coin') state.ui.coinCapFlashPending = true;
 }
 
+const FOOD_ROT_WARNING_MESSAGE = "Careful now, food that's chilling too long rots into waste";
+
+// One-shot tutorial nudge for the stationary-to-Waste mechanic — per direct
+// request, fires the FIRST time either of two things happens: 5 Food items
+// exist at once, or a pellet actually finishes rotting into Waste. Whichever
+// comes first shows the message; the flag then blocks the other one from
+// showing it again. Called from trySpawnFood (the count case) and updateFood
+// (the actual-rot case) below.
+function maybeWarnFoodRot(state) {
+  if (state.level.tutorialFlags.foodRotWarningShown) return;
+  state.level.tutorialFlags.foodRotWarningShown = true;
+  pushStoryNotification(state, FOOD_ROT_WARNING_MESSAGE);
+}
+
 // Returns a reason string rather than a bare bool so callers can react
 // differently to each failure — main.js flashes the money HUD red on
 // 'no_money'. No capacity check any more — see the module comment above
-// countTankFood.
+// countTankItemsByType.
 export function trySpawnFood(state, x, y) {
   // Food can only be dropped in open water, never directly into the seabed
   // city — per direct request, after going back and forth on whether to
@@ -337,6 +337,8 @@ export function trySpawnFood(state, x, y) {
   state.level.money -= FOOD_COST;
   state.level.items.push(createFood(x, y));
   playFoodPlace();
+  const foodCount = state.level.items.reduce((n, i) => n + (i.type === 'food' ? 1 : 0), 0);
+  if (foodCount >= 5) maybeWarnFoodRot(state);
   return 'spawned';
 }
 
@@ -751,6 +753,7 @@ function updateFood(item, state, dtMs) {
     item.stationaryTimer += dtMs;
     if (item.stationaryTimer >= FOOD_STATIONARY_TO_WASTE_MS) {
       pendingFoodToWasteSpawns.push({ x: item.x, y: item.y });
+      maybeWarnFoodRot(state); // the other half of the one-shot gate above — see its own comment
       return false;
     }
   }

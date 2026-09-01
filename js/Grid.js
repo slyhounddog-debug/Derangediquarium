@@ -1234,36 +1234,59 @@ function renderDirectionIndicator(ctx, type, x, y, size, angle, zoom) {
     return;
   }
 
-  const armLen = size * 0.34;
-  const headSize = Math.max(2, size * 0.12);
+  // Bigger and higher-contrast than the original per direct request ("the
+  // arrows are kind of hard to see") — each arrow now draws a wide white
+  // "halo" stroke underneath its real color first, same cheap trick used
+  // elsewhere in this file for fake-outline contrast without a blur filter.
+  // A tile's own fill color spans blues/greens/purples/gold across every
+  // Processor/Auto-Feeder tier, so a single dark or single light arrow color
+  // alone can't stay legible against all of them — the halo guarantees
+  // contrast regardless of what's underneath.
+  const armLen = size * 0.4;
+  const headSize = Math.max(3, size * 0.17);
+  const lineW = Math.max(1.5, 2.6 * zoom);
+  const haloW = lineW + Math.max(1.5, 2.2 * zoom);
   ctx.save();
-  ctx.lineWidth = Math.max(1, 2 * zoom);
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
 
-  // Output — points away from center, toward the tile's edge.
-  ctx.strokeStyle = 'rgba(20, 20, 20, 0.7)';
-  ctx.fillStyle = 'rgba(20, 20, 20, 0.7)';
+  function drawHaloedArrow(fromX, fromY, tipX, tipY, mainColor) {
+    ctx.lineWidth = haloW;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+    ctx.beginPath();
+    ctx.moveTo(fromX, fromY);
+    ctx.lineTo(tipX, tipY);
+    ctx.stroke();
+    drawArrowhead(ctx, tipX, tipY, angle, headSize + haloW * 0.5);
+
+    ctx.lineWidth = lineW;
+    ctx.strokeStyle = mainColor;
+    ctx.fillStyle = mainColor;
+    ctx.beginPath();
+    ctx.moveTo(fromX, fromY);
+    ctx.lineTo(tipX, tipY);
+    ctx.stroke();
+    drawArrowhead(ctx, tipX, tipY, angle, headSize);
+  }
+
+  // Output — points away from center, toward the tile's edge. Solid black
+  // (was a translucent dark grey) for maximum contrast against the white
+  // halo and against light tile colors alike.
   const outX = cx + Math.cos(angle) * armLen;
   const outY = cy + Math.sin(angle) * armLen;
-  ctx.beginPath();
-  ctx.moveTo(cx, cy);
-  ctx.lineTo(outX, outY);
-  ctx.stroke();
-  drawArrowhead(ctx, outX, outY, angle, headSize);
+  drawHaloedArrow(cx, cy, outX, outY, '#141414');
 
   // Intake — points toward center from the opposite side, stopping short of
   // dead-center so it doesn't collide with the Collector's own center-circle
-  // render (renderTileShape).
-  ctx.strokeStyle = 'rgba(90, 220, 255, 0.9)';
-  ctx.fillStyle = 'rgba(90, 220, 255, 0.9)';
+  // render (renderTileShape). Solid cyan (was translucent) for the same
+  // reason.
   const inStartX = cx - Math.cos(angle) * armLen;
   const inStartY = cy - Math.sin(angle) * armLen;
   const inTipX = cx - Math.cos(angle) * armLen * 0.3;
   const inTipY = cy - Math.sin(angle) * armLen * 0.3;
-  ctx.beginPath();
-  ctx.moveTo(inStartX, inStartY);
-  ctx.lineTo(inTipX, inTipY);
-  ctx.stroke();
-  drawArrowhead(ctx, inTipX, inTipY, angle, headSize);
+  drawHaloedArrow(inStartX, inStartY, inTipX, inTipY, '#1fc8ff');
+
   ctx.restore();
 }
 

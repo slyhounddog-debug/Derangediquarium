@@ -87,6 +87,7 @@ export function loadLevel(state, levelId) {
       cleanlinessWarningShown: false, // fires once cleanliness first crosses below CLEANLINESS_WARNING_THRESHOLD — see Entities.js's adjustCleanliness
       firstSplice: false, // Phase 4 — first successful Gene-Splicing drag, see Entities.js's spliceFish
       firstPlatformNeeded: false, // first building placement attempt refused for lacking a Platform to anchor to — see main.js's handleBuildPlacementFailure
+      foodRotWarningShown: false, // fires once on whichever comes first — 5 Food items existing at once, or the first Food-to-Waste conversion — see Entities.js's maybeWarnFoodRot
     },
     lifetimeMoneyEarned: 0, // real in-play income only (coins banked) — NOT the starting endowment or the bankruptcy bailout gift; see Entities.js's bankMoney and Config.js's MONEY_MILESTONE_1K
     fishVanishTimer: 0, // ms remaining on the "you found the chat" gag — see Entities.js's updateEntities; every fish freezes in place (not just hidden) and stops rendering while this is > 0

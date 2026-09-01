@@ -288,7 +288,7 @@ html, body {
   display: flex; flex-wrap: wrap; gap: 8px;
   margin-bottom: 14px;
 }
-#shop-money, #shop-food, #shop-coin-cap, #shop-science-cap, #shop-cleanliness, #shop-power, #tank-points-display {
+#shop-money, #shop-coin-cap, #shop-science-cap, #shop-cleanliness, #shop-power, #tank-points-display {
   display: inline-block;
   background: linear-gradient(160deg, #fffdf8 0%, #ffe9f4 100%);
   border: 2px solid #ffffff;
@@ -353,9 +353,9 @@ html, body {
 /* Generic "good change: green flash + bouncy pop" / "bad change: red flash +
    multi-axis shake" pair (translate AND rotate, not just side to side) —
    originally money-only, now shared by any HUD readout that needs the same
-   feedback: #hud-money/#shop-money on every money change, #hud-food when a
-   food placement is blocked by the capacity cap, #hud-cleanliness whenever
-   cleanliness moves up or down. UI.js re-triggers these by removing then
+   feedback: #hud-money/#shop-money on every money change, #hud-coin-cap when
+   a coin production cycle is blocked by the Coin Cap, #hud-cleanliness
+   whenever cleanliness moves up or down. UI.js re-triggers these by removing then
    re-adding the class so rapid, repeated changes each restart the animation. */
 @keyframes flash-pickup {
   0% { transform: scale(1) translateY(0); color: #6b4c6b; }
@@ -510,17 +510,18 @@ html, body {
   white-space: nowrap;
 }
 
-/* A floor height so switching between species (or the empty state) doesn't
-   shove the icon grid below it up/down for anything short enough to fit —
-   min-height, not a hard height, per direct request ("make sure the shop
-   window fits all the stats for the building"): a building whose stats
-   block genuinely needs more room than 180px (e.g. the Processor family's 4
-   stat lines) now grows the box instead of clipping/overflowing past its
-   bottom edge. Both the empty placeholder and the populated content fill
-   this same box; the hint line is pinned to its bottom via margin-top:auto
-   regardless of how tall the box ends up being. */
+/* A genuinely FIXED height, not min-height — per direct request ("I don't
+   want it pushing the shop items up and down every time I click a different
+   option"). An earlier pass made this min-height instead of a hard height so
+   a tall stats block (the Processor family's 4 stat lines) wouldn't clip,
+   but that meant the icon grid below still visibly shifted every time the
+   box grew/shrank between selections, which is exactly what's being fixed
+   here. Sized generously enough that every real building/species' content
+   fits without scrolling in practice; #shop-preview-content's own
+   overflow-y:auto (below) is a safety net for anything that somehow doesn't,
+   scrolling INSIDE the fixed box instead of resizing it. */
 #shop-preview {
-  min-height: 180px;
+  height: 232px;
   display: flex;
   flex-direction: column;
   background: linear-gradient(165deg, #fffaf3 0%, #fff0f6 100%);
@@ -545,8 +546,15 @@ html, body {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  overflow-y: auto; /* safety net — see #shop-preview's own comment on why this box is a fixed height now */
+  scrollbar-width: thin;
+  scrollbar-color: #ffb6d5 #fff0f6;
 }
 #shop-preview-content.hidden { display: none; }
+#shop-preview-content::-webkit-scrollbar { width: 6px; }
+#shop-preview-content::-webkit-scrollbar-track { background: #fff0f6; border-radius: 999px; }
+#shop-preview-content::-webkit-scrollbar-thumb { background: #ffb6d5; border-radius: 999px; }
+#shop-preview-content::-webkit-scrollbar-thumb:hover { background: #ff9ac4; }
 #shop-preview-top {
   display: flex; align-items: center; gap: 12px;
   margin-bottom: 10px;
@@ -737,10 +745,11 @@ html, body {
   box-shadow: 0 16px 40px rgba(107, 76, 107, 0.45), inset 0 2px 0 rgba(255, 255, 255, 0.7);
   text-align: center;
 }
-/* Deliberately no title naming the game here any more, per direct request —
-   the splash animation (see below) is the only place the name appears, so
-   it still reads as a reveal instead of being shown twice/spoiled. */
-#start-subtitle { font-size: 14px; font-weight: 800; color: #c25f8f; margin: 0 0 20px; }
+/* Deliberately no title or tagline text at all any more, per direct request
+   for "a less is more type of visual" — just the three buttons. (Also means
+   the game's name is never shown here — the splash animation, once Start is
+   clicked, is the only place it appears, so it still reads as a reveal
+   rather than being shown twice/spoiled.) */
 #start-play-btn { background: linear-gradient(160deg, #a8f0cb 0%, #7ad4a8 100%); color: #1f4a34; box-shadow: 0 3px 8px rgba(53, 145, 97, 0.35), inset 0 2px 0 rgba(255, 255, 255, 0.5); }
 #start-play-btn:hover { background: linear-gradient(160deg, #97e8bd 0%, #68c896 100%); }
 
@@ -905,6 +914,14 @@ html, body {
   box-shadow: 0 3px 9px rgba(107, 76, 107, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.85);
   flex: 1;
 }
+/* Zoom in/out, per direct request — mirrors the mouse-wheel zoom UI.js's
+   initLabTreeDrag also wires up, for anyone without (or who doesn't think
+   to try) a scroll wheel over the tree. */
+#lab-zoom-controls { display: flex; gap: 6px; flex: none; }
+#lab-zoom-controls .pause-btn {
+  width: 32px; height: 32px; padding: 0; margin-bottom: 0;
+  font-size: 18px; font-weight: 800; line-height: 1;
+}
 #lab-close-btn { flex: none; width: auto; padding: 9px 16px; margin-bottom: 0; }
 
 /* Click-and-drag panning instead of scrolling, per direct request — the
@@ -916,16 +933,22 @@ html, body {
    browser's own scroll handling. drawLabTreeConnectors already reads
    scrollLeft/scrollTop for its connector math, so panning this way needs no
    further change there. user-select:none stops a drag from also
-   highlighting node text the way a click-drag normally would on a page. */
+   highlighting node text the way a click-drag normally would on a page.
+   Per a direct follow-up report, the drag listener now lives on the whole
+   #lab-modal (see UI.js's initLabTreeDrag), not just this wrap — the player
+   had to click exactly the tree's own empty background to pan it; now any
+   mousedown anywhere in the modal (the header row, the padding around the
+   tree, a locked node) starts a pan, so #lab-modal itself carries the grab
+   cursor/no-select treatment and .dragging class too, not just this inner
+   wrap. */
 #lab-tree-wrap {
   position: relative;
   flex: 1;
   min-height: 380px;
   overflow: hidden;
-  cursor: grab;
-  user-select: none;
 }
-#lab-tree-wrap.dragging { cursor: grabbing; }
+#lab-modal { cursor: grab; user-select: none; }
+#lab-modal.dragging { cursor: grabbing; }
 
 #lab-tree-canvas {
   position: absolute; top: 0; left: 0;
@@ -934,25 +957,35 @@ html, body {
 #lab-tree-columns {
   position: relative;
   display: flex;
-  gap: 48px;
-  padding: 12px 16px;
+  gap: calc(48px * var(--lab-zoom, 1));
+  padding: calc(12px * var(--lab-zoom, 1)) calc(16px * var(--lab-zoom, 1));
   min-width: max-content;
 }
 .lab-tree-col {
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 28px;
-  width: 170px;
+  gap: calc(28px * var(--lab-zoom, 1));
+  width: calc(170px * var(--lab-zoom, 1));
   flex: none;
 }
 
+/* Zoom, per direct request ("make it so you can zoom in and out of the
+   science lab") — driven by a --lab-zoom custom property (UI.js's
+   setLabZoom, mouse-wheel or the +/- buttons above) that scales every real
+   box-model/font dimension in the tree by the same factor, rather than a
+   CSS transform: scale(). A transform doesn't change an element's actual
+   layout size, so #lab-tree-wrap's overflow/scrollWidth (what the existing
+   drag-pan and drawLabTreeConnectors's getBoundingClientRect() math both
+   depend on) would silently desync from what's visually drawn; scaling the
+   real dimensions instead means every bit of existing geometry-reading code
+   keeps working unmodified. */
 .lab-node {
   width: 100%;
   background: linear-gradient(160deg, #fffdf8 0%, #fff0dc 100%);
   border: 2px solid #ffffff;
-  border-radius: 16px;
-  padding: 10px 14px;
+  border-radius: calc(16px * var(--lab-zoom, 1));
+  padding: calc(10px * var(--lab-zoom, 1)) calc(14px * var(--lab-zoom, 1));
   text-align: left;
   cursor: pointer;
   box-shadow: 0 3px 8px rgba(107, 76, 107, 0.2), inset 0 2px 0 rgba(255, 255, 255, 0.7);
@@ -965,9 +998,61 @@ html, body {
   background: linear-gradient(160deg, #a8f0cb 0%, #7ad4a8 100%);
   box-shadow: 0 3px 8px rgba(53, 145, 97, 0.3), inset 0 2px 0 rgba(255, 255, 255, 0.5);
 }
-.lab-node-name { font-size: 13px; font-weight: 800; color: #6b4c6b; }
+.lab-node-name { font-size: calc(13px * var(--lab-zoom, 1)); font-weight: 800; color: #6b4c6b; }
 .lab-node.purchased .lab-node-name { color: #1f4a34; }
-.lab-node-cost { font-size: 11px; font-weight: 700; opacity: 0.75; margin-top: 3px; }
+.lab-node-cost { font-size: calc(11px * var(--lab-zoom, 1)); font-weight: 700; opacity: 0.75; margin-top: 3px; }
+
+/* Purchase confirmation modal — per direct request ("I want to have a
+   purchase modal pop up when in the science lab, so you have a chance to
+   read what something does and confirm the purchase, instead of just
+   clicking it"). Clicking a lab node no longer spends anything directly; it
+   opens this on top of #lab-overlay (a higher z-index, same dimmed-backdrop
+   pattern) showing what the node grants — a fish or building's real
+   description plus its stats (the same .building-stat chip look the shop
+   preview already uses) — with Confirm actually doing the purchase UI.js's
+   buyLabUpgrade always used to do immediately on click. */
+#lab-purchase-overlay {
+  position: fixed; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(107, 76, 107, 0.45);
+  z-index: 230; /* above #lab-overlay (210) — this sits on top of the tree modal, not beside it */
+}
+#lab-purchase-overlay.hidden { display: none; }
+#lab-purchase-modal {
+  width: 340px;
+  max-width: 90vw;
+  background: linear-gradient(165deg, #fffaf3 0%, #ffe4f2 100%);
+  color: #6b4c6b;
+  border: 3px solid #ffffff;
+  border-radius: 24px;
+  padding: 20px 22px;
+  box-shadow: 0 16px 40px rgba(107, 76, 107, 0.45), inset 0 2px 0 rgba(255, 255, 255, 0.7);
+}
+#lab-purchase-header-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+#lab-purchase-icon { font-size: 26px; line-height: 1; }
+#lab-purchase-name { font-size: 17px; font-weight: 800; color: #c25f8f; }
+#lab-purchase-desc { font-size: 12.5px; line-height: 1.45; opacity: 0.85; margin-bottom: 8px; }
+#lab-purchase-stats {
+  display: flex; flex-wrap: wrap; gap: 4px 8px;
+  margin-bottom: 12px;
+}
+#lab-purchase-cost {
+  font-size: 14px; font-weight: 800; color: #6b4c6b;
+  text-align: center;
+  background: linear-gradient(160deg, #fffdf8 0%, #ffe9f4 100%);
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  padding: 7px 10px;
+  margin-bottom: 14px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.85);
+}
+#lab-purchase-buttons { display: flex; gap: 10px; }
+#lab-purchase-buttons .pause-btn { margin-bottom: 0; flex: 1; }
+#lab-purchase-confirm-btn {
+  background: linear-gradient(160deg, #a8f0cb 0%, #7ad4a8 100%);
+  color: #1f4a34;
+  box-shadow: 0 3px 8px rgba(53, 145, 97, 0.35), inset 0 2px 0 rgba(255, 255, 255, 0.5);
+}
 
 #debug-overlay {
   position: fixed; bottom: 12px; left: 12px;

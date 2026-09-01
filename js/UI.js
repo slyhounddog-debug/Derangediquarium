@@ -34,9 +34,11 @@ import {
   COIN_CAP_BY_LEVEL,
   COIN_CAP_UPGRADE_COSTS,
   COIN_CAP_UPGRADE_MAX_LEVEL,
+  SCIENCE_CAP_BY_LEVEL,
+  SPECIES,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings, loadLevel } from './Levels.js';
-import { getFishPurchaseCost, countTankFood, effectiveCoinCapacity, effectiveScienceCapacity, countTankItemsByType } from './Entities.js';
+import { getFishPurchaseCost, effectiveCoinCapacity, effectiveScienceCapacity, countTankItemsByType } from './Entities.js';
 import { getTile, worldToTile, getBuildingCost, FAN_STATS } from './Grid.js';
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
@@ -69,6 +71,11 @@ let moundMenuCloseTimer = null;
 let labMenuOpen = false;
 let labMenuClosing = false;
 let labMenuCloseTimer = null;
+let labZoom = 1; // current --lab-zoom scale factor, reset to 1 every time the Lab is opened — see openLabMenu/setLabZoom
+const LAB_ZOOM_MIN = 0.6;
+const LAB_ZOOM_MAX = 1.6;
+const LAB_ZOOM_STEP = 0.15;
+let labPurchaseNodeId = null; // node id the confirmation modal is currently showing, if any — see openLabPurchaseModal/confirmLabPurchase
 let powerGraphOpen = false; // the small rolling-graph popup under the electricity HUD readout — see #hud-power's click listener
 // familyId -> currently-selected tile id within that family (see Config.js's
 // BUILDING_FAMILIES) — reset to the highest-unlocked tier every time
@@ -139,7 +146,6 @@ export function initUI(state) {
   els = {
     hud: document.getElementById('hud'),
     money: document.getElementById('hud-money'),
-    food: document.getElementById('hud-food'),
     coinCap: document.getElementById('hud-coin-cap'),
     scienceCap: document.getElementById('hud-science-cap'),
     cleanliness: document.getElementById('hud-cleanliness'),
@@ -149,7 +155,6 @@ export function initUI(state) {
     shopPanel: document.getElementById('shop-panel'),
     shopCollapseBtn: document.getElementById('shop-collapse-btn'),
     shopMoney: document.getElementById('shop-money'),
-    shopFood: document.getElementById('shop-food'),
     shopCoinCap: document.getElementById('shop-coin-cap'),
     shopScienceCap: document.getElementById('shop-science-cap'),
     shopCleanliness: document.getElementById('shop-cleanliness'),
@@ -188,10 +193,20 @@ export function initUI(state) {
     labOverlay: document.getElementById('lab-overlay'),
     labModal: document.getElementById('lab-modal'),
     labScienceReadout: document.getElementById('lab-science-readout'),
+    labZoomInBtn: document.getElementById('lab-zoom-in-btn'),
+    labZoomOutBtn: document.getElementById('lab-zoom-out-btn'),
     labCloseBtn: document.getElementById('lab-close-btn'),
     labTreeWrap: document.getElementById('lab-tree-wrap'),
     labTreeCanvas: document.getElementById('lab-tree-canvas'),
     labTreeColumns: document.getElementById('lab-tree-columns'),
+    labPurchaseOverlay: document.getElementById('lab-purchase-overlay'),
+    labPurchaseIcon: document.getElementById('lab-purchase-icon'),
+    labPurchaseName: document.getElementById('lab-purchase-name'),
+    labPurchaseDesc: document.getElementById('lab-purchase-desc'),
+    labPurchaseStats: document.getElementById('lab-purchase-stats'),
+    labPurchaseCost: document.getElementById('lab-purchase-cost'),
+    labPurchaseCancelBtn: document.getElementById('lab-purchase-cancel-btn'),
+    labPurchaseConfirmBtn: document.getElementById('lab-purchase-confirm-btn'),
     tankPanel: document.getElementById('tank-panel'),
     tankCollapseBtn: document.getElementById('tank-collapse-btn'),
     tankPointsDisplay: document.getElementById('tank-points-display'),
@@ -225,6 +240,18 @@ export function initUI(state) {
   els.labCloseBtn.addEventListener('click', () => closeLabMenu());
   els.labOverlay.addEventListener('click', (e) => {
     if (e.target === els.labOverlay) closeLabMenu();
+  });
+  els.labZoomInBtn.addEventListener('click', () => setLabZoom(state, labZoom + LAB_ZOOM_STEP));
+  els.labZoomOutBtn.addEventListener('click', () => setLabZoom(state, labZoom - LAB_ZOOM_STEP));
+
+  // Purchase confirmation modal, per direct request — clicking a lab node no
+  // longer spends anything directly (see buildLabTree below), it opens this
+  // instead; Confirm is the only path left that actually calls
+  // buyLabUpgrade.
+  els.labPurchaseCancelBtn.addEventListener('click', () => closeLabPurchaseModal());
+  els.labPurchaseConfirmBtn.addEventListener('click', () => confirmLabPurchase(state));
+  els.labPurchaseOverlay.addEventListener('click', (e) => {
+    if (e.target === els.labPurchaseOverlay) closeLabPurchaseModal();
   });
 
   els.notificationLatest.addEventListener('click', () => {
@@ -296,9 +323,7 @@ export function initUI(state) {
   const clearFlashClass = (e) => e.target.classList.remove('flash-pickup', 'flash-spend');
   els.money.addEventListener('animationend', clearFlashClass);
   els.shopMoney.addEventListener('animationend', clearFlashClass);
-  els.food.addEventListener('animationend', clearFlashClass);
   els.cleanliness.addEventListener('animationend', clearFlashClass);
-  els.shopFood.addEventListener('animationend', clearFlashClass);
   els.shopCleanliness.addEventListener('animationend', clearFlashClass);
   els.coinCap.addEventListener('animationend', clearFlashClass);
   els.shopCoinCap.addEventListener('animationend', clearFlashClass);
@@ -318,6 +343,17 @@ export function initUI(state) {
   buildLabTree(state);
   initLabTreeDrag(state);
   scheduleSheenAll();
+}
+
+// Closes whichever side panel (Shop or Tank Upgrades) is currently open —
+// shared by opening the Science Lab and selecting a bottom-tool-bar tool
+// (see openLabMenu/selectTool below), per direct request: neither the Lab
+// nor an armed tool should have to compete with a panel left open behind
+// it. No sound of its own — whatever triggered the close (opening the Lab,
+// picking a tool) already has its own feedback.
+function closeSidePanels(state) {
+  if (!state.ui.shopCollapsed) { state.ui.shopCollapsed = true; updateShopCollapse(state); }
+  if (!state.ui.tankPanelCollapsed) { state.ui.tankPanelCollapsed = true; updateTankPanelCollapse(state); }
 }
 
 // Called by the collapse button and the S hotkey (wired in main.js) alike,
@@ -344,14 +380,12 @@ function updateShopCollapse(state) {
   // from scratch — so toggling the shop could replay a stale pickup/spend
   // flash that has nothing to do with this toggle. Strip it defensively on
   // every toggle rather than relying solely on it finishing naturally.
-  // #hud holds money/food/cleanliness together, and #shop-hud holds the
-  // shop panel's own copies of all three, so all six need this.
+  // #hud holds money/cleanliness/coinCap together, and #shop-hud holds the
+  // shop panel's own copies of each, so all need this.
   els.money.classList.remove('flash-pickup', 'flash-spend');
-  els.food.classList.remove('flash-pickup', 'flash-spend');
   els.cleanliness.classList.remove('flash-pickup', 'flash-spend');
   els.coinCap.classList.remove('flash-pickup', 'flash-spend');
   els.shopMoney.classList.remove('flash-pickup', 'flash-spend');
-  els.shopFood.classList.remove('flash-pickup', 'flash-spend');
   els.shopCleanliness.classList.remove('flash-pickup', 'flash-spend');
   els.shopCoinCap.classList.remove('flash-pickup', 'flash-spend');
   // The preview canvas is invisible while collapsed — no point animating
@@ -479,7 +513,18 @@ export function openLabMenu(state) {
   labMenuOpen = true;
   labMenuClosing = false;
   if (labMenuCloseTimer !== null) { clearTimeout(labMenuCloseTimer); labMenuCloseTimer = null; }
+  closeSidePanels(state); // per direct request — the Shop/Tank Upgrades panel shouldn't sit open behind the Lab
   els.labOverlay.classList.remove('hidden');
+  // Reset zoom to the default every fresh open, then center the tree
+  // VERTICALLY (not pinned to its top edge) — per direct request. Has to
+  // happen after the overlay is actually unhidden (a display:none element
+  // has no layout box, so scrollHeight/clientHeight would both read 0), and
+  // before refreshLabTree so its own drawLabTreeConnectors call draws
+  // against the final scroll position rather than the stale one.
+  labZoom = 1;
+  els.labTreeColumns.style.setProperty('--lab-zoom', '1');
+  els.labTreeWrap.scrollLeft = 0;
+  els.labTreeWrap.scrollTop = Math.max(0, (els.labTreeWrap.scrollHeight - els.labTreeWrap.clientHeight) / 2);
   refreshLabTree(state);
   els.labModal.classList.add('lab-modal-closed');
   void els.labModal.offsetWidth; // forced reflow — same retrigger trick every other one-shot transition in this file uses
@@ -491,6 +536,7 @@ export function closeLabMenu() {
   if (!labMenuOpen) return;
   labMenuOpen = false;
   labMenuClosing = true;
+  closeLabPurchaseModal(); // don't leave the confirmation modal stranded on top of a closed/closing tree
   els.labModal.classList.add('lab-modal-closed');
   labMenuCloseTimer = setTimeout(() => {
     els.labOverlay.classList.add('hidden');
@@ -503,6 +549,13 @@ export function closeLabMenu() {
 // Read by main.js's Escape handler, same reason isMoundMenuOpen is.
 export function isLabMenuOpen() {
   return labMenuOpen;
+}
+
+// Read by main.js's Escape handler — checked AHEAD of isLabMenuOpen so
+// Escape closes the confirmation modal first (it sits on top) rather than
+// closing the whole tree out from under it.
+export function isLabPurchaseModalOpen() {
+  return labPurchaseNodeId !== null;
 }
 
 // One dependency-depth per column — a node with no prerequisites is depth
@@ -541,23 +594,30 @@ let labTreeJustDragged = false; // true for exactly the one 'click' event immedi
 // overflow:hidden (no native scrollbar/wheel-scroll), but scrollLeft/
 // scrollTop remain fully readable and settable via JS — this just drives
 // them from mouse movement instead of the browser's own scroll handling.
+// A direct follow-up report clarified the mousedown listener needs to live
+// on the whole modal, not just the tree's own wrap — "right now you have to
+// specifically click the background in the science lab to be able to drag
+// it," i.e. starting a drag from the header row or the padding around the
+// tree (or a locked node) did nothing. Panning itself still only ever moves
+// #lab-tree-wrap's own scrollLeft/scrollTop; only WHERE a drag is allowed to
+// start moved outward.
 function initLabTreeDrag(state) {
   const wrap = els.labTreeWrap;
-  wrap.addEventListener('mousedown', (e) => {
+  const modal = els.labModal;
+  modal.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return; // left button only
     labTreeDrag = { startX: e.clientX, startY: e.clientY, startScrollLeft: wrap.scrollLeft, startScrollTop: wrap.scrollTop, moved: false };
   });
-  // Listened on window, not the wrap, so a drag that carries the cursor
-  // outside the wrap's own bounds (easy to do — it's not a huge box) keeps
-  // panning smoothly instead of stalling out the instant the pointer
-  // crosses the edge.
+  // Listened on window, not the modal, so a drag that carries the cursor
+  // outside the modal's own bounds keeps panning smoothly instead of
+  // stalling out the instant the pointer crosses the edge.
   window.addEventListener('mousemove', (e) => {
     if (!labTreeDrag) return;
     const dx = e.clientX - labTreeDrag.startX;
     const dy = e.clientY - labTreeDrag.startY;
     if (!labTreeDrag.moved && Math.hypot(dx, dy) > LAB_TREE_DRAG_THRESHOLD_PX) {
       labTreeDrag.moved = true;
-      wrap.classList.add('dragging');
+      modal.classList.add('dragging');
     }
     if (labTreeDrag.moved) {
       wrap.scrollLeft = labTreeDrag.startScrollLeft - dx;
@@ -572,17 +632,70 @@ function initLabTreeDrag(state) {
   window.addEventListener('mouseup', () => {
     if (labTreeDrag && labTreeDrag.moved) labTreeJustDragged = true;
     labTreeDrag = null;
-    wrap.classList.remove('dragging');
+    modal.classList.remove('dragging');
   });
-  // Capture phase so this runs BEFORE a .lab-node's own bubbling click
-  // handler (buyLabUpgrade) — swallows the synthetic click a mouseup
-  // generates on whatever element the drag happened to end on top of.
-  wrap.addEventListener('click', (e) => {
+  // Capture phase on WINDOW (not just the modal) so this runs before ANY
+  // other click listener anywhere, including #lab-overlay's own
+  // click-the-backdrop-to-close handler — swallows the synthetic click a
+  // mouseup generates wherever the drag happened to end. This matters now
+  // that dragging can start well inside the modal (e.g. the header) and, if
+  // the gesture crosses back out over the dimmed backdrop before release,
+  // the resulting click's target is #lab-overlay itself rather than
+  // anything inside #lab-modal — a listener scoped to the modal wouldn't
+  // even be in that click's propagation path, so the drag would silently
+  // close the whole tree on release instead of just finishing the pan.
+  // stopPropagation() here, called on window during the capture phase (the
+  // very first stop on the event's path), keeps the event from ever
+  // reaching its real target at all.
+  window.addEventListener('click', (e) => {
     if (labTreeJustDragged) {
       e.stopPropagation();
       labTreeJustDragged = false;
     }
   }, true);
+
+  // Zoom, per direct request ("make it so you can zoom in and out of the
+  // science lab") — mouse wheel over the tree area itself, centered on the
+  // cursor so whatever point you're hovering stays put as it scales. Scoped
+  // to the wrap (not the whole modal, unlike dragging) since scrolling over
+  // the header/close button has no natural meaning.
+  wrap.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const dir = e.deltaY > 0 ? -1 : 1;
+    setLabZoom(state, labZoom + dir * LAB_ZOOM_STEP, e.clientX, e.clientY);
+  }, { passive: false });
+}
+
+// See style.css's comment on #lab-tree-columns for why this scales real
+// box-model dimensions (a --lab-zoom custom property) instead of a
+// transform: scale(). anchorClientX/Y (from a wheel event) keep whatever
+// point was under the cursor visually stationary through the zoom step —
+// content at zoom-space position `contentX` before the change lands at
+// `contentX * (newZoom/oldZoom)` after, since every scaled dimension grows
+// uniformly from the tree's own top-left origin; omitted (the +/- buttons),
+// it just rescales in place from the current scroll position.
+function setLabZoom(state, zoom, anchorClientX, anchorClientY) {
+  const wrap = els.labTreeWrap;
+  const oldZoom = labZoom;
+  const newZoom = Math.min(LAB_ZOOM_MAX, Math.max(LAB_ZOOM_MIN, zoom));
+  if (newZoom === oldZoom) return;
+  let newScrollLeft = null;
+  let newScrollTop = null;
+  if (anchorClientX != null) {
+    const wrapRect = wrap.getBoundingClientRect();
+    const contentX = wrap.scrollLeft + (anchorClientX - wrapRect.left);
+    const contentY = wrap.scrollTop + (anchorClientY - wrapRect.top);
+    const ratio = newZoom / oldZoom;
+    newScrollLeft = contentX * ratio - (anchorClientX - wrapRect.left);
+    newScrollTop = contentY * ratio - (anchorClientY - wrapRect.top);
+  }
+  labZoom = newZoom;
+  els.labTreeColumns.style.setProperty('--lab-zoom', String(labZoom));
+  if (newScrollLeft !== null) {
+    wrap.scrollLeft = newScrollLeft;
+    wrap.scrollTop = newScrollTop;
+  }
+  drawLabTreeConnectors(state);
 }
 
 // Built once at init (mirrors buildTankPanel) — the tree's SHAPE (which
@@ -612,7 +725,12 @@ function buildLabTree(state) {
     const costEl = document.createElement('div');
     costEl.className = 'lab-node-cost';
     btn.append(nameEl, costEl);
-    btn.addEventListener('click', () => buyLabUpgrade(state, node.id));
+    // No longer buys directly on click — per direct request, opens the
+    // confirmation modal instead (see openLabPurchaseModal below), which is
+    // the only thing that still calls buyLabUpgrade. A disabled button
+    // (locked or already purchased) never dispatches a click at all, so this
+    // never opens for something that couldn't actually be bought.
+    btn.addEventListener('click', () => openLabPurchaseModal(state, node.id));
     labNodeButtons[node.id] = { btn, costEl };
     columns[labNodeDepthMemo[node.id]].appendChild(btn);
   }
@@ -621,7 +739,9 @@ function buildLabTree(state) {
 
 // Every Science Lab node spends BOTH Science and gold at once — a
 // deliberate first in this game's economy, per direct request, tying the
-// whole tree to two resources so it reads as the real end-goal sink.
+// whole tree to two resources so it reads as the real end-goal sink. Only
+// ever called from confirmLabPurchase now (see the purchase modal below) —
+// clicking a node itself just opens that modal.
 function buyLabUpgrade(state, id) {
   const node = SCIENCE_LAB_UPGRADES[id];
   if (state.meta.labUpgradesPurchased.includes(id)) return;
@@ -648,6 +768,97 @@ function buyLabUpgrade(state, id) {
   playUpgrade();
   refreshLabTree(state);
   refreshShopPanel(state);
+}
+
+// ---- Lab purchase confirmation modal ----
+// Per direct request ("I want to have a purchase modal pop up when in the
+// science lab, so you have a chance to read what something does and confirm
+// the purchase, instead of just clicking it... Have that purchase modal give
+// the stats of the building/fish being unlocked"). Opened by a node's click
+// handler above instead of buying immediately; Confirm is the only thing
+// left that actually calls buyLabUpgrade.
+function openLabPurchaseModal(state, id) {
+  const node = SCIENCE_LAB_UPGRADES[id];
+  labPurchaseNodeId = id;
+  els.labPurchaseIcon.textContent = node.icon;
+  els.labPurchaseName.textContent = node.name;
+  els.labPurchaseCost.textContent = `${node.scienceCost} 🔬 · $${node.goldCost}`;
+
+  const descLines = [];
+  const statChips = [];
+  for (const sid of node.grants.species || []) {
+    const s = SPECIES[sid];
+    if (!s) continue;
+    descLines.push(s.description);
+    statChips.push(speciesStatsHtml(sid));
+  }
+  for (const bid of node.grants.buildings || []) {
+    const b = BUILDING_TYPES[bid];
+    if (!b) continue;
+    descLines.push(b.description);
+    statChips.push(buildingStatsHtml(bid));
+  }
+  if (node.grants.scienceCapLevel) {
+    descLines.push('Raises the Science Bubble cap — how many can exist unbanked in the tank at once before an Octopus\'s brew is blocked.');
+    const level = state.level.upgrades.scienceCapLevel;
+    const from = SCIENCE_CAP_BY_LEVEL[level - 1] ?? SCIENCE_CAP_BY_LEVEL[0];
+    const to = SCIENCE_CAP_BY_LEVEL[level] ?? from;
+    statChips.push(`<div class="building-stat">🔬 Bubble cap: <b>${from} → ${to}</b></div>`);
+  }
+  if (!descLines.length) {
+    // A pure prerequisite node (gene_splicing, the 3 hybrid "track" gates) —
+    // grants nothing by itself, so describe what it opens up instead.
+    descLines.push('Doesn\'t unlock anything by itself — it\'s a prerequisite for what comes next.');
+    const unlocksHtml = labNodeUnlocksHtml(id);
+    if (unlocksHtml) statChips.push(unlocksHtml);
+  }
+  els.labPurchaseDesc.innerHTML = descLines.map((t) => `<div>${t}</div>`).join('');
+  els.labPurchaseStats.innerHTML = statChips.join('');
+  els.labPurchaseOverlay.classList.remove('hidden');
+  playPanelOpen();
+}
+
+export function closeLabPurchaseModal() {
+  if (labPurchaseNodeId === null) return;
+  labPurchaseNodeId = null;
+  els.labPurchaseOverlay.classList.add('hidden');
+  playPanelClose();
+}
+
+function confirmLabPurchase(state) {
+  if (labPurchaseNodeId === null) return;
+  const id = labPurchaseNodeId;
+  closeLabPurchaseModal();
+  buyLabUpgrade(state, id);
+}
+
+// A fish's real stats, in the same compact chip format buildingStatsHtml
+// below already uses for buildings — role, purchase cost, adult coin value
+// (for a coin-dropping FEEDER/hybrid), hunger rate.
+function speciesStatsHtml(speciesId) {
+  const s = SPECIES[speciesId];
+  if (!s) return '';
+  const adult = s.growthStages[s.growthStages.length - 1];
+  const role = s.behavior.includes('SCAVENGER') ? 'Scavenger'
+    : s.behavior.includes('GENERATOR') ? 'Generator'
+    : s.behavior.includes('RESEARCHER') ? 'Researcher'
+    : 'Feeder';
+  let html = `<div class="building-stat">🎭 Role: <b>${role}</b></div>`;
+  html += `<div class="building-stat">💰 Cost: <b>$${s.cost}</b></div>`;
+  if (s.dropType === 'coin' && adult.dropValue) {
+    html += `<div class="building-stat">🪙 Adult coin: <b>$${adult.dropValue}</b></div>`;
+  }
+  html += `<div class="building-stat">🍽️ Hunger: <b>${s.hungerRate.toFixed(2)}/sec</b></div>`;
+  return html;
+}
+
+// What a pure-prerequisite node (no grants of its own) actually opens up —
+// every other node whose own `requires` lists it, so a locked-behind-this
+// purchase still reads as meaningful rather than a dead end.
+function labNodeUnlocksHtml(id) {
+  const dependents = SCIENCE_LAB_UPGRADE_LIST.filter((n) => n.requires.includes(id));
+  if (!dependents.length) return '';
+  return `<div class="building-stat">🔓 Unlocks: <b>${dependents.map((d) => d.name).join(', ')}</b></div>`;
 }
 
 // Re-checked every frame the popup is open (from updateHUD) — Science/money
@@ -808,6 +1019,7 @@ function restartLevel(state) {
 // sets the tool so both paths stay in sync.
 export function selectTool(state, tool) {
   state.ui.selectedTool = tool;
+  closeSidePanels(state); // per direct request — picking a bottom-tool-bar tool (Food/Demolish/Merge) closes the Shop/Tank Upgrades panel if it's open
   updateToolbar(state);
 }
 
@@ -1462,13 +1674,6 @@ export function updateHUD(state) {
   const cleanColor = cleanlinessColor(cleanliness);
   els.cleanliness.style.color = cleanColor;
   els.shopCleanliness.style.color = cleanColor;
-  // No more "/cap" denominator — the Food Capacity cap was retired entirely
-  // (see Entities.js's countTankFood/updateFood) in favor of the
-  // stationary-to-Waste mechanic, so this is just a live count now.
-  const foodText = `🍽️ ${countTankFood(state)}`;
-  els.food.textContent = foodText;
-  els.shopFood.textContent = foodText;
-
   // Coin Cap — always shown (coins exist from the very start), unlike
   // Science below. Counts EVERY coin currently in state.level.items, seabed
   // city included — see Entities.js's countTankItemsByType.
