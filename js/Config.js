@@ -57,11 +57,11 @@ export const SEABED_FLOOR_Y = SEABED_ROW_START * TILE_SIZE; // world-y of the wa
 // visual padding. Cut again, 156 -> 100, per a later direct request ("it's
 // too tall right now... just slightly bigger than the toolbar") — this time
 // NOT compensated by moving tiles into WORLD_TILES_H, since this pass is
-// purely "make the buffer itself shorter," not "reclaim buildable space." A
-// #bottom-bar-row toolbar's own on-screen footprint is ~86px (72px tall bar
-// + 14px bottom offset) at any viewport height, so 100px clears it with a
-// small margin. See Grid.js's renderCameraBottomBuffer for what fills it.
-export const CAMERA_BOTTOM_BUFFER_PX = 100;
+// purely "make the buffer itself shorter," not "reclaim buildable space."
+// Bumped back up slightly, 100 -> 105 (+5%), per a still-later direct
+// request ("make the toolbar area at the bottom 5% taller"). See Grid.js's
+// renderCameraBottomBuffer for what fills it.
+export const CAMERA_BOTTOM_BUFFER_PX = 105;
 // A fixed rest height, 4 tiles above the world's absolute bottom row, that
 // NOTHING falls past — coins, Science Bubbles, Food, and Waste alike, per
 // direct request ("the rocky shelf is now a hard barrier for all objects...

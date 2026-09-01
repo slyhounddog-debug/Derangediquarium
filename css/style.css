@@ -464,6 +464,29 @@ html, body {
    code needed. */
 .cap-warning.flash-spend { animation: cap-warning-pulse 1s ease-in-out infinite, flash-spend 0.33s ease; }
 
+/* "At the cap" bounce — per direct request, layered on top of the pulse
+   above once the live count reaches the actual FULL 100% (not just the 80%
+   warning threshold), so it reads like a real notification badge popping
+   rather than just a color change. A pure scale "pop," deliberately never
+   touching translate/rotate the way flash-spend's shake does below — per
+   direct request to keep the two visually distinct, since a blocked
+   production attempt (flash-spend) is a different signal from "the cap is
+   full" itself (this). */
+@keyframes cap-full-bounce {
+  0%, 100% { transform: scale(1); }
+  25% { transform: scale(1.18); }
+  45% { transform: scale(0.95); }
+  65% { transform: scale(1.06); }
+  85% { transform: scale(0.99); }
+}
+.cap-warning.cap-full { animation: cap-warning-pulse 1s ease-in-out infinite, cap-full-bounce 1.6s ease-in-out infinite; }
+/* All three can land on the same element at once (full, AND a blocked
+   production attempt just shook it) — same "list every active animation
+   explicitly" fix as the two-way compound rule above, so the one-shot
+   shake still plays in full and the two continuous animations both resume
+   afterward with no extra code needed. */
+.cap-warning.cap-full.flash-spend { animation: cap-warning-pulse 1s ease-in-out infinite, cap-full-bounce 1.6s ease-in-out infinite, flash-spend 0.33s ease; }
+
 /* Every building slot shares ONE 3-columns-per-row grid — per direct
    request ("3 max buildings/tools to a row"). Food/Demolish/Merge used to
    live in here too but moved out to the fixed #bottom-tool-bar below, per a

@@ -1894,6 +1894,12 @@ export function updateHUD(state) {
   // pay attention" cues, just one continuous and one per-event.
   const coinCapWarningActive = coinCapCount / coinCapMax >= CAP_WARNING_THRESHOLD_FRACTION;
   els.coinCap.classList.toggle('cap-warning', coinCapWarningActive);
+  // Per direct request, a genuinely FULL cap (not just the 80% warning)
+  // also bounces like a notification badge, on top of the pulse — see
+  // style.css's .cap-full for the visual, kept deliberately distinct from
+  // the flash-spend shake below (a different signal: a blocked production
+  // attempt, not "the cap is full" itself).
+  els.coinCap.classList.toggle('cap-full', coinCapCount >= coinCapMax);
   // One-time notification the first time the coin count ever reaches this
   // threshold, per direct request — "make it more obvious when the coin
   // limit is reached." Same inline push-then-cap pattern every other
@@ -1933,6 +1939,7 @@ export function updateHUD(state) {
     const scienceCapMax = effectiveScienceCapacity(state);
     els.scienceCap.textContent = `🔬 ${scienceCapCount}/${scienceCapMax}`;
     els.scienceCap.classList.toggle('cap-warning', scienceCapCount / scienceCapMax >= CAP_WARNING_THRESHOLD_FRACTION);
+    els.scienceCap.classList.toggle('cap-full', scienceCapCount >= scienceCapMax);
     if (lastScienceCapCount !== null && scienceCapCount > lastScienceCapCount) {
       playFlash(els.scienceCap, 'flash-spend');
     }

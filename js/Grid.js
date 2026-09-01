@@ -1141,48 +1141,100 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
 // for the fixed bottom tool-bar that never covers real gameplay content.
 // The seabed fill/texture above already covers it for free (that fill runs
 // to the bottom of the canvas regardless of true world bounds), so on top of
-// that this draws two things: a flat highlight strip exactly at WORLD_H —
-// per direct request ("add in a rock line to the bottom of the city like
-// the transition from the tank to the city [i.e. flat/solid, NOT the jagged
+// that this draws: a flat highlight strip exactly at WORLD_H — per direct
+// request ("add in a rock line to the bottom of the city like the
+// transition from the tank to the city [i.e. flat/solid, NOT the jagged
 // Rocky Shelf]") — marking the city's real bottom edge the same "solid fill
 // + thin lighter strip" way renderSeabedGrid's own SEABED_ROW_START line
-// already does, and the buffer's own fill below that line.
+// already does, then the buffer's own fill below that line.
 //
-// That fill went through two passes: the original request was a fade
-// ("the gradient shouldn't go over the entire city part, just the new part
-// added onto the bottom"), then a later request changed it to a flat
+// That fill has been through several passes: the original request was a
+// fade ("the gradient shouldn't go over the entire city part, just the new
+// part added onto the bottom"), then a request changed it to a flat
 // #000000 hard break ("the gradient to black... should be changed to a hard
-// break from the bottom tank to the toolbar"), and this pass keeps that hard
-// EDGE (the highlight strip above is that seam — nothing fades across it)
-// but reworks the fill ITSELF into a real gradient + the same speckle
-// texture every other seabed fill in this file already uses, per direct
-// request ("rework the black toolbar to look like a polished toolbar area
-// thats not a flat solid color... match the aesthetic of the rest of the
-// game") — a flat #000000 rectangle was the one remaining place in this
-// whole render pass that didn't get that treatment.
+// break from the bottom tank to the toolbar"), then a first polish pass
+// swapped the flat black for a plain 2-stop gradient + texture — which per
+// direct follow-up report still "looks mostly like a flat black area." This
+// pass keeps the hard EDGE (the highlight strip above is that seam —
+// nothing fades across it) but genuinely earns "polished, not flat, matches
+// the aesthetic of the rest of the game": a richer 3-stop gradient (a real
+// visible mid-tone band, not just a top-to-bottom fade), a row of evenly-
+// spaced machined rivets (deliberately NOT randomly jittered like the
+// organic Rocky Shelf — reads as an engineered panel) each with their own
+// tiny lit/shadowed bevel, a soft warm glow suggesting ambient light
+// bleeding up from the toolbar's own equipment, and a second, fainter seam
+// line partway down for real structure beyond a single gradient.
+const BUFFER_RIVET_SPACING = TILE_SIZE * 1.5;
+const BUFFER_RIVET_RADIUS = 3;
 function renderCameraBottomBuffer(ctx, camera, canvasWidth, canvasHeight) {
   const topScreenY = worldToScreen(0, WORLD_H, camera).y;
   const bottomScreenY = worldToScreen(0, WORLD_H + CAMERA_BOTTOM_BUFFER_PX, camera).y;
   if (topScreenY > canvasHeight || bottomScreenY < 0) return; // buffer strip entirely off-screen
+
+  const clampedTop = Math.max(0, topScreenY);
+  const clampedBottom = Math.min(canvasHeight, bottomScreenY);
+  const bufferHeight = clampedBottom - clampedTop;
+
+  const gradient = ctx.createLinearGradient(0, topScreenY, 0, bottomScreenY);
+  gradient.addColorStop(0, '#2e2115');
+  gradient.addColorStop(0.45, '#1c150e');
+  gradient.addColorStop(1, '#0a0705');
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, clampedTop, canvasWidth, bufferHeight);
+
+  ctx.save();
+  ctx.fillStyle = getUndergroundTexturePattern(ctx);
+  ctx.globalAlpha = 0.3;
+  ctx.fillRect(0, clampedTop, canvasWidth, bufferHeight);
+  ctx.restore();
+
+  if (bufferHeight > 4) {
+    ctx.save();
+    const glowGradient = ctx.createRadialGradient(
+      canvasWidth / 2, clampedTop, 0,
+      canvasWidth / 2, clampedTop, canvasWidth * 0.42
+    );
+    glowGradient.addColorStop(0, 'rgba(255, 200, 120, 0.16)');
+    glowGradient.addColorStop(1, 'rgba(255, 200, 120, 0)');
+    ctx.fillStyle = glowGradient;
+    ctx.fillRect(0, clampedTop, canvasWidth, bufferHeight);
+    ctx.restore();
+  }
 
   if (topScreenY >= 0) {
     ctx.fillStyle = '#4a3d2e';
     ctx.fillRect(0, topScreenY, canvasWidth, Math.max(2, 3 * camera.zoom));
   }
 
-  const clampedTop = Math.max(0, topScreenY);
-  const clampedBottom = Math.min(canvasHeight, bottomScreenY);
-  const gradient = ctx.createLinearGradient(0, topScreenY, 0, bottomScreenY);
-  gradient.addColorStop(0, '#251d15');
-  gradient.addColorStop(1, '#0a0806');
-  ctx.fillStyle = gradient;
-  ctx.fillRect(0, clampedTop, canvasWidth, clampedBottom - clampedTop);
+  // Evenly-spaced rivets just below the boundary line.
+  const rivetScreenY = topScreenY + Math.max(10, 14 * camera.zoom);
+  if (rivetScreenY >= -10 && rivetScreenY <= canvasHeight + 10) {
+    const worldLeft = camera.x;
+    const worldRight = camera.x + canvasWidth / camera.zoom;
+    const firstRivetX = Math.floor(worldLeft / BUFFER_RIVET_SPACING) * BUFFER_RIVET_SPACING;
+    for (let wx = firstRivetX; wx <= worldRight + BUFFER_RIVET_SPACING; wx += BUFFER_RIVET_SPACING) {
+      const screenX = worldToScreen(wx, 0, camera).x;
+      const r = Math.max(1.5, BUFFER_RIVET_RADIUS * camera.zoom);
+      ctx.beginPath();
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+      ctx.arc(screenX, rivetScreenY, r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.fillStyle = 'rgba(255, 220, 180, 0.35)';
+      ctx.arc(screenX - r * 0.3, rivetScreenY - r * 0.3, r * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
 
-  ctx.save();
-  ctx.fillStyle = getUndergroundTexturePattern(ctx);
-  ctx.globalAlpha = 0.35;
-  ctx.fillRect(0, clampedTop, canvasWidth, clampedBottom - clampedTop);
-  ctx.restore();
+  // A second, fainter seam line partway down the buffer's own height.
+  const seamY = topScreenY + bufferHeight * 0.55;
+  if (seamY >= 0 && seamY <= canvasHeight) {
+    const seamThickness = Math.max(1, 1 * camera.zoom);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.05)';
+    ctx.fillRect(0, seamY, canvasWidth, seamThickness);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+    ctx.fillRect(0, seamY + seamThickness, canvasWidth, Math.max(1, 2 * camera.zoom));
+  }
 }
 
 // Draws every Fan's cone + aim arrow regardless of whether its own tile is
