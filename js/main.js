@@ -117,10 +117,14 @@ window.addEventListener('keydown', resumeAudio, { once: true });
 // the word has actually finished growing in.
 //
 // The per-letter spans are still built eagerly here at load — but per
-// direct request, the animation itself no longer starts automatically: the
-// CSS only defines it on #splash-title.play (see style.css), added by
-// triggerSplash() below once the player actually clicks Start on the new
-// start screen, not on page load.
+// direct request, #splash-screen itself starts fully invisible (not just
+// "not yet animating" — see its own opacity:0 in style.css) and the
+// animation doesn't start automatically either: both are gated on a single
+// .play class added to #splash-screen (not #splash-title — see style.css's
+// descendant selectors) by triggerSplash() below, once the player actually
+// clicks Start on the new start screen, not on page load. This also means
+// the splash can never bleed through the start screen's blurred backdrop
+// the way it could while only the animation (not the visibility) was gated.
 const splashScreen = document.getElementById('splash-screen');
 const splashTitle = splashScreen.querySelector('#splash-title');
 const SPLASH_GROW_IN_DURATION_S = 1.125;
@@ -138,7 +142,7 @@ splashTitle.addEventListener('animationend', (e) => {
   if (e.target === splashTitle) splashScreen.remove(); // ignore bubbled per-letter animationend events, only the title's own grow-fade ending means it's done
 });
 function triggerSplash() {
-  splashTitle.classList.add('play');
+  splashScreen.classList.add('play');
 }
 
 // ---- Root state (§3.1) — plain, JSON-serializable, meta/level split ----
