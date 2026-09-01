@@ -27,9 +27,17 @@ import {
   AUTO_FEEDER_UNLOCK_COST,
 } from './Config.js';
 import { worldToScreen } from './Engine.js';
+import { createShimmerTimer, updateShimmerTimer, drawShimmerSweep } from './Shimmer.js';
 
 const MOUND_WIDTH_PX = MOUND_WIDTH_TILES * TILE_SIZE;
 export const MOUND_X = WORLD_W / 2; // world-space center, fixed for the life of the level
+
+// Shimmer/gleam, per direct request ("make it so the mound and the science
+// lab shimmer/gleen like the other objects, but every 10-50 seconds") — see
+// Shimmer.js for the shared mechanism. Each object gets its own independent
+// timer so the two don't stay in sync.
+const moundShimmer = createShimmerTimer();
+const labShimmer = createShimmerTimer();
 
 // The camera starts at world x=0 (the far-left edge) by default, but the
 // Mound sits at the world's horizontal center — without this, it's off the
@@ -281,7 +289,10 @@ export function renderMound(ctx, state) {
     ctx.lineTo(bx + Math.sin(angleRad) * branchLen, by + Math.cos(angleRad) * branchLen);
     ctx.stroke();
   }
-  ctx.restore(); // lifts the dome-silhouette clip set above, now that the texture AND every crack/branch have been drawn through it
+  // Drawn last, still inside the dome-silhouette clip, so the sweep never
+  // paints outside the Mound's own shape.
+  drawShimmerSweep(ctx, updateShimmerTimer(moundShimmer, state.level.elapsed), topLeft.x, topLeft.y, w, h);
+  ctx.restore(); // lifts the dome-silhouette clip set above, now that the texture, every crack/branch, and the shimmer have been drawn through it
 }
 
 // ---- Science Lab (Phase 4) ----
@@ -330,4 +341,19 @@ export function renderScienceLab(ctx, state) {
   ctx.strokeStyle = 'rgba(122, 212, 232, 0.6)';
   ctx.lineWidth = Math.max(1, 2 * camera.zoom);
   ctx.strokeRect(topLeft.x + w * 0.1, topLeft.y + h * 0.55, w * 0.8, h * 0.45);
+
+  // Shimmer, clipped to the Lab's own silhouette (the base rect plus the
+  // dome's upper half-circle, traced as one path) so the sweep can't paint
+  // into the empty water above/around it.
+  const baseY = topLeft.y + h * 0.55;
+  const domeRadius = w * 0.32;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, baseY, domeRadius, Math.PI, 0);
+  ctx.lineTo(topLeft.x + w * 0.9, topLeft.y + h);
+  ctx.lineTo(topLeft.x + w * 0.1, topLeft.y + h);
+  ctx.closePath();
+  ctx.clip();
+  drawShimmerSweep(ctx, updateShimmerTimer(labShimmer, state.level.elapsed), topLeft.x, topLeft.y, w, h);
+  ctx.restore();
 }

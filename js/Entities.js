@@ -252,6 +252,15 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
     // economy parent had reached before being spliced). null for every
     // ordinary fish.
     dropValueOverride,
+    // Per direct request, a fish shimmers/gleams the moment it's created —
+    // covers a freshly purchased-and-placed fish AND a combine/splice
+    // result, since combineFish/createHybridFish both create the new fish
+    // through this exact function, one choke point for all of it. Also
+    // (re)set on a growth-stage transition — see updateFish. Read by
+    // main.js's render loop via Shimmer.js's oneShotShimmerProgress;
+    // state.level.elapsed is always defined by the time any fish is ever
+    // created (level load seeds it to 0 first).
+    shimmerStartedAt: state.level.elapsed,
   };
 }
 
@@ -1027,7 +1036,12 @@ function updateFish(fish, state, dtMs) {
         if (!isScavenger) fish.dropTimer += def.growthStages[fish.stage].dropInterval * COIN_TIMER_FEED_BONUS_FRACTION;
         fish.totalFeeds += 1;
         const wasAdult = fish.stage === def.growthStages.length - 1;
+        const prevStage = fish.stage;
         fish.stage = stageIndexForFeeds(def, fish.totalFeeds);
+        // Per direct request, a fish shimmers whenever it "grows in size" —
+        // a real stage advance (hatchling->juvenile->adult), not just any
+        // feed (most feeds don't cross a stage boundary).
+        if (fish.stage > prevStage) fish.shimmerStartedAt = state.level.elapsed;
         if (!wasAdult && fish.stage === def.growthStages.length - 1) {
           awardTankPoint(state, fish);
         }

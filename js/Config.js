@@ -1131,13 +1131,19 @@ export const TIER_UNLOCKS = {
 // buyLabUpgrade pushes each into state.meta/state.level the same way
 // Mound.js's crackMound already does for species/buildings.
 export const SCIENCE_LAB_UPGRADES = {
+  // Per direct request, Eel/Suckerfish are no longer tree roots — both now
+  // require Bubble Cap 10 (science_cap_1, declared further down this same
+  // object) first. labNodeDepth (UI.js) computes column placement purely
+  // from `requires` depth, so this alone re-lays the tree with the capacity
+  // chain now feeding INTO the two utility species rather than sitting
+  // beside them as an unrelated branch.
   eel: {
     id: 'eel', name: 'Electric Eel', icon: '🐍', scienceCost: 10, goldCost: 1000,
-    requires: [], grants: { species: ['electric_eel'] },
+    requires: ['science_cap_1'], grants: { species: ['electric_eel'] },
   },
   suckerfish: {
     id: 'suckerfish', name: 'Suckerfish', icon: '🐠', scienceCost: 15, goldCost: 1000,
-    requires: [], grants: { species: ['suckerfish'] },
+    requires: ['science_cap_1'], grants: { species: ['suckerfish'] },
   },
   electric_fan: {
     id: 'electric_fan', name: 'Electric Fan', icon: '💨', scienceCost: 20, goldCost: 2500,
@@ -1187,9 +1193,12 @@ export const SCIENCE_LAB_UPGRADES = {
   // exactly its one species into speciesUnlocked, mirroring `eel`/
   // `suckerfish` above — Entities.js's canSpliceFish checks that array
   // directly for the specific resulting hybrid id, not a blanket flag.
+  // Also requires Bubble Cap 20 (science_cap_2) now, per direct request —
+  // stacks on top of the existing eel/suckerfish requirement rather than
+  // replacing it.
   gene_splicing: {
     id: 'gene_splicing', name: 'Gene-Splicing', icon: '🧬', scienceCost: 10, goldCost: 1000,
-    requires: ['eel', 'suckerfish'], grants: {},
+    requires: ['eel', 'suckerfish', 'science_cap_2'], grants: {},
   },
   suckerfish_hybrids: {
     id: 'suckerfish_hybrids', name: 'Suckerfish Hybrids', icon: '🧹', scienceCost: 10, goldCost: 1000,

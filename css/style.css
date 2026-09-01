@@ -268,6 +268,7 @@ html, body {
   display: none;
 }
 #tank-panel.collapsed #tank-header,
+#tank-panel.collapsed #tank-hud,
 #tank-panel.collapsed #tank-points-display,
 #tank-panel.collapsed #tank-upgrade-list {
   display: none;
@@ -279,16 +280,20 @@ html, body {
 }
 #shop-header, #tank-header { font-size: 17px; font-weight: 800; color: #c25f8f; }
 
-/* The shop sits open most of the game now, so it carries its own copy of
-   every main-HUD readout (money/food/cleanliness) rather than relying on
-   #hud, which is hidden while the shop panel is expanded — see UI.js's
-   updateHUD, which writes to whichever set is actually visible and redirects
-   the flash-pickup/flash-spend animations there too. */
-#shop-hud {
+/* The shop AND the Tank Upgrades panel each carry their own copy of every
+   main-HUD readout (money/coin cap/science cap/cleanliness/power) now — per
+   direct request, so #hud (hidden whenever EITHER panel is expanded — see
+   UI.js's updateHudVisibility) is never the only place to see them. UI.js's
+   updateHUD writes to whichever set(s) exist every frame and redirects the
+   flash-pickup/flash-spend animations to whichever one is actually visible
+   (visibleHudEl) — #shop-hud was first, #tank-hud mirrors it exactly. */
+#shop-hud, #tank-hud {
   display: flex; flex-wrap: wrap; gap: 8px;
   margin-bottom: 14px;
 }
-#shop-money, #shop-coin-cap, #shop-science-cap, #shop-cleanliness, #shop-power, #tank-points-display {
+#shop-money, #shop-coin-cap, #shop-science-cap, #shop-cleanliness, #shop-power,
+#tank-money, #tank-coin-cap, #tank-science-cap, #tank-cleanliness, #tank-power,
+#tank-points-display {
   display: inline-block;
   background: linear-gradient(160deg, #fffdf8 0%, #ffe9f4 100%);
   border: 2px solid #ffffff;
@@ -298,9 +303,9 @@ html, body {
   box-shadow: 0 3px 9px rgba(107, 76, 107, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.85);
 }
 #tank-points-display { margin-bottom: 14px; }
-#shop-power.hidden { display: none; }
-#shop-power { cursor: default; } /* per direct request, only the HUD copy opens the graph — this one is a plain readout */
-#hud-science-cap.hidden, #shop-science-cap.hidden { display: none; } /* only shown once the Science Octopus is unlocked, same "hidden until relevant" precedent as #hud-power/electric Eel */
+#shop-power.hidden, #tank-power.hidden { display: none; }
+#shop-power, #tank-power { cursor: default; } /* per direct request, only the HUD copy opens the graph — these are plain readouts */
+#hud-science-cap.hidden, #shop-science-cap.hidden, #tank-science-cap.hidden { display: none; } /* only shown once the Science Octopus is unlocked, same "hidden until relevant" precedent as #hud-power/electric Eel */
 
 /* A soft diagonal light sweep that plays across a UI element every so often
    — per direct request, applied broadly across the HUD/shop/panels (see
@@ -994,6 +999,10 @@ html, body {
 .lab-node:hover:not(:disabled) { transform: scale(1.04); }
 .lab-node:disabled { cursor: not-allowed; }
 .lab-node.locked { opacity: 0.55; }
+/* Unaffordable but unlocked — still fully clickable (opens the purchase
+   modal to read it), per direct request; just a lighter dim than .locked
+   so the two read as distinct states rather than identically inert. */
+.lab-node.unaffordable { opacity: 0.8; }
 .lab-node.purchased {
   background: linear-gradient(160deg, #a8f0cb 0%, #7ad4a8 100%);
   box-shadow: 0 3px 8px rgba(53, 145, 97, 0.3), inset 0 2px 0 rgba(255, 255, 255, 0.5);
@@ -1052,6 +1061,12 @@ html, body {
   background: linear-gradient(160deg, #a8f0cb 0%, #7ad4a8 100%);
   color: #1f4a34;
   box-shadow: 0 3px 8px rgba(53, 145, 97, 0.35), inset 0 2px 0 rgba(255, 255, 255, 0.5);
+}
+/* Per direct request — the node itself is always clickable to read once
+   unlocked, but Confirm is what's actually greyed out when it can't be
+   afforded, same look every other disabled buy button in this game uses. */
+#lab-purchase-confirm-btn:disabled {
+  background: #e6dcd0; color: #a99; opacity: 0.7; cursor: not-allowed; box-shadow: none; transform: none;
 }
 
 #debug-overlay {

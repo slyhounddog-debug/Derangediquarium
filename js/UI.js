@@ -36,6 +36,7 @@ import {
   COIN_CAP_UPGRADE_MAX_LEVEL,
   SCIENCE_CAP_BY_LEVEL,
   SPECIES,
+  WASTE_POOP_INTERVAL_MS,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings, loadLevel } from './Levels.js';
 import { getFishPurchaseCost, effectiveCoinCapacity, effectiveScienceCapacity, countTankItemsByType } from './Entities.js';
@@ -160,6 +161,11 @@ export function initUI(state) {
     shopCleanliness: document.getElementById('shop-cleanliness'),
     shopPower: document.getElementById('shop-power'),
     shopGrid: document.getElementById('shop-species-grid'),
+    tankMoney: document.getElementById('tank-money'),
+    tankCoinCap: document.getElementById('tank-coin-cap'),
+    tankScienceCap: document.getElementById('tank-science-cap'),
+    tankCleanliness: document.getElementById('tank-cleanliness'),
+    tankPower: document.getElementById('tank-power'),
     previewEmpty: document.getElementById('shop-preview-empty'),
     previewContent: document.getElementById('shop-preview-content'),
     previewCanvas: document.getElementById('shop-preview-canvas'),
@@ -323,10 +329,13 @@ export function initUI(state) {
   const clearFlashClass = (e) => e.target.classList.remove('flash-pickup', 'flash-spend');
   els.money.addEventListener('animationend', clearFlashClass);
   els.shopMoney.addEventListener('animationend', clearFlashClass);
+  els.tankMoney.addEventListener('animationend', clearFlashClass);
   els.cleanliness.addEventListener('animationend', clearFlashClass);
   els.shopCleanliness.addEventListener('animationend', clearFlashClass);
+  els.tankCleanliness.addEventListener('animationend', clearFlashClass);
   els.coinCap.addEventListener('animationend', clearFlashClass);
   els.shopCoinCap.addEventListener('animationend', clearFlashClass);
+  els.tankCoinCap.addEventListener('animationend', clearFlashClass);
 
   // No Buy button any more — picking a species arms it as the active
   // click-tool (state.ui.selectedTool = 'fish:<id>'), exactly like picking a
@@ -371,23 +380,39 @@ export function toggleShopCollapse(state) {
   (state.ui.shopCollapsed ? playPanelClose : playPanelOpen)();
 }
 
+// #hud is hidden whenever EITHER the Shop or the Tank Upgrades panel is
+// expanded — both now carry their own copy of every readout it shows (see
+// the big comment above #shop-hud/#tank-hud in style.css), per direct
+// request that #hud "can be gone when either the shop or tank upgrade is
+// open," not just the shop. Called from both updateShopCollapse and
+// updateTankPanelCollapse, since either one toggling can change the answer.
+function updateHudVisibility(state) {
+  els.hud.classList.toggle('hidden', !(state.ui.shopCollapsed && state.ui.tankPanelCollapsed));
+}
+
+// CSS animations don't run on a display:none element, and if the flash
+// class is still attached when a panel is redisplayed, the animation
+// restarts from scratch — so toggling a panel could replay a stale
+// pickup/spend flash that has nothing to do with this toggle. Stripped
+// defensively on every shop/tank toggle rather than relying solely on it
+// finishing naturally. Covers all three copies of each readout (#hud,
+// #shop-hud, #tank-hud) regardless of which panel is actually toggling,
+// since either one's visibility change can affect which copy was mid-flash.
+function stripHudFlashClasses() {
+  for (const el of [
+    els.money, els.shopMoney, els.tankMoney,
+    els.cleanliness, els.shopCleanliness, els.tankCleanliness,
+    els.coinCap, els.shopCoinCap, els.tankCoinCap,
+  ]) {
+    el.classList.remove('flash-pickup', 'flash-spend');
+  }
+}
+
 function updateShopCollapse(state) {
   els.shopPanel.classList.toggle('collapsed', state.ui.shopCollapsed);
   els.shopCollapseBtn.classList.toggle('panel-toggle-active', !state.ui.shopCollapsed); // which of the two toggle buttons is "pressed" needs to be obvious at a glance since both stay visible regardless of panel state
-  els.hud.classList.toggle('hidden', !state.ui.shopCollapsed); // money lives in the shop panel while it's open
-  // CSS animations don't run on a display:none element, and if the flash
-  // class is still attached when it's redisplayed, the animation restarts
-  // from scratch — so toggling the shop could replay a stale pickup/spend
-  // flash that has nothing to do with this toggle. Strip it defensively on
-  // every toggle rather than relying solely on it finishing naturally.
-  // #hud holds money/cleanliness/coinCap together, and #shop-hud holds the
-  // shop panel's own copies of each, so all need this.
-  els.money.classList.remove('flash-pickup', 'flash-spend');
-  els.cleanliness.classList.remove('flash-pickup', 'flash-spend');
-  els.coinCap.classList.remove('flash-pickup', 'flash-spend');
-  els.shopMoney.classList.remove('flash-pickup', 'flash-spend');
-  els.shopCleanliness.classList.remove('flash-pickup', 'flash-spend');
-  els.shopCoinCap.classList.remove('flash-pickup', 'flash-spend');
+  updateHudVisibility(state);
+  stripHudFlashClasses();
   // The preview canvas is invisible while collapsed — no point animating
   // it. Resume on expand if a species is already selected; a building
   // preview has no animation to resume, just redraw its static swatch.
@@ -411,6 +436,8 @@ export function toggleTankPanel(state) {
 function updateTankPanelCollapse(state) {
   els.tankPanel.classList.toggle('collapsed', state.ui.tankPanelCollapsed);
   els.tankCollapseBtn.classList.toggle('panel-toggle-active', !state.ui.tankPanelCollapsed);
+  updateHudVisibility(state);
+  stripHudFlashClasses();
   if (!state.ui.tankPanelCollapsed) refreshTankPanel(state); // populate it fresh the moment it opens, not just on the next frame's updateHUD
 }
 
@@ -783,6 +810,7 @@ function openLabPurchaseModal(state, id) {
   els.labPurchaseIcon.textContent = node.icon;
   els.labPurchaseName.textContent = node.name;
   els.labPurchaseCost.textContent = `${node.scienceCost} 🔬 · $${node.goldCost}`;
+  refreshLabPurchaseButton(state);
 
   const descLines = [];
   const statChips = [];
@@ -832,23 +860,70 @@ function confirmLabPurchase(state) {
   buyLabUpgrade(state, id);
 }
 
+// Per direct request ("let me click all unlocked items in the science lab,
+// even if I can't afford it, so I can read them... have the confirm grayed
+// out if they can't afford it") — a node button itself is only ever
+// disabled for being locked or already purchased (see refreshLabTree)
+// now, never for being unaffordable, so it can always be opened to read.
+// This is what actually enforces affordability: greys out Confirm instead.
+// Called once when the modal opens and every frame afterward (from
+// refreshLabTree, since Science/gold can keep changing while it's open —
+// e.g. waiting on an Octopus's brew).
+function refreshLabPurchaseButton(state) {
+  const node = SCIENCE_LAB_UPGRADES[labPurchaseNodeId];
+  const affordable = state.level.science >= node.scienceCost && state.level.money >= node.goldCost;
+  els.labPurchaseConfirmBtn.disabled = !affordable;
+}
+
 // A fish's real stats, in the same compact chip format buildingStatsHtml
-// below already uses for buildings — role, purchase cost, adult coin value
-// (for a coin-dropping FEEDER/hybrid), hunger rate.
+// below already uses for buildings — role, purchase cost, then the shared
+// hunger/coin/waste economy stats (see fishEconomyStatsHtml). Shown
+// identically in the shop preview (selectSpeciesForPreview) and the Science
+// Lab purchase modal (openLabPurchaseModal), per direct request.
 function speciesStatsHtml(speciesId) {
   const s = SPECIES[speciesId];
   if (!s) return '';
-  const adult = s.growthStages[s.growthStages.length - 1];
   const role = s.behavior.includes('SCAVENGER') ? 'Scavenger'
     : s.behavior.includes('GENERATOR') ? 'Generator'
     : s.behavior.includes('RESEARCHER') ? 'Researcher'
     : 'Feeder';
   let html = `<div class="building-stat">🎭 Role: <b>${role}</b></div>`;
   html += `<div class="building-stat">💰 Cost: <b>$${s.cost}</b></div>`;
+  html += fishEconomyStatsHtml(speciesId);
+  return html;
+}
+
+// Hunger (as food/min, not a raw hunger-points/sec rate — per direct
+// request, "make the hunger stat make sense in terms of the amount of food
+// they need per minute"), coin value/sec, and waste/sec — the three shared
+// per-fish economy stats requested for both the shop preview and the
+// Science Lab. Hunger uses the UNUPGRADED Food Quality relief amount
+// (FOOD_HUNGER_RELIEF_BY_LEVEL[0]) as its baseline on purpose — like every
+// other stat shown here (adult coin value, base cost), this is meant to be
+// a fixed per-species comparison figure, not one that silently shifts as
+// the player buys Food Quality upgrades. Coin/sec only applies to a
+// coin-dropping species (a base FEEDER or a feeder-based hybrid — checked
+// via `dropType`, not a behavior tag, since that's what actually gates a
+// coin drop in Entities.js's updateFish); waste/sec only applies to a
+// non-Scavenger — a Scavenger consumes Waste instead of producing it, and
+// Entities.js's own poop timer is gated on that exact same bare
+// `behavior.includes('SCAVENGER')` check (not the narrower isPureScavenger
+// used elsewhere for eating/coin-drop purposes), so this mirrors it exactly
+// rather than guessing at a different rule.
+function fishEconomyStatsHtml(speciesId) {
+  const s = SPECIES[speciesId];
+  if (!s) return '';
+  const adult = s.growthStages[s.growthStages.length - 1];
+  const foodPerMin = (s.hungerRate * 60) / FOOD_HUNGER_RELIEF_BY_LEVEL[0];
+  let html = `<div class="building-stat">🍽️ Hunger: <b>${foodPerMin.toFixed(1)} food/min</b></div>`;
   if (s.dropType === 'coin' && adult.dropValue) {
-    html += `<div class="building-stat">🪙 Adult coin: <b>$${adult.dropValue}</b></div>`;
+    const coinPerSec = (adult.dropValue / adult.dropInterval) * 1000;
+    html += `<div class="building-stat">🪙 Coin: <b>$${coinPerSec.toFixed(2)}/sec</b></div>`;
   }
-  html += `<div class="building-stat">🍽️ Hunger: <b>${s.hungerRate.toFixed(2)}/sec</b></div>`;
+  if (!s.behavior.includes('SCAVENGER')) {
+    const wastePerSec = 1000 / WASTE_POOP_INTERVAL_MS;
+    html += `<div class="building-stat">💩 Waste: <b>${wastePerSec.toFixed(2)}/sec</b></div>`;
+  }
   return html;
 }
 
@@ -870,8 +945,17 @@ function refreshLabTree(state) {
     const { btn, costEl } = labNodeButtons[node.id];
     const purchased = state.meta.labUpgradesPurchased.includes(node.id);
     const prereqsMet = node.requires.every((r) => state.meta.labUpgradesPurchased.includes(r));
+    const affordable = science >= node.scienceCost && state.level.money >= node.goldCost;
     btn.classList.toggle('purchased', purchased);
     btn.classList.toggle('locked', !purchased && !prereqsMet);
+    // Per direct request, an unlocked-but-unaffordable node stays CLICKABLE
+    // ("let me click all unlocked items... so I can read them... any
+    // unlocked ones should be able to be clicked") — only `purchased` and
+    // `!prereqsMet` actually disable the button below; unaffordable just
+    // dims it a touch via this class, and it's the purchase modal's OWN
+    // Confirm button that's actually greyed out (see
+    // openLabPurchaseModal/refreshLabPurchaseButton).
+    btn.classList.toggle('unaffordable', !purchased && prereqsMet && !affordable);
     if (purchased) {
       costEl.textContent = 'Unlocked ✓';
       btn.disabled = true;
@@ -880,10 +964,11 @@ function refreshLabTree(state) {
       btn.disabled = true;
     } else {
       costEl.textContent = `${node.scienceCost} 🔬 · $${node.goldCost}`;
-      btn.disabled = science < node.scienceCost || state.level.money < node.goldCost;
+      btn.disabled = false;
     }
   }
   drawLabTreeConnectors(state);
+  if (labPurchaseNodeId !== null) refreshLabPurchaseButton(state); // Science/gold can keep changing while the confirmation modal sits open
 }
 
 // The "web" itself — one bezier connector per prerequisite edge, drawn on a
@@ -1367,7 +1452,11 @@ function selectSpeciesForPreview(state, species) {
   els.previewContent.classList.remove('hidden');
   els.previewHint.textContent = 'Click in the tank to place it';
   els.previewDesc.textContent = species.description;
-  els.previewStats.classList.add('hidden'); // stats block is building-only — see buildingStatsHtml
+  // Per direct request, fish get the same stats chip row buildings already
+  // show — see fishEconomyStatsHtml.
+  const statsHtml = speciesStatsHtml(species.id);
+  els.previewStats.innerHTML = statsHtml;
+  els.previewStats.classList.toggle('hidden', !statsHtml);
   // Name/price text is set live in refreshPreviewInfo (called both here and
   // every frame from updateHUD) since an economy species' price is dynamic —
   // see Config.js's ECONOMY_FISH_COST_GROWTH_RATE.
@@ -1575,13 +1664,25 @@ function playFlash(el, className) {
   el.classList.add(className);
 }
 
+// Picks whichever copy of a given HUD readout (main #hud / #shop-hud /
+// #tank-hud) is actually visible right now — shop takes priority (the two
+// panels are mutually exclusive already, but this stays correct even if
+// that ever changes), then Tank Upgrades, then the main HUD. Shared by
+// every flash/redirect site below so a readout always animates the copy
+// the player can actually see.
+function visibleHudEl(state, mainEl, shopEl, tankEl) {
+  if (!state.ui.shopCollapsed) return shopEl;
+  if (!state.ui.tankPanelCollapsed) return tankEl;
+  return mainEl;
+}
+
 // Redirects to whichever copy of the money readout is currently visible —
 // per direct request, an attempted shop purchase (food, a fish, a building)
 // that fails for lack of money shakes the money readout red instead of
 // silently doing nothing, so the failure actually reads as "you can't
 // afford that" rather than "nothing happened, did my click even register."
 export function flashMoneyInsufficient(state) {
-  playFlash(state.ui.shopCollapsed ? els.money : els.shopMoney, 'flash-spend');
+  playFlash(visibleHudEl(state, els.money, els.shopMoney, els.tankMoney), 'flash-spend');
 }
 
 // Bright blue at 100% cleanliness, fading to olive green (WASTE_COLOR's own
@@ -1667,19 +1768,23 @@ export function updateHUD(state) {
   const moneyText = `💰 $${Math.floor(money)}`;
   els.money.textContent = moneyText;
   els.shopMoney.textContent = moneyText;
+  els.tankMoney.textContent = moneyText;
   const cleanliness = state.level.cleanliness;
   const cleanlinessText = `✨ ${Math.round(cleanliness)}%`;
   els.cleanliness.textContent = cleanlinessText;
   els.shopCleanliness.textContent = cleanlinessText;
+  els.tankCleanliness.textContent = cleanlinessText;
   const cleanColor = cleanlinessColor(cleanliness);
   els.cleanliness.style.color = cleanColor;
   els.shopCleanliness.style.color = cleanColor;
+  els.tankCleanliness.style.color = cleanColor;
   // Coin Cap — always shown (coins exist from the very start), unlike
   // Science below. Counts EVERY coin currently in state.level.items, seabed
   // city included — see Entities.js's countTankItemsByType.
   const coinCapText = `🪙 ${countTankItemsByType(state, 'coin')}/${effectiveCoinCapacity(state)}`;
   els.coinCap.textContent = coinCapText;
   els.shopCoinCap.textContent = coinCapText;
+  els.tankCoinCap.textContent = coinCapText;
   // Set by Entities.js's updateFish the instant a coin-drop cycle is blocked
   // by the cap — a plain flag read-and-cleared here rather than a direct
   // function call, since Entities.js has no reason to import UI.js. Per
@@ -1687,7 +1792,7 @@ export function updateHUD(state) {
   // no equivalent ask.
   if (state.ui.coinCapFlashPending) {
     state.ui.coinCapFlashPending = false;
-    playFlash(state.ui.shopCollapsed ? els.coinCap : els.shopCoinCap, 'flash-spend');
+    playFlash(visibleHudEl(state, els.coinCap, els.shopCoinCap, els.tankCoinCap), 'flash-spend');
   }
 
   // Science Cap — hidden until the Science Octopus is unlocked, same
@@ -1695,10 +1800,12 @@ export function updateHUD(state) {
   const octopusUnlocked = state.meta.speciesUnlocked.includes('octopus');
   els.scienceCap.classList.toggle('hidden', !octopusUnlocked);
   els.shopScienceCap.classList.toggle('hidden', !octopusUnlocked);
+  els.tankScienceCap.classList.toggle('hidden', !octopusUnlocked);
   if (octopusUnlocked) {
     const scienceCapText = `🔬 ${countTankItemsByType(state, 'science')}/${effectiveScienceCapacity(state)}`;
     els.scienceCap.textContent = scienceCapText;
     els.shopScienceCap.textContent = scienceCapText;
+    els.tankScienceCap.textContent = scienceCapText;
   }
 
   // Electricity — only shown at all once Electric Eel is unlocked, per
@@ -1708,12 +1815,14 @@ export function updateHUD(state) {
   const eelUnlocked = state.meta.speciesUnlocked.includes('electric_eel');
   els.power.classList.toggle('hidden', !eelUnlocked);
   els.shopPower.classList.toggle('hidden', !eelUnlocked);
+  els.tankPower.classList.toggle('hidden', !eelUnlocked);
   if (eelUnlocked) {
     const history = state.level.powerHistory;
     const last = history[history.length - 1];
     const powerText = last ? `⚡ ${last.demand}/${last.supply} mw` : '⚡ 0/0 mw';
     els.power.textContent = powerText;
     els.shopPower.textContent = powerText;
+    els.tankPower.textContent = powerText;
     if (powerGraphOpen) renderPowerGraph(state);
   } else if (powerGraphOpen) {
     powerGraphOpen = false;
@@ -1727,20 +1836,18 @@ export function updateHUD(state) {
   if (labMenuOpen) refreshLabTree(state); // no position-tracking needed any more — it's a centered modal now, not anchored to the Mound's screen position
   if (!state.ui.tankPanelCollapsed) refreshTankPanel(state);
 
-  // The shop sits open most of the game now, so it carries its own copy of
-  // every readout that flashes (money already did; food/cleanliness follow
-  // the same pattern) — only flash whichever copy is actually visible right
-  // now, since a display:none element doesn't run CSS animations at all and
-  // would just leave the class stuck there unfired, waiting to wrongly
-  // replay the next time the shop toggles.
-  const shopOpen = !state.ui.shopCollapsed;
+  // The Shop and Tank Upgrades panel each carry their own copy of every
+  // readout that flashes — only flash whichever copy is actually visible
+  // right now, since a display:none element doesn't run CSS animations at
+  // all and would just leave the class stuck there unfired, waiting to
+  // wrongly replay the next time a panel toggles.
   if (lastMoney !== null && money !== lastMoney) {
-    playFlash(shopOpen ? els.shopMoney : els.money, money > lastMoney ? 'flash-pickup' : 'flash-spend');
+    playFlash(visibleHudEl(state, els.money, els.shopMoney, els.tankMoney), money > lastMoney ? 'flash-pickup' : 'flash-spend');
   }
   lastMoney = money;
 
   if (lastCleanliness !== null && cleanliness !== lastCleanliness) {
-    playFlash(shopOpen ? els.shopCleanliness : els.cleanliness, cleanliness > lastCleanliness ? 'flash-pickup' : 'flash-spend');
+    playFlash(visibleHudEl(state, els.cleanliness, els.shopCleanliness, els.tankCleanliness), cleanliness > lastCleanliness ? 'flash-pickup' : 'flash-spend');
   }
   lastCleanliness = cleanliness;
 }

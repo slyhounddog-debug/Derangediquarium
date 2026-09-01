@@ -77,6 +77,7 @@ import {
 } from './Grid.js';
 import { isPointOnMound, crackMound, renderMound, centerCameraOnMound, isPointOnScienceLab, renderScienceLab } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
+import { oneShotShimmerProgress, drawShimmerSweep } from './Shimmer.js';
 import {
   initUI,
   updateHUD,
@@ -902,6 +903,20 @@ function render() {
     // request that a hungry fish should visibly look a bit unwell.
     const sickness = fish.hunger >= HUNGER_CRITICAL_THRESHOLD ? 0.35 : fish.hunger >= HUNGER_SEEK_THRESHOLD ? 0.18 : 0;
     drawFish(ctx, pos.x, pos.y, fish.speciesId, fish.stage, facing, fish.tailPhase, eyeDirection, fish.starTier || 1, sickness);
+
+    // Shimmer/gleam, per direct request — placed, grown a stage, or
+    // merged/spliced (all three set fish.shimmerStartedAt, see Entities.js's
+    // createFish/updateFish). Clipped to a circle around the fish's own
+    // silhouette so the sweep can't paint into the water around it.
+    const shimmerT = oneShotShimmerProgress(fish.shimmerStartedAt, state.level.elapsed);
+    if (shimmerT !== null) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, size, 0, Math.PI * 2);
+      ctx.clip();
+      drawShimmerSweep(ctx, shimmerT, pos.x - size, pos.y - size, size * 2, size * 2);
+      ctx.restore();
+    }
 
     // Economy Fish Combining: a soft ring around the fish currently being
     // dragged, and a green/red ring around whatever it's hovering over.
