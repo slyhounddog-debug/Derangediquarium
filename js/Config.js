@@ -51,12 +51,17 @@ export const SEABED_FLOOR_Y = SEABED_ROW_START * TILE_SIZE; // world-y of the wa
 // all the way to the bottom of the canvas regardless of true world bounds,
 // so this buffer reads as "the same city floor" for free; the only new
 // render step is the black gradient Grid.js's renderCameraBottomBuffer adds
-// on top, fading to black exactly at the buffer's own bottom edge (not
-// bleeding up into the real seabed above it). Cut from 220 to 156 (2 tiles'
-// worth of px) per direct request that the buffer "is a little too tall" —
-// those 2 tiles moved into WORLD_TILES_H above instead, as real buildable
-// seabed rather than dead visual padding.
-export const CAMERA_BOTTOM_BUFFER_PX = 156;
+// on top. Cut from 220 to 156 (2 tiles' worth of px) per an earlier direct
+// request that the buffer "is a little too tall" — those 2 tiles moved into
+// WORLD_TILES_H above instead, as real buildable seabed rather than dead
+// visual padding. Cut again, 156 -> 100, per a later direct request ("it's
+// too tall right now... just slightly bigger than the toolbar") — this time
+// NOT compensated by moving tiles into WORLD_TILES_H, since this pass is
+// purely "make the buffer itself shorter," not "reclaim buildable space." A
+// #bottom-bar-row toolbar's own on-screen footprint is ~86px (72px tall bar
+// + 14px bottom offset) at any viewport height, so 100px clears it with a
+// small margin. See Grid.js's renderCameraBottomBuffer for what fills it.
+export const CAMERA_BOTTOM_BUFFER_PX = 100;
 // A fixed rest height, 4 tiles above the world's absolute bottom row, that
 // NOTHING falls past — coins, Science Bubbles, Food, and Waste alike, per
 // direct request ("the rocky shelf is now a hard barrier for all objects...

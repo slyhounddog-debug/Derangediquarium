@@ -1140,24 +1140,49 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
 // bottom edge (see Config.js) into a pure-visual strip — a permanent home
 // for the fixed bottom tool-bar that never covers real gameplay content.
 // The seabed fill/texture above already covers it for free (that fill runs
-// to the bottom of the canvas regardless of true world bounds), so the only
-// thing this adds is solid black across the buffer's own world-Y span — not
-// bleeding up into the real seabed above it, per the original direct
-// request ("the gradient shouldn't go over the entire city part, just the
-// new part added onto the bottom"). A later direct request changed this
-// from a fade to a hard break — "the gradient to black that currently
-// transitions into the toolbar at the bottom should be changed to a hard
-// break from the bottom tank to the toolbar" — so it's now a flat fill, no
-// gradient object at all: the underground/city fill directly above stops
-// dead at WORLD_H and solid black starts immediately, right at that line.
+// to the bottom of the canvas regardless of true world bounds), so on top of
+// that this draws two things: a flat highlight strip exactly at WORLD_H —
+// per direct request ("add in a rock line to the bottom of the city like
+// the transition from the tank to the city [i.e. flat/solid, NOT the jagged
+// Rocky Shelf]") — marking the city's real bottom edge the same "solid fill
+// + thin lighter strip" way renderSeabedGrid's own SEABED_ROW_START line
+// already does, and the buffer's own fill below that line.
+//
+// That fill went through two passes: the original request was a fade
+// ("the gradient shouldn't go over the entire city part, just the new part
+// added onto the bottom"), then a later request changed it to a flat
+// #000000 hard break ("the gradient to black... should be changed to a hard
+// break from the bottom tank to the toolbar"), and this pass keeps that hard
+// EDGE (the highlight strip above is that seam — nothing fades across it)
+// but reworks the fill ITSELF into a real gradient + the same speckle
+// texture every other seabed fill in this file already uses, per direct
+// request ("rework the black toolbar to look like a polished toolbar area
+// thats not a flat solid color... match the aesthetic of the rest of the
+// game") — a flat #000000 rectangle was the one remaining place in this
+// whole render pass that didn't get that treatment.
 function renderCameraBottomBuffer(ctx, camera, canvasWidth, canvasHeight) {
   const topScreenY = worldToScreen(0, WORLD_H, camera).y;
   const bottomScreenY = worldToScreen(0, WORLD_H + CAMERA_BOTTOM_BUFFER_PX, camera).y;
   if (topScreenY > canvasHeight || bottomScreenY < 0) return; // buffer strip entirely off-screen
-  ctx.fillStyle = '#000000';
+
+  if (topScreenY >= 0) {
+    ctx.fillStyle = '#4a3d2e';
+    ctx.fillRect(0, topScreenY, canvasWidth, Math.max(2, 3 * camera.zoom));
+  }
+
   const clampedTop = Math.max(0, topScreenY);
   const clampedBottom = Math.min(canvasHeight, bottomScreenY);
+  const gradient = ctx.createLinearGradient(0, topScreenY, 0, bottomScreenY);
+  gradient.addColorStop(0, '#251d15');
+  gradient.addColorStop(1, '#0a0806');
+  ctx.fillStyle = gradient;
   ctx.fillRect(0, clampedTop, canvasWidth, clampedBottom - clampedTop);
+
+  ctx.save();
+  ctx.fillStyle = getUndergroundTexturePattern(ctx);
+  ctx.globalAlpha = 0.35;
+  ctx.fillRect(0, clampedTop, canvasWidth, clampedBottom - clampedTop);
+  ctx.restore();
 }
 
 // Draws every Fan's cone + aim arrow regardless of whether its own tile is

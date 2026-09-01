@@ -92,6 +92,7 @@ export function loadLevel(state, levelId) {
       firstAlienWaveTipShown: false, // fires the alien-combat tip the moment the very first wave's aliens actually spawn — see Systems.js's spawnAlienWave
       firstAlienWarning1Shown: false, // gates ALIEN_WARNING_MESSAGE_1 ("Something's stirring...") to only ever post once, ever — see Systems.js's updateAlienWaves
       firstCoinCapWarningShown: false, // fires COIN_CAP_WARNING_MESSAGE the first time the live coin count reaches CAP_WARNING_THRESHOLD_FRACTION of the active cap — see UI.js's updateHUD
+      hasScrolledDown: false, // set true the first time state.camera.y is ever seen > 0 — gates the #scroll-hint bouncing-arrows nudge, see UI.js's updateScrollHint
     },
     // Alien Invasion (see Config.js's ALIEN_* constants, Systems.js's updateAlienWaves,
     // Entities.js's createAlien/updateAlien) — all level-scoped/reset on restart like

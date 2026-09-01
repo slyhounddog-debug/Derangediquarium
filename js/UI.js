@@ -164,8 +164,10 @@ function scheduleNotificationReminder() {
 // it stops on its own the tick after the shop is first expanded (see
 // toggleShopCollapse) rather than needing an explicit cancel from there.
 let shopButtonReminderTimer = null;
-const SHOP_BUTTON_REMINDER_MIN_MS = 3000;
-const SHOP_BUTTON_REMINDER_MAX_MS = 6000;
+// Halved per direct request ("have the shop bounce twice as often until
+// it's opened for the first time") — was 3000/6000.
+const SHOP_BUTTON_REMINDER_MIN_MS = 1500;
+const SHOP_BUTTON_REMINDER_MAX_MS = 3000;
 export function scheduleShopButtonReminder(state) {
   if (shopButtonReminderTimer !== null) return;
   const delay = SHOP_BUTTON_REMINDER_MIN_MS + Math.random() * (SHOP_BUTTON_REMINDER_MAX_MS - SHOP_BUTTON_REMINDER_MIN_MS);
@@ -188,6 +190,7 @@ export function initUI(state) {
     powerGraph: document.getElementById('hud-power-graph'),
     alienCountdown: document.getElementById('alien-countdown'),
     alienCountdownSeconds: document.getElementById('alien-countdown-seconds'),
+    scrollHint: document.getElementById('scroll-hint'),
     powerGraphCanvas: document.getElementById('hud-power-graph-canvas'),
     shopPanel: document.getElementById('shop-panel'),
     shopCollapseBtn: document.getElementById('shop-collapse-btn'),
@@ -1970,6 +1973,26 @@ export function updateHUD(state) {
   lastCleanliness = cleanliness;
 
   updateAlienCountdown(state);
+  updateScrollHint(state);
+}
+
+// A row of bouncing down-arrows nudging the player to pan the camera down,
+// per direct request ("at the beginning of the game, after 10 seconds, if
+// the player hasn't scrolled down yet, have arrows show up along the bottom
+// of the screen and bounce until the player scrolls at least one scroll
+// downward"). state.camera.y only ever moves away from its loadLevel-seeded
+// 0 via deliberate vertical pan input (Engine.js's updateCamera) — nothing
+// else in the game ever touches it — so ">0" is a reliable, one-line "has
+// the player scrolled down at all" signal with no need to hook into
+// Engine.js's own input handling (which deliberately has no knowledge of
+// tutorial state — see its module header).
+const SCROLL_HINT_DELAY_MS = 10000;
+function updateScrollHint(state) {
+  if (!state.level.tutorialFlags.hasScrolledDown && state.camera.y > 0) {
+    state.level.tutorialFlags.hasScrolledDown = true;
+  }
+  const shouldShow = state.level.elapsed >= SCROLL_HINT_DELAY_MS && !state.level.tutorialFlags.hasScrolledDown;
+  els.scrollHint.classList.toggle('hidden', !shouldShow);
 }
 
 // Alien Invasion: the top-of-screen countdown banner, per direct request —
