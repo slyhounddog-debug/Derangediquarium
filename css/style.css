@@ -204,14 +204,16 @@ html, body {
   display: flex; flex-direction: column; gap: 8px;
   z-index: 15; /* above both panels — always visible/clickable no matter which (if either) is expanded */
 }
+/* 50% bigger than the original 36px/18px, per direct request ("make the
+   shop and tank upgrade icons 50% bigger" — these two toggle buttons). */
 #shop-collapse-btn, #tank-collapse-btn {
   flex: none;
-  width: 36px; height: 36px;
+  width: 54px; height: 54px;
   display: flex; align-items: center; justify-content: center;
   background: linear-gradient(160deg, #ffe4f2 0%, #ffc2e0 100%);
   border: 2px solid #ffffff; border-radius: 50%;
   cursor: pointer;
-  font-size: 18px;
+  font-size: 27px;
   line-height: 1;
   box-shadow: 0 3px 8px rgba(255, 150, 200, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.8);
   transition: transform 0.12s ease, background 0.12s ease;

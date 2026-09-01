@@ -76,6 +76,7 @@ import {
   COIN_CAP_BY_LEVEL,
   SCIENCE_CAP_BY_LEVEL,
   PRODUCTION_BLOCKED_COLOR,
+  FISH_VANISH_DURATION_MS,
 } from './Config.js';
 import { stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemForces, updateBuildings } from './Grid.js';
 // Sound is a fire-and-forget side effect at the moment something already
@@ -738,12 +739,12 @@ function updateFood(item, state, dtMs) {
   // Stationary-to-Waste: per direct request, replacing the old capacity cap
   // (FOOD_MAX_ON_SCREEN_BASE/the Food Capacity Tank Upgrade, both retired)
   // entirely — instead of limiting how much food can exist at once, a
-  // pellet that's gone FOOD_STATIONARY_TO_WASTE_MS (10s) without moving more
+  // pellet that's gone FOOD_STATIONARY_TO_WASTE_MS (20s) without moving more
   // than FOOD_STATIONARY_MOVE_TOLERANCE_PX from where it last genuinely
   // moved turns into a real Waste item at its own position, rather than
   // just despawning — an ignored pellet still costs the player something
   // (a bit of cleanliness) instead of evaporating for free. Position-based,
-  // not velocity-based, so "moves within that 10 seconds restarts the
+  // not velocity-based, so "moves within that window restarts the
   // countdown" falls out naturally: a Fan visibly wobbling a held pellet
   // keeps resetting its own origin every tick it actually sways, the same
   // as if the player had nudged it themselves; only something genuinely
@@ -1204,13 +1205,28 @@ function updatePickupText(item, dtMs) {
 }
 
 // "You found the chat" gag (UI.js's notification-log expand handler starts
-// the timer) — every fish freezes exactly as it was (position, hunger,
-// coin-drop timer, everything) for FISH_VANISH_DURATION_MS by simply
-// skipping updateFish entirely while the timer is running, then resumes
-// on its own the tick the timer reaches 0. main.js's render() separately
-// skips drawing any fish for the same duration — this function only owns
-// the freeze/timer, not the "invisible" part.
+// the DELAY, not the vanish itself — see fishVanishDelayMs below) — every
+// fish freezes exactly as it was (position, hunger, coin-drop timer,
+// everything) for FISH_VANISH_DURATION_MS by simply skipping updateFish
+// entirely while the timer is running, then resumes on its own the tick the
+// timer reaches 0. main.js's render() separately skips drawing any fish for
+// the same duration — this function only owns the freeze/timer, not the
+// "invisible" part.
+//
+// Per direct request, the vanish itself doesn't start the instant the chat
+// closes any more — fishVanishDelayMs counts down first (FISH_VANISH_DELAY_MS,
+// set by UI.js), so the "curiosity kills the fish" line gets a beat to land
+// before anything visibly happens. The delay and the real vanish timer are
+// deliberately two separate fields rather than one repurposed countdown —
+// main.js's render loop and this function's own "is anything frozen right
+// now" checks only ever look at fishVanishTimer, so nothing needs to learn
+// about the delay's existence except this one function that resolves it.
 function updateFishVanish(state, dtMs) {
+  if (state.level.fishVanishDelayMs > 0) {
+    state.level.fishVanishDelayMs = Math.max(0, state.level.fishVanishDelayMs - dtMs);
+    if (state.level.fishVanishDelayMs === 0) state.level.fishVanishTimer = FISH_VANISH_DURATION_MS; // the delay just elapsed — start the real vanish now
+    return;
+  }
   if (state.level.fishVanishTimer <= 0) return;
   state.level.fishVanishTimer = Math.max(0, state.level.fishVanishTimer - dtMs);
   if (state.level.fishVanishTimer === 0) pushStoryNotification(state, FISH_VANISH_REAPPEAR_MESSAGE);

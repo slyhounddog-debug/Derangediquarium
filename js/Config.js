@@ -378,14 +378,14 @@ export const FOOD_COLOR = '#ffb238'; // orange — was a green (#8bc34a) close e
 // exist or silently despawning an ignored pellet, a pellet that hasn't
 // moved more than FOOD_STATIONARY_MOVE_TOLERANCE_PX from its own last
 // "genuinely moving" position in FOOD_STATIONARY_TO_WASTE_MS turns into a
-// real Waste item at its own spot instead — "if it moves within that 10
-// seconds it restarts the countdown" falls out of the tolerance check
+// real Waste item at its own spot instead — "if it moves within that
+// window it restarts the countdown" falls out of the tolerance check
 // directly (a Fan visibly wobbling a held pellet keeps resetting it, the
 // same as if the player nudged it themselves).
-export const FOOD_STATIONARY_TO_WASTE_MS = 10000;
+export const FOOD_STATIONARY_TO_WASTE_MS = 20000; // doubled from 10000 per direct request ("make food take twice as long to turn to waste")
 export const FOOD_STATIONARY_MOVE_TOLERANCE_PX = 4; // small enough to still catch real movement, large enough to ignore sub-pixel collision-resolution jitter on something genuinely resting
 export const COIN_RADIUS = 10; // px, base visual radius (bronze size) — 25% bigger than the original 8, easier to see and aim at
-export const COIN_CLICK_RADIUS_MULTIPLIER = 1.6; // click hit-test radius is each coin's own (tier-scaled) radius times this — 60% bigger than the coin itself (was 40%, bumped again per direct request so coins are "even easier to click"), so a click doesn't have to be pixel-perfect (and doesn't get misread as a food-placement click on a miss). tryBankCoinAt still only ever banks the first match it finds per click and returns immediately, so an overlapping pair of these bigger radii still can't bank two coins on one click.
+export const COIN_CLICK_RADIUS_MULTIPLIER = 1.9; // click hit-test radius is each coin's own (tier-scaled) radius times this — 90% bigger than the coin itself (was 60%, bumped again per direct request), so a click doesn't have to be pixel-perfect (and doesn't get misread as a food-placement click on a miss). Purely a hit-test radius — the coin's actual drawn/collision size (COIN_RADIUS) is untouched. tryBankCoinAt still only ever banks the first match it finds per click and returns immediately, so an overlapping pair of these bigger radii still can't bank two coins on one click.
 export const CHEAT_GRANT_AMOUNT = 10000; // $ granted by the M debug key
 export const CHEAT_TANK_POINTS_GRANT_AMOUNT = 20; // Tank Points also granted by the M debug key, so testing the Tank Upgrades panel doesn't require grinding fish growth
 export const CHEAT_SCIENCE_GRANT_AMOUNT = 500; // Science Bubbles also granted by the M debug key, so testing the Science Lab's tech tree doesn't require grinding an Octopus's real brew-and-collect cycle
@@ -695,7 +695,7 @@ export const SPECIES = {
     unlockedByDefault: true,
   },
   dartfin: {
-    id: 'dartfin', name: 'Dartfin', tier: 1, cost: 10, // cut from 12 per direct request
+    id: 'dartfin', name: 'Dartfin', tier: 1, cost: 8, // cut from 10 per direct request
     description: 'Cheaper and faster. Frequent low-value coins reward density.',
     behavior: ['FEEDER'], dropType: 'coin',
     swimSpeed: 65, // -5, see FISH_MOVEMENT_UPGRADE_SPEED_BONUS
@@ -1424,4 +1424,5 @@ export const NOTIFICATION_LOG_MAX = 50; // oldest entries drop off past this man
 export const BANKRUPTCY_BAILOUT_AMOUNT = 100; // $ granted the first time the player has no fish left AND can't afford anything in the shop — see Systems.js's updateStoryTriggers
 export const MONEY_MILESTONE_1K = 1000; // lifetime money EARNED (not current balance) that triggers the one-time "save some for the fishes" notification — see Entities.js's bankMoney
 export const ESCAPE_DARE_DELAY_MS = 120000; // 2 minutes of state.level.elapsed with Escape never pressed before the "press escape, I dare you" notification fires
-export const FISH_VANISH_DURATION_MS = 2500; // ms every fish freezes (position/hunger/coin-timer all frozen, not just hidden) and stops rendering, the first time the notification log is ever expanded
+export const FISH_VANISH_DURATION_MS = 3500; // ms every fish freezes (position/hunger/coin-timer all frozen, not just hidden) and stops rendering — raised from 2500 per direct request
+export const FISH_VANISH_DELAY_MS = 1500; // ms between the chat closing and the vanish actually starting — per direct request ("delay the fish disappearing for 1.5 seconds first"), gives the "curiosity kills the fish" line a beat to land before anything visibly happens

@@ -91,6 +91,7 @@ export function loadLevel(state, levelId) {
     },
     lifetimeMoneyEarned: 0, // real in-play income only (coins banked) — NOT the starting endowment or the bankruptcy bailout gift; see Entities.js's bankMoney and Config.js's MONEY_MILESTONE_1K
     fishVanishTimer: 0, // ms remaining on the "you found the chat" gag — see Entities.js's updateEntities; every fish freezes in place (not just hidden) and stops rendering while this is > 0
+    fishVanishDelayMs: 0, // ms remaining before fishVanishTimer above actually starts — see Entities.js's updateFishVanish/Config.js's FISH_VANISH_DELAY_MS
     bankruptcyActive: false, // true while "no fish + can't afford anything" is CURRENTLY true, so the bailout/game-over response only fires once per fresh occurrence of that condition, not every tick it holds — see Systems.js's updateStoryTriggers
     bankruptciesTriggered: 0, // 0 = never happened, 1 = the one-time $100 bailout already used, 2+ = game over
     gameOver: false, // set true on the second bankruptcy — main.js's update() stops simulating while this is true, same as state.ui.paused, but Escape still opens the pause menu so Restart stays reachable

@@ -19,7 +19,7 @@ import {
   FISH_MOVEMENT_UPGRADE_MAX_LEVEL,
   FISH_MOVEMENT_UPGRADE_SPEED_BONUS,
   NOTIFICATION_LOG_MAX,
-  FISH_VANISH_DURATION_MS,
+  FISH_VANISH_DELAY_MS,
   BUILDING_FAMILIES,
   BUILDING_TYPES,
   FISH_MERGING_UNLOCK_COST,
@@ -55,6 +55,10 @@ const LAB_MENU_TRANSITION_MS = 220; // must match #lab-modal's CSS transition du
 // moved to Entities.js's trySpawnPurchasedFish, since buying is now a canvas
 // click rather than a UI.js button handler.)
 const FOUND_THE_CHAT_MESSAGE = 'You found the chat. Curiosity kills the fish.';
+// Per direct request, the vanish gag only fires if the player has actually
+// bought a fish (nothing to make disappear otherwise) — this is the line
+// shown instead when they haven't, on the exact same first-close trigger.
+const FOUND_THE_CHAT_NO_FISH_MESSAGE = 'You found the chat, you curious little fish.';
 
 let els = null;
 let currentPreviewSpecies = null; // species currently shown in the in-panel preview, if any
@@ -279,9 +283,20 @@ export function initUI(state) {
     if (!notificationLogExpanded && !state.level.tutorialFlags.firstChatClosed) {
       state.level.tutorialFlags.firstChatClosed = true;
       const notifications = state.level.notifications;
-      notifications.push({ id: notifications.length + 1, text: FOUND_THE_CHAT_MESSAGE, elapsed: state.level.elapsed });
+      // Per direct request, the vanish gag only makes sense if there's a
+      // fish to vanish — gated on the same flag trySpawnPurchasedFish sets
+      // the first time the player actually buys one. No fish yet? A
+      // different line, and nothing disappears at all.
+      if (state.level.tutorialFlags.firstFishBought) {
+        notifications.push({ id: notifications.length + 1, text: FOUND_THE_CHAT_MESSAGE, elapsed: state.level.elapsed });
+        // Doesn't hide any fish immediately any more — starts the DELAY
+        // instead (see Entities.js's updateFishVanish), per direct request
+        // ("delay the fish disappearing for 1.5 seconds first").
+        state.level.fishVanishDelayMs = FISH_VANISH_DELAY_MS;
+      } else {
+        notifications.push({ id: notifications.length + 1, text: FOUND_THE_CHAT_NO_FISH_MESSAGE, elapsed: state.level.elapsed });
+      }
       if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
-      state.level.fishVanishTimer = FISH_VANISH_DURATION_MS; // every fish freezes + hides for a few seconds — see Entities.js's updateFishVanish and main.js's render()
     }
   });
 
@@ -895,16 +910,20 @@ function speciesStatsHtml(speciesId) {
 
 // Hunger (as food/min, not a raw hunger-points/sec rate — per direct
 // request, "make the hunger stat make sense in terms of the amount of food
-// they need per minute"), coin value/sec, and waste/sec — the three shared
+// they need per minute"), money/min, and waste/min — the three shared
 // per-fish economy stats requested for both the shop preview and the
-// Science Lab. Hunger uses the UNUPGRADED Food Quality relief amount
-// (FOOD_HUNGER_RELIEF_BY_LEVEL[0]) as its baseline on purpose — like every
-// other stat shown here (adult coin value, base cost), this is meant to be
-// a fixed per-species comparison figure, not one that silently shifts as
-// the player buys Food Quality upgrades. Coin/sec only applies to a
+// Science Lab. Per a later direct request, money and waste are BOTH
+// per-minute now too (were per-second) — a per-second rate for either reads
+// as an oddly tiny/precise number (a fraction of a cent, a hundredth of a
+// waste item) next to hunger's own per-minute framing, so all three now
+// share the same time unit. Hunger uses the UNUPGRADED Food Quality relief
+// amount (FOOD_HUNGER_RELIEF_BY_LEVEL[0]) as its baseline on purpose — like
+// every other stat shown here (adult coin value, base cost), this is meant
+// to be a fixed per-species comparison figure, not one that silently shifts
+// as the player buys Food Quality upgrades. Money/min only applies to a
 // coin-dropping species (a base FEEDER or a feeder-based hybrid — checked
 // via `dropType`, not a behavior tag, since that's what actually gates a
-// coin drop in Entities.js's updateFish); waste/sec only applies to a
+// coin drop in Entities.js's updateFish); waste/min only applies to a
 // non-Scavenger — a Scavenger consumes Waste instead of producing it, and
 // Entities.js's own poop timer is gated on that exact same bare
 // `behavior.includes('SCAVENGER')` check (not the narrower isPureScavenger
@@ -917,12 +936,12 @@ function fishEconomyStatsHtml(speciesId) {
   const foodPerMin = (s.hungerRate * 60) / FOOD_HUNGER_RELIEF_BY_LEVEL[0];
   let html = `<div class="building-stat">🍽️ Hunger: <b>${foodPerMin.toFixed(1)} food/min</b></div>`;
   if (s.dropType === 'coin' && adult.dropValue) {
-    const coinPerSec = (adult.dropValue / adult.dropInterval) * 1000;
-    html += `<div class="building-stat">🪙 Coin: <b>$${coinPerSec.toFixed(2)}/sec</b></div>`;
+    const moneyPerMin = (adult.dropValue / adult.dropInterval) * 60000;
+    html += `<div class="building-stat">🪙 Money: <b>$${moneyPerMin.toFixed(2)}/min</b></div>`;
   }
   if (!s.behavior.includes('SCAVENGER')) {
-    const wastePerSec = 1000 / WASTE_POOP_INTERVAL_MS;
-    html += `<div class="building-stat">💩 Waste: <b>${wastePerSec.toFixed(2)}/sec</b></div>`;
+    const wastePerMin = 60000 / WASTE_POOP_INTERVAL_MS;
+    html += `<div class="building-stat">💩 Waste: <b>${wastePerMin.toFixed(2)}/min</b></div>`;
   }
   return html;
 }
@@ -1203,7 +1222,15 @@ function buildSingleBuildingButton(state, building) {
   priceTag.textContent = `$${getBuildingCost(state, building.id)}`;
   btn.appendChild(priceTag);
   buildingPriceTags[building.id] = priceTag;
-  btn.addEventListener('click', () => selectBuildingForPreview(state, building));
+  // Per direct request, clicking an already-selected single-tier building
+  // (Platform, or any other standalone building with no other tier — NOT a
+  // multi-tier family slot, which already cycles on repeat click, see
+  // buildFamilyButton above) deselects it instead — see
+  // deselectShopSelection.
+  btn.addEventListener('click', () => {
+    if (state.ui.selectedTool === `build:${building.id}`) deselectShopSelection(state);
+    else selectBuildingForPreview(state, building);
+  });
   els.buildToolGrid.appendChild(btn);
 }
 
@@ -1434,6 +1461,28 @@ function refreshTankPanel(state) {
   els.tankPointsDisplay.textContent = `🏆 ${available}`;
 }
 
+// Per direct request: clicking an already-selected single-tier shop item
+// (a fish, or a standalone building with no other tier) a second time
+// deselects it instead of leaving it selected — defaults back to the Food
+// tool, and the preview window back to its empty placeholder, same as if
+// nothing had ever been picked. A multi-tier family building slot is
+// deliberately NOT wired to this — clicking it again already cycles to the
+// next tier (see buildFamilyButton), an established behavior this doesn't
+// change.
+function deselectShopSelection(state) {
+  currentPreviewSpecies = null;
+  currentPreviewBuilding = null;
+  stopPreviewAnimation();
+  els.previewEmpty.classList.remove('hidden');
+  els.previewContent.classList.add('hidden');
+  // Deliberately NOT selectTool(state, 'food') — that also closes the Shop/
+  // Tank Upgrades panel (see its own closeSidePanels call, for the bottom
+  // hotbar's Food/Demolish/Merge buttons), which would be wrong here: the
+  // player is still IN the shop, just with nothing picked any more.
+  state.ui.selectedTool = 'food';
+  updateToolbar(state);
+}
+
 // Clicking a species icon populates this in-panel preview with its
 // description and the actual Buy action — it doesn't buy directly. That
 // way there's one obvious way to buy, not two (an icon and a per-row
@@ -1617,7 +1666,14 @@ function buildShopPanel(state) {
     btn.appendChild(priceTag);
     speciesPriceTags[species.id] = priceTag;
 
-    btn.addEventListener('click', () => selectSpeciesForPreview(state, species));
+    // Per direct request, clicking an already-selected single-tier shop
+    // item (a fish always is one — there's no fish "family" the way
+    // buildings have) deselects it instead of just re-selecting the same
+    // thing — see deselectShopSelection.
+    btn.addEventListener('click', () => {
+      if (state.ui.selectedTool === `fish:${species.id}`) deselectShopSelection(state);
+      else selectSpeciesForPreview(state, species);
+    });
 
     els.shopGrid.appendChild(btn);
   }
