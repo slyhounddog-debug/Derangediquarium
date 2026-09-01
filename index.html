@@ -62,41 +62,6 @@
   <div id="notification-log" class="hidden"></div>
 </div>
 
-<div id="shop-panel">
-  <div id="shop-header-row">
-    <div id="shop-header">Shop</div>
-  </div>
-
-  <div id="shop-preview" class="sheen-target">
-    <div id="shop-preview-empty">Tap a fish or building below to see it here!</div>
-    <div id="shop-preview-content" class="hidden">
-      <div id="shop-preview-top">
-        <canvas id="shop-preview-canvas" width="60" height="60"></canvas>
-        <div id="shop-preview-text">
-          <div id="shop-preview-name"></div>
-          <div id="shop-preview-desc"></div>
-        </div>
-      </div>
-      <div id="shop-preview-stats" class="hidden"></div>
-      <div id="shop-preview-hint">Click in the tank to place it</div>
-    </div>
-  </div>
-
-  <div id="shop-species-grid"></div>
-
-  <div id="tool-bar">
-    <div id="build-tool-grid"></div>
-  </div>
-</div>
-
-<div id="tank-panel" class="collapsed">
-  <div id="tank-header-row">
-    <div id="tank-header">Tank Upgrades</div>
-  </div>
-  <div id="tank-points-display" class="sheen-target">🏆 0</div>
-  <div id="tank-upgrade-list"></div>
-</div>
-
 <div id="mound-overlay" class="hidden">
   <div id="mound-menu-anchor">
     <div id="mound-menu">
@@ -165,7 +130,38 @@
 </div>
 
 <div id="bottom-bar-row">
-  <button id="shop-collapse-btn" title="Shop (S)">🛍️</button>
+  <div id="shop-anchor">
+    <button id="shop-collapse-btn" title="Shop (S)">🛍️</button>
+    <div id="shop-panel">
+      <div id="shop-panel-scroll">
+        <div id="shop-header-row">
+          <div id="shop-header">Shop</div>
+        </div>
+
+        <div id="shop-preview" class="sheen-target">
+          <div id="shop-preview-empty">Tap a fish or building below to see it here!</div>
+          <div id="shop-preview-content" class="hidden">
+            <div id="shop-preview-top">
+              <canvas id="shop-preview-canvas" width="60" height="60"></canvas>
+              <div id="shop-preview-text">
+                <div id="shop-preview-name"></div>
+                <div id="shop-preview-desc"></div>
+              </div>
+            </div>
+            <div id="shop-preview-stats" class="hidden"></div>
+            <div id="shop-preview-hint">Click in the tank to place it</div>
+          </div>
+        </div>
+
+        <div id="shop-species-grid"></div>
+
+        <div id="tool-bar">
+          <div id="build-tool-grid"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="bottom-tool-bar">
     <button id="tool-food-btn" class="tool-btn sheen-target" title="Food — $3 (1)">
       <span class="tool-icon tool-icon-food"></span>
@@ -173,7 +169,19 @@
     <button id="tool-demolish-btn" class="tool-btn sheen-target tool-btn-emoji" title="Demolish — select this, then click a building to remove it for a full refund (2)">🔨</button>
     <button id="tool-merge-btn" class="tool-btn sheen-target tool-btn-emoji" title="Merge — select this, then drag one Adult fish onto a matching one to combine or splice it (3)">🧤</button>
   </div>
-  <button id="tank-collapse-btn" title="Tank Upgrades (P)">🏆</button>
+
+  <div id="tank-anchor">
+    <button id="tank-collapse-btn" title="Tank Upgrades (P)">🏆</button>
+    <div id="tank-panel" class="collapsed">
+      <div id="tank-panel-scroll">
+        <div id="tank-header-row">
+          <div id="tank-header">Tank Upgrades</div>
+        </div>
+        <div id="tank-points-display" class="sheen-target">🏆 0</div>
+        <div id="tank-upgrade-list"></div>
+      </div>
+    </div>
+  </div>
 </div>
 
 <div id="debug-overlay" class="hidden">

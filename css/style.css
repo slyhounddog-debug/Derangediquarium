@@ -250,56 +250,71 @@ html, body {
 }
 #shop-collapse-btn.panel-toggle-active:hover, #tank-collapse-btn.panel-toggle-active:hover { background: #ff5aa0; }
 
-/* Shop and Tank Upgrades are now fly-out modals anchored to their own
-   toggle button in #bottom-bar-row, per direct request ("should look the
-   same as they do now, but only half as tall") — same look/content as
-   before (gradient card, rounded corners, custom scrollbar), just:
-   (1) positioned above its own corner icon instead of docked the full
-   height of the viewport, (2) HEIGHT halved — half of the previous
-   `100vh - 28px` full-height slot, via the same calc so it stays exactly
-   proportional at any viewport size, and (3) animated with a scale+opacity
-   "fly out of/back into its icon" transition (transform-origin pinned to
-   the bottom corner nearest that icon) instead of the old width:0 collapse
-   — the same mechanism Mound.js's own popup (#mound-menu) already
-   established, just permanently unhidden (display never toggles here,
-   only scale/opacity/pointer-events) since UI.js's existing collapsed-class
-   toggle logic needed no changes to keep working. No dimmed/click-catching
-   backdrop, unlike the Mound/Lab popups — per current gameplay, the Shop
-   stays open WHILE actively playing (banking coins, watching fish) far more
-   than the Mound/Lab's rare deliberate visits, so a full-screen click-eater
-   would break that; closing still only ever happens via the toggle
-   button/hotkey/opening the other panel, unchanged. */
+/* Shop and Tank Upgrades are fly-out modals anchored to their own toggle
+   button, per direct request ("should look the same as they do now, but
+   only half as tall" — later "show up right above their respective icons
+   instead of on the far left and right of the screen"). #shop-anchor/
+   #tank-anchor (position:relative wrappers around each toggle button, see
+   #bottom-bar-row below) are what make that second request work: the panel
+   is now a true positioned CHILD of the same wrapper the button lives in
+   (position:absolute; bottom:100%+gap), so it tracks the button's REAL
+   on-screen position automatically — including the button not actually
+   sitting at the screen edge, since #bottom-bar-row itself is centered —
+   rather than the old approach (position:fixed; left/right:14px) which
+   just assumed the button was pinned to the screen edge, true before the
+   toggle buttons moved into this centered row but wrong afterward. No JS
+   needed for the positioning itself, same as before. */
+#shop-anchor, #tank-anchor { position: relative; }
+
 #shop-panel, #tank-panel {
-  position: fixed; bottom: 96px; /* clears #bottom-bar-row's own 14px bottom offset + its ~72px height + a little breathing room */
+  position: absolute;
+  bottom: calc(100% + 10px); /* just above the button, with a small gap */
   width: 286px;
-  height: calc((100vh - 28px) / 2); /* half of the previous full-height slot (100vh - 14px top - 14px bottom) */
+  height: calc((100vh - 28px) / 2); /* half of the old full-height slot (100vh - 14px top - 14px bottom) */
   background: linear-gradient(165deg, #fff8f0 0%, #ffe4f2 100%);
   color: #6b4c6b;
-  padding: 14px;
-  overflow-y: auto;
-  overflow-x: hidden;
   z-index: 10;
   border-radius: 26px;
   border: 2px solid #ffffff;
   box-shadow: 0 8px 26px rgba(107, 76, 107, 0.25), inset 0 2px 0 rgba(255, 255, 255, 0.7);
   transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.18s ease;
+}
+/* Shop got an extra 10% on top of that half-height, per direct request —
+   #tank-panel stays at the plain half-height above. */
+#shop-panel { height: calc((100vh - 28px) / 2 * 1.1); }
+#shop-panel { left: 0; transform-origin: 0% 100%; } /* grows from/shrinks into its icon, which is the left button in the row */
+#tank-panel { right: 0; transform-origin: 100% 100%; } /* grows from/shrinks into its icon, the right button in the row */
+#shop-panel.collapsed, #tank-panel.collapsed {
+  transform: scale(0.05);
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* The actual scrolling now happens on an INNER wrapper, inset from the
+   card's own edges, rather than on #shop-panel/#tank-panel directly — per
+   direct report, a scrollbar that spans the full height of an element that
+   ALSO has border-radius gets its top/bottom visually clipped by the
+   curve (the browser clips overflow content, scrollbar included, to the
+   rounded shape, and the corner radius eats into the scrollbar's own
+   corners right where it's flush with the box edge). Insetting this inner
+   box by the same 14px the old padding used keeps the exact same content
+   layout as before, but now the scrollbar belongs to a plain, un-rounded
+   rectangle safely inside the curve — both shorter (it stops 14px short of
+   the card's real top/bottom) and never clipped. */
+#shop-panel-scroll, #tank-panel-scroll {
+  position: absolute; inset: 14px;
+  overflow-y: auto;
+  overflow-x: hidden;
   /* Custom scrollbar — matches #notification-log's pink/rounded style
      instead of the browser's plain default, per direct request that no
      scrollbar in the game should look ugly. */
   scrollbar-width: thin;
   scrollbar-color: #ffb6d5 #fff0f6;
 }
-#shop-panel::-webkit-scrollbar, #tank-panel::-webkit-scrollbar { width: 8px; }
-#shop-panel::-webkit-scrollbar-track, #tank-panel::-webkit-scrollbar-track { background: #fff0f6; border-radius: 999px; }
-#shop-panel::-webkit-scrollbar-thumb, #tank-panel::-webkit-scrollbar-thumb { background: #ffb6d5; border-radius: 999px; }
-#shop-panel::-webkit-scrollbar-thumb:hover, #tank-panel::-webkit-scrollbar-thumb:hover { background: #ff9ac4; }
-#shop-panel { left: 14px; transform-origin: 0% 100%; } /* grows from/shrinks into its bottom-LEFT icon */
-#tank-panel { right: 14px; transform-origin: 100% 100%; } /* grows from/shrinks into its bottom-RIGHT icon */
-#shop-panel.collapsed, #tank-panel.collapsed {
-  transform: scale(0.05);
-  opacity: 0;
-  pointer-events: none;
-}
+#shop-panel-scroll::-webkit-scrollbar, #tank-panel-scroll::-webkit-scrollbar { width: 8px; }
+#shop-panel-scroll::-webkit-scrollbar-track, #tank-panel-scroll::-webkit-scrollbar-track { background: #fff0f6; border-radius: 999px; }
+#shop-panel-scroll::-webkit-scrollbar-thumb, #tank-panel-scroll::-webkit-scrollbar-thumb { background: #ffb6d5; border-radius: 999px; }
+#shop-panel-scroll::-webkit-scrollbar-thumb:hover, #tank-panel-scroll::-webkit-scrollbar-thumb:hover { background: #ff9ac4; }
 
 #shop-header-row, #tank-header-row {
   display: flex; align-items: center;
