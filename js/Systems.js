@@ -1,13 +1,11 @@
-// Systems.js — cross-cutting simulation systems: cleanliness/toxicity, Eel
-// power balance, science accumulation, wave timers.
-//
-// Cleanliness/toxicity/power/science/wave-timers are still Phase 3-5
-// scope, not yet implemented (state.level.cleanliness is a static
-// placeholder set by Levels.js). This module's first real code is the
-// story-trigger system below — genuinely cross-cutting (reads shop
-// affordability across species/buildings, fish count, and elapsed time),
-// which is exactly the kind of check this module was reserved for. See
-// CLAUDE.md's "Story & Tutorial Notifications" section.
+// Systems.js — cross-cutting simulation systems: the bankruptcy/game-over
+// and Escape-dare story triggers, and Alien Invasion wave timing/scheduling
+// (updateAlienWaves — genuinely cross-cutting: reads/writes elapsed time,
+// notifications, and pushes into state.level.alienPortals, which Entities.js
+// then turns into real alien entities — see that function's own comment for
+// why the split avoids a circular import). Cleanliness/toxicity/eel power
+// balance/science accumulation live in Entities.js/Grid.js instead, not
+// here, despite this module's original header once reserving them.
 // Forbidden: no rendering, no input handling.
 
 import {
@@ -15,6 +13,27 @@ import {
   BANKRUPTCY_BAILOUT_AMOUNT,
   ESCAPE_DARE_DELAY_MS,
   NOTIFICATION_LOG_MAX,
+  ALIEN_WAVE_INTERVAL_MIN_MS,
+  ALIEN_WAVE_INTERVAL_MAX_MS,
+  ALIEN_WAVE_DIFFICULTY_RAMP_WAVES,
+  ALIEN_WAVE_COUNT_EARLY_MIN,
+  ALIEN_WAVE_COUNT_EARLY_MAX,
+  ALIEN_WAVE_COUNT_LATE_MIN,
+  ALIEN_WAVE_COUNT_LATE_MAX,
+  ALIEN_HP_EARLY_MIN,
+  ALIEN_HP_EARLY_MAX,
+  ALIEN_HP_LATE_MIN,
+  ALIEN_HP_LATE_MAX,
+  ALIEN_WARNING_MS_1,
+  ALIEN_WARNING_MS_2,
+  ALIEN_WARNING_MESSAGE_1,
+  ALIEN_WARNING_MESSAGE_2,
+  ALIEN_FIRST_WAVE_TIP_MESSAGE,
+  ALIEN_PORTAL_STAGGER_MS,
+  FISH_MIN_X,
+  FISH_MAX_X,
+  FISH_MIN_Y,
+  SEABED_FLOOR_Y,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings } from './Levels.js';
 import { getFishPurchaseCost } from './Entities.js';
@@ -88,8 +107,83 @@ function updateEscapeDare(state) {
   pushNotification(state, ESCAPE_DARE_MESSAGE);
 }
 
+function randomWaveIntervalMs() {
+  return ALIEN_WAVE_INTERVAL_MIN_MS + Math.random() * (ALIEN_WAVE_INTERVAL_MAX_MS - ALIEN_WAVE_INTERVAL_MIN_MS);
+}
+
+// Linear interpolation from the "early" range up to the "late" range across
+// ALIEN_WAVE_DIFFICULTY_RAMP_WAVES waves, then plateaus — wavesSpawned is
+// state.level.alienWavesSpawned BEFORE this wave counts, so wave 1 starts at
+// t=0 (purely early) and wave 11+ sits at t=1 (purely late).
+function alienDifficultyT(wavesSpawned) {
+  return Math.min(1, wavesSpawned / ALIEN_WAVE_DIFFICULTY_RAMP_WAVES);
+}
+
+// Pushes ALIEN_PORTAL_STAGGER_MS-staggered portal records into
+// state.level.alienPortals — plain data only, no alien entity created here.
+// Entities.js's updateEntities (updateAlienPortals) is what turns a due
+// portal into a real alien once its own open delay elapses — see that
+// function's own comment for why the split avoids a circular import.
+function spawnAlienWave(state) {
+  const t = alienDifficultyT(state.level.alienWavesSpawned);
+  const countMin = Math.round(ALIEN_WAVE_COUNT_EARLY_MIN + (ALIEN_WAVE_COUNT_LATE_MIN - ALIEN_WAVE_COUNT_EARLY_MIN) * t);
+  const countMax = Math.round(ALIEN_WAVE_COUNT_EARLY_MAX + (ALIEN_WAVE_COUNT_LATE_MAX - ALIEN_WAVE_COUNT_EARLY_MAX) * t);
+  const count = countMin + Math.floor(Math.random() * (countMax - countMin + 1));
+  const hpMin = Math.round(ALIEN_HP_EARLY_MIN + (ALIEN_HP_LATE_MIN - ALIEN_HP_EARLY_MIN) * t);
+  const hpMax = Math.round(ALIEN_HP_EARLY_MAX + (ALIEN_HP_LATE_MAX - ALIEN_HP_EARLY_MAX) * t);
+
+  for (let i = 0; i < count; i++) {
+    state.level.alienPortals.push({
+      x: FISH_MIN_X + Math.random() * (FISH_MAX_X - FISH_MIN_X),
+      // Biased toward the upper-mid water column (not down near the seabed
+      // line) so a fresh portal reads as "emerging from open water," not
+      // spawning right on top of the player's factory.
+      y: FISH_MIN_Y + Math.random() * (SEABED_FLOOR_Y * 0.7 - FISH_MIN_Y),
+      hp: hpMin + Math.floor(Math.random() * (hpMax - hpMin + 1)),
+      openAtMs: state.level.elapsed + i * ALIEN_PORTAL_STAGGER_MS,
+      spawned: false,
+      spawnedAtMs: 0,
+    });
+  }
+  state.level.alienWavesSpawned += 1;
+
+  if (!state.level.tutorialFlags.firstAlienWaveTipShown) {
+    state.level.tutorialFlags.firstAlienWaveTipShown = true;
+    pushNotification(state, ALIEN_FIRST_WAVE_TIP_MESSAGE);
+  }
+}
+
+// Wave timing/warnings/difficulty ramp — the "wave timers" scope this
+// module's own header comment has reserved since Phase 1. alienNextWaveAtMs
+// is an absolute state.level.elapsed target (Levels.js seeds the first one),
+// matching updateEscapeDare's own ESCAPE_DARE_DELAY_MS pattern above, rather
+// than a countdown-from value. Portal/alien creation itself lives in
+// Entities.js (see spawnAlienWave's own comment) — this function only ever
+// decides WHEN a wave should start and pushes the resulting portal data.
+function updateAlienWaves(state) {
+  const elapsed = state.level.elapsed;
+  const nextWaveAt = state.level.alienNextWaveAtMs;
+
+  if (!state.level.alienWarning1Shown && elapsed >= nextWaveAt - ALIEN_WARNING_MS_1) {
+    state.level.alienWarning1Shown = true;
+    pushNotification(state, ALIEN_WARNING_MESSAGE_1);
+  }
+  if (!state.level.alienWarning2Shown && elapsed >= nextWaveAt - ALIEN_WARNING_MS_2) {
+    state.level.alienWarning2Shown = true;
+    pushNotification(state, ALIEN_WARNING_MESSAGE_2);
+  }
+
+  if (elapsed >= nextWaveAt) {
+    spawnAlienWave(state);
+    state.level.alienNextWaveAtMs = elapsed + randomWaveIntervalMs();
+    state.level.alienWarning1Shown = false;
+    state.level.alienWarning2Shown = false;
+  }
+}
+
 // Called once per tick from main.js's update().
 export function updateStoryTriggers(state) {
   updateBankruptcy(state);
   updateEscapeDare(state);
+  updateAlienWaves(state);
 }

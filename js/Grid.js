@@ -21,9 +21,18 @@ import {
   TILE_AUTO_FEEDER,
   TILE_AUTO_FEEDER_ELECTRIC,
   TILE_AUTO_FEEDER_ADVANCED,
+  TILE_TURRET_WASTE,
+  TILE_TURRET_ELECTRIC,
+  TILE_TURRET_ADVANCED,
   BUILDING_TYPES,
   PROCESSOR_STATS,
   AUTO_FEEDER_STATS,
+  TURRET_STATS,
+  TURRET_RANGE,
+  TURRET_INTAKE_RADIUS,
+  WASTE_TURRET_SHOTS_PER_WASTE,
+  WASTE_TURRET_MAX_AMMO,
+  WASTE_TURRET_MAX_WASTE,
   TILE_REFUND_FRACTION,
   GRID_SWEEP_SUBSTEP,
   ITEM_LOST_BELOW_WORLD_MARGIN_PX,
@@ -44,7 +53,6 @@ import {
   AUTO_FEEDER_INTAKE_RADIUS,
   AUTO_FEEDER_PORT_OFFSET_FRACTION,
   COLLECTOR_INTAKE_RADIUS,
-  INTAKE_SIDE_MIN_DOT_FRACTION,
   PLATFORM_FLAT_COST,
   BUILDING_COST_INCREMENT,
   NOTIFICATION_LOG_MAX,
@@ -69,9 +77,10 @@ function pushGridNotification(state, text) {
 // Tiles an item's fall (or rise) is arrested by.
 const COLLECTOR_TILES = new Set([TILE_COLLECTOR, TILE_COLLECTOR_ELECTRIC, TILE_COLLECTOR_ADVANCED]);
 const AUTO_FEEDER_TILES = new Set([TILE_AUTO_FEEDER, TILE_AUTO_FEEDER_ELECTRIC, TILE_AUTO_FEEDER_ADVANCED]);
+export const TURRET_TILES = new Set([TILE_TURRET_WASTE, TILE_TURRET_ELECTRIC, TILE_TURRET_ADVANCED]);
 const SOLID_TILES = new Set([
   TILE_PLATFORM, TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4,
-  ...COLLECTOR_TILES, ...AUTO_FEEDER_TILES,
+  ...COLLECTOR_TILES, ...AUTO_FEEDER_TILES, ...TURRET_TILES,
 ]);
 const FAN_TILES = new Set([TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4]);
 
@@ -163,6 +172,24 @@ function countPlacedOfType(grid, buildingId) {
   return n;
 }
 
+// Whether ANYTHING has been built on the grid, of any type — per direct
+// request, gates the Demolish tool (nothing to gray a hammer icon for on an
+// empty seabed). Deliberately a real tile scan, not a shortcut off
+// state.level.buildingData's key count — a lone Platform never gets a
+// buildingData entry at all (only Fans/Processors/Auto-Feeders/Turrets need
+// one, for their per-instance angle/ammo/etc — see placeTile below), so that
+// shortcut would wrongly report "nothing built" on a Platform-only grid.
+// Early-returns on the first hit, so this stays cheap even on a busy grid.
+export function hasAnyBuildingPlaced(state) {
+  const grid = state.level.grid;
+  for (let r = SEABED_ROW_START; r < WORLD_TILES_H; r++) {
+    for (let c = 0; c < WORLD_TILES_W; c++) {
+      if (grid[r][c] !== TILE_EMPTY) return true;
+    }
+  }
+  return false;
+}
+
 // Every building's live shop cost — Platform is a flat PLATFORM_FLAT_COST
 // regardless of how many exist; every other building's cost climbs by
 // BUILDING_COST_INCREMENT for each tile of that exact type already placed —
@@ -215,6 +242,14 @@ export function placeTile(state, col, row, buildingId, angle = 0) {
     // while this tile is actively holding an item) — see updateBuildings'
     // Collector branch and PROCESSOR_STATS' wasteEveryMs.
     state.level.buildingData[buildingKey(col, row)] = { type: buildingId, angle, wasteAccumMs: 0 };
+  } else if (TURRET_TILES.has(buildingId)) {
+    // No `angle` at all — a turret auto-targets, it doesn't have a
+    // player-chosen aim. `ammo` only ever matters for the Waste Turret
+    // (starts empty, has to be fed — see updateBuildings' turret intake
+    // scan); Electric/Advanced ignore it entirely (unlimited ammo, a power
+    // cost instead). `cooldownMs` counts down to the next shot regardless of
+    // tier — see updateBuildings' turret-fire branch.
+    state.level.buildingData[buildingKey(col, row)] = { type: buildingId, ammo: 0, cooldownMs: 0 };
   }
   if (!state.level.tutorialFlags.firstBuildingPlaced) {
     state.level.tutorialFlags.firstBuildingPlaced = true;
@@ -249,28 +284,6 @@ export function removeTile(state, col, row) {
   return true;
 }
 
-// R hotkey — rotates the Collector or Auto-Feeder under the cursor 90° per
-// press, per direct request. Only ever touches `data.angle` — every other
-// piece of behavior (which side is intake vs output, the two-arrow render,
-// the isOnIntakeSide scan in updateBuildings) already reads `data.angle`
-// live off state.level.buildingData every tick/frame rather than caching it
-// anywhere, so rotating a placed building "just works" the instant this
-// updates the one stored value: the output side is always wherever the
-// current angle points, and the intake-side check is always relative to
-// that same current angle, with no separate bookkeeping to keep in sync.
-// Fans are deliberately excluded — they already have their own two-click
-// aiming flow at placement (see "Aiming" in CLAUDE.md) and were not asked
-// for this.
-export function rotateBuilding(state, worldX, worldY) {
-  const { col, row } = worldToTile(worldX, worldY);
-  const type = getTile(state.level.grid, col, row);
-  if (!COLLECTOR_TILES.has(type) && !AUTO_FEEDER_TILES.has(type)) return false;
-  const data = state.level.buildingData[buildingKey(col, row)];
-  if (!data) return false;
-  data.angle += Math.PI / 2;
-  return true;
-}
-
 // T debug key — cycles the tile under the cursor through every building type
 // (plus empty) for free, ignoring cost/occupancy/anchoring. Fans/Auto-Feeder
 // default to pointing straight up (toward the water column) since that's the
@@ -280,6 +293,7 @@ const CHEAT_CYCLE = [
   TILE_COLLECTOR, TILE_COLLECTOR_ELECTRIC, TILE_COLLECTOR_ADVANCED,
   TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4,
   TILE_AUTO_FEEDER, TILE_AUTO_FEEDER_ELECTRIC, TILE_AUTO_FEEDER_ADVANCED,
+  TILE_TURRET_WASTE, TILE_TURRET_ELECTRIC, TILE_TURRET_ADVANCED,
 ];
 const CHEAT_DEFAULT_ANGLE = -Math.PI / 2; // straight up
 export function cycleTileCheat(state, worldX, worldY) {
@@ -296,6 +310,10 @@ export function cycleTileCheat(state, worldX, worldY) {
     state.level.buildingData[buildingKey(col, row)] = { type: next, angle: CHEAT_DEFAULT_ANGLE, wasteAccumMs: 0 };
   } else if (AUTO_FEEDER_TILES.has(next)) {
     state.level.buildingData[buildingKey(col, row)] = { type: next, angle: CHEAT_DEFAULT_ANGLE, absorbing: false, progressMs: 0, wasteCount: 0 };
+  } else if (TURRET_TILES.has(next)) {
+    // Cheat-cycled turrets start pre-loaded with max ammo (Waste Turret) so
+    // testing combat doesn't require grinding real Waste first.
+    state.level.buildingData[buildingKey(col, row)] = { type: next, ammo: next === TILE_TURRET_WASTE ? WASTE_TURRET_MAX_AMMO : 0, cooldownMs: 0 };
   }
 }
 
@@ -492,24 +510,17 @@ export function stepItemOnGrid(item, state, dt, physics) {
   return 'falling';
 }
 
-// Whether an item at (itemX, itemY) is both within `radius` of a directional
-// building's intake point AND actually approaching from that side of the
-// tile — not merely close to the port coordinate, which (given the port sits
-// only AUTO_FEEDER_PORT_OFFSET_FRACTION of a tile out from center) could
-// otherwise still be satisfied by an item resting on top of the tile or
-// drifting in from another side entirely. `angle` is the building's
-// aim/output direction; the intake is the opposite side, so an item's offset
-// from the tile's CENTER (not the port) is checked against -angle via a
-// normalized dot product — per direct request that items shouldn't be
-// pulled in "through the building" or land on it from the top and get
-// vacuumed up regardless of side.
-function isOnIntakeSide(centerX, centerY, angle, intakeX, intakeY, itemX, itemY, radius) {
-  if (Math.hypot(itemX - intakeX, itemY - intakeY) > radius) return false;
-  const dx = itemX - centerX;
-  const dy = itemY - centerY;
-  const dist = Math.hypot(dx, dy) || 1;
-  const dot = (dx * -Math.cos(angle) + dy * -Math.sin(angle)) / dist; // -1..1, 1 = dead-on the intake side
-  return dot >= INTAKE_SIDE_MIN_DOT_FRACTION;
+// Whether an item at (itemX, itemY) is within `radius` of a building's own
+// tile center — per direct request ("let's remove the arrows and the need
+// for a specific input side. The auto-feeder, collector, and waste turret
+// will suck any appropriate item touching it"), this used to also require
+// approaching from a specific angle-derived "intake side" (a dot-product
+// check against the building's aim direction); that whole directional half
+// is gone now — any eligible item touching the tile from ANY side qualifies,
+// simple radius-only proximity, same as how a Fan's cone or a Turret's own
+// range check already work without caring about approach angle.
+function isNearBuildingCenter(centerX, centerY, itemX, itemY, radius) {
+  return Math.hypot(itemX - centerX, itemY - centerY) <= radius;
 }
 
 // Starts the same pull-to-center hold stepCollectorProcessing eases through
@@ -556,8 +567,6 @@ export function updateBuildings(state, dtMs) {
     const [row, col] = key.split(',').map(Number);
     const centerX = col * TILE_SIZE + TILE_SIZE / 2;
     const centerY = row * TILE_SIZE + TILE_SIZE / 2;
-    const intakeX = centerX - Math.cos(data.angle) * TILE_SIZE * AUTO_FEEDER_PORT_OFFSET_FRACTION;
-    const intakeY = centerY - Math.sin(data.angle) * TILE_SIZE * AUTO_FEEDER_PORT_OFFSET_FRACTION;
 
     if (COLLECTOR_TILES.has(data.type)) {
       // Only one item processes at a time per Processor tile — skip the scan
@@ -575,7 +584,7 @@ export function updateBuildings(state, dtMs) {
           const it = items[i];
           if (it.type !== 'coin' && it.type !== 'science') continue;
           if (it.collectorProgressMs != null) continue;
-          if (isOnIntakeSide(centerX, centerY, data.angle, intakeX, intakeY, it.x, it.y, COLLECTOR_INTAKE_RADIUS)) {
+          if (isNearBuildingCenter(centerX, centerY, it.x, it.y, COLLECTOR_INTAKE_RADIUS)) {
             beginCollectorProcessing(it, centerX, centerY, data.type);
             anyProcessing = true;
             break;
@@ -599,16 +608,79 @@ export function updateBuildings(state, dtMs) {
       continue;
     }
 
+    if (TURRET_TILES.has(data.type)) {
+      // Refill (Waste Turret only) — sucks in any Waste item touching it,
+      // same radius-from-center intake pattern the Collector/Auto-Feeder
+      // just got, converting it straight to WASTE_TURRET_SHOTS_PER_WASTE
+      // ammo instead of holding it for a timed process. Electric/Advanced
+      // never read `ammo` at all — unlimited ammo, a power cost instead.
+      if (data.type === TILE_TURRET_WASTE && data.ammo < WASTE_TURRET_MAX_AMMO) {
+        for (let i = 0; i < items.length; i++) {
+          const it = items[i];
+          if (it.type !== 'waste') continue;
+          if (isNearBuildingCenter(centerX, centerY, it.x, it.y, TURRET_INTAKE_RADIUS)) {
+            items.splice(i, 1);
+            data.ammo = Math.min(WASTE_TURRET_MAX_AMMO, data.ammo + WASTE_TURRET_SHOTS_PER_WASTE);
+            break;
+          }
+        }
+      }
+
+      // Fire — cooldown-gated, auto-targets the NEAREST living alien within
+      // TURRET_RANGE (no player-chosen aim at all, per direct request that
+      // buildings shouldn't need one any more). Aliens live in
+      // state.level.entities, same array fish do; Grid.js reading their
+      // positions for a plain distance check is the same kind of thing this
+      // function already does reading state.level.items for an intake scan,
+      // not "fish logic" in the sense CLAUDE.md's module boundary forbids.
+      // data.firing (read by computeCurrentPowerDemand above) is
+      // recomputed fresh every tick, true only on a tick a shot actually
+      // fires — an alien's hp is reduced directly here; the ENTITIES filter
+      // loop in Entities.js's updateEntities (which runs AFTER this
+      // function, every tick) is what actually removes it once hp <= 0,
+      // same "Grid.js mutates in place, the real owner reconciles" split
+      // resolveItemCollisions already uses for items.
+      data.cooldownMs = Math.max(0, data.cooldownMs - dtMs);
+      const turretStats = TURRET_STATS[data.type];
+      const hasAmmo = data.type !== TILE_TURRET_WASTE || data.ammo > 0;
+      let firedThisTick = false;
+      if (data.cooldownMs <= 0 && hasAmmo) {
+        let nearestAlien = null;
+        let nearestDist = TURRET_RANGE;
+        for (const entity of state.level.entities) {
+          if (entity.type !== 'alien' || entity.hp <= 0) continue;
+          const d = Math.hypot(entity.x - centerX, entity.y - centerY);
+          if (d <= nearestDist) {
+            nearestAlien = entity;
+            nearestDist = d;
+          }
+        }
+        if (nearestAlien) {
+          nearestAlien.hp -= turretStats.damage;
+          data.cooldownMs = 1000 / turretStats.shotsPerSec;
+          if (data.type === TILE_TURRET_WASTE) data.ammo -= 1;
+          firedThisTick = true;
+        }
+      }
+      data.firing = firedThisTick;
+      continue;
+    }
+
     if (!AUTO_FEEDER_TILES.has(data.type)) continue;
     const afStats = AUTO_FEEDER_STATS[data.type];
-    const outputX = centerX + Math.cos(data.angle) * TILE_SIZE * AUTO_FEEDER_PORT_OFFSET_FRACTION;
-    const outputY = centerY + Math.sin(data.angle) * TILE_SIZE * AUTO_FEEDER_PORT_OFFSET_FRACTION;
+    // Fixed top-center now, not angle-derived — per direct request ("make it
+    // so the collectors and auto-feeders output on top, by default"). The
+    // Collector has no physical output of its own (it just banks what it
+    // consumes), so this only ever applies to the Auto-Feeder's Food
+    // dispense point.
+    const outputX = centerX;
+    const outputY = centerY - TILE_SIZE * AUTO_FEEDER_PORT_OFFSET_FRACTION;
 
     if (!data.absorbing) {
       for (let i = 0; i < items.length; i++) {
         const it = items[i];
         if (it.type !== 'waste') continue;
-        if (isOnIntakeSide(centerX, centerY, data.angle, intakeX, intakeY, it.x, it.y, AUTO_FEEDER_INTAKE_RADIUS)) {
+        if (isNearBuildingCenter(centerX, centerY, it.x, it.y, AUTO_FEEDER_INTAKE_RADIUS)) {
           items.splice(i, 1);
           // "Buildings" pushing cleanliness back up (see CLAUDE.md's
           // Cleanliness section) — the Auto-Feeder is the one currently
@@ -665,6 +737,13 @@ export function computeCurrentPowerDemand(state) {
       if (activelyProcessing) demand += PROCESSOR_STATS[data.type].powerCostPerSec;
     } else if (AUTO_FEEDER_TILES.has(data.type)) {
       if (data.absorbing) demand += AUTO_FEEDER_STATS[data.type].powerCostPerSec;
+    } else if (TURRET_TILES.has(data.type)) {
+      // Waste Turret has no power cost at all (runs on ammo instead) — see
+      // TURRET_STATS. Electric/Advanced only draw while actively engaging a
+      // target this tick (data.firing, set by updateBuildings' turret-fire
+      // branch below), same "only while actually doing something" pattern
+      // the Processor/Auto-Feeder already follow above.
+      if (data.firing) demand += TURRET_STATS[data.type].powerCostPerSec;
     }
   }
   return demand;
@@ -1022,13 +1101,14 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
         // culled ones this loop already skipped past — a Fan's cone can reach
         // tiles/water well beyond its own tile, so its own tile scrolling off
         // screen doesn't mean its effective range has too. Collector/Auto-
-        // Feeder's indicators stay here — their intake radius is small enough
-        // (sub-tile) that tile-culling never cuts off anything actually visible.
-        if (data && (AUTO_FEEDER_TILES.has(type) || COLLECTOR_TILES.has(type))) {
-          renderDirectionIndicator(ctx, type, screen.x, screen.y, size, data.angle, camera.zoom);
-        }
+        // Feeder/Turret no longer have a direction indicator to draw at all —
+        // see renderDirectionIndicator's own comment on why (they suck in
+        // anything touching them from any side now, no "input side" any more).
         if (data && AUTO_FEEDER_TILES.has(type)) {
           renderAutoFeederDots(ctx, type, screen.x, screen.y, size, data.wasteCount, camera.zoom);
+        }
+        if (data && type === TILE_TURRET_WASTE) {
+          renderTurretAmmoDots(ctx, screen.x, screen.y, size, data.ammo, camera.zoom);
         }
       }
     }
@@ -1119,13 +1199,13 @@ function renderSquareBevel(ctx, x, y, size) {
 // center circle) rather than a bespoke silhouette per tier, which is what
 // keeps each tier reading as "still a Processor/Auto-Feeder" at a glance.
 function renderTierBadge(ctx, type, x, y, size) {
-  if (type === TILE_COLLECTOR_ELECTRIC || type === TILE_AUTO_FEEDER_ELECTRIC) {
+  if (type === TILE_COLLECTOR_ELECTRIC || type === TILE_AUTO_FEEDER_ELECTRIC || type === TILE_TURRET_ELECTRIC) {
     ctx.fillStyle = '#fff04d';
     ctx.font = `${Math.max(8, size * 0.34)}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('⚡', x + size * 0.82, y + size * 0.2);
-  } else if (type === TILE_COLLECTOR_ADVANCED || type === TILE_AUTO_FEEDER_ADVANCED) {
+  } else if (type === TILE_COLLECTOR_ADVANCED || type === TILE_AUTO_FEEDER_ADVANCED || type === TILE_TURRET_ADVANCED) {
     ctx.fillStyle = '#e8c8ff';
     ctx.font = `${Math.max(8, size * 0.34)}px sans-serif`;
     ctx.textAlign = 'center';
@@ -1187,115 +1267,86 @@ function renderAutoFeederDots(ctx, type, x, y, size, wasteCount, zoom) {
   }
 }
 
-// A small filled triangle at (tipX, tipY), pointing along `angle` — the
-// arrowhead cap shared by every direction indicator below.
-function drawArrowhead(ctx, tipX, tipY, angle, headSize) {
-  ctx.beginPath();
-  ctx.moveTo(tipX, tipY);
-  ctx.lineTo(tipX - Math.cos(angle - 0.5) * headSize, tipY - Math.sin(angle - 0.5) * headSize);
-  ctx.lineTo(tipX - Math.cos(angle + 0.5) * headSize, tipY - Math.sin(angle + 0.5) * headSize);
-  ctx.closePath();
-  ctx.fill();
+// 5 dots on the Waste Turret — one per stored Waste unit, per direct
+// request ("with dots indicating each waste/10 ammo"). Ammo drains one shot
+// at a time (not in clean blocks of 10), so a dot stays "lit" until the very
+// last shot of its own 10-shot block is spent — Math.ceil, not a plain
+// division — reading as "how many loads are still stored" rather than
+// jumping to the next dot down mid-block.
+function renderTurretAmmoDots(ctx, x, y, size, ammo, zoom) {
+  const litDots = Math.ceil(ammo / WASTE_TURRET_SHOTS_PER_WASTE);
+  const dotRadius = Math.max(1.5, size * 0.055);
+  const gap = dotRadius * 2.6;
+  const totalWidth = (WASTE_TURRET_MAX_WASTE - 1) * gap;
+  const startX = x + size / 2 - totalWidth / 2;
+  const dotY = y + size * 0.14;
+  for (let i = 0; i < WASTE_TURRET_MAX_WASTE; i++) {
+    ctx.beginPath();
+    ctx.arc(startX + i * gap, dotY, dotRadius, 0, Math.PI * 2);
+    ctx.fillStyle = i < litDots ? '#ffe066' : 'rgba(0, 0, 0, 0.35)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.lineWidth = Math.max(0.5, zoom * 0.5);
+    ctx.stroke();
+  }
 }
 
-// Fans get a single small aim arrow plus their translucent force cone — a
-// Fan has no "intake," it's a pure emitter. The Collector and Auto-Feeder
-// instead get two distinct arrows: a dark one pointing OUT from center along
-// `angle` (the output side) and a cyan one pointing IN toward center from
-// the opposite side (the intake side, where an item actually has to be to
-// get pulled in — see Grid.js's isOnIntakeSide) — two different colors/
-// directions so which side is which reads at a glance, per direct request,
-// rather than one generic arrow implying a single direction.
-function renderDirectionIndicator(ctx, type, x, y, size, angle, zoom) {
+// Fan-only now, per direct request ("all the arrows on the buildings are
+// impossible to see and plan around. Let's remove the arrows and the need
+// for a specific input side") — the Collector/Auto-Feeder/Turret's own
+// two-arrow indicator (output + intake) is gone entirely, since those three
+// building types no longer have a directional "input side" at all: Grid.js's
+// updateBuildings now pulls in any eligible item touching them from ANY
+// side (see isOnIntakeSide's retirement and the plain-radius intake checks
+// there), so there's nothing left to indicate. A Fan still has a genuine
+// aim direction the player actually chooses (its whole mechanic is a
+// directional force cone), so it keeps its cone + aim arrow — `showCone`
+// (default true) lets a caller suppress even that: per direct request, the
+// Fan's ghost preview during the FIRST click's plain hover phase (before a
+// placement cell is actually armed — see main.js's build-ghost render
+// branch) draws no cone at all, since the angle at that point is just
+// wherever the mouse happens to be relative to whatever tile it's currently
+// over, not a real aim decision yet, and a cone swinging around during that
+// phase read as "visually confusing... while trying to choose the fan
+// location" per direct report. Once click 1 arms a cell (main.js's
+// isFanAimingActive() branch), the cone reappears and rotates live with the
+// cursor for the real aiming step.
+function renderDirectionIndicator(ctx, type, x, y, size, angle, zoom, showCone = true) {
+  if (!FAN_TILES.has(type) || !showCone) return;
   const cx = x + size / 2;
   const cy = y + size / 2;
-  if (FAN_TILES.has(type)) {
-    const stats = FAN_STATS[type];
-    const range = stats.maxRange * zoom;
-    ctx.save();
-    ctx.globalAlpha = 0.12;
-    ctx.fillStyle = '#ffffff';
-    ctx.beginPath();
-    ctx.moveTo(cx, cy);
-    ctx.arc(cx, cy, range, angle - FAN_CONE_HALF_ANGLE_RAD, angle + FAN_CONE_HALF_ANGLE_RAD);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
-
-    ctx.save();
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
-    ctx.lineWidth = Math.max(1, 2 * zoom);
-    ctx.beginPath();
-    const len = size * 0.32;
-    ctx.moveTo(cx - Math.cos(angle) * len * 0.4, cy - Math.sin(angle) * len * 0.4);
-    ctx.lineTo(cx + Math.cos(angle) * len, cy + Math.sin(angle) * len);
-    ctx.stroke();
-    ctx.restore();
-    return;
-  }
-
-  // Bigger and higher-contrast than the original per direct request ("the
-  // arrows are kind of hard to see") — each arrow now draws a wide white
-  // "halo" stroke underneath its real color first, same cheap trick used
-  // elsewhere in this file for fake-outline contrast without a blur filter.
-  // A tile's own fill color spans blues/greens/purples/gold across every
-  // Processor/Auto-Feeder tier, so a single dark or single light arrow color
-  // alone can't stay legible against all of them — the halo guarantees
-  // contrast regardless of what's underneath.
-  const armLen = size * 0.4;
-  const headSize = Math.max(3, size * 0.17);
-  const lineW = Math.max(1.5, 2.6 * zoom);
-  const haloW = lineW + Math.max(1.5, 2.2 * zoom);
+  const stats = FAN_STATS[type];
+  const range = stats.maxRange * zoom;
   ctx.save();
-  ctx.lineJoin = 'round';
-  ctx.lineCap = 'round';
+  ctx.globalAlpha = 0.12;
+  ctx.fillStyle = '#ffffff';
+  ctx.beginPath();
+  ctx.moveTo(cx, cy);
+  ctx.arc(cx, cy, range, angle - FAN_CONE_HALF_ANGLE_RAD, angle + FAN_CONE_HALF_ANGLE_RAD);
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
 
-  function drawHaloedArrow(fromX, fromY, tipX, tipY, mainColor) {
-    ctx.lineWidth = haloW;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.95)';
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
-    ctx.beginPath();
-    ctx.moveTo(fromX, fromY);
-    ctx.lineTo(tipX, tipY);
-    ctx.stroke();
-    drawArrowhead(ctx, tipX, tipY, angle, headSize + haloW * 0.5);
-
-    ctx.lineWidth = lineW;
-    ctx.strokeStyle = mainColor;
-    ctx.fillStyle = mainColor;
-    ctx.beginPath();
-    ctx.moveTo(fromX, fromY);
-    ctx.lineTo(tipX, tipY);
-    ctx.stroke();
-    drawArrowhead(ctx, tipX, tipY, angle, headSize);
-  }
-
-  // Output — points away from center, toward the tile's edge. Solid black
-  // (was a translucent dark grey) for maximum contrast against the white
-  // halo and against light tile colors alike.
-  const outX = cx + Math.cos(angle) * armLen;
-  const outY = cy + Math.sin(angle) * armLen;
-  drawHaloedArrow(cx, cy, outX, outY, '#141414');
-
-  // Intake — points toward center from the opposite side, stopping short of
-  // dead-center so it doesn't collide with the Collector's own center-circle
-  // render (renderTileShape). Solid cyan (was translucent) for the same
-  // reason.
-  const inStartX = cx - Math.cos(angle) * armLen;
-  const inStartY = cy - Math.sin(angle) * armLen;
-  const inTipX = cx - Math.cos(angle) * armLen * 0.3;
-  const inTipY = cy - Math.sin(angle) * armLen * 0.3;
-  drawHaloedArrow(inStartX, inStartY, inTipX, inTipY, '#1fc8ff');
-
+  ctx.save();
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
+  ctx.lineWidth = Math.max(1, 2 * zoom);
+  ctx.beginPath();
+  const len = size * 0.32;
+  ctx.moveTo(cx - Math.cos(angle) * len * 0.4, cy - Math.sin(angle) * len * 0.4);
+  ctx.lineTo(cx + Math.cos(angle) * len, cy + Math.sin(angle) * len);
+  ctx.stroke();
   ctx.restore();
 }
 
 // Build-mode cursor preview — a translucent square at the snapped tile under
 // the cursor, tinted green if placing there is currently valid or red if
-// not (occupied, out of bounds, unaffordable, or unanchored). `angle` (only
-// relevant for Fans/Auto-Feeder) draws the same aim indicator as the placed
-// version, live-following the cursor's exact position within the tile.
-export function renderBuildGhost(ctx, state, worldX, worldY, buildingId, angle) {
+// not (occupied, out of bounds, unaffordable, or unanchored). `angle`/
+// `showCone` (only relevant for a Fan now — see renderDirectionIndicator's
+// own comment) draw the same aim cone the placed version gets, live-
+// following the cursor's exact position within the tile. `showCone`
+// defaults true; main.js passes false specifically for a Fan's plain-hover
+// ghost, before a placement cell has actually been armed.
+export function renderBuildGhost(ctx, state, worldX, worldY, buildingId, angle, showCone = true) {
   const { col, row } = worldToTile(worldX, worldY);
   const check = canPlaceTile(state, col, row, buildingId);
   const screen = worldToScreen(col * TILE_SIZE, row * TILE_SIZE, state.camera);
@@ -1304,8 +1355,8 @@ export function renderBuildGhost(ctx, state, worldX, worldY, buildingId, angle) 
   ctx.fillStyle = check.ok ? '#8fe0b8' : '#ff6b6b';
   ctx.fillRect(screen.x, screen.y, size, size);
   ctx.globalAlpha = 1;
-  if (check.ok && (FAN_TILES.has(buildingId) || AUTO_FEEDER_TILES.has(buildingId) || COLLECTOR_TILES.has(buildingId))) {
-    renderDirectionIndicator(ctx, buildingId, screen.x, screen.y, size, angle, state.camera.zoom);
+  if (check.ok && FAN_TILES.has(buildingId)) {
+    renderDirectionIndicator(ctx, buildingId, screen.x, screen.y, size, angle, state.camera.zoom, showCone);
   }
 }
 

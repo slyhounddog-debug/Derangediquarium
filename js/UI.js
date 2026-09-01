@@ -37,10 +37,18 @@ import {
   SCIENCE_CAP_BY_LEVEL,
   SPECIES,
   WASTE_POOP_INTERVAL_MS,
+  FISH_SPEED_MULTIPLIER,
+  GENE_SPLICING_LAB_ID,
+  ALIEN_COUNTDOWN_START_MS,
+  TURRET_STATS,
+  TURRET_RANGE,
+  TILE_TURRET_WASTE,
+  WASTE_TURRET_SHOTS_PER_WASTE,
+  WASTE_TURRET_MAX_WASTE,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings, loadLevel } from './Levels.js';
 import { getFishPurchaseCost, effectiveCoinCapacity, effectiveScienceCapacity, countTankItemsByType } from './Entities.js';
-import { getTile, worldToTile, getBuildingCost, FAN_STATS } from './Grid.js';
+import { getTile, worldToTile, getBuildingCost, FAN_STATS, hasAnyBuildingPlaced } from './Grid.js';
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
@@ -147,6 +155,26 @@ function scheduleNotificationReminder() {
   }, delay);
 }
 
+// Per direct request — "at the beginning, before the shop has been opened,
+// have it bounce until it's opened for the first time." Same self-
+// terminating setTimeout-chain shape as scheduleNotificationReminder above:
+// each firing re-checks the flag before bouncing and before rescheduling, so
+// it stops on its own the tick after the shop is first expanded (see
+// toggleShopCollapse) rather than needing an explicit cancel from there.
+let shopButtonReminderTimer = null;
+const SHOP_BUTTON_REMINDER_MIN_MS = 3000;
+const SHOP_BUTTON_REMINDER_MAX_MS = 6000;
+export function scheduleShopButtonReminder(state) {
+  if (shopButtonReminderTimer !== null) return;
+  const delay = SHOP_BUTTON_REMINDER_MIN_MS + Math.random() * (SHOP_BUTTON_REMINDER_MAX_MS - SHOP_BUTTON_REMINDER_MIN_MS);
+  shopButtonReminderTimer = setTimeout(() => {
+    shopButtonReminderTimer = null;
+    if (state.level.tutorialFlags.firstShopOpened) return;
+    playFlash(els.shopCollapseBtn, 'bounce-play');
+    scheduleShopButtonReminder(state);
+  }, delay);
+}
+
 export function initUI(state) {
   els = {
     hud: document.getElementById('hud'),
@@ -156,6 +184,8 @@ export function initUI(state) {
     cleanliness: document.getElementById('hud-cleanliness'),
     power: document.getElementById('hud-power'),
     powerGraph: document.getElementById('hud-power-graph'),
+    alienCountdown: document.getElementById('alien-countdown'),
+    alienCountdownSeconds: document.getElementById('alien-countdown-seconds'),
     powerGraphCanvas: document.getElementById('hud-power-graph-canvas'),
     shopPanel: document.getElementById('shop-panel'),
     shopCollapseBtn: document.getElementById('shop-collapse-btn'),
@@ -390,6 +420,7 @@ export function toggleShopCollapse(state) {
   if (!state.ui.shopCollapsed) {
     state.ui.tankPanelCollapsed = true;
     updateTankPanelCollapse(state);
+    state.level.tutorialFlags.firstShopOpened = true; // stops scheduleShopButtonReminder's bounce for good, this playthrough
   }
   updateShopCollapse(state);
   (state.ui.shopCollapsed ? playPanelClose : playPanelOpen)();
@@ -424,6 +455,15 @@ function stripHudFlashClasses() {
 }
 
 function updateShopCollapse(state) {
+  // Per direct request ("if a fish is selected and you close the shop, have
+  // it deselect the fish and default to the food") — checked here, the one
+  // place every close path (the toggle button/S hotkey, opening the Tank
+  // panel, closeSidePanels) funnels through, rather than duplicated at each
+  // call site. Idempotent: once deselected, selectedTool is 'food', so a
+  // later call with the shop still collapsed is a no-op.
+  if (state.ui.shopCollapsed && state.ui.selectedTool.startsWith('fish:')) {
+    deselectShopSelection(state);
+  }
   els.shopPanel.classList.toggle('collapsed', state.ui.shopCollapsed);
   els.shopCollapseBtn.classList.toggle('panel-toggle-active', !state.ui.shopCollapsed); // which of the two toggle buttons is "pressed" needs to be obvious at a glance since both stay visible regardless of panel state
   updateHudVisibility(state);
@@ -910,32 +950,39 @@ function speciesStatsHtml(speciesId) {
 
 // Hunger (as food/min, not a raw hunger-points/sec rate — per direct
 // request, "make the hunger stat make sense in terms of the amount of food
-// they need per minute"), money/min, and waste/min — the three shared
-// per-fish economy stats requested for both the shop preview and the
-// Science Lab. Per a later direct request, money and waste are BOTH
-// per-minute now too (were per-second) — a per-second rate for either reads
-// as an oddly tiny/precise number (a fraction of a cent, a hundredth of a
-// waste item) next to hunger's own per-minute framing, so all three now
-// share the same time unit. Hunger uses the UNUPGRADED Food Quality relief
-// amount (FOOD_HUNGER_RELIEF_BY_LEVEL[0]) as its baseline on purpose — like
-// every other stat shown here (adult coin value, base cost), this is meant
-// to be a fixed per-species comparison figure, not one that silently shifts
-// as the player buys Food Quality upgrades. Money/min only applies to a
-// coin-dropping species (a base FEEDER or a feeder-based hybrid — checked
-// via `dropType`, not a behavior tag, since that's what actually gates a
-// coin drop in Entities.js's updateFish); waste/min only applies to a
-// non-Scavenger — a Scavenger consumes Waste instead of producing it, and
-// Entities.js's own poop timer is gated on that exact same bare
-// `behavior.includes('SCAVENGER')` check (not the narrower isPureScavenger
-// used elsewhere for eating/coin-drop purposes), so this mirrors it exactly
-// rather than guessing at a different rule.
+// they need per minute"), money/min, waste/min, and swim speed — the shared
+// per-fish stats shown in both the shop preview and the Science Lab. Money
+// and waste are BOTH per-minute (were per-second) — a per-second rate for
+// either reads as an oddly tiny/precise number (a fraction of a cent, a
+// hundredth of a waste item) next to hunger's own per-minute framing, so all
+// three share the same time unit. Hunger uses the UNUPGRADED Food Quality
+// relief amount (FOOD_HUNGER_RELIEF_BY_LEVEL[0]) as its baseline on purpose —
+// like every other stat shown here (base cost, base speed), this is meant to
+// be a fixed per-species comparison figure, not one that silently shifts as
+// the player buys Food Quality/Fish Movement upgrades.
+//
+// Money/min applies to any species whose passive drop timer actually
+// produces a coin — checked via `behavior.includes('FEEDER')`, NOT
+// `dropType === 'coin'` (a real bug fixed here: a feeder-based hybrid like
+// Scrub Guppy has `dropType: 'waste_cleared'`, describing its SECONDARY
+// resource, even though it drops coins on its dropInterval same as any
+// other Feeder — see Entities.js's updateFish, where the money branch is
+// `else if (!isPureScavenger)` after the Researcher/Generator checks, which
+// resolves to exactly "has the FEEDER tag" for every row in this table,
+// since isPureScavenger/isPureGenerator/isPureResearcher each require the
+// ABSENCE of FEEDER). Waste/min only applies to a non-Scavenger — a
+// Scavenger consumes Waste instead of producing it, and Entities.js's own
+// poop timer is gated on that exact same bare `behavior.includes('SCAVENGER')`
+// check (not the narrower isPureScavenger used elsewhere for eating/coin-drop
+// purposes), so this mirrors it exactly rather than guessing at a different
+// rule.
 function fishEconomyStatsHtml(speciesId) {
   const s = SPECIES[speciesId];
   if (!s) return '';
   const adult = s.growthStages[s.growthStages.length - 1];
   const foodPerMin = (s.hungerRate * 60) / FOOD_HUNGER_RELIEF_BY_LEVEL[0];
   let html = `<div class="building-stat">🍽️ Hunger: <b>${foodPerMin.toFixed(1)} food/min</b></div>`;
-  if (s.dropType === 'coin' && adult.dropValue) {
+  if (s.behavior.includes('FEEDER') && adult.dropValue) {
     const moneyPerMin = (adult.dropValue / adult.dropInterval) * 60000;
     html += `<div class="building-stat">🪙 Money: <b>$${moneyPerMin.toFixed(2)}/min</b></div>`;
   }
@@ -943,6 +990,12 @@ function fishEconomyStatsHtml(speciesId) {
     const wastePerMin = 60000 / WASTE_POOP_INTERVAL_MS;
     html += `<div class="building-stat">💩 Waste: <b>${wastePerMin.toFixed(2)}/min</b></div>`;
   }
+  // Per direct request ("add in the fish speed stat"). The base swimSpeed
+  // times the flat game-wide multiplier — deliberately NOT the live
+  // effectiveSwimSpeed (which also folds in the player's current Fish
+  // Movement Tank Upgrade level), for the same "fixed comparison figure"
+  // reason every other stat here uses a baseline value.
+  html += `<div class="building-stat">🏊 Speed: <b>${Math.round(s.swimSpeed * FISH_SPEED_MULTIPLIER)}px/s</b></div>`;
   return html;
 }
 
@@ -1121,19 +1174,50 @@ function restartLevel(state) {
 // Shared by the bottom tool-bar's own click handlers above and main.js's
 // 1/2/3 hotkeys (see main.js's keydownHandlers) — one place that actually
 // sets the tool so both paths stay in sync.
+// Per direct request: Demolish is meaningless with nothing built yet, and
+// Merge is meaningless until either combining or splicing is actually
+// unlocked — both stay grayed out (and genuinely unusable, not just dimmed)
+// until then. Exported so main.js's 1/2/3 hotkeys can check before calling
+// selectTool at all.
+export function isDemolishToolAvailable(state) {
+  return hasAnyBuildingPlaced(state);
+}
+export function isMergeToolAvailable(state) {
+  return state.level.upgrades.fishMergingUnlocked || state.meta.labUpgradesPurchased.includes(GENE_SPLICING_LAB_ID);
+}
+
 export function selectTool(state, tool) {
+  if (tool === 'demolish' && !isDemolishToolAvailable(state)) return;
+  if (tool === 'merge' && !isMergeToolAvailable(state)) return;
   state.ui.selectedTool = tool;
   closeSidePanels(state); // per direct request — picking a bottom-tool-bar tool (Food/Demolish/Merge) closes the Shop/Tank Upgrades panel if it's open
   updateToolbar(state);
 }
 
 function updateToolbar(state) {
+  // Grayed-out + genuinely disabled until there's something to demolish /
+  // merging or splicing is unlocked — re-checked every frame (called from
+  // updateHUD) so a building placed/removed or an upgrade just bought takes
+  // effect immediately, not just the next time a tool happens to be picked.
+  // Resolved BEFORE reading state.ui.selectedTool below, so if the
+  // currently-selected tool just became unavailable (e.g. the last building
+  // was demolished while Demolish was still selected), the fallback to Food
+  // is reflected consistently in every class toggle that follows, not just
+  // the build/shop grids.
+  const demolishAvailable = isDemolishToolAvailable(state);
+  const mergeAvailable = isMergeToolAvailable(state);
+  els.toolDemolishBtn.disabled = !demolishAvailable;
+  els.toolMergeBtn.disabled = !mergeAvailable;
+  if (state.ui.selectedTool === 'demolish' && !demolishAvailable) state.ui.selectedTool = 'food';
+  if (state.ui.selectedTool === 'merge' && !mergeAvailable) state.ui.selectedTool = 'food';
+
   const foodSelected = state.ui.selectedTool === 'food';
   const demolishSelected = state.ui.selectedTool === 'demolish';
   const mergeSelected = state.ui.selectedTool === 'merge';
   els.toolFoodBtn.classList.toggle('selected', foodSelected);
   els.toolDemolishBtn.classList.toggle('selected', demolishSelected);
   els.toolMergeBtn.classList.toggle('selected', mergeSelected);
+
   // Descriptive text lives on each button's own native `title` hover
   // tooltip now, not a separate always-visible shop line — per direct
   // request ("remove any text from the shop for the tools, and move those
@@ -1565,6 +1649,17 @@ function buildingStatsHtml(buildingId) {
       `<div class="building-stat">⚡ <b>${f.powerCost}</b> mw/sec</div>`
     );
   }
+  const t = TURRET_STATS[buildingId];
+  if (t) {
+    let html =
+      `<div class="building-stat">🔫 Fire rate: <b>${t.shotsPerSec}/sec</b></div>` +
+      `<div class="building-stat">💥 Damage: <b>${t.damage}/shot</b></div>` +
+      `<div class="building-stat">📏 Range: <b>${TURRET_RANGE}px</b></div>`;
+    html += buildingId === TILE_TURRET_WASTE
+      ? `<div class="building-stat">🗑️ Ammo: <b>${WASTE_TURRET_SHOTS_PER_WASTE}/waste, holds ${WASTE_TURRET_MAX_WASTE}</b></div>`
+      : `<div class="building-stat">⚡ <b>${t.powerCostPerSec}</b> mw/sec</div>`;
+    return html;
+  }
   return '';
 }
 
@@ -1820,6 +1915,9 @@ function renderPowerGraph(state) {
 }
 
 export function updateHUD(state) {
+  // Keeps the Demolish/Merge gray-out live every frame — see updateToolbar's
+  // own comment on why this can't just wait for the next tool-select event.
+  updateToolbar(state);
   const money = state.level.money;
   const moneyText = `💰 $${Math.floor(money)}`;
   els.money.textContent = moneyText;
@@ -1906,6 +2004,24 @@ export function updateHUD(state) {
     playFlash(visibleHudEl(state, els.cleanliness, els.shopCleanliness, els.tankCleanliness), cleanliness > lastCleanliness ? 'flash-pickup' : 'flash-spend');
   }
   lastCleanliness = cleanliness;
+
+  updateAlienCountdown(state);
+}
+
+// Alien Invasion: the top-of-screen countdown banner, per direct request —
+// shown only during the final ALIEN_COUNTDOWN_START_MS before a wave (the
+// two earlier warnings, at ALIEN_WARNING_MS_1/_2, are plain chat
+// notifications instead — see Systems.js's updateAlienWaves). Ceils the
+// remaining time so the displayed number counts 10, 9, 8...1 rather than
+// jumping straight from 10 to 9 a frame after the banner appears.
+function updateAlienCountdown(state) {
+  const msRemaining = state.level.alienNextWaveAtMs - state.level.elapsed;
+  if (msRemaining > 0 && msRemaining <= ALIEN_COUNTDOWN_START_MS) {
+    els.alienCountdown.classList.remove('hidden');
+    els.alienCountdownSeconds.textContent = String(Math.ceil(msRemaining / 1000));
+  } else {
+    els.alienCountdown.classList.add('hidden');
+  }
 }
 
 export function updateDebugOverlay(state, stats) {

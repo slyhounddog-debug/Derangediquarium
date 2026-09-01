@@ -16,7 +16,12 @@ let elapsed = 0; // seconds, drives every sway/wobble phase below
 // every frame — each bubble rises from somewhere near the seabed floor up
 // past the top of the water column, wobbling side to side as it goes, then
 // respawns lower down once it's off the top.
-const BUBBLE_COUNT = 45;
+// Scaled down from 45 by the same ~0.375 ratio WORLD_W itself shrank by
+// (5120px -> 1920px, per direct request to fit the tank to one screen
+// width) — keeps bubbles-per-px-of-width the same as before, rather than
+// cramming the original count into a much narrower column and reading
+// 2.67x busier than intended.
+const BUBBLE_COUNT = 18;
 // Per direct request, a bubble grows to full size over this many seconds
 // after it spawns, instead of just appearing at full size — `age` (seconds
 // since spawn) drives the scale in renderBubbles below.
@@ -58,7 +63,12 @@ for (let i = 0; i < BUBBLE_COUNT; i++) {
 // size too: the smallest strands are LESS blurry than the old fixed amount,
 // the biggest are only SLIGHTLY more — the old fixed amount (blurFactor 1.0)
 // sits deliberately near the top of this new range, not the middle.
-const SEAWEED_COUNT = 48; // was 16 — 3x as many, per direct request
+// Scaled down from 48 by the same ~0.375 ratio WORLD_W shrank by (5120px ->
+// 1920px, per direct request to fit the tank to one screen width) — the new
+// per-strand spacing (WORLD_W / SEAWEED_COUNT) lands almost exactly where it
+// was before the resize, so density-per-px-of-width is unchanged rather than
+// reading far denser crammed into a much narrower column.
+const SEAWEED_COUNT = 18; // was 48
 const SEAWEED_MIN_HEIGHT = 130; // was the old range's max (55-130)
 const SEAWEED_MAX_HEIGHT = 130 * 4;
 const SEAWEED_MIN_WIDTH = 5; // was the old fixed stroke width

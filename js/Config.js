@@ -7,7 +7,22 @@
 
 // ---- World & coordinate constants (§3.3) ----
 export const TILE_SIZE = 32; // px per tile — every coordinate transform is built on this
-export const WORLD_TILES_W = 160; // world width in tiles
+// Shrunk from 160 to 60 tiles (5120px -> 1920px), per direct request — "reduce
+// the width of the tank to just the width of a full screen monitor, there
+// doesn't need to be a left or right movement of the viewport. Only up and
+// down." 1920px matches a common full-HD monitor width almost exactly; on a
+// wider/taller window the shortfall reads as empty margin either side
+// (Engine.js's updateCamera centers the world horizontally instead of
+// pinning it to the left edge when WORLD_W < the viewport), and on a
+// narrower one it's cropped slightly — inherent to any fixed-width world,
+// same tradeoff a print page or a fixed-width game canvas always makes.
+// Horizontal camera panning (WASD/arrow-key and horizontal wheel/trackpad)
+// is removed entirely in Engine.js — camera.x is now purely derived from the
+// viewport width, never accumulated from input. See also Ambience.js's
+// BUBBLE_COUNT/SEAWEED_COUNT, both scaled down by the same ~0.375 ratio so
+// bubble/seaweed density (per px of width) stays what it was before, rather
+// than reading 2.67x busier crammed into a much narrower column.
+export const WORLD_TILES_W = 60; // world width in tiles — was 160
 // World height in tiles — 47, up from 45 per direct request ("allow for 4
 // lines of buildings under the rocky shelf line instead of 2"). The water
 // column (SEABED_ROW_START and up) is untouched; the 2 extra rows are pure
@@ -19,7 +34,7 @@ export const WORLD_TILES_W = 160; // world width in tiles
 // depth (WORLD_H + the buffer) stays exactly what it was before, per direct
 // request to "keep the height of the tank and visual buffer the same."
 export const WORLD_TILES_H = 47;
-export const WORLD_W = WORLD_TILES_W * TILE_SIZE; // 5120px
+export const WORLD_W = WORLD_TILES_W * TILE_SIZE; // 1920px
 export const WORLD_H = WORLD_TILES_H * TILE_SIZE; // 1504px
 
 export const SEABED_ROW_START = 27; // first seabed tile row; rows 0-26 are water column
@@ -79,6 +94,22 @@ export const TILE_FAN_T4 = 'fan_t4'; // solid — Turbo Fan (Tier 4, draws power
 export const TILE_AUTO_FEEDER = 'auto_feeder'; // solid — absorbs Waste pushed into its intake side, dispenses Food from the opposite side
 export const TILE_AUTO_FEEDER_ELECTRIC = 'auto_feeder_electric'; // solid — Electric Auto-Feeder — see AUTO_FEEDER_STATS
 export const TILE_AUTO_FEEDER_ADVANCED = 'auto_feeder_advanced'; // solid — Advanced Auto-Feeder, bought in the Science Lab — see AUTO_FEEDER_STATS
+// ---- Turrets (Alien Invasion) ----
+// Anchored/placed exactly like a Collector or Auto-Feeder (same simple
+// single-click flow, same Platform-anchoring rule — see BUILDING_TYPES/
+// canPlaceTile, nothing turret-specific needed there since only Platform is
+// ever exempt). Unlike those two, a Turret has no aim/intake side at all —
+// it auto-targets whatever alien is nearest within TURRET_STATS[type].range,
+// same "no directional input side" simplification the Collector/Auto-Feeder
+// just got. The Waste Turret is granted at Tier 1 alongside Platform itself
+// (unlockedByDefault: true — see its BUILDING_TYPES row), per direct
+// request ("give the waste turret at the very beginning of the game with
+// the platforms") — the only weapon against aliens before the Science Lab
+// exists. Electric/Advanced Turret are Science Lab purchases, same pattern
+// as Electric/Advanced Fan.
+export const TILE_TURRET_WASTE = 'turret_waste'; // solid — free from the start; ammo comes from consumed Waste, see WASTE_TURRET_SHOTS_PER_WASTE/WASTE_TURRET_MAX_WASTE
+export const TILE_TURRET_ELECTRIC = 'turret_electric'; // solid — Science Lab purchase (requires the Eel), unlimited ammo, draws power per shot
+export const TILE_TURRET_ADVANCED = 'turret_advanced'; // solid — Science Lab purchase (requires the Electric Turret), strongest tier
 
 // Fish stay clear of the outer edges of the water column when spawning —
 // both the random spawn position on a shop purchase in UI.js, and (for
@@ -206,26 +237,20 @@ export const FAN_T4_MAX_RANGE = 640; // px — 20 tiles, unchanged per direct re
 export const FAN_T4_POWER_COST = 3; // per direct request — "the advanced takes 3mw always"
 
 // ---- Auto-Feeder ----
-// Placed and aimed the same way as a Fan (angle locked at placement) — its
-// aim is the OUTPUT direction; the intake sits directly opposite. Grid.js's
-// updateBuildings absorbs any Waste item that drifts within
-// AUTO_FEEDER_INTAKE_RADIUS of the intake point (typically pushed there by a
-// Fan) and, after however many completed AUTO_FEEDER_STATS[type].wasteProcessMs
-// holds that tier's wasteRequired calls for, dispenses one Food item at the
-// output point with zero velocity — a Fan can then pick it back up and
-// launch it into the water column, same as any other item.
+// No longer aimed at all, per direct request ("let's remove the arrows and
+// the need for a specific input side") — Grid.js's updateBuildings absorbs
+// any Waste item within AUTO_FEEDER_INTAKE_RADIUS of the tile's own CENTER,
+// from any side, as long as it isn't already mid-hold on something else (see
+// isNearBuildingCenter, which replaced the old angle-gated isOnIntakeSide
+// entirely). After however many completed AUTO_FEEDER_STATS[type].wasteProcessMs
+// holds that tier's wasteRequired calls for, it dispenses one Food item at a
+// fixed point above the tile's top edge (AUTO_FEEDER_PORT_OFFSET_FRACTION of
+// a tile out from center, now always straight up rather than angle-derived —
+// "make it so the collectors and auto-feeders output on top, by default")
+// with zero velocity — a Fan can then pick it back up and launch it into the
+// water column, same as any other item.
 export const AUTO_FEEDER_INTAKE_RADIUS = TILE_SIZE * 0.6;
-export const AUTO_FEEDER_PORT_OFFSET_FRACTION = 0.5; // fraction of TILE_SIZE — how far outside the tile's center the intake/output points sit, along the aim axis
-// A candidate item must not just be within the intake radius above — it also
-// has to actually be approaching from the intake side, not resting on top of
-// the tile or drifting in from some other direction. Grid.js's isOnIntakeSide
-// checks the item's offset from tile-center against the intake direction (the
-// aim angle, reversed) via a dot product; this is the minimum fraction of
-// that offset's length that has to point toward the intake side to count —
-// per direct request that items shouldn't be pulled in "through the
-// building" or "from the top." Shared by both the Auto-Feeder and the
-// Collector's intake scans (see COLLECTOR_INTAKE_RADIUS below).
-export const INTAKE_SIDE_MIN_DOT_FRACTION = 0.35;
+export const AUTO_FEEDER_PORT_OFFSET_FRACTION = 0.5; // fraction of TILE_SIZE — how far above the tile's center the fixed output point sits
 
 // A Collector doesn't bank an item the instant it lands any more — it visibly
 // draws it in toward the tile's center and holds it there for that tile's
@@ -246,16 +271,12 @@ export const INTAKE_SIDE_MIN_DOT_FRACTION = 0.35;
 export const COLLECTOR_PULL_STRENGTH = 10; // 1/sec ease rate toward the tile's center
 export const COLLECTOR_PROCESSING_MASS = 1000;
 export const COLLECTOR_CIRCLE_RADIUS_FRACTION = 0.32; // fraction of TILE_SIZE — the drawing-in point rendered in the tile's center
-// A Collector is now aimed at placement exactly like the Auto-Feeder (angle
-// locked from the cursor's sub-tile position — see Grid.js's placeTile) and
-// pulled from via the same kind of intake-radius scan, instead of consuming
-// whatever happens to land on top of it via ordinary gravity. Per direct
-// request — items shouldn't be pulled in "through the building" or land on
-// it from the top and get vacuumed up; they need to approach from its
-// designated intake side (opposite the aim/output arrow), same as the
-// Auto-Feeder. A plain top-landing on a Collector now just rests there like
-// a Platform, until something (a Fan, gravity carrying it past the tile's
-// edge) brings it around to the intake side within COLLECTOR_INTAKE_RADIUS.
+// A Collector pulls from a plain intake-radius scan around its own tile
+// center instead of consuming whatever happens to land on top of it via
+// ordinary gravity — per direct request, ANY side counts now (no more
+// angle-gated "intake side," same retirement as the Auto-Feeder's above), so
+// an item just has to genuinely touch the tile (within COLLECTOR_INTAKE_RADIUS
+// of its center) to get pulled in, from any direction.
 export const COLLECTOR_INTAKE_RADIUS = TILE_SIZE * 0.65;
 
 // Items no longer rest at the world's bottom edge — with nothing built to
@@ -426,7 +447,7 @@ export const WASTE_HUNGER_RELIEF = 70;
 // of size/species, placeholder balance like every other timing constant
 // here, tune once real playtesting exists. Scavenger fish (Suckerfish)
 // don't poop — they're the one eating this, not producing it.
-export const WASTE_POOP_INTERVAL_MS = 27778; // waste production 10% less frequent per direct request — was 25000
+export const WASTE_POOP_INTERVAL_MS = 39683; // waste production 30% SLOWER per direct request ("all fish produce waste 30% slower") — was 27778, itself 10% less frequent than the original 25000. This single flat constant is what every non-Scavenger species pops on, so this one change covers "all fish" at once — see CLAUDE.md's Waste section for why this is intentionally NOT per-species.
 
 // ---- Science (physical resource) ----
 // Per direct request, Science is no longer an instant number added straight
@@ -464,7 +485,7 @@ export const SCIENCE_PROGRESS_TICKS = 10;
 // yet (fish stress/toxicity is still unbuilt, later Phase 3+ scope) — this
 // is the visible-feedback half of the system.
 export const CLEANLINESS_MAX = 100;
-export const CLEANLINESS_PER_WASTE_EVENT = 0.5; // was 4 — cut per direct request so cleanliness drains far more gradually per individual Waste item
+export const CLEANLINESS_PER_WASTE_EVENT = 0.25; // was 0.5 (itself cut from an original 4) — halved again per direct request ("waste counts as .25% cleanliness instead of .5%")
 // The first time cleanliness crosses below this (a one-shot tutorial gate,
 // see state.level.tutorialFlags.cleanlinessWarningShown), Entities.js's
 // adjustCleanliness posts CLEANLINESS_WARNING_MESSAGE to the notification
@@ -686,11 +707,11 @@ export const SPECIES = {
     behavior: ['FEEDER'], dropType: 'coin',
     swimSpeed: 35, // px/sec — 5 below the original 40; the Level 1 Fish Movement Tank Upgrade restores it, see Config.js's FISH_MOVEMENT_UPGRADE_SPEED_BONUS
     lifespan: 300000, // ms, not enforced until a later phase
-    hungerRate: 1.624, // hunger points/sec — a further 20% slower on top of the earlier de-pacing pass, per direct request ("all the fish get hungrier 20% slower across the board"); hungry ~every 29s now
+    hungerRate: 1.218, // hunger points/sec — 25% slower again per direct request ("all fish get hungrier 25% slower"); was 1.624
     growthStages: [
-      { feedsRequired: 0, scale: 0.5, dropInterval: 33556, dropValue: 5 }, // stage 1: hatchling — coin production 10% LESS frequent (dropInterval / 0.9), per direct request ("produce money... 10% less frequently across the board"); feeding fills the timer, see COIN_TIMER_FEED_BONUS_FRACTION
-      { feedsRequired: 3, scale: 0.75, dropInterval: 26889, dropValue: 5 }, // stage 2: juvenile
-      { feedsRequired: 6, scale: 1.0, dropInterval: 17444, dropValue: 5 }, // stage 3: adult
+      { feedsRequired: 0, scale: 0.5, dropInterval: 37284, dropValue: 5 }, // stage 1: hatchling — money production 10% slower again per direct request (dropInterval / 0.9); was 33556; feeding fills the timer, see COIN_TIMER_FEED_BONUS_FRACTION
+      { feedsRequired: 3, scale: 0.75, dropInterval: 29877, dropValue: 5 }, // stage 2: juvenile — was 26889
+      { feedsRequired: 6, scale: 1.0, dropInterval: 19382, dropValue: 5 }, // stage 3: adult — was 17444
     ],
     unlockedByDefault: true,
   },
@@ -700,11 +721,11 @@ export const SPECIES = {
     behavior: ['FEEDER'], dropType: 'coin',
     swimSpeed: 65, // -5, see FISH_MOVEMENT_UPGRADE_SPEED_BONUS
     lifespan: 240000,
-    hungerRate: 1.264, // a further 20% slower per direct request — was 1.58; hungry ~every 37s now — lowest coin value of the three, so it's the least demanding to keep fed
+    hungerRate: 0.948, // 25% slower again per direct request — was 1.264 — lowest coin value of the three, so it's the least demanding to keep fed
     growthStages: [
-      { feedsRequired: 0, scale: 0.5, dropInterval: 20167, dropValue: 3 }, // coin production 10% less frequent per direct request — was 18150
-      { feedsRequired: 3, scale: 0.75, dropInterval: 12667, dropValue: 3 }, // was 11400
-      { feedsRequired: 6, scale: 1.0, dropInterval: 8444, dropValue: 3 }, // was 7600 — still the high-frequency coin firehose of the three, just slightly less so
+      { feedsRequired: 0, scale: 0.5, dropInterval: 22408, dropValue: 3 }, // money production 10% slower again per direct request — was 20167
+      { feedsRequired: 3, scale: 0.75, dropInterval: 14074, dropValue: 3 }, // was 12667
+      { feedsRequired: 6, scale: 1.0, dropInterval: 9382, dropValue: 3 }, // was 8444 — still the high-frequency coin firehose of the three, just slightly less so
     ],
     unlockedByDefault: true,
   },
@@ -714,11 +735,11 @@ export const SPECIES = {
     behavior: ['FEEDER'], dropType: 'coin',
     swimSpeed: 17, // 10% faster than the original 20, then -5, see FISH_MOVEMENT_UPGRADE_SPEED_BONUS
     lifespan: 360000,
-    hungerRate: 2.072, // a further 20% slower per direct request — was 2.59; hungry ~every 22s now — highest coin value of the three, so it's still the most demanding to keep fed
+    hungerRate: 1.554, // 25% slower again per direct request — was 2.072 — highest coin value of the three, so it's still the most demanding to keep fed
     growthStages: [
-      { feedsRequired: 0, scale: 0.6, dropInterval: 37667, dropValue: 16 }, // coin production 10% less frequent per direct request — was 33900
-      { feedsRequired: 3, scale: 0.8, dropInterval: 32222, dropValue: 17 }, // was 29000
-      { feedsRequired: 6, scale: 1.0, dropInterval: 26333, dropValue: 22 }, // was 23700
+      { feedsRequired: 0, scale: 0.6, dropInterval: 41852, dropValue: 16 }, // money production 10% slower again per direct request — was 37667
+      { feedsRequired: 3, scale: 0.8, dropInterval: 35802, dropValue: 17 }, // was 32222
+      { feedsRequired: 6, scale: 1.0, dropInterval: 29259, dropValue: 22 }, // was 26333
     ],
     unlockedByDefault: true,
   },
@@ -744,7 +765,7 @@ export const SPECIES = {
     description: 'Only eats Waste, never Food — cleans up after the rest of the tank instead of adding to the mess.',
     behavior: ['SCAVENGER'], dropType: 'waste_cleared',
     swimSpeed: 30, lifespan: 300000,
-    hungerRate: 0.812, // a further 20% slower per direct request — was 1.015 (itself exactly half of Guppy's original 2.03). Entities.js's updateFish targets Waste items (never Food) for any species carrying the SCAVENGER tag. Deliberately flat across all 3 stages (unlike dropInterval below) — per direct request, a baby eats less OFTEN than an adult but still starves on the same overall clock.
+    hungerRate: 0.609, // 25% slower again per direct request — was 0.812. Entities.js's updateFish targets Waste items (never Food) for any species carrying the SCAVENGER tag. Deliberately flat across all 3 stages (unlike dropInterval below) — per direct request, a baby eats less OFTEN than an adult but still starves on the same overall clock.
     // dropInterval is repurposed for a Scavenger as its EAT COOLDOWN — the
     // minimum time between two waste-eating events, not a coin-drop timer
     // (dropValue stays 0, unused) — see Entities.js's updateFish SCAVENGER
@@ -761,7 +782,7 @@ export const SPECIES = {
     id: 'electric_eel', name: 'Electric Eel', tier: 2, unlockPhase: 3, cost: 35, // cut from 80 per direct request
     description: 'Primary MW supply. Must be fed to keep generating.',
     behavior: ['GENERATOR'], dropType: 'power',
-    swimSpeed: 20, lifespan: 300000, hungerRate: 0.776, // a further 20% slower per direct request — was 0.97
+    swimSpeed: 20, lifespan: 300000, hungerRate: 0.582, // 25% slower again per direct request — was 0.776
     // pixelsPerMW replaces the old timer+speed-multiplier scheme for a pure
     // Generator, per direct request ("produces 1MW per 10 pixels swam as a
     // baby, and 1MW per 5 pixels as an adult") — a literal distance-traveled
@@ -779,7 +800,7 @@ export const SPECIES = {
     id: 'octopus', name: 'Science Octopus', tier: 3, unlockPhase: 4, cost: 60, // cut from 90 per direct request
     description: 'Slowly brews one Science Bubble at a time — collect it like a coin once it drops.',
     behavior: ['RESEARCHER'], dropType: 'science_blue',
-    swimSpeed: 25, lifespan: 300000, hungerRate: 0.624, // a further 20% slower per direct request — was 0.78
+    swimSpeed: 25, lifespan: 300000, hungerRate: 0.468, // 25% slower again per direct request — was 0.624
     // dropInterval is now a real long brew cycle, not a short speed-scaled
     // tick — per direct request ("a full minute at base... every 70 seconds
     // as a baby, every 50 seconds as an adult"). dropValue is the number of
@@ -809,79 +830,79 @@ export const SPECIES = {
     id: 'scrub_guppy', name: 'Scrub Guppy', tier: 4, unlockPhase: 4, cost: 45,
     description: 'Suckerfish-spliced Guppy — clears waste on its rounds, still drops coins.',
     behavior: ['SCAVENGER', 'FEEDER'], dropType: 'waste_cleared', parents: ['suckerfish', 'guppy'],
-    swimSpeed: 33, lifespan: 300000, hungerRate: 1.152, // a further 20% slower per direct request — was 1.44
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 14278, dropValue: 6 }], // 1.2x Guppy's adult dropValue (5) — see CLAUDE.md's Gene-Splicing note: a splice can only happen on an adult fish, and inherits 1.2x that fish's adult coin value. Coin production 10% less frequent per direct request — was 12850
+    swimSpeed: 33, lifespan: 300000, hungerRate: 0.864, // 25% slower again per direct request — was 1.152
+    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 15864, dropValue: 6 }], // 1.2x Guppy's adult dropValue (5) — see CLAUDE.md's Gene-Splicing note: a splice can only happen on an adult fish, and inherits 1.2x that fish's adult coin value. Money production 10% slower again per direct request — was 14278
     unlockedByDefault: false,
   },
   scrub_dartfin: {
     id: 'scrub_dartfin', name: 'Scrub Dartfin', tier: 4, unlockPhase: 4, cost: 37,
     description: 'Suckerfish-spliced Dartfin — fast waste cleanup, frequent small coins.',
     behavior: ['SCAVENGER', 'FEEDER'], dropType: 'waste_cleared', parents: ['suckerfish', 'dartfin'],
-    swimSpeed: 48, lifespan: 300000, hungerRate: 0.976, // a further 20% slower per direct request — was 1.22
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 9778, dropValue: 4 }], // 1.2x Dartfin's adult dropValue (3) — see CLAUDE.md's Gene-Splicing note. Coin production 10% less frequent per direct request — was 8800
+    swimSpeed: 48, lifespan: 300000, hungerRate: 0.732, // 25% slower again per direct request — was 0.976
+    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 10864, dropValue: 4 }], // 1.2x Dartfin's adult dropValue (3) — see CLAUDE.md's Gene-Splicing note. Money production 10% slower again per direct request — was 9778
     unlockedByDefault: false,
   },
   scrub_blimpfish: {
     id: 'scrub_blimpfish', name: 'Scrub Blimpfish', tier: 4, unlockPhase: 4, cost: 85,
     description: 'Suckerfish-spliced Blimpfish — slow but thorough, big coins and a clean tank.',
     behavior: ['SCAVENGER', 'FEEDER'], dropType: 'waste_cleared', parents: ['suckerfish', 'blimpfish'],
-    swimSpeed: 24, lifespan: 300000, hungerRate: 1.376, // a further 20% slower per direct request — was 1.72
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 18722, dropValue: 26 }], // 1.2x Blimpfish's adult dropValue (22) — see CLAUDE.md's Gene-Splicing note. Coin production 10% less frequent per direct request — was 16850
+    swimSpeed: 24, lifespan: 300000, hungerRate: 1.032, // 25% slower again per direct request — was 1.376
+    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 20802, dropValue: 26 }], // 1.2x Blimpfish's adult dropValue (22) — see CLAUDE.md's Gene-Splicing note. Money production 10% slower again per direct request — was 18722
     unlockedByDefault: false,
   },
   volt_guppy: {
     id: 'volt_guppy', name: 'Volt Guppy', tier: 4, unlockPhase: 4, cost: 100,
     description: 'Electric Eel-spliced Guppy — generates MW alongside its usual coin drops.',
     behavior: ['GENERATOR', 'FEEDER'], dropType: 'power', parents: ['electric_eel', 'guppy'],
-    swimSpeed: 28, lifespan: 300000, hungerRate: 1.2, // a further 20% slower per direct request — was 1.50
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 11500, dropValue: 6 }], // 1.2x Guppy's adult dropValue (5) — see CLAUDE.md's Gene-Splicing note. Coin production 10% less frequent per direct request — was 10350
+    swimSpeed: 28, lifespan: 300000, hungerRate: 0.9, // 25% slower again per direct request — was 1.2
+    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 12778, dropValue: 6 }], // 1.2x Guppy's adult dropValue (5) — see CLAUDE.md's Gene-Splicing note. Money production 10% slower again per direct request — was 11500
     unlockedByDefault: false,
   },
   volt_dartfin: {
     id: 'volt_dartfin', name: 'Volt Dartfin', tier: 4, unlockPhase: 4, cost: 92,
     description: 'Electric Eel-spliced Dartfin — a fast, low-cost trickle of power and coins.',
     behavior: ['GENERATOR', 'FEEDER'], dropType: 'power', parents: ['electric_eel', 'dartfin'],
-    swimSpeed: 43, lifespan: 300000, hungerRate: 1.024, // a further 20% slower per direct request — was 1.28
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 7000, dropValue: 4 }], // 1.2x Dartfin's adult dropValue (3) — see CLAUDE.md's Gene-Splicing note. Coin production 10% less frequent per direct request — was 6300
+    swimSpeed: 43, lifespan: 300000, hungerRate: 0.768, // 25% slower again per direct request — was 1.024
+    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 7778, dropValue: 4 }], // 1.2x Dartfin's adult dropValue (3) — see CLAUDE.md's Gene-Splicing note. Money production 10% slower again per direct request — was 7000
     unlockedByDefault: false,
   },
   volt_blimpfish: {
     id: 'volt_blimpfish', name: 'Volt Blimpfish', tier: 4, unlockPhase: 4, cost: 140,
     description: 'Electric Eel-spliced Blimpfish — slow, heavy-feeding hybrid with big power output.',
     behavior: ['GENERATOR', 'FEEDER'], dropType: 'power', parents: ['electric_eel', 'blimpfish'],
-    swimSpeed: 19, lifespan: 300000, hungerRate: 1.424, // a further 20% slower per direct request — was 1.78
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 15944, dropValue: 26 }], // 1.2x Blimpfish's adult dropValue (22) — see CLAUDE.md's Gene-Splicing note. Coin production 10% less frequent per direct request — was 14350
+    swimSpeed: 19, lifespan: 300000, hungerRate: 1.068, // 25% slower again per direct request — was 1.424
+    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 17716, dropValue: 26 }], // 1.2x Blimpfish's adult dropValue (22) — see CLAUDE.md's Gene-Splicing note. Money production 10% slower again per direct request — was 15944
     unlockedByDefault: false,
   },
   scholar_guppy: {
     id: 'scholar_guppy', name: 'Scholar Guppy', tier: 4, unlockPhase: 4, cost: 110,
     description: 'Science Octopus-spliced Guppy — drops Blue Science alongside coins.',
     behavior: ['RESEARCHER', 'FEEDER'], dropType: 'science_blue', parents: ['octopus', 'guppy'],
-    swimSpeed: 30, lifespan: 300000, hungerRate: 1.128, // a further 20% slower per direct request — was 1.41
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 17056, dropValue: 6 }], // 1.2x Guppy's adult dropValue (5) — see CLAUDE.md's Gene-Splicing note. Coin production 10% less frequent per direct request — was 15350
+    swimSpeed: 30, lifespan: 300000, hungerRate: 0.846, // 25% slower again per direct request — was 1.128
+    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 18951, dropValue: 6 }], // 1.2x Guppy's adult dropValue (5) — see CLAUDE.md's Gene-Splicing note. Money production 10% slower again per direct request — was 17056
     unlockedByDefault: false,
   },
   scholar_dartfin: {
     id: 'scholar_dartfin', name: 'Scholar Dartfin', tier: 4, unlockPhase: 4, cost: 102,
     description: 'Science Octopus-spliced Dartfin — quick, cheap research on the move.',
     behavior: ['RESEARCHER', 'FEEDER'], dropType: 'science_blue', parents: ['octopus', 'dartfin'],
-    swimSpeed: 45, lifespan: 300000, hungerRate: 0.944, // a further 20% slower per direct request — was 1.18
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 12556, dropValue: 4 }], // 1.2x Dartfin's adult dropValue (3) — see CLAUDE.md's Gene-Splicing note. Coin production 10% less frequent per direct request — was 11300
+    swimSpeed: 45, lifespan: 300000, hungerRate: 0.708, // 25% slower again per direct request — was 0.944
+    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 13951, dropValue: 4 }], // 1.2x Dartfin's adult dropValue (3) — see CLAUDE.md's Gene-Splicing note. Money production 10% slower again per direct request — was 12556
     unlockedByDefault: false,
   },
   scholar_blimpfish: {
     id: 'scholar_blimpfish', name: 'Scholar Blimpfish', tier: 4, unlockPhase: 4, cost: 150,
     description: 'Science Octopus-spliced Blimpfish — slow but valuable, big coins and big science.',
     behavior: ['RESEARCHER', 'FEEDER'], dropType: 'science_blue', parents: ['octopus', 'blimpfish'],
-    swimSpeed: 21, lifespan: 300000, hungerRate: 1.352, // a further 20% slower per direct request — was 1.69
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 21500, dropValue: 26 }], // 1.2x Blimpfish's adult dropValue (22) — see CLAUDE.md's Gene-Splicing note. Coin production 10% less frequent per direct request — was 19350
+    swimSpeed: 21, lifespan: 300000, hungerRate: 1.014, // 25% slower again per direct request — was 1.352
+    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 23889, dropValue: 26 }], // 1.2x Blimpfish's adult dropValue (22) — see CLAUDE.md's Gene-Splicing note. Money production 10% slower again per direct request — was 21500
     unlockedByDefault: false,
   },
   scrub_eel: {
     id: 'scrub_eel', name: 'Scrub-Eel', tier: 4, unlockPhase: 4, cost: 105,
     description: 'Suckerfish-Eel splice — keeps the tank clean while powering the grid.',
     behavior: ['SCAVENGER', 'GENERATOR'], dropType: 'waste_cleared+power', parents: ['suckerfish', 'electric_eel'],
-    swimSpeed: 25, lifespan: 300000, hungerRate: 0.728, // a further 20% slower per direct request — was 0.91
+    swimSpeed: 25, lifespan: 300000, hungerRate: 0.546, // 25% slower again per direct request — was 0.728
     growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 7500, dropValue: 0 }],
     unlockedByDefault: false,
   },
@@ -889,7 +910,7 @@ export const SPECIES = {
     id: 'scrub_topus', name: 'Scrub-Topus', tier: 4, unlockPhase: 4, cost: 115,
     description: 'Suckerfish-Octopus splice — clears waste while trickling Blue Science.',
     behavior: ['SCAVENGER', 'RESEARCHER'], dropType: 'waste_cleared+science_blue', parents: ['suckerfish', 'octopus'],
-    swimSpeed: 28, lifespan: 300000, hungerRate: 0.656, // a further 20% slower per direct request — was 0.82
+    swimSpeed: 28, lifespan: 300000, hungerRate: 0.492, // 25% slower again per direct request — was 0.656
     growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 12500, dropValue: 1 }],
     unlockedByDefault: false,
   },
@@ -897,7 +918,7 @@ export const SPECIES = {
     id: 'volt_topus', name: 'Volt-Topus', tier: 4, unlockPhase: 4, cost: 170,
     description: 'Eel-Octopus splice — powers the grid and researches at the same time.',
     behavior: ['GENERATOR', 'RESEARCHER'], dropType: 'power+science_blue', parents: ['electric_eel', 'octopus'],
-    swimSpeed: 23, lifespan: 300000, hungerRate: 0.704, // a further 20% slower per direct request — was 0.88
+    swimSpeed: 23, lifespan: 300000, hungerRate: 0.528, // 25% slower again per direct request — was 0.704
     growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 10000, dropValue: 1 }],
     unlockedByDefault: false,
   },
@@ -992,6 +1013,21 @@ export const BUILDING_TYPES = {
     description: 'The fastest Auto-Feeder — needs the least Waste per Food output. Purchased once in the Science Lab, then placeable like any other building.',
     color: '#ffd76f', unlockedByDefault: false,
   },
+  [TILE_TURRET_WASTE]: {
+    id: TILE_TURRET_WASTE, name: 'Waste Turret', icon: '🔫', cost: 25,
+    description: 'Auto-fires on the nearest alien within range. Runs on Waste — feeds itself from any Waste touching it, same as an Auto-Feeder.',
+    color: '#9c8a6b', unlockedByDefault: true, // free from the start, alongside Platform — the only defense before the Science Lab exists
+  },
+  [TILE_TURRET_ELECTRIC]: {
+    id: TILE_TURRET_ELECTRIC, name: 'Electric Turret', icon: '🔫', cost: 55,
+    description: 'A powered turret — faster fire rate and harder-hitting than the Waste Turret, with unlimited ammo. Draws power per shot fired.',
+    color: '#5fb8ff', unlockedByDefault: false,
+  },
+  [TILE_TURRET_ADVANCED]: {
+    id: TILE_TURRET_ADVANCED, name: 'Advanced Turret', icon: '🔫', cost: 130,
+    description: 'The strongest turret — fastest fire rate, hardest-hitting. Purchased once in the Science Lab, then placeable like any other building.',
+    color: '#c9a8ff', unlockedByDefault: false,
+  },
 };
 export const BUILDING_LIST = Object.values(BUILDING_TYPES);
 // Buildings that share one shop slot instead of each getting their own icon
@@ -1007,6 +1043,7 @@ export const BUILDING_FAMILIES = {
   fan: [TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4],
   collector: [TILE_COLLECTOR, TILE_COLLECTOR_ELECTRIC, TILE_COLLECTOR_ADVANCED],
   auto_feeder: [TILE_AUTO_FEEDER, TILE_AUTO_FEEDER_ELECTRIC, TILE_AUTO_FEEDER_ADVANCED],
+  turret: [TILE_TURRET_WASTE, TILE_TURRET_ELECTRIC, TILE_TURRET_ADVANCED],
 };
 
 // ---- Processor (Collector) tiers & Auto-Feeder tiers ----
@@ -1042,6 +1079,36 @@ export const AUTO_FEEDER_STATS = {
   [TILE_AUTO_FEEDER_ELECTRIC]: { wasteProcessMs: 12000, wasteRequired: 3, powerCostPerSec: 5 },
   [TILE_AUTO_FEEDER_ADVANCED]: { wasteProcessMs: 10000, wasteRequired: 2, powerCostPerSec: 10 },
 };
+
+// ---- Turrets (Alien Invasion) ----
+// Exact numbers per direct request: "the waste turret... shoot 1.5 times per
+// second, that do 4 damage each shot... The electric turret takes 2mw per
+// shot, shoots 2 times per second, and does 6 damage per shot. The advanced
+// turret takes 3mw per shot, shoots three times a second, and does 8 damage
+// per shot." `range` (how far a turret can auto-target an alien) isn't
+// spec'd explicitly — set generously, comparable to a mid-tier Fan's own
+// reach, since a seabed-anchored turret still needs to hit aliens loitering
+// up in the open water column where fish are. `powerCostPerSec` for the
+// electric tiers is derived from their own per-shot cost × fire rate (2mw ×
+// 2/sec = 4, 3mw × 3/sec = 9) so it slots into computeCurrentPowerDemand the
+// same way every other Electric building's "while actively doing something"
+// draw already does — the Waste Turret has none, it runs on ammo instead.
+export const TURRET_RANGE = 480; // px, all three tiers — only fire rate/damage/cost differ by tier
+export const TURRET_STATS = {
+  [TILE_TURRET_WASTE]: { shotsPerSec: 1.5, damage: 4, powerCostPerSec: 0 },
+  [TILE_TURRET_ELECTRIC]: { shotsPerSec: 2, damage: 6, powerCostPerSec: 4 },
+  [TILE_TURRET_ADVANCED]: { shotsPerSec: 3, damage: 8, powerCostPerSec: 9 },
+};
+// Waste Turret ammo — per direct request: "each waste gives it 10 shots and
+// it can hold 5 waste (with dots indicating each waste/10 ammo)." Consumes a
+// touching Waste item exactly like an Auto-Feeder absorbs one (Grid.js's
+// updateBuildings), converting it straight to ammo rather than holding it
+// for a timed process — there's no "processing duration" for a turret's own
+// intake, only the fire-rate cooldown on the OUTPUT side.
+export const WASTE_TURRET_SHOTS_PER_WASTE = 10;
+export const WASTE_TURRET_MAX_WASTE = 5; // -> 50 max stored shots
+export const WASTE_TURRET_MAX_AMMO = WASTE_TURRET_SHOTS_PER_WASTE * WASTE_TURRET_MAX_WASTE;
+export const TURRET_INTAKE_RADIUS = TILE_SIZE * 0.65; // same as COLLECTOR_INTAKE_RADIUS — a Waste item has to genuinely touch the tile to get sucked in as ammo
 
 // ---- Tier Progression & The Mound (Phase 2) ----
 // See CLAUDE.md's "Tier Progression & The Mound" section for the full
@@ -1168,6 +1235,16 @@ export const SCIENCE_LAB_UPGRADES = {
   advanced_auto_feeder: {
     id: 'advanced_auto_feeder', name: 'Advanced Auto-Feeder', icon: '♻️', scienceCost: 150, goldCost: 15000,
     requires: ['electric_auto_feeder'], grants: { buildings: [TILE_AUTO_FEEDER_ADVANCED] },
+  },
+  // The Waste Turret needs no node at all — it's unlockedByDefault: true,
+  // same as Platform (see BUILDING_TYPES), free from the very start.
+  electric_turret: {
+    id: 'electric_turret', name: 'Electric Turret', icon: '🔫', scienceCost: 25, goldCost: 3000,
+    requires: ['eel'], grants: { buildings: [TILE_TURRET_ELECTRIC] },
+  },
+  advanced_turret: {
+    id: 'advanced_turret', name: 'Advanced Turret', icon: '🔫', scienceCost: 120, goldCost: 18000,
+    requires: ['electric_turret'], grants: { buildings: [TILE_TURRET_ADVANCED] },
   },
 
   // ---- Gene-Splicing hybrid tree ----
@@ -1426,3 +1503,76 @@ export const MONEY_MILESTONE_1K = 1000; // lifetime money EARNED (not current ba
 export const ESCAPE_DARE_DELAY_MS = 120000; // 2 minutes of state.level.elapsed with Escape never pressed before the "press escape, I dare you" notification fires
 export const FISH_VANISH_DURATION_MS = 3500; // ms every fish freezes (position/hunger/coin-timer all frozen, not just hidden) and stops rendering — raised from 2500 per direct request
 export const FISH_VANISH_DELAY_MS = 1500; // ms between the chat closing and the vanish actually starting — per direct request ("delay the fish disappearing for 1.5 seconds first"), gives the "curiosity kills the fish" line a beat to land before anything visibly happens
+
+// ---- Alien Invasion (Aliens.js) ----
+// A "wave" is one spawn burst — a handful of aliens emerging from portals at
+// once, after which the timer restarts for the next one. Difficulty scales
+// with how many waves have already spawned THIS level
+// (state.level.alienWavesSpawned, level-scoped like Tier/money — resets on
+// restart): count and HP both ramp linearly from their EARLY values up to
+// their LATE ones across ALIEN_WAVE_DIFFICULTY_RAMP_WAVES waves, then hold
+// steady — per direct request ("start with 20-30 health with only a couple
+// spawning, and eventually have 10-15 spawn with 60-100 health").
+export const ALIEN_WAVE_INTERVAL_MIN_MS = 180000; // 3 minutes
+export const ALIEN_WAVE_INTERVAL_MAX_MS = 300000; // 5 minutes
+export const ALIEN_WAVE_DIFFICULTY_RAMP_WAVES = 10;
+export const ALIEN_WAVE_COUNT_EARLY_MIN = 2;
+export const ALIEN_WAVE_COUNT_EARLY_MAX = 3;
+export const ALIEN_WAVE_COUNT_LATE_MIN = 10;
+export const ALIEN_WAVE_COUNT_LATE_MAX = 15;
+export const ALIEN_HP_EARLY_MIN = 20;
+export const ALIEN_HP_EARLY_MAX = 30;
+export const ALIEN_HP_LATE_MIN = 60;
+export const ALIEN_HP_LATE_MAX = 100;
+
+// Warnings + the on-screen countdown — per direct request ("plenty of HUD
+// chat message warnings, and a countdown timer from 10 seconds that shows up
+// at the top of the screen when there's 10 seconds left").
+export const ALIEN_WARNING_MS_1 = 60000; // first chat-log warning, 60s out
+export const ALIEN_WARNING_MS_2 = 30000; // second chat-log warning, 30s out
+export const ALIEN_COUNTDOWN_START_MS = 10000; // the visible on-screen "10... 9... 8..." banner takes over from here
+export const ALIEN_WARNING_MESSAGE_1 = "Something's stirring out past the reef... probably nothing.";
+export const ALIEN_WARNING_MESSAGE_2 = "Uh oh, I'm reading movement out there. Get your turrets ready.";
+export const ALIEN_FIRST_WAVE_TIP_MESSAGE = "Aliens incoming! Click 'em for 1 damage a pop, or let a turret handle it. While they're alive they'll poop waste and scare nearby fish off their coins, so don't dawdle.";
+
+// AI — deliberately not a strict chase/flee, per direct request ("both the
+// aliens and the fish are gonna be kinda dumb at being predator/prey, so
+// don't make them strictly move towards the target fish or away from the
+// alien"). Each time an alien/fish picks a new wander target (its existing
+// WANDER_INTERVAL_* cadence for fish, ALIEN_WANDER_INTERVAL_* below for
+// aliens), a fresh coin flip against these chances decides whether that
+// particular wander happens to bias toward the nearest threat/prey (alien)
+// or away from it (fish) instead of a plain random direction — never a
+// hard-locked pursuit/retreat.
+export const ALIEN_CHASE_CHANCE = 0.5;
+export const ALIEN_FLEE_CHANCE = 0.65;
+export const ALIEN_AWARENESS_RADIUS = 260; // px — how close a fish/alien has to be to the other before either reacts to it at all
+export const ALIEN_SPEED = 40; // px/sec, base wander/chase speed
+export const ALIEN_WANDER_INTERVAL_MIN_S = 1;
+export const ALIEN_WANDER_INTERVAL_MAX_S = 2.5;
+
+export const ALIEN_CLICK_DAMAGE = 1; // per direct request — "clicking on them for 1 damage each"
+export const ALIEN_POOP_INTERVAL_MS = 1000; // "poop out 1 waste every second" while alive
+export const ALIEN_INCOME_BLOCK_RADIUS = 90; // px — a fish this close to a LIVING alien produces no coin on its drop timer at all, see Entities.js's updateFish
+export const ALIEN_RADIUS = 16; // px, base visual/hit-test size
+export const ALIEN_COLOR = '#5a2d6b'; // dark purple, visually distinct from every fish color
+export const ALIEN_HEALTH_BAR_WIDTH = 30;
+export const ALIEN_HEALTH_BAR_HEIGHT = 4;
+
+// A fish tints gray under two conditions — per direct request ("make fish
+// visually turn a gray color when they aren't producing coins, and make
+// them turn this color for 1 second as well if they try to produce a coin
+// but the coin max is reached"): continuously, for as long as it's within
+// ALIEN_INCOME_BLOCK_RADIUS of a living alien (refreshed every tick that
+// stays true, so it reads as a steady tint, not a flicker), or for exactly
+// this long, one-shot, the moment a coin-drop is blocked by the Coin Cap.
+export const FISH_BLOCKED_TINT_MS = 1000;
+
+// Portals — temporary animated spawn points, per direct request ("have
+// alien fish spawn in from animated temporary portals that open to let them
+// through"). One portal per alien in a wave, staggered so a whole wave
+// doesn't pop in on the exact same instant.
+export const ALIEN_PORTAL_OPEN_MS = 900; // grow-in duration before the alien actually emerges
+export const ALIEN_PORTAL_CLOSE_MS = 700; // shrink-out duration after it emerges
+export const ALIEN_PORTAL_RADIUS = 26;
+export const ALIEN_PORTAL_STAGGER_MS = 350; // gap between each alien's own portal opening, within one wave

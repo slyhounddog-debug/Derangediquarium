@@ -44,7 +44,23 @@ function mixColor(hex, target, t) {
   const mb = Math.round(b + (target.b - b) * t);
   return `rgb(${mr}, ${mg}, ${mb})`;
 }
+
+// Same blend, but starting from an already-resolved {r,g,b} object instead
+// of a hex string — used to layer a second tint (grayed) on top of a first
+// (sickness) without re-parsing an "rgb(...)" string as if it were hex,
+// which mixColor's own hexToRgb call would silently mis-parse into NaN.
+function mixRgb({ r, g, b }, target, t) {
+  return {
+    r: Math.round(r + (target.r - r) * t),
+    g: Math.round(g + (target.g - g) * t),
+    b: Math.round(b + (target.b - b) * t),
+  };
+}
 const SICK_GREEN = { r: 120, g: 200, b: 90 };
+// A fish blocked from producing money (an alien nearby, or a just-blocked
+// Coin Cap drop) tints toward this flat gray instead — see drawFish's
+// `grayed` param.
+const ALIEN_BLOCKED_GRAY = { r: 128, g: 128, b: 128 };
 
 // A straight 50/50 blend between two hex colors — used for a Gene-Splicing
 // hybrid's color, per direct request: rather than a single flat color (or
@@ -301,7 +317,13 @@ function drawOctopusBody(ctx, x, y, size, facing, tailPhase, isFullyGrown, color
   }
 }
 
-export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDirection, starTier = 1, sickness = 0) {
+// grayed (0-1) tints toward ALIEN_BLOCKED_GRAY — a fish that either has a
+// living alien nearby (continuous, see Entities.js's fish.alienNearby) or
+// just had a coin drop blocked by the Coin Cap (timed, ~1s, see
+// fish.capBlockedTintRemainingMs) — per direct request that a fish should
+// visibly read as "not producing" in both cases. Applied on top of any
+// sickness tint rather than instead of it; the two only rarely coincide.
+export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDirection, starTier = 1, sickness = 0, grayed = 0) {
   const def = SPECIES[speciesId];
   const scale = def.growthStages[stage].scale;
   const size = FISH_BASE_SIZE * scale;
@@ -311,7 +333,13 @@ export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDire
   const baseColor = def.parents
     ? blendHexColors(FISH_COLORS[def.parents[0]] || '#ffffff', FISH_COLORS[def.parents[1]] || '#ffffff')
     : FISH_COLORS[speciesId] || '#ffffff';
-  const color = sickness > 0 ? mixColor(baseColor, SICK_GREEN, sickness) : baseColor;
+  let color = baseColor;
+  if (sickness > 0 || grayed > 0) {
+    let rgb = hexToRgb(baseColor);
+    if (sickness > 0) rgb = mixRgb(rgb, SICK_GREEN, sickness);
+    if (grayed > 0) rgb = mixRgb(rgb, ALIEN_BLOCKED_GRAY, grayed);
+    color = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+  }
   const isFullyGrown = stage === def.growthStages.length - 1;
 
   // Suckerfish/Electric Eel/Science Octopus each get a visually distinct

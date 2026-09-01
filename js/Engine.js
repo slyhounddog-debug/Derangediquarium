@@ -95,33 +95,45 @@ export function createInput(canvas) {
   return input;
 }
 
-// Panning is driven only by deliberate input — WASD/arrows and the scroll
-// wheel. Mouse position alone never pans the camera (no edge-scroll): it
-// used to fire by accident during ordinary play (e.g. moving the cursor
-// toward the bottom of the screen to click a coin near the floor).
+// Panning is driven only by deliberate input, vertically only — WASD/arrows
+// and the scroll wheel. Mouse position alone never pans the camera (no
+// edge-scroll): it used to fire by accident during ordinary play (e.g.
+// moving the cursor toward the bottom of the screen to click a coin near the
+// floor). Horizontal panning is gone entirely, per direct request ("reduce
+// the width of the tank to just the width of a full screen monitor... only
+// up and down. Everything should happen within the initial horizontal
+// viewport") — camera.x is no longer accumulated from any input at all, it's
+// derived fresh every call from the current viewport width, below.
 export function updateCamera(camera, input, canvas, dtMs) {
   const dt = dtMs / 1000;
-  let dx = 0;
   let dy = 0;
 
   // KeyS is deliberately not bound here — it's the shop collapse/expand
   // hotkey (see main.js). ArrowDown remains the way to pan down by keyboard.
   if (input.keysDown.has('KeyW') || input.keysDown.has('ArrowUp')) dy -= 1;
   if (input.keysDown.has('ArrowDown')) dy += 1;
-  if (input.keysDown.has('KeyA') || input.keysDown.has('ArrowLeft')) dx -= 1;
-  if (input.keysDown.has('KeyD') || input.keysDown.has('ArrowRight')) dx += 1;
 
-  camera.x += dx * CAMERA_PAN_SPEED * dt;
   camera.y += dy * CAMERA_PAN_SPEED * dt;
 
-  camera.x += input.wheelDeltaX * CAMERA_SCROLL_SENSITIVITY;
+  // input.wheelDeltaX is still accumulated (Engine.js's wheel listener
+  // doesn't distinguish axes) but deliberately never consumed here any
+  // more — just drained each call so it can't build up unboundedly.
   camera.y += input.wheelDeltaY * CAMERA_SCROLL_SENSITIVITY;
   input.wheelDeltaX = 0;
   input.wheelDeltaY = 0;
 
   const viewW = canvas.width / camera.zoom;
   const viewH = canvas.height / camera.zoom;
-  camera.x = Math.max(0, Math.min(camera.x, Math.max(0, WORLD_W - viewW)));
+  // Always centered — the midpoint of [0, WORLD_W - viewW]. When the world
+  // is narrower than the viewport (WORLD_W <= viewW, the common case now at
+  // 1920px wide), this comes out negative, which is exactly right: it insets
+  // the world's rendering evenly from both screen edges instead of pinning
+  // it to the left with all the empty space on the right. When the viewport
+  // is narrower than the world (a small/zoomed browser window), the same
+  // formula lands between 0 and WORLD_W - viewW automatically — the
+  // midpoint of a non-negative range can't fall outside it — so no separate
+  // clamp is needed for that case either.
+  camera.x = (WORLD_W - viewW) / 2;
   // Allowed to scroll CAMERA_BOTTOM_BUFFER_PX past the world's real bottom
   // edge — a pure-visual buffer strip, per direct request, that's always
   // reachable so the fixed bottom tool-bar has somewhere to live that never

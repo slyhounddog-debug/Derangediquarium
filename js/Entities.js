@@ -50,6 +50,7 @@ import {
   NOTIFICATION_LOG_MAX,
   ITEM_LOST_COLOR,
   WORLD_H,
+  WORLD_W,
   ITEM_MASS_BY_TYPE,
   FISH_BASE_SIZE,
   ECONOMY_SPECIES_IDS,
@@ -77,6 +78,17 @@ import {
   SCIENCE_CAP_BY_LEVEL,
   PRODUCTION_BLOCKED_COLOR,
   FISH_VANISH_DURATION_MS,
+  ALIEN_AWARENESS_RADIUS,
+  ALIEN_CHASE_CHANCE,
+  ALIEN_FLEE_CHANCE,
+  ALIEN_SPEED,
+  ALIEN_WANDER_INTERVAL_MIN_S,
+  ALIEN_WANDER_INTERVAL_MAX_S,
+  ALIEN_POOP_INTERVAL_MS,
+  ALIEN_INCOME_BLOCK_RADIUS,
+  ALIEN_PORTAL_OPEN_MS,
+  ALIEN_PORTAL_CLOSE_MS,
+  FISH_BLOCKED_TINT_MS,
 } from './Config.js';
 import { stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemForces, updateBuildings } from './Grid.js';
 // Sound is a fire-and-forget side effect at the moment something already
@@ -201,6 +213,101 @@ export function createPickupText(x, y, text, color) {
   return { id: nextId(), type: 'pickupText', x, y, text, color, age: 0 };
 }
 
+// Alien Invasion — see Config.js's ALIEN_* constants and CLAUDE.md-pending
+// notes. Systems.js's updateAlienWaves owns wave TIMING/scheduling and
+// pushes { x, y, hp, openAtMs, spawned, spawnedAtMs } records into
+// state.level.alienPortals; this file owns the actual entity (creation, AI,
+// poop, removal) per Entities.js's own "Fish, Alien, Food, Item" scope.
+// updateEntities below is what actually turns a due portal into a real
+// alien — kept here rather than in Systems.js so no circular import is
+// needed (Systems.js writing plain portal data into state needs no import
+// of this file at all).
+export function createAlien(x, y, hp) {
+  return {
+    id: nextId(),
+    type: 'alien',
+    x, y,
+    vx: 0,
+    vy: 0,
+    hp,
+    maxHp: hp,
+    wanderTimer: 0, // 0 so the very first tick immediately picks a heading, same as fish's own wanderTimer
+    poopTimer: 0,
+  };
+}
+
+// Same idea as findNearestFood/findNearestWaste, but scoped to a max radius
+// (aliens shouldn't "sense" a fish clear across the tank) and targeting
+// live fish entities instead of items.
+function findNearestFishWithin(entities, x, y, radius) {
+  let best = null;
+  let bestDistSq = radius * radius;
+  for (const e of entities) {
+    if (e.type !== 'fish') continue;
+    const dx = e.x - x;
+    const dy = e.y - y;
+    const d = dx * dx + dy * dy;
+    if (d < bestDistSq) { bestDistSq = d; best = e; }
+  }
+  return best;
+}
+
+// Mirror of findNearestFishWithin, targeting living aliens instead — used by
+// updateFish for both the flee-bias (wander) and the coin-production-block/
+// gray-tint check.
+function findNearestAlienWithin(entities, x, y, radius) {
+  let best = null;
+  let bestDistSq = radius * radius;
+  for (const e of entities) {
+    if (e.type !== 'alien' || e.hp <= 0) continue;
+    const dx = e.x - x;
+    const dy = e.y - y;
+    const d = dx * dx + dy * dy;
+    if (d < bestDistSq) { bestDistSq = d; best = e; }
+  }
+  return best;
+}
+
+// Both aliens and fish are deliberately "kinda dumb" at predator/prey, per
+// direct request — neither ever hard-locks onto a straight pursuit/flee
+// line. ALIEN_CHASE_CHANCE gates whether this wander cycle even considers
+// the nearest fish at all; when it does, the new heading is biased toward
+// it by a random angle offset rather than aimed dead-on.
+function updateAlien(alien, state, dtMs) {
+  if (alien.hp <= 0) return false;
+  const dt = dtMs / 1000;
+
+  alien.wanderTimer -= dt;
+  if (alien.wanderTimer <= 0) {
+    alien.wanderTimer = ALIEN_WANDER_INTERVAL_MIN_S + Math.random() * (ALIEN_WANDER_INTERVAL_MAX_S - ALIEN_WANDER_INTERVAL_MIN_S);
+    const targetFish = Math.random() < ALIEN_CHASE_CHANCE
+      ? findNearestFishWithin(state.level.entities, alien.x, alien.y, ALIEN_AWARENESS_RADIUS)
+      : null;
+    const angle = targetFish
+      ? Math.atan2(targetFish.y - alien.y, targetFish.x - alien.x) + (Math.random() - 0.5) * (Math.PI * 0.7)
+      : Math.random() * Math.PI * 2;
+    alien.vx = Math.cos(angle) * ALIEN_SPEED;
+    alien.vy = Math.sin(angle) * ALIEN_SPEED * FISH_VERTICAL_DAMPING;
+  }
+
+  alien.x += alien.vx * dt;
+  alien.y += alien.vy * dt;
+
+  if (alien.x < FISH_MIN_X) { alien.x = FISH_MIN_X; alien.vx = Math.abs(alien.vx); }
+  if (alien.x > FISH_MAX_X) { alien.x = FISH_MAX_X; alien.vx = -Math.abs(alien.vx); }
+  if (alien.y < FISH_MIN_Y) { alien.y = FISH_MIN_Y; alien.vy = Math.abs(alien.vy); }
+  if (alien.y > SEABED_FLOOR_Y) { alien.y = SEABED_FLOOR_Y; alien.vy = -Math.abs(alien.vy); } // aliens can't swim into the seabed city either, same rule as fish
+
+  alien.poopTimer += dtMs;
+  if (alien.poopTimer >= ALIEN_POOP_INTERVAL_MS) {
+    alien.poopTimer = 0;
+    state.level.items.push(createWaste(alien.x, alien.y));
+    adjustCleanliness(state, -CLEANLINESS_PER_WASTE_EVENT);
+  }
+
+  return true;
+}
+
 function stageIndexForFeeds(speciesDef, totalFeeds) {
   let idx = 0;
   for (let i = 0; i < speciesDef.growthStages.length; i++) {
@@ -239,6 +346,8 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
     distanceAccumPx: 0, // pure-Generator only — pixels swum since the last MW produced, see updateFish's GENERATOR branch
     researchTickIndex: 0, // pure-Researcher only — which tenth of the current brew cycle's "+0.1" progress bubbles have already fired, see updateFish's RESEARCHER branch
     hungerCriticalSfxPlayed: false, // plays playHunger() once per crossing into HUNGER_CRITICAL_THRESHOLD, reset once hunger drops back below it (e.g. after eating) — see updateFish
+    alienNearby: false, // recomputed every tick in updateFish — true while a living alien is within ALIEN_INCOME_BLOCK_RADIUS, driving both the coin-production block and the continuous gray tint (main.js's render)
+    capBlockedTintRemainingMs: 0, // counts down from FISH_BLOCKED_TINT_MS whenever a coin drop is blocked by the Coin Cap — the OTHER (timed) source of the gray tint, see triggerProductionBlocked
     wanderTimer: 0,
     tailPhase: 0, // only rendered once fully grown; advances faster the faster the fish is currently moving
     // Economy Fish Combining (Tier 2) — see CLAUDE.md's "Economy Fish
@@ -316,6 +425,11 @@ function triggerProductionBlocked(state, fish, stageDef, resource) {
   );
   playProductionBlocked();
   if (resource === 'coin') state.ui.coinCapFlashPending = true;
+  // Per direct request, a fish also flashes gray for exactly
+  // FISH_BLOCKED_TINT_MS the moment a drop is blocked by its cap — the same
+  // visual cue an alien blocking production continuously uses (see
+  // fish.alienNearby), just timed instead of proximity-driven.
+  fish.capBlockedTintRemainingMs = FISH_BLOCKED_TINT_MS;
 }
 
 const FOOD_ROT_WARNING_MESSAGE = "Careful now, food that's chilling too long rots into waste";
@@ -703,6 +817,29 @@ export function spliceFish(state, utilityFish, targetFish) {
 // that's knocked off whatever it was resting on by resolveItemCollisions
 // picks the fall back up on its very next step, the same as if a tile had
 // been removed out from under it.
+// Per direct request ("make the sides act as walls preventing items from
+// leaving or falling") — now that the world is a single fixed screen width
+// with no horizontal camera panning at all (see Engine.js's updateCamera),
+// an item drifting past either edge would scroll off to where the player
+// could never see or reach it again. The seabed band already can't be
+// crossed horizontally (Grid.js's tileAt reads any out-of-column tile as a
+// solid BOUNDARY_WALL sentinel); open water has no tile grid to bound it the
+// same way, so this is the equivalent for it — called from each item type's
+// own per-tick open-water branch, right after integrating vx. Clamps to the
+// item's own radius in from each edge (reads as bumping the glass, not
+// overlapping it) and zeroes vx once it does, so a Fan/sway push doesn't
+// keep reapplying against a wall it can't cross.
+function clampItemToWorldWalls(item) {
+  const margin = item.radius || 0;
+  if (item.x < margin) {
+    item.x = margin;
+    if (item.vx < 0) item.vx = 0;
+  } else if (item.x > WORLD_W - margin) {
+    item.x = WORLD_W - margin;
+    if (item.vx > 0) item.vx = 0;
+  }
+}
+
 function updateFood(item, state, dtMs) {
   const dt = dtMs / 1000;
   // Food Quality Tank Upgrade: each purchased level sinks 5% slower (both
@@ -723,6 +860,7 @@ function updateFood(item, state, dtMs) {
     const swayVx = currentSwayVx(item, FOOD_SWAY_AMPLITUDE, FOOD_SWAY_FREQUENCY, FOOD_SWAY_ENVELOPE_FREQUENCY);
     item.x += (item.vx + swayVx) * dt;
     item.y += item.vy * dt;
+    clampItemToWorldWalls(item);
   } else {
     const status = stepItemOnGrid(item, state, dt, physics);
     if (status === 'consumed') {
@@ -781,6 +919,7 @@ function updateCoin(item, state, dtMs) {
     integrateItemForces(item, dt, physics, fanForce);
     item.y += item.vy * dt;
     item.x += item.vx * dt;
+    clampItemToWorldWalls(item);
     return true;
   }
   const status = stepItemOnGrid(item, state, dt, physics);
@@ -819,6 +958,7 @@ function updateScience(item, state, dtMs) {
     integrateItemForces(item, dt, physics, fanForce);
     item.y += item.vy * dt;
     item.x += item.vx * dt;
+    clampItemToWorldWalls(item);
     return true;
   }
   const status = stepItemOnGrid(item, state, dt, physics);
@@ -850,6 +990,7 @@ function updateWaste(item, state, dtMs) {
     const swayVx = currentSwayVx(item, WASTE_SWAY_AMPLITUDE, WASTE_SWAY_FREQUENCY, FOOD_SWAY_ENVELOPE_FREQUENCY);
     item.y += item.vy * dt;
     item.x += (item.vx + swayVx) * dt;
+    clampItemToWorldWalls(item);
     return true;
   }
   const status = stepItemOnGrid(item, state, dt, physics);
@@ -896,11 +1037,20 @@ function findNearestWaste(items, x, y) {
   return best;
 }
 
-function wander(fish, def, state, dt) {
+// nearbyAlien (optional) is the closest living alien within
+// ALIEN_AWARENESS_RADIUS, if any — see updateFish. Usually, not always,
+// biases the new heading AWAY from it (ALIEN_FLEE_CHANCE) rather than a
+// strict retreat, matching the aliens' own "kinda dumb" chase bias.
+function wander(fish, def, state, dt, nearbyAlien) {
   fish.wanderTimer -= dt;
   if (fish.wanderTimer <= 0) {
-    const angle = Math.random() * Math.PI * 2;
     const speed = effectiveSwimSpeed(def, state);
+    let angle;
+    if (nearbyAlien && Math.random() < ALIEN_FLEE_CHANCE) {
+      angle = Math.atan2(fish.y - nearbyAlien.y, fish.x - nearbyAlien.x) + (Math.random() - 0.5) * (Math.PI * 0.7);
+    } else {
+      angle = Math.random() * Math.PI * 2;
+    }
     fish.vx = Math.cos(angle) * speed;
     fish.vy = Math.sin(angle) * speed * FISH_VERTICAL_DAMPING;
     fish.wanderTimer = WANDER_INTERVAL_MIN_S + Math.random() * (WANDER_INTERVAL_MAX_S - WANDER_INTERVAL_MIN_S);
@@ -975,6 +1125,16 @@ function updateFish(fish, state, dtMs) {
     fish.hungerCriticalSfxPlayed = false;
   }
 
+  // Alien Invasion reactions, per direct request: a fish near a living alien
+  // usually (not always — see wander's own ALIEN_FLEE_CHANCE bias) tries to
+  // move away from it, and can't produce a coin at all while this close
+  // (checked below, only on the coin-drop branch — waste/science/power are
+  // untouched). fish.alienNearby also drives the continuous gray tint in
+  // main.js's render, separate from the timed Coin-Cap-blocked tint below.
+  const nearbyAlien = findNearestAlienWithin(state.level.entities, fish.x, fish.y, ALIEN_AWARENESS_RADIUS);
+  fish.alienNearby = !!(nearbyAlien && Math.hypot(nearbyAlien.x - fish.x, nearbyAlien.y - fish.y) <= ALIEN_INCOME_BLOCK_RADIUS);
+  if (fish.capBlockedTintRemainingMs > 0) fish.capBlockedTintRemainingMs = Math.max(0, fish.capBlockedTintRemainingMs - dtMs);
+
   const isScavenger = def.behavior.includes('SCAVENGER'); // Suckerfish (and any future SCAVENGER species) eats ONLY Waste, never Food
   // A SCAVENGER+FEEDER hybrid (Scrub-Guppy/Dartfin/Blimpfish) still eats
   // Waste like any Scavenger, but its dropInterval is claimed for coin-drop
@@ -1048,10 +1208,10 @@ function updateFish(fish, state, dtMs) {
         }
       }
     } else {
-      wander(fish, def, state, dt);
+      wander(fish, def, state, dt, nearbyAlien);
     }
   } else {
-    wander(fish, def, state, dt);
+    wander(fish, def, state, dt, nearbyAlien);
   }
 
   fish.x += fish.vx * dt;
@@ -1147,7 +1307,15 @@ function updateFish(fish, state, dtMs) {
     // SCAVENGER+FEEDER hybrid (Scrub-Guppy/Dartfin/Blimpfish) falls through
     // to here too — its dropInterval is a coin timer, not an eat cooldown.
     fish.dropTimer += dtMs;
-    if (fish.dropTimer >= stageDef.dropInterval) {
+    // Per direct request, a fish can't produce money at all while close to a
+    // living alien — no coin, no cap-blocked feedback either (that's
+    // reserved for a genuine cap-full block); the continuous gray tint
+    // (fish.alienNearby, set above) is the only feedback for this case. The
+    // cycle still resets rather than holding at the threshold, so the fish
+    // doesn't instantly drop a coin the moment the alien wanders off.
+    if (fish.dropTimer >= stageDef.dropInterval && fish.alienNearby) {
+      fish.dropTimer = 0;
+    } else if (fish.dropTimer >= stageDef.dropInterval) {
       fish.dropTimer = 0;
       // A hybrid's dropValueOverride (T5 value carry-over pipeline) already
       // reflects its economy parent's tier-scaled value in full — using it
@@ -1232,8 +1400,30 @@ function updateFishVanish(state, dtMs) {
   if (state.level.fishVanishTimer === 0) pushStoryNotification(state, FISH_VANISH_REAPPEAR_MESSAGE);
 }
 
+// Turns a due alien-wave portal into a real alien entity, and cleans up
+// portals once their close animation has finished. Systems.js's
+// updateAlienWaves owns the TIMING (when a wave starts, how many portals,
+// each one's HP/stagger) and only ever pushes/reads plain data into
+// state.level.alienPortals — no import of this file needed there. This is
+// the one place that data becomes a real entity, kept here (not Systems.js)
+// per this file's own "Fish, Alien, Food, Item" ownership.
+function updateAlienPortals(state) {
+  const elapsed = state.level.elapsed;
+  for (const portal of state.level.alienPortals) {
+    if (!portal.spawned && elapsed >= portal.openAtMs + ALIEN_PORTAL_OPEN_MS) {
+      portal.spawned = true;
+      portal.spawnedAtMs = elapsed;
+      state.level.entities.push(createAlien(portal.x, portal.y, portal.hp));
+    }
+  }
+  state.level.alienPortals = state.level.alienPortals.filter(
+    (p) => !p.spawned || elapsed < p.spawnedAtMs + ALIEN_PORTAL_CLOSE_MS
+  );
+}
+
 export function updateEntities(state, dtMs) {
   updateFishVanish(state, dtMs);
+  updateAlienPortals(state);
   pendingFoodToWasteSpawns.length = 0; // updateFood (below) fills this — see its own comment for why it can't push into state.level.items directly
   state.level.items = state.level.items.filter((item) => {
     if (item.type === 'food') return updateFood(item, state, dtMs);
@@ -1261,6 +1451,7 @@ export function updateEntities(state, dtMs) {
 
   state.level.entities = state.level.entities.filter((entity) => {
     if (entity.type === 'fish') return state.level.fishVanishTimer > 0 ? true : updateFish(entity, state, dtMs);
+    if (entity.type === 'alien') return updateAlien(entity, state, dtMs);
     return true;
   });
 }

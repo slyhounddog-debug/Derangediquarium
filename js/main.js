@@ -38,6 +38,15 @@ import {
   POWER_HISTORY_MAX,
   SCIENCE_CAP_BY_LEVEL,
   MOUND_MAX_TIER,
+  ALIEN_CLICK_DAMAGE,
+  ALIEN_RADIUS,
+  ALIEN_COLOR,
+  ALIEN_HEALTH_BAR_WIDTH,
+  ALIEN_HEALTH_BAR_HEIGHT,
+  ALIEN_COUNTDOWN_START_MS,
+  ALIEN_PORTAL_OPEN_MS,
+  ALIEN_PORTAL_CLOSE_MS,
+  ALIEN_PORTAL_RADIUS,
 } from './Config.js';
 import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop } from './Engine.js';
 import { loadLevel, LEVELS } from './Levels.js';
@@ -67,7 +76,6 @@ import {
   placeTile,
   removeTile,
   cycleTileCheat,
-  rotateBuilding,
   worldToTile,
   angleFromTileToPoint,
   canPlaceTile,
@@ -98,6 +106,7 @@ import {
   flashMoneyInsufficient,
   selectTool,
   initStartScreen,
+  scheduleShopButtonReminder,
 } from './UI.js';
 
 const canvas = document.getElementById('game-canvas');
@@ -295,6 +304,19 @@ input.clickHandlers.push((sx, sy) => {
   if (fishDragArmed) { fishDragArmed = false; return; } // this click followed a fish-combine drag gesture — don't also bank/feed/mound-click at the release point
   const world = screenToWorld(sx, sy, state.camera);
 
+  // Alien Invasion: clicking a living alien always does ALIEN_CLICK_DAMAGE,
+  // regardless of the currently selected tool — same "always works,
+  // whatever's selected" precedent coin-banking (below) already has.
+  // Checked first so it can't be shadowed by a build/demolish tool's own
+  // early-return branches.
+  for (const entity of state.level.entities) {
+    if (entity.type !== 'alien' || entity.hp <= 0) continue;
+    if (Math.hypot(entity.x - world.x, entity.y - world.y) <= ALIEN_RADIUS) {
+      entity.hp -= ALIEN_CLICK_DAMAGE;
+      return;
+    }
+  }
+
   if (state.ui.selectedTool.startsWith('build:')) {
     const buildingId = state.ui.selectedTool.slice('build:'.length);
     if (FAN_BUILDING_IDS.includes(buildingId)) {
@@ -485,11 +507,6 @@ input.keydownHandlers.push((e) => {
       cycleTileCheat(state, world.x, world.y);
       break;
     }
-    case 'KeyR': { // rotate the Collector/Auto-Feeder under the cursor 90° — see Grid.js's rotateBuilding
-      const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
-      rotateBuilding(state, world.x, world.y);
-      break;
-    }
     case 'KeyN': { // force-crack the Mound to the next real tier, free
       // Previously pre-set moundTeased/fanUnlockPurchased/autoFeederUnlockPurchased
       // to true and called crackMound() once — but crackMound's own grant
@@ -517,6 +534,9 @@ input.keydownHandlers.push((e) => {
       refreshShopPanel(state);
       break;
     }
+    case 'KeyY': // force the next Alien Invasion wave to start right now, for testing without waiting out a real ALIEN_WAVE_INTERVAL_MIN/MAX_MS gap
+      state.level.alienNextWaveAtMs = state.level.elapsed;
+      break;
   }
 });
 
@@ -529,6 +549,7 @@ initUI(state);
 initStartScreen(state, () => {
   state.ui.gameStarted = true;
   triggerSplash();
+  scheduleShopButtonReminder(state); // per direct request — bounces the shop toggle until it's opened for the first time
 });
 
 // ---- Perf counters for the debug overlay ----
@@ -733,7 +754,15 @@ function render() {
     const buildingId = state.ui.selectedTool.slice('build:'.length);
     const { col, row } = worldToTile(world.x, world.y);
     const angle = angleFromTileToPoint(col, row, world.x, world.y);
-    renderBuildGhost(ctx, state, world.x, world.y, buildingId, angle);
+    // showCone: false — this is the plain-hover phase, before a Fan's
+    // placement cell has actually been armed by click 1 (see the
+    // isFanAimingActive() branch above for that real aiming step). The
+    // angle here is just wherever the cursor happens to be relative to
+    // whatever tile it's currently over, not a deliberate aim decision yet,
+    // so per direct report ("visually confusing to have the cone moving
+    // around while trying to choose the fan location") no cone shows until
+    // the location itself is actually confirmed.
+    renderBuildGhost(ctx, state, world.x, world.y, buildingId, angle, false);
   } else if (state.ui.selectedTool === 'demolish' && input.mouse.inside && !state.ui.paused) {
     // Ghost-mode preview of whatever's under the cursor, plus the refund
     // it'll pay out — TILE_REFUND_FRACTION is 1.0 (a full refund) per
@@ -869,6 +898,7 @@ function render() {
   // — skip the whole draw loop rather than each fish individually, since
   // nothing about them should be visible, not even the hunger indicator.
   for (const fish of state.level.fishVanishTimer > 0 ? [] : state.level.entities) {
+    if (fish.type !== 'fish') continue; // state.level.entities also holds Alien Invasion aliens now — rendered separately below
     const pos = worldToScreen(fish.x, fish.y, state.camera);
     if (pos.x < -60 || pos.x > canvas.width + 60 || pos.y < -60 || pos.y > canvas.height + 60) continue; // cull offscreen
     const def = SPECIES[fish.speciesId];
@@ -902,7 +932,12 @@ function render() {
     // little more green past the "!!" critical threshold — per direct
     // request that a hungry fish should visibly look a bit unwell.
     const sickness = fish.hunger >= HUNGER_CRITICAL_THRESHOLD ? 0.35 : fish.hunger >= HUNGER_SEEK_THRESHOLD ? 0.18 : 0;
-    drawFish(ctx, pos.x, pos.y, fish.speciesId, fish.stage, facing, fish.tailPhase, eyeDirection, fish.starTier || 1, sickness);
+    // Alien Invasion: a fish reads as gray while it can't currently produce
+    // money — either a living alien is close by (continuous) or it just had
+    // a coin drop blocked by the Coin Cap (timed, ~1s) — see Entities.js's
+    // fish.alienNearby/capBlockedTintRemainingMs.
+    const grayed = (fish.alienNearby || fish.capBlockedTintRemainingMs > 0) ? 0.55 : 0;
+    drawFish(ctx, pos.x, pos.y, fish.speciesId, fish.stage, facing, fish.tailPhase, eyeDirection, fish.starTier || 1, sickness, grayed);
 
     // Shimmer/gleam, per direct request — placed, grown a stage, or
     // merged/spliced (all three set fish.shimmerStartedAt, see Entities.js's
@@ -943,6 +978,67 @@ function render() {
       ctx.font = '10px sans-serif';
       ctx.fillText('!', pos.x - 2, pos.y - size * 0.5 - 4);
     }
+  }
+
+  // Alien Invasion: portals (animated open, hold, then close — see
+  // Entities.js's updateAlienPortals for the timing this mirrors) and
+  // aliens themselves (with a health bar above each), rendered as their own
+  // pass after fish. Portals are plain state.level.alienPortals data
+  // (Systems.js's spawnAlienWave), not entities.
+  for (const portal of state.level.alienPortals) {
+    const pos = worldToScreen(portal.x, portal.y, state.camera);
+    if (pos.x < -40 || pos.x > canvas.width + 40 || pos.y < -40 || pos.y > canvas.height + 40) continue;
+    const elapsed = state.level.elapsed;
+    // 0-1 "how open" the portal currently reads — ramps in over its own
+    // ALIEN_PORTAL_OPEN_MS delay, then ramps back out over ALIEN_PORTAL_CLOSE_MS
+    // once its alien has actually spawned (see Entities.js's updateAlienPortals).
+    const t = !portal.spawned
+      ? Math.min(1, Math.max(0, (elapsed - portal.openAtMs) / ALIEN_PORTAL_OPEN_MS))
+      : Math.max(0, 1 - (elapsed - portal.spawnedAtMs) / ALIEN_PORTAL_CLOSE_MS);
+    if (t <= 0) continue;
+    const radius = ALIEN_PORTAL_RADIUS * state.camera.zoom * t;
+    if (radius <= 0.5) continue;
+    ctx.save();
+    ctx.globalAlpha = 0.85 * t;
+    const gradient = ctx.createRadialGradient(pos.x, pos.y, radius * 0.15, pos.x, pos.y, radius);
+    gradient.addColorStop(0, 'rgba(190, 100, 230, 0.9)');
+    gradient.addColorStop(1, 'rgba(90, 20, 130, 0.05)');
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(220, 170, 255, 0.9)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  for (const alien of state.level.entities) {
+    if (alien.type !== 'alien' || alien.hp <= 0) continue;
+    const pos = worldToScreen(alien.x, alien.y, state.camera);
+    if (pos.x < -40 || pos.x > canvas.width + 40 || pos.y < -40 || pos.y > canvas.height + 40) continue;
+    const radius = ALIEN_RADIUS * state.camera.zoom;
+    ctx.beginPath();
+    ctx.fillStyle = ALIEN_COLOR;
+    ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.fillStyle = '#ff5b5b'; // a couple of menacing eye dots so it doesn't read as a plain blob
+    ctx.beginPath();
+    ctx.arc(pos.x - radius * 0.32, pos.y - radius * 0.15, radius * 0.16, 0, Math.PI * 2);
+    ctx.arc(pos.x + radius * 0.32, pos.y - radius * 0.15, radius * 0.16, 0, Math.PI * 2);
+    ctx.fill();
+
+    const barW = ALIEN_HEALTH_BAR_WIDTH * state.camera.zoom;
+    const barH = ALIEN_HEALTH_BAR_HEIGHT * state.camera.zoom;
+    const barX = pos.x - barW / 2;
+    const barY = pos.y - radius - barH - 6;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    ctx.fillRect(barX, barY, barW, barH);
+    ctx.fillStyle = '#ff4d4d';
+    ctx.fillRect(barX, barY, barW * Math.max(0, alien.hp / alien.maxHp), barH);
   }
 
   // Small red "Can't afford"/"Needs Platform" reason text, glued to the

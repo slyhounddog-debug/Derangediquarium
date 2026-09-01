@@ -3,7 +3,7 @@
 // which species/buildings are available, win conditions, alien waves, and
 // meta rewards granted on completion.
 
-import { SPECIES_LIST, BUILDING_LIST } from './Config.js';
+import { SPECIES_LIST, BUILDING_LIST, ALIEN_WAVE_INTERVAL_MIN_MS, ALIEN_WAVE_INTERVAL_MAX_MS } from './Config.js';
 import { createGrid } from './Grid.js';
 
 // The very first entry in state.level.notifications, pushed at level load
@@ -88,7 +88,20 @@ export function loadLevel(state, levelId) {
       firstSplice: false, // Phase 4 — first successful Gene-Splicing drag, see Entities.js's spliceFish
       firstPlatformNeeded: false, // first building placement attempt refused for lacking a Platform to anchor to — see main.js's handleBuildPlacementFailure
       foodRotWarningShown: false, // fires once on whichever comes first — 5 Food items existing at once, or the first Food-to-Waste conversion — see Entities.js's maybeWarnFoodRot
+      firstShopOpened: false, // set the first time the Shop panel is ever expanded — until then, UI.js's scheduleShopButtonReminder keeps bouncing the shop toggle button as a reminder it exists
+      firstAlienWaveTipShown: false, // fires the alien-combat tip the moment the very first wave's aliens actually spawn — see Systems.js's spawnAlienWave
     },
+    // Alien Invasion (see Config.js's ALIEN_* constants, Systems.js's updateAlienWaves,
+    // Entities.js's createAlien/updateAlien) — all level-scoped/reset on restart like
+    // everything else here. alienNextWaveAtMs is an absolute state.level.elapsed target,
+    // not a countdown-from value, matching this file's existing ESCAPE_DARE_DELAY_MS
+    // pattern. Seeded with a real random interval so the very first wave doesn't always
+    // land at the exact same moment every playthrough.
+    alienNextWaveAtMs: ALIEN_WAVE_INTERVAL_MIN_MS + Math.random() * (ALIEN_WAVE_INTERVAL_MAX_MS - ALIEN_WAVE_INTERVAL_MIN_MS),
+    alienWavesSpawned: 0,
+    alienWarning1Shown: false,
+    alienWarning2Shown: false,
+    alienPortals: [], // { x, y, hp, openAtMs, spawned, spawnedAtMs } — see Systems.js's spawnAlienWave/Entities.js's updateEntities
     lifetimeMoneyEarned: 0, // real in-play income only (coins banked) — NOT the starting endowment or the bankruptcy bailout gift; see Entities.js's bankMoney and Config.js's MONEY_MILESTONE_1K
     fishVanishTimer: 0, // ms remaining on the "you found the chat" gag — see Entities.js's updateEntities; every fish freezes in place (not just hidden) and stops rendering while this is > 0
     fishVanishDelayMs: 0, // ms remaining before fishVanishTimer above actually starts — see Entities.js's updateFishVanish/Config.js's FISH_VANISH_DELAY_MS

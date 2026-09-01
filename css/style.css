@@ -137,6 +137,30 @@ html, body {
 #hud-power-graph.hidden { display: none; }
 #hud-power-graph-canvas { display: block; }
 
+/* Alien Invasion final-countdown banner — shown only during the last
+   ALIEN_COUNTDOWN_START_MS (10s) before a wave, top-center per direct
+   request ("a countdown timer... that shows up at the top of the screen").
+   UI.js's updateAlienCountdown toggles .hidden and updates the seconds
+   text live every frame. */
+#alien-countdown {
+  position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+  padding: 9px 22px;
+  background: linear-gradient(160deg, #ffdede 0%, #ff8f8f 100%);
+  color: #5a1414;
+  font-size: 16px;
+  font-weight: 800;
+  border-radius: 999px;
+  border: 2px solid #ffffff;
+  box-shadow: 0 6px 16px rgba(90, 20, 20, 0.35), inset 0 2px 0 rgba(255, 255, 255, 0.85);
+  z-index: 20;
+  animation: alien-countdown-pulse 0.7s ease-in-out infinite;
+}
+#alien-countdown.hidden { display: none; }
+@keyframes alien-countdown-pulse {
+  0%, 100% { transform: translateX(-50%) scale(1); }
+  50% { transform: translateX(-50%) scale(1.05); }
+}
+
 /* Rolling notification log — collapsed by default to just its latest line
    (Mound crack narration, tips, alerts once later phases write to it).
    Click the pill to expand a scrollback of recent messages. */
@@ -417,8 +441,12 @@ html, body {
   box-shadow: 0 3px 8px rgba(107, 76, 107, 0.2), inset 0 2px 0 rgba(255, 255, 255, 0.7);
   transition: transform 0.1s ease, background 0.1s ease;
 }
-.tool-btn:hover { transform: scale(1.06); }
+.tool-btn:hover:not(:disabled) { transform: scale(1.06); }
 .tool-btn.selected { border-color: #ffb84d; background: linear-gradient(160deg, #fffaf0 0%, #ffe6b3 100%); }
+/* Demolish (nothing built yet) / Merge (combining or splicing not unlocked
+   yet), per direct request — grayed out and genuinely inert, same look
+   every other disabled buy/confirm button in this game already uses. */
+.tool-btn:disabled { opacity: 0.4; cursor: not-allowed; filter: grayscale(0.6); }
 .tool-icon { display: block; border-radius: 50%; }
 .tool-icon-food { width: 22px; height: 22px; background: #ffb238; box-shadow: 0 0 0 5px rgba(255, 178, 56, 0.3); } /* matches Config.js's FOOD_COLOR — was a green too close to Waste's own color to tell apart at a glance */
 .tool-btn-emoji { font-size: 26px; } /* the Demolish button's 🔨 — was a plain colored circle, per direct request for an actual hammer/trashcan icon */
