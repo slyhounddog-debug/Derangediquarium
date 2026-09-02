@@ -735,14 +735,15 @@ export const SPECIES = {
     // Per direct request ("fish spawn coins at the same rate as adult, they
     // are just worth more value...") — every stage shares the ADULT's own
     // dropInterval (19382), so growing up no longer speeds up production at
-    // all, only raises the payout. Coin value range corrected per a direct
-    // follow-up ("make it so the guppy fish coins range from 7-13 instead of
-    // 8-16") — the earlier $7.5/$15 pass (visually ~8/~16) came in too high;
-    // now a flat $7 baby / $13 adult, with $10 juvenile splitting the gap.
+    // all, only raises the payout. Coin value cut twice since: first to a
+    // flat $7/$10/$13 ("range from 7-13 instead of 8-16"), then down again
+    // to $5/$7/$9 per direct request ("too close to the blimpfish in
+    // economy") — Guppy is meant to read as the cheap/low-value baseline,
+    // clearly below Blimpfish's $12.7/$16.5/$22.
     growthStages: [
-      { feedsRequired: 0, scale: 0.5, dropInterval: 19382, dropValue: 7 }, // stage 1: hatchling
-      { feedsRequired: 3, scale: 0.75, dropInterval: 19382, dropValue: 10 }, // stage 2: juvenile
-      { feedsRequired: 6, scale: 1.0, dropInterval: 19382, dropValue: 13 }, // stage 3: adult
+      { feedsRequired: 0, scale: 0.5, dropInterval: 19382, dropValue: 5 }, // stage 1: hatchling
+      { feedsRequired: 3, scale: 0.75, dropInterval: 19382, dropValue: 7 }, // stage 2: juvenile
+      { feedsRequired: 6, scale: 1.0, dropInterval: 19382, dropValue: 9 }, // stage 3: adult
     ],
     // Per-species multiplier on the flat WASTE_POOP_INTERVAL_MS fish-poop
     // timer (Entities.js's updateFish) — omitted here since Guppy IS the

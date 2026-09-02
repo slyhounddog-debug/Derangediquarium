@@ -973,10 +973,10 @@ function fishEconomyStatsHtml(speciesId) {
     // that ever changes again.
     const babyMoneyPerMin = (baby.dropValue / baby.dropInterval) * 60000;
     const adultMoneyPerMin = (adult.dropValue / adult.dropInterval) * 60000;
-    // Rounded to the nearest tenth, not hundredth — per direct request
-    // ("visually round to the nearest tenth"), two decimal places on a
-    // range like "$23.22 - $46.43" read as more precision than useful.
-    html += `<div class="building-stat">🪙 Money: <b>$${babyMoneyPerMin.toFixed(1)} - $${adultMoneyPerMin.toFixed(1)}/min</b></div>`;
+    // Rounded to the nearest whole dollar now, per direct request — was
+    // toFixed(1) (nearest tenth) before that, toFixed(2) before that; a
+    // dollar range doesn't need fractional-cent precision to be useful.
+    html += `<div class="building-stat">🪙 Money: <b>$${Math.round(babyMoneyPerMin)} - $${Math.round(adultMoneyPerMin)}/min</b></div>`;
   }
   if (!s.behavior.includes('SCAVENGER')) {
     // Real bug fix: this used to read the flat global WASTE_POOP_INTERVAL_MS
