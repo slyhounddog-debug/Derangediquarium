@@ -733,16 +733,16 @@ export const SPECIES = {
     lifespan: 300000, // ms, not enforced until a later phase
     hungerRate: 1.218, // hunger points/sec — 25% slower again per direct request ("all fish get hungrier 25% slower"); was 1.624
     // Per direct request ("fish spawn coins at the same rate as adult, they
-    // are just worth more value, and they should around double from baby to
-    // adult in the coin value... guppies adult gets a boost up to $15 per
-    // coin") — every stage now shares the ADULT's own dropInterval (19382,
-    // unchanged from before), so growing up no longer speeds up production
-    // at all, only raises the payout: 0.5x/0.75x/1.0x of the new $15 adult
-    // value, replacing the old flat-7.5-at-every-stage table entirely.
+    // are just worth more value...") — every stage shares the ADULT's own
+    // dropInterval (19382), so growing up no longer speeds up production at
+    // all, only raises the payout. Coin value range corrected per a direct
+    // follow-up ("make it so the guppy fish coins range from 7-13 instead of
+    // 8-16") — the earlier $7.5/$15 pass (visually ~8/~16) came in too high;
+    // now a flat $7 baby / $13 adult, with $10 juvenile splitting the gap.
     growthStages: [
-      { feedsRequired: 0, scale: 0.5, dropInterval: 19382, dropValue: 7.5 }, // stage 1: hatchling — half the adult value
-      { feedsRequired: 3, scale: 0.75, dropInterval: 19382, dropValue: 11.25 }, // stage 2: juvenile — three-quarters
-      { feedsRequired: 6, scale: 1.0, dropInterval: 19382, dropValue: 15 }, // stage 3: adult — boosted from $7.5 to $15 per direct request
+      { feedsRequired: 0, scale: 0.5, dropInterval: 19382, dropValue: 7 }, // stage 1: hatchling
+      { feedsRequired: 3, scale: 0.75, dropInterval: 19382, dropValue: 10 }, // stage 2: juvenile
+      { feedsRequired: 6, scale: 1.0, dropInterval: 19382, dropValue: 13 }, // stage 3: adult
     ],
     // Per-species multiplier on the flat WASTE_POOP_INTERVAL_MS fish-poop
     // timer (Entities.js's updateFish) — omitted here since Guppy IS the
@@ -781,15 +781,17 @@ export const SPECIES = {
     swimSpeed: 17, // 10% faster than the original 20, then -5, see FISH_MOVEMENT_UPGRADE_SPEED_BONUS
     lifespan: 360000,
     hungerRate: 1.554, // 25% slower again per direct request — was 2.072 — highest coin value of the three, so it's still the most demanding to keep fed
-    // Same "share the adult's own dropInterval, scale only the value ~2x
-    // baby-to-adult" treatment as Guppy/Dartfin above — adult dropValue (22)
-    // is unchanged, only the per-stage split and the now-flat interval (the
-    // old table already shrank per stage — 41852/35802/29259 — that
-    // speed-up is gone now, every stage fires at the adult's own 29259ms).
+    // Same "share the adult's own dropInterval" treatment as Guppy/Dartfin
+    // above — every stage fires at the adult's own 29259ms, that old
+    // per-stage speed-up (41852/35802/29259) is gone. Baby dropValue tuned
+    // per a direct follow-up ("make it so the starting blimpfish coin value
+    // makes it closer to 26 money/min as a baby, and keep the adult the
+    // same") — 12.7 lands right at ~$26.04/min (12.7 / 29259 * 60000);
+    // adult (22) and juvenile (16.5) are unchanged from the prior pass.
     growthStages: [
-      { feedsRequired: 0, scale: 0.6, dropInterval: 29259, dropValue: 11 }, // hatchling — half the adult value
-      { feedsRequired: 3, scale: 0.8, dropInterval: 29259, dropValue: 16.5 }, // juvenile — three-quarters
-      { feedsRequired: 6, scale: 1.0, dropInterval: 29259, dropValue: 22 }, // adult
+      { feedsRequired: 0, scale: 0.6, dropInterval: 29259, dropValue: 12.7 }, // hatchling — ~$26/min
+      { feedsRequired: 3, scale: 0.8, dropInterval: 29259, dropValue: 16.5 }, // juvenile
+      { feedsRequired: 6, scale: 1.0, dropInterval: 29259, dropValue: 22 }, // adult — unchanged per direct request
     ],
     // 5% faster waste production than Guppy, per direct request — same
     // per-species multiplier mechanism as Dartfin's own (slower) one above,

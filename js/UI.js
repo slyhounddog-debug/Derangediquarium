@@ -973,7 +973,10 @@ function fishEconomyStatsHtml(speciesId) {
     // that ever changes again.
     const babyMoneyPerMin = (baby.dropValue / baby.dropInterval) * 60000;
     const adultMoneyPerMin = (adult.dropValue / adult.dropInterval) * 60000;
-    html += `<div class="building-stat">🪙 Money: <b>$${babyMoneyPerMin.toFixed(2)} - $${adultMoneyPerMin.toFixed(2)}/min</b></div>`;
+    // Rounded to the nearest tenth, not hundredth — per direct request
+    // ("visually round to the nearest tenth"), two decimal places on a
+    // range like "$23.22 - $46.43" read as more precision than useful.
+    html += `<div class="building-stat">🪙 Money: <b>$${babyMoneyPerMin.toFixed(1)} - $${adultMoneyPerMin.toFixed(1)}/min</b></div>`;
   }
   if (!s.behavior.includes('SCAVENGER')) {
     // Real bug fix: this used to read the flat global WASTE_POOP_INTERVAL_MS
@@ -984,7 +987,7 @@ function fishEconomyStatsHtml(speciesId) {
     // actual poop timer; only this display-side stat had drifted out of
     // sync with it).
     const wastePerMin = 60000 / (WASTE_POOP_INTERVAL_MS * (s.wastePoopIntervalMultiplier || 1));
-    html += `<div class="building-stat">💩 Waste: <b>${wastePerMin.toFixed(2)}/min</b></div>`;
+    html += `<div class="building-stat">💩 Waste: <b>${wastePerMin.toFixed(1)}/min</b></div>`; // nearest tenth, per direct request — see the Money line's own comment
   }
   // Per direct request ("add in the fish speed stat"). The base swimSpeed
   // times the flat game-wide multiplier — deliberately NOT the live
