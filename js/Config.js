@@ -438,7 +438,8 @@ export const COIN_TIERS = [
 // consume it, each restoring CLEANLINESS_PER_WASTE_EVENT of cleanliness
 // when they do. Electric buildings (Tier 4+) skip producing the
 // Collector-side of it entirely, once they exist.
-export const WASTE_RADIUS = 5 * 1.25; // 25% bigger than the original 5, per direct request so it's easier to spot on the seabed
+export const WASTE_RADIUS = FOOD_RADIUS * 1.1; // per direct request, "10% bigger than food" — replaces the old "25% bigger than the original 5" sizing, now pinned to Food's own radius instead of a standalone number
+export const WASTE_DRAG_CLICK_RADIUS_MULTIPLIER = 1.6; // hit-test radius for grabbing a piece of Waste to drag — same "bigger than the drawn size" precedent as COIN_CLICK_RADIUS_MULTIPLIER, so a drag doesn't need to start pixel-perfect
 export const WASTE_GRAVITY = GRAVITY; // sinks like a coin, not a drifting food pellet
 export const WASTE_MAX_FALL_SPEED = MAX_FALL_SPEED;
 export const WASTE_COLOR = '#6b8e4e';
@@ -491,6 +492,26 @@ export const SCIENCE_PROGRESS_TICKS = 10;
 // is the visible-feedback half of the system.
 export const CLEANLINESS_MAX = 100;
 export const CLEANLINESS_PER_WASTE_EVENT = 0.25; // was 0.5 (itself cut from an original 4) — halved again per direct request ("waste counts as .25% cleanliness instead of .5%")
+// A hard, silent safety cap on how many Waste items can exist in the world
+// at once — real bug fix, per direct report ("when the aliens have been on
+// screen for a while without being killed, the game gets super laggy and
+// gets down to 1 frame per second"). Root cause: Waste, unlike Coins/
+// Science, never had ANY cap — every alien poops one every
+// ALIEN_POOP_INTERVAL_MS (2s) with no cap on how long it survives, and up
+// to ALIEN_MAX_ALIVE (20) can be alive at once, so a genuinely neglected
+// wave can add waste far faster than a player would ever have generated it
+// from fish poop alone (which is what this tank's item counts were
+// originally tuned against). Grid.js's resolveItemCollisions is O(n²) per
+// tick — once total item count climbs into the hundreds, that cost alone
+// is enough to collapse the framerate. Applied at every Waste-spawning call
+// site (fish poop, alien poop, the Collector/Processor byproduct, and food
+// rotting into Waste) via a plain "already at the cap? skip this spawn,
+// silently" check — deliberately no player-facing feedback (unlike the
+// Coin/Science caps, which are core resources the player is meant to
+// actively manage; this is purely a performance safety valve, not a new
+// mechanic). Generous enough that reaching it already represents a badly
+// neglected tank under any normal circumstance.
+export const WASTE_MAX_ON_SCREEN = 200;
 // The first time cleanliness crosses below this (a one-shot tutorial gate,
 // see state.level.tutorialFlags.cleanlinessWarningShown), Entities.js's
 // adjustCleanliness posts CLEANLINESS_WARNING_MESSAGE to the notification
@@ -639,7 +660,7 @@ export const FISH_SPEED_MULTIPLIER = 1.1;
 // "only while in open water" carve-out (a coin resting in the seabed city
 // still very much counts as an "active drop" the player hasn't banked yet).
 export const COIN_CAP_BY_LEVEL = [10, 25, 50, 100, 250, 500]; // index 0 = unupgraded default
-export const COIN_CAP_UPGRADE_COSTS = [3, 8, 20, 45, 80]; // Tank Points — placeholder balance, tune once real playtesting exists, same as every other economy constant here
+export const COIN_CAP_UPGRADE_COSTS = [1, 8, 20, 45, 80]; // Tank Points — level 1 cut from 3 to 1 per direct request, so a player can afford it off their very first-ever Tank Point (see the new Tank Point tutorial flow in UI.js); levels 2+ untouched, placeholder balance like every other economy constant here
 export const COIN_CAP_UPGRADE_MAX_LEVEL = COIN_CAP_UPGRADE_COSTS.length;
 
 // Shared by both the Coin Cap and Science Cap HUD readouts (UI.js's
@@ -1561,6 +1582,8 @@ export const NOTIFICATION_LOG_MAX = 50; // oldest entries drop off past this man
 export const BANKRUPTCY_BAILOUT_AMOUNT = 100; // $ granted the first time the player has no fish left AND can't afford anything in the shop — see Systems.js's updateStoryTriggers
 export const MONEY_MILESTONE_1K = 1000; // lifetime money EARNED (not current balance) that triggers the one-time "save some for the fishes" notification — see Entities.js's bankMoney
 export const ESCAPE_DARE_DELAY_MS = 120000; // 2 minutes of state.level.elapsed with Escape never pressed before the "press escape, I dare you" notification fires
+export const ALIEN_TUTORIAL_DELAY_MS = 10000; // 10s of state.level.elapsed after the first alien is ever killed (Entities.js's updateAlien sets state.level.firstAlienKilledAtMs) before the post-alien "arm up" guided tutorial starts — see Systems.js's updateStoryTriggers
+export const POST_ALIEN_TUTORIAL_MESSAGE = "Now that's I'm talking about. A little firepower never hurt no one."; // per direct request's exact wording — posted once the player finishes placing the guided Waste Turret
 export const FISH_VANISH_DURATION_MS = 3500; // ms every fish freezes (position/hunger/coin-timer all frozen, not just hidden) and stops rendering — raised from 2500 per direct request
 export const FISH_VANISH_DELAY_MS = 1500; // ms between the chat closing and the vanish actually starting — per direct request ("delay the fish disappearing for 1.5 seconds first"), gives the "curiosity kills the fish" line a beat to land before anything visibly happens
 
@@ -1630,7 +1653,7 @@ export const ALIEN_CLICK_DAMAGE = 1; // per direct request — "clicking on them
 // easier to click"). Purely a hit-test change; ALIEN_RADIUS (the drawn/
 // collision size) is untouched.
 export const ALIEN_CLICK_RADIUS_MULTIPLIER = 1.5;
-export const ALIEN_POOP_INTERVAL_MS = 2000; // was 1000 ("poop out 1 waste every second") — halved per direct request, and it also softens the population cap's own worst-case waste-production rate (see ALIEN_MAX_ALIVE's comment)
+export const ALIEN_POOP_INTERVAL_MS = 4000; // was 2000 — doubled again per direct request, further softening the population cap's own worst-case waste-production rate (see ALIEN_MAX_ALIVE's comment)
 export const ALIEN_INCOME_BLOCK_RADIUS = 90; // px — a fish this close to a LIVING alien produces no coin on its drop timer at all, see Entities.js's updateFish
 export const ALIEN_RADIUS = 16; // px, base visual/hit-test size
 export const ALIEN_COLOR = '#5a2d6b'; // dark purple, visually distinct from every fish color

@@ -93,7 +93,31 @@ export function loadLevel(state, levelId) {
       firstAlienWarning1Shown: false, // gates ALIEN_WARNING_MESSAGE_1 ("Something's stirring...") to only ever post once, ever — see Systems.js's updateAlienWaves
       firstCoinCapWarningShown: false, // fires COIN_CAP_WARNING_MESSAGE the first time the live coin count reaches CAP_WARNING_THRESHOLD_FRACTION of the active cap — see UI.js's updateHUD
       hasScrolledDown: false, // set true the first time state.camera.y is ever seen > 0 — gates the #scroll-hint bouncing-arrows nudge, see UI.js's updateScrollHint
+      firstAlienIntroShown: false, // gates the cinematic first-alien intro (spotlight + forced pause) to only ever trigger once, ever — see Entities.js's updateAlienPortals
+      startTutorialShown: false, // gates the game-start guided tutorial (shop -> Guppy -> buy your first fish) to once, ever — see UI.js's tutorialFlow system, started by main.js the moment the player clicks Start
+      tankPointTutorialShown: false, // gates the "spend your first Tank Point" guided tutorial (Tank Upgrades -> Coin Capacity) to once, ever — see Entities.js's awardTankPoint
+      postAlienTutorialShown: false, // gates the "arm up" guided tutorial (Shop -> Waste Turret -> scroll down -> place it) to once, ever — see Systems.js's updateStoryTriggers, fired ~10s after the first alien kill
     },
+    // Cinematic first-alien intro — per direct request, the very first alien
+    // to ever spawn gets a dedicated teaching moment: the whole game freezes
+    // (main.js's update() also checks this, alongside paused/gameOver) and
+    // render() draws a full-screen spotlight (dimmed everywhere except a
+    // circle around the alien) until the player actually clicks it. Both
+    // level-scoped/reset on restart like everything else here.
+    firstAlienIntroActive: false,
+    firstAlienIntroTargetId: null,
+    // Guided tutorial flows (Shop->Guppy->buy fish at game start; Tank
+    // Upgrades->Coin Capacity on the first Tank Point; Shop->Waste Turret->
+    // scroll->place ~10s after the first alien kill) — see UI.js's
+    // TUTORIAL_FLOWS/updateTutorialOverlay/advanceTutorialFlow. Plain
+    // { id, step } | null, level-scoped/reset on restart like everything
+    // else here. main.js's update() freezes most systems while this is set
+    // (camera panning and build-drag placement stay live — see its own
+    // comment), and UI.js's tutorial-overlay DOM element uses a live
+    // clip-path "hole" to physically restrict clicks to whatever this step's
+    // target is, so no separate click-swallowing logic is needed elsewhere.
+    tutorialFlow: null,
+    firstAlienKilledAtMs: null, // set once, the instant the very first alien ever dies (Entities.js's updateAlien) — Systems.js's updateStoryTriggers starts the post-alien tutorial flow ALIEN_TUTORIAL_DELAY_MS after this
     // Alien Invasion (see Config.js's ALIEN_* constants, Systems.js's updateAlienWaves,
     // Entities.js's createAlien/updateAlien) — all level-scoped/reset on restart like
     // everything else here. alienNextWaveAtMs is an absolute state.level.elapsed target,

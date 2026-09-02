@@ -94,6 +94,7 @@ import {
   TURRET_PROJECTILE_SPEED,
   TURRET_PROJECTILE_HIT_RADIUS,
   COIN_BLOCKED_EFFECT_DURATION_MS,
+  WASTE_MAX_ON_SCREEN,
 } from './Config.js';
 import { stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemForces, updateBuildings } from './Grid.js';
 // Sound is a fire-and-forget side effect at the moment something already
@@ -286,6 +287,10 @@ function updateAlien(alien, state, dtMs) {
     // the alien entity itself (which is removed right here), same
     // independent-particle pattern state.level.floatingTexts already uses.
     state.level.alienDeathEffects.push({ x: alien.x, y: alien.y, age: 0 });
+    // The very first alien ever killed starts the countdown to the
+    // post-alien "arm up" guided tutorial (Systems.js's updateStoryTriggers
+    // checks state.level.elapsed against this ALIEN_TUTORIAL_DELAY_MS later).
+    if (state.level.firstAlienKilledAtMs === null) state.level.firstAlienKilledAtMs = state.level.elapsed;
     return false;
   }
   const dt = dtMs / 1000;
@@ -316,8 +321,15 @@ function updateAlien(alien, state, dtMs) {
   alien.poopTimer += dtMs;
   if (alien.poopTimer >= ALIEN_POOP_INTERVAL_MS) {
     alien.poopTimer = 0;
-    state.level.items.push(createWaste(alien.x, alien.y));
-    adjustCleanliness(state, -CLEANLINESS_PER_WASTE_EVENT);
+    // canSpawnMoreWaste: see Config.js's WASTE_MAX_ON_SCREEN — this is the
+    // single biggest source of runaway item counts (up to ALIEN_MAX_ALIVE
+    // aliens all pooping every couple seconds, indefinitely, if left
+    // unfought), so it's the most important of the 4 call sites this cap
+    // gates.
+    if (canSpawnMoreWaste(state)) {
+      state.level.items.push(createWaste(alien.x, alien.y));
+      adjustCleanliness(state, -CLEANLINESS_PER_WASTE_EVENT);
+    }
   }
 
   return true;
@@ -404,6 +416,17 @@ export function countTankItemsByType(state, type) {
     if (item.type === type) n++;
   }
   return n;
+}
+
+// A silent safety cap on total Waste in the world — see Config.js's
+// WASTE_MAX_ON_SCREEN for the full performance-bug rationale. Checked at
+// every Waste-spawning call site (fish poop, alien poop, the Collector/
+// Processor byproduct, food rotting into Waste) — deliberately no
+// player-facing feedback when it blocks a spawn, unlike the Coin/Science
+// caps, since this exists purely to keep item counts (and so
+// Grid.js's O(n²) resolveItemCollisions) bounded, not as a mechanic.
+function canSpawnMoreWaste(state) {
+  return countTankItemsByType(state, 'waste') < WASTE_MAX_ON_SCREEN;
 }
 
 // Coin Cap Tank Upgrade — state.level.upgrades.coinCapLevel indexes straight
@@ -1109,7 +1132,19 @@ function awardTankPoint(state, fish) {
   state.level.tankPoints.available += TANK_POINT_PER_ADULT_FISH;
   state.level.floatingTexts.push(createPickupText(fish.x, fish.y, '+1 Tank Point!', TANK_POINT_COLOR));
   playTankPoint();
-  if (isFirst) pushStoryNotification(state, TANK_POINT_TUTORIAL_MESSAGE);
+  if (isFirst) {
+    pushStoryNotification(state, TANK_POINT_TUTORIAL_MESSAGE);
+    // Per direct request: the first-ever Tank Point also kicks off a guided
+    // tutorial (Tank Upgrades -> Coin Capacity's buy button) — see UI.js's
+    // TUTORIAL_FLOWS/updateTutorialOverlay. Gated the same one-time way
+    // every other tutorial trigger in this file already is, and only if the
+    // start-of-game tutorial isn't still active (it always finishes first —
+    // a fish can't reach Adult before the player has even bought one).
+    if (!state.level.tutorialFlags.tankPointTutorialShown && !state.level.tutorialFlow) {
+      state.level.tutorialFlags.tankPointTutorialShown = true;
+      state.level.tutorialFlow = { id: 'tankpoint', step: 'tankbtn' };
+    }
+  }
 }
 
 // Returns false if the fish should be removed (starved).
@@ -1386,8 +1421,10 @@ function updateFish(fish, state, dtMs) {
     const wastePoopInterval = WASTE_POOP_INTERVAL_MS * (def.wastePoopIntervalMultiplier || 1);
     if (fish.poopTimer >= wastePoopInterval) {
       fish.poopTimer = 0;
-      state.level.items.push(createWaste(fish.x, fish.y));
-      adjustCleanliness(state, -CLEANLINESS_PER_WASTE_EVENT);
+      if (canSpawnMoreWaste(state)) { // see Config.js's WASTE_MAX_ON_SCREEN
+        state.level.items.push(createWaste(fish.x, fish.y));
+        adjustCleanliness(state, -CLEANLINESS_PER_WASTE_EVENT);
+      }
     }
   }
 
@@ -1441,7 +1478,20 @@ function updateAlienPortals(state) {
     if (!portal.spawned && elapsed >= portal.openAtMs + ALIEN_PORTAL_OPEN_MS) {
       portal.spawned = true;
       portal.spawnedAtMs = elapsed;
-      state.level.entities.push(createAlien(portal.x, portal.y, portal.hp));
+      const alien = createAlien(portal.x, portal.y, portal.hp);
+      state.level.entities.push(alien);
+      // Cinematic first-alien intro — per direct request, the very first
+      // alien to ever spawn (wave 1 is forced to exactly one, see
+      // Systems.js's spawnAlienWave) freezes the whole game and spotlights
+      // itself until the player clicks it. One-time, ever, via
+      // tutorialFlags.firstAlienIntroShown — main.js's update()/render()
+      // and click handler are what actually enforce the freeze/spotlight/
+      // click-to-end.
+      if (!state.level.tutorialFlags.firstAlienIntroShown) {
+        state.level.tutorialFlags.firstAlienIntroShown = true;
+        state.level.firstAlienIntroActive = true;
+        state.level.firstAlienIntroTargetId = alien.id;
+      }
     }
   }
   state.level.alienPortals = state.level.alienPortals.filter(
@@ -1529,8 +1579,11 @@ export function updateEntities(state, dtMs) {
   // avoid a circular import (createFood/createWaste live here).
   const { foodSpawnPoints, wasteSpawnPoints, turretShots } = updateBuildings(state, dtMs);
   for (const point of foodSpawnPoints) state.level.items.push(createFood(point.x, point.y));
-  for (const point of wasteSpawnPoints) state.level.items.push(createWaste(point.x, point.y));
-  for (const point of pendingFoodToWasteSpawns) state.level.items.push(createWaste(point.x, point.y));
+  // canSpawnMoreWaste checked per-item (not once before the loop) so a
+  // batch of several at once still respects the cap precisely — see
+  // Config.js's WASTE_MAX_ON_SCREEN.
+  for (const point of wasteSpawnPoints) { if (canSpawnMoreWaste(state)) state.level.items.push(createWaste(point.x, point.y)); }
+  for (const point of pendingFoodToWasteSpawns) { if (canSpawnMoreWaste(state)) state.level.items.push(createWaste(point.x, point.y)); }
   for (const shot of turretShots) state.level.turretProjectiles.push(createTurretProjectile(shot));
   // Runs before the entities filter loop below, same as the old direct-
   // mutation turret code did, so a lethal hit lands and gets cleaned up in

@@ -12,6 +12,7 @@ import {
   FOOD_COST,
   BANKRUPTCY_BAILOUT_AMOUNT,
   ESCAPE_DARE_DELAY_MS,
+  ALIEN_TUTORIAL_DELAY_MS,
   NOTIFICATION_LOG_MAX,
   ALIEN_WAVE_INTERVAL_MIN_MS,
   ALIEN_WAVE_INTERVAL_MAX_MS,
@@ -108,6 +109,22 @@ function updateEscapeDare(state) {
   pushNotification(state, ESCAPE_DARE_MESSAGE);
 }
 
+// Starts the post-alien "arm up" guided tutorial (Shop -> Waste Turret ->
+// scroll -> place — see UI.js's TUTORIAL_FLOWS) ALIEN_TUTORIAL_DELAY_MS
+// after the very first alien ever dies. Gated the same one-time way every
+// other tutorial trigger is, and deferred while any OTHER tutorial flow is
+// already active (the tank-point tutorial, most likely, if the player
+// happened to grow a fish to adulthood around the same time) rather than
+// stomping it — this check just runs again next tick until that clears.
+function updatePostAlienTutorial(state) {
+  const flags = state.level.tutorialFlags;
+  if (flags.postAlienTutorialShown || state.level.tutorialFlow) return;
+  if (state.level.firstAlienKilledAtMs === null) return;
+  if (state.level.elapsed - state.level.firstAlienKilledAtMs < ALIEN_TUTORIAL_DELAY_MS) return;
+  flags.postAlienTutorialShown = true;
+  state.level.tutorialFlow = { id: 'postalien', step: 'shop' };
+}
+
 function randomWaveIntervalMs() {
   return ALIEN_WAVE_INTERVAL_MIN_MS + Math.random() * (ALIEN_WAVE_INTERVAL_MAX_MS - ALIEN_WAVE_INTERVAL_MIN_MS);
 }
@@ -142,7 +159,14 @@ function spawnAlienWave(state) {
   // portals actually opening.
   const aliveCount = state.level.entities.reduce((n, e) => n + (e.type === 'alien' && e.hp > 0 ? 1 : 0), 0)
     + state.level.alienPortals.filter((p) => !p.spawned).length;
-  const count = Math.max(0, Math.min(rolledCount, ALIEN_MAX_ALIVE - aliveCount));
+  // The very first wave, ever, is forced to exactly 1 alien — per direct
+  // request ("for the first wave of the aliens, have literally just one
+  // alien show up") — this is what main.js's cinematic first-alien intro
+  // (paused, spotlighted, click-to-damage) is built around; every wave
+  // after the first uses the normal ramped roll.
+  const count = state.level.alienWavesSpawned === 0
+    ? 1
+    : Math.max(0, Math.min(rolledCount, ALIEN_MAX_ALIVE - aliveCount));
 
   for (let i = 0; i < count; i++) {
     state.level.alienPortals.push({
@@ -207,4 +231,5 @@ export function updateStoryTriggers(state) {
   updateBankruptcy(state);
   updateEscapeDare(state);
   updateAlienWaves(state);
+  updatePostAlienTutorial(state);
 }

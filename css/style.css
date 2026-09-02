@@ -140,6 +140,91 @@ html, body {
 #hud-power-graph.hidden { display: none; }
 #hud-power-graph-canvas { display: block; }
 
+/* Pause menu toggle — per direct request, a circular hamburger button
+   top-right, below #hud, "matching the style of the shop and tank upgrade"
+   (see #shop-collapse-btn/#tank-collapse-btn's own block below) — replaces
+   the old Escape-opens-the-pause-menu behavior entirely (see main.js's
+   keydown handler for Escape's new job). #hud sits at top:14, and its own
+   pill is ~46px tall at this font size, so 68px clears it with a visible
+   gap while staying tight to the same corner. */
+#pause-toggle-btn {
+  position: fixed; top: 68px; right: 14px; z-index: 10;
+  width: 54px; height: 54px;
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(160deg, #ffe4f2 0%, #ffc2e0 100%);
+  border: 2px solid #ffffff; border-radius: 50%;
+  cursor: pointer;
+  font-size: 24px;
+  line-height: 1;
+  color: #6b4c6b;
+  box-shadow: 0 3px 8px rgba(255, 150, 200, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.8);
+  transition: transform 0.12s ease, background 0.12s ease;
+}
+#pause-toggle-btn:hover { background: linear-gradient(160deg, #ffdcee 0%, #ffb0d8 100%); transform: scale(1.08); }
+
+/* Build legend — "Click to purchase" / "(Esc) to cancel", shown only while
+   a building is armed (state.ui.selectedTool starts with 'build:'), per
+   direct request. Sits just above the fixed bottom tool-bar, same slot
+   #scroll-hint uses (the two are never shown at the same time in practice —
+   scroll-hint only appears before a building would ever be selected, or
+   during a guided tutorial step that has no building armed). */
+#build-legend {
+  position: fixed;
+  bottom: 100px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 14px;
+  padding: 9px 20px;
+  background: linear-gradient(160deg, #fffdf8 0%, #ffe9f4 100%);
+  color: #6b4c6b;
+  font-size: 14px;
+  font-weight: 700;
+  border-radius: 999px;
+  border: 2px solid #ffffff;
+  box-shadow: 0 6px 16px rgba(107, 76, 107, 0.25), inset 0 2px 0 rgba(255, 255, 255, 0.9);
+  z-index: 16;
+  white-space: nowrap;
+}
+#build-legend.hidden { display: none; }
+
+/* Guided tutorial spotlight — see UI.js's TUTORIAL_FLOWS/
+   updateTutorialOverlay. #tutorial-overlay covers the whole viewport and
+   darkens everything except the current step's target circle, punched out
+   with a REAL clip-path hole (not just a visual one) — clip-path restricts
+   both rendering AND pointer hit-testing in modern browsers, so a click
+   inside the circle passes straight through to whatever real element sits
+   underneath (the Shop button, a species icon, the canvas...) while
+   anywhere else in the darkened area swallows the click entirely. The exact
+   clip-path polygon/path is computed and set every frame by JS (the circle
+   moves — a DOM target's rect, or a world point via the live camera).
+   Higher z-index than everything else in the game, #pause-overlay (650)
+   included — a guided tutorial step takes priority over any other UI. */
+#tutorial-overlay {
+  position: fixed; inset: 0; z-index: 700;
+  background: rgba(20, 12, 20, 0.72);
+  cursor: pointer;
+}
+#tutorial-overlay.hidden { display: none; }
+
+/* Instruction text for whichever tutorial step is active — a separate fixed
+   pill (not inside #tutorial-overlay) so it stays fully opaque/legible
+   regardless of the overlay's own clip-path hole, and so it can still show
+   during a noSpotlight step (the "scroll" step) where #tutorial-overlay
+   itself is hidden entirely. */
+#tutorial-text {
+  position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+  z-index: 701;
+  padding: 10px 22px;
+  background: linear-gradient(160deg, #fffdf8 0%, #ffe9f4 100%);
+  color: #6b4c6b;
+  font-size: 16px;
+  font-weight: 800;
+  border-radius: 999px;
+  border: 2px solid #ffffff;
+  box-shadow: 0 6px 16px rgba(107, 76, 107, 0.35), inset 0 2px 0 rgba(255, 255, 255, 0.9);
+  white-space: nowrap;
+  pointer-events: none; /* purely informational — never blocks the click that's supposed to land on the spotlighted target */
+}
+#tutorial-text.hidden { display: none; }
+
 /* Alien Invasion final-countdown banner — shown only during the last
    ALIEN_COUNTDOWN_START_MS (10s) before a wave, top-center per direct
    request ("a countdown timer... that shows up at the top of the screen").
@@ -349,13 +434,18 @@ html, body {
 #shop-panel-scroll::-webkit-scrollbar-thumb, #tank-panel-scroll::-webkit-scrollbar-thumb { background: #ffb6d5; border-radius: 999px; }
 #shop-panel-scroll::-webkit-scrollbar-thumb:hover, #tank-panel-scroll::-webkit-scrollbar-thumb:hover { background: #ff9ac4; }
 
+/* Per direct request, #shop-money/#tank-points-display sit inline with
+   their panel's own title now — the only HUD-style readout either panel
+   carries (see UI.js's updateHUD's own comment on #hud being the one
+   always-visible copy of everything else) — pushed to the row's far end via
+   space-between while the title itself stays left. */
 #shop-header-row, #tank-header-row {
-  display: flex; align-items: center;
+  display: flex; align-items: center; justify-content: space-between;
   margin-bottom: 12px;
 }
 #shop-header, #tank-header { font-size: 17px; font-weight: 800; color: #c25f8f; }
 
-#tank-points-display {
+#shop-money, #tank-points-display {
   display: inline-block;
   background: linear-gradient(160deg, #fffdf8 0%, #ffe9f4 100%);
   border: 2px solid #ffffff;
@@ -363,7 +453,6 @@ html, body {
   padding: 7px 12px;
   border-radius: 999px;
   box-shadow: 0 3px 9px rgba(107, 76, 107, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.85);
-  margin-bottom: 14px;
 }
 #hud-science-cap.hidden { display: none; } /* only shown once the Science Octopus is unlocked, same "hidden until relevant" precedent as #hud-power/electric Eel */
 

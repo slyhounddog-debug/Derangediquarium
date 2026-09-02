@@ -55,6 +55,16 @@
   </div>
 </div>
 
+<button id="pause-toggle-btn" class="sheen-target" title="Menu">☰</button>
+
+<div id="build-legend" class="hidden">
+  <span>Click to purchase</span>
+  <span>(Esc) to cancel</span>
+</div>
+
+<div id="tutorial-overlay" class="hidden"></div>
+<div id="tutorial-text" class="hidden"></div>
+
 <div id="alien-countdown" class="hidden">👽 Alien wave incoming: <span id="alien-countdown-seconds">10</span>s</div>
 
 <div id="scroll-hint" class="hidden">
@@ -144,6 +154,7 @@
       <div id="shop-panel-scroll">
         <div id="shop-header-row">
           <div id="shop-header">Shop</div>
+          <div id="shop-money" class="sheen-target">💰 $0</div>
         </div>
 
         <div id="shop-preview" class="sheen-target">
@@ -184,8 +195,8 @@
       <div id="tank-panel-scroll">
         <div id="tank-header-row">
           <div id="tank-header">Tank Upgrades</div>
+          <div id="tank-points-display" class="sheen-target">🏆 0</div>
         </div>
-        <div id="tank-points-display" class="sheen-target">🏆 0</div>
         <div id="tank-upgrade-list"></div>
       </div>
     </div>

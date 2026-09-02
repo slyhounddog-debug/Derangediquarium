@@ -56,6 +56,11 @@ import {
   TURRET_PROJECTILE_COLOR,
   COIN_RADIUS,
   COIN_BLOCKED_EFFECT_DURATION_MS,
+  WORLD_H,
+  CAMERA_BOTTOM_BUFFER_PX,
+  WASTE_RADIUS,
+  WASTE_DRAG_CLICK_RADIUS_MULTIPLIER,
+  BUILDING_FAMILIES,
 } from './Config.js';
 import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop } from './Engine.js';
 import { loadLevel, LEVELS } from './Levels.js';
@@ -103,7 +108,6 @@ import {
   refreshShopPanel,
   toggleShopCollapse,
   toggleTankPanel,
-  togglePauseMenu,
   openMoundMenu,
   closeMoundMenu,
   isMoundMenuOpen,
@@ -116,6 +120,8 @@ import {
   selectTool,
   initStartScreen,
   scheduleShopButtonReminder,
+  cancelActiveTool,
+  advanceTutorialFlow,
 } from './UI.js';
 
 const canvas = document.getElementById('game-canvas');
@@ -292,6 +298,64 @@ input.mouseUpHandlers.push((sx, sy) => {
   draggedFishId = null;
 });
 
+// Waste dragging (city only) — per direct request. Mirrors the Economy Fish
+// combine-drag pattern above (draggedFishId/fishDragArmed), just for a
+// single Waste item instead of a fish, with no tool requirement (grabbing a
+// piece of Waste directly always works, regardless of the currently
+// selected tool — nothing was asked for gating this behind one). Only one
+// piece of Waste can ever be dragged at a time (a second mousedown on
+// another piece while one's already held is impossible anyway, since
+// releasing the first is what clears draggedWasteId). updateWasteDrag
+// (called from update(), after updateEntities — same "override whatever
+// this tick's normal physics did" ordering updateFishDrag already uses)
+// snaps the item's position to the cursor and zeroes its velocity every
+// tick; Grid.js's resolveItemCollisions (which runs inside updateEntities,
+// unconditionally over every item every tick regardless of who's currently
+// "controlling" its position — see CLAUDE.md's "Items can't stack" section)
+// then pushes every other nearby item out of the way of wherever the
+// dragged waste currently sits, one tick behind, same as a dragged fish
+// already causes for anything it swims through — no special-casing needed
+// there at all. A Waste Turret/Auto-Feeder's own intake scan (Grid.js's
+// updateBuildings) is equally untouched: it already just looks for an
+// eligible Waste item within its intake radius each tick regardless of any
+// drag state (gated only on "not already mid-process," same as always), so
+// a dragged piece that drifts close enough still gets pulled in and
+// spliced out of state.level.items normally — updateWasteDrag just needs to
+// notice the item is gone and clear the drag, same as updateFishDrag
+// already does for a fish that starves mid-drag.
+let draggedWasteId = null;
+let wasteDragArmed = false;
+
+input.mouseDownHandlers.push((sx, sy) => {
+  if (state.ui.paused || state.level.tutorialFlow) return;
+  if (draggedFishId != null) return; // a fish-drag already claimed this press
+  const world = screenToWorld(sx, sy, state.camera);
+  if (world.y < SEABED_FLOOR_Y) return; // city only, per direct request
+  const waste = state.level.items.find(
+    (item) => item.type === 'waste' && Math.hypot(item.x - world.x, item.y - world.y) <= WASTE_RADIUS * WASTE_DRAG_CLICK_RADIUS_MULTIPLIER
+  );
+  if (waste) {
+    draggedWasteId = waste.id;
+    wasteDragArmed = true;
+  }
+});
+
+input.mouseUpHandlers.push(() => {
+  draggedWasteId = null;
+});
+
+function updateWasteDrag() {
+  if (draggedWasteId == null) return;
+  const dragged = state.level.items.find((item) => item.id === draggedWasteId && item.type === 'waste');
+  if (!dragged) { draggedWasteId = null; return; } // absorbed by a Turret/Auto-Feeder (or otherwise removed) mid-drag
+  const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
+  dragged.x = world.x;
+  dragged.y = Math.max(world.y, SEABED_FLOOR_Y); // stays in the city — can't drag it back up into open water
+  dragged.vx = 0;
+  dragged.vy = 0;
+  dragged.resting = true;
+}
+
 // Fan placement is a two-click flow, not a single click: click 1 arms
 // aiming at a valid cell (the tile isn't placed yet), then the ghost
 // rotates live with the cursor from that cell's fixed position until click
@@ -309,8 +373,50 @@ function isFanAimingActive() {
   return fanAimingCell != null && state.ui.selectedTool === `build:${fanAimingCell.buildingId}`;
 }
 
+// Per direct request: a Build or Demolish tool can't do anything in open
+// water anyway — every building needs seabed anchoring, and there's nothing
+// to demolish up there — so the cursor icon, ghost preview, and click
+// behavior all default back to Food while hovering open water with one of
+// those two tools selected. Crucially, state.ui.selectedTool itself is
+// NEVER changed by this — only what a click/hover DOES is reinterpreted —
+// so a building stays armed exactly as selected the moment the cursor
+// comes back down to the seabed, no need to reselect it in the shop. Fish
+// and Merge are deliberately excluded, since both are genuinely used in
+// open water and should stay exactly as selected everywhere. Shared by the
+// click handler, updateBuildDrag, the cursor icon, and the ghost-preview
+// render branch below, so all four can never drift out of sync with each
+// other.
+function effectiveToolAt(worldY) {
+  const rawTool = state.ui.selectedTool;
+  if (worldY < SEABED_FLOOR_Y && (rawTool.startsWith('build:') || rawTool === 'demolish')) return 'food';
+  return rawTool;
+}
+
 input.clickHandlers.push((sx, sy) => {
+  // Cinematic first-alien intro (see Entities.js's updateAlienPortals for
+  // what sets this): swallow every click except one that actually lands on
+  // the intro alien — that one damages it (same click-radius as ordinary
+  // alien damage) and ends the intro, un-freezing the game. A miss does
+  // nothing at all — per direct request, "the whole game pause[s] until
+  // they click the alien," not until they click anywhere. Checked before
+  // absolutely everything else, including the fish-drag suppression below,
+  // since nothing else should be interactable while this is active.
+  if (state.level.firstAlienIntroActive) {
+    const world = screenToWorld(sx, sy, state.camera);
+    const alien = state.level.entities.find(
+      (e) => e.id === state.level.firstAlienIntroTargetId && e.type === 'alien' && e.hp > 0
+    );
+    if (!alien) { state.level.firstAlienIntroActive = false; return; } // defensive: target somehow gone, don't soft-lock the game
+    if (Math.hypot(alien.x - world.x, alien.y - world.y) <= ALIEN_RADIUS * ALIEN_CLICK_RADIUS_MULTIPLIER) {
+      alien.hp -= ALIEN_CLICK_DAMAGE;
+      alien.hitFlashMs = ALIEN_HIT_FLASH_MS;
+      state.level.firstAlienIntroActive = false;
+    }
+    return;
+  }
+
   if (fishDragArmed) { fishDragArmed = false; return; } // this click followed a fish-combine drag gesture — don't also bank/feed/mound-click at the release point
+  if (wasteDragArmed) { wasteDragArmed = false; return; } // same, for a Waste-drag gesture
   const world = screenToWorld(sx, sy, state.camera);
 
   // Alien Invasion: clicking a living alien always does ALIEN_CLICK_DAMAGE,
@@ -327,20 +433,32 @@ input.clickHandlers.push((sx, sy) => {
     }
   }
 
-  if (state.ui.selectedTool.startsWith('build:')) {
-    const buildingId = state.ui.selectedTool.slice('build:'.length);
+  // A Fan's click-2 confirmation must work regardless of where the
+  // confirming click lands — including open water, e.g. aiming a Fan's
+  // cone straight up into the water column, a completely normal thing to
+  // do — so this is checked BEFORE the open-water "defaults to Food"
+  // override below, and can never be shadowed by it. isFanAimingActive()
+  // already self-heals against a tool switch (see its own comment), so
+  // this is only ever true while the exact fan that was armed is still the
+  // selected tool.
+  if (isFanAimingActive()) {
+    const buildingId = fanAimingCell.buildingId;
+    const angle = angleFromTileToPoint(fanAimingCell.col, fanAimingCell.row, world.x, world.y);
+    const confirmCheck = canPlaceTile(state, fanAimingCell.col, fanAimingCell.row, buildingId);
+    if (!confirmCheck.ok) handleBuildPlacementFailure(confirmCheck.reason);
+    placeTile(state, fanAimingCell.col, fanAimingCell.row, buildingId, angle);
+    fanAimingCell = null;
+    return;
+  }
+
+  // Per direct request, a Build/Demolish tool defaults to Food while the
+  // click lands in open water — see effectiveToolAt's own comment. Every
+  // branch below reads this instead of state.ui.selectedTool directly.
+  const effectiveTool = effectiveToolAt(world.y);
+
+  if (effectiveTool.startsWith('build:')) {
+    const buildingId = effectiveTool.slice('build:'.length);
     if (FAN_BUILDING_IDS.includes(buildingId)) {
-      if (isFanAimingActive()) {
-        // Click 2: confirm the angle (from the armed cell's center to
-        // wherever the cursor is NOW, not necessarily back over that cell)
-        // and actually place the tile.
-        const angle = angleFromTileToPoint(fanAimingCell.col, fanAimingCell.row, world.x, world.y);
-        const confirmCheck = canPlaceTile(state, fanAimingCell.col, fanAimingCell.row, buildingId);
-        if (!confirmCheck.ok) handleBuildPlacementFailure(confirmCheck.reason);
-        placeTile(state, fanAimingCell.col, fanAimingCell.row, buildingId, angle);
-        fanAimingCell = null;
-        return;
-      }
       // Click 1: arm aiming at this cell if it's actually a legal placement —
       // no tile placed yet, no money spent yet.
       const { col, row } = worldToTile(world.x, world.y);
@@ -351,7 +469,7 @@ input.clickHandlers.push((sx, sy) => {
     }
   }
 
-  if (state.ui.selectedTool === 'demolish') {
+  if (effectiveTool === 'demolish') {
     const { col, row } = worldToTile(world.x, world.y);
     removeTile(state, col, row);
     return;
@@ -361,7 +479,7 @@ input.clickHandlers.push((sx, sy) => {
   if (isPointOnScienceLab(state, world.x, world.y)) { openLabMenu(state); return; } // Phase 4 — the Mound's replacement once it's fully shattered
   if (tryBankCoinAt(state, world.x, world.y)) return; // clicking a coin always banks it, regardless of selected tool
   if (tryBankScienceAt(state, world.x, world.y)) return; // same for a Science Bubble
-  if (state.ui.selectedTool === 'food') {
+  if (effectiveTool === 'food') {
     const reason = trySpawnFood(state, world.x, world.y);
     if (reason === 'no_money') flashMoneyInsufficient(state);
     return;
@@ -369,10 +487,10 @@ input.clickHandlers.push((sx, sy) => {
   // A purchased fish is placed with a click, exactly like a building — see
   // Entities.js's trySpawnPurchasedFish and UI.js's selectSpeciesForPreview
   // (which sets this tool instead of arming a Buy button any more).
-  if (state.ui.selectedTool.startsWith('fish:')) {
-    if (trySpawnPurchasedFish(state, state.ui.selectedTool.slice('fish:'.length), world.x, world.y) === 'no_money') {
-      flashMoneyInsufficient(state);
-    }
+  if (effectiveTool.startsWith('fish:')) {
+    const result = trySpawnPurchasedFish(state, effectiveTool.slice('fish:'.length), world.x, world.y);
+    if (result === 'no_money') flashMoneyInsufficient(state);
+    else if (result === 'spawned') advanceTutorialFlow(state, 'start', 'buyfish'); // game-start guided tutorial's final step
     return;
   }
   // Non-fan build-mode placement doesn't happen here — see the mousedown/
@@ -445,24 +563,42 @@ input.keydownHandlers.push((e) => {
   // sub-views) is the only thing on screen, and it has its own buttons for
   // navigating back, not Escape.
   if (!state.ui.gameStarted) return;
-  if (e.code === 'Escape') { // opens/closes any time, even while paused
+  // Cinematic first-alien intro — per direct request, "the whole game
+  // pause[s]" until the intro alien is clicked, so no hotkey (including
+  // Escape/the pause menu) should be reachable while it's active either.
+  if (state.level.firstAlienIntroActive) return;
+  // The debug overlay toggle is a pure observability tool, not a gameplay
+  // action — deliberately never blocked by anything below (the cinematic
+  // intro/tutorial-flow gates included), so it's always reachable for QA.
+  if (e.code === 'Backquote') { state.debug.overlayVisible = !state.debug.overlayVisible; return; }
+  // Guided tutorial flows (see UI.js's TUTORIAL_FLOWS) swallow every OTHER
+  // hotkey, same reasoning as the cinematic intro above — the overlay's own
+  // click-through "hole" is the only interaction that should work.
+  if (state.level.tutorialFlow) return;
+  if (e.code === 'Escape') {
+    // Per direct request, Escape no longer opens the pause menu — that's now
+    // the dedicated #pause-toggle-btn button (top-right, below the HUD).
+    // Escape's new job: close whatever popup is on top, or cancel an armed
+    // build/demolish/merge tool back to Food. A no-op if none of those apply
+    // (Food or a fish selection stay armed).
     if (!state.level.tutorialFlags.escapePressed) {
       state.level.tutorialFlags.escapePressed = true;
       if (state.level.tutorialFlags.escapeDareShown) pushMainNotification(MADE_YA_LOOK_MESSAGE);
     }
-    if (isMoundMenuOpen()) { closeMoundMenu(); return; } // close whatever's on top first, rather than opening the pause menu behind/over it
-    if (isLabPurchaseModalOpen()) { closeLabPurchaseModal(); return; } // closes the confirmation modal first — it sits on top of the tree
-    if (isLabMenuOpen()) { closeLabMenu(); return; } // same, for the Science Lab's popup
-    if (isFanAimingActive()) { fanAimingCell = null; return; } // cancel the pending Fan placement instead of opening the pause menu on top of it
-    togglePauseMenu(state);
+    if (isMoundMenuOpen()) { closeMoundMenu(); return; }
+    if (isLabPurchaseModalOpen()) { closeLabPurchaseModal(); return; }
+    if (isLabMenuOpen()) { closeLabMenu(); return; }
+    if (isFanAimingActive()) {
+      fanAimingCell = null; // cancel the pending aim...
+      cancelActiveTool(state); // ...and the armed Fan tool itself, back to Food — a Fan is still a "building selected" per direct request
+      return;
+    }
+    cancelActiveTool(state);
     return;
   }
   if (state.ui.paused) return; // swallow every other key while the pause menu is open
 
   switch (e.code) {
-    case 'Backquote': // ` — toggle debug overlay
-      state.debug.overlayVisible = !state.debug.overlayVisible;
-      break;
     case 'Equal':
     case 'NumpadAdd': // + — faster
       state.debug.timeScaleIndex = Math.min(TIME_SCALE_STEPS.length - 1, state.debug.timeScaleIndex + 1);
@@ -560,6 +696,13 @@ initStartScreen(state, () => {
   state.ui.gameStarted = true;
   triggerSplash();
   scheduleShopButtonReminder(state); // per direct request — bounces the shop toggle until it's opened for the first time
+  // Game-start guided tutorial (Shop -> Guppy -> buy your first fish) — see
+  // UI.js's TUTORIAL_FLOWS/advanceTutorialFlow. One-time, like every other
+  // tutorial trigger in this codebase.
+  if (!state.level.tutorialFlags.startTutorialShown) {
+    state.level.tutorialFlags.startTutorialShown = true;
+    state.level.tutorialFlow = { id: 'start', step: 'shop' };
+  }
 });
 
 // ---- Perf counters for the debug overlay ----
@@ -592,11 +735,19 @@ function updateBuildDrag() {
     lastBuildCell = null;
     return;
   }
-  if (draggedFishId != null) return; // a fish-combine drag is in progress — don't also place tiles under it
+  if (draggedFishId != null || draggedWasteId != null) return; // a fish-combine or Waste drag is in progress — don't also place tiles under it
   if (!input.mouse.inside || !state.ui.selectedTool.startsWith('build:')) return;
   const buildingId = state.ui.selectedTool.slice('build:'.length);
   if (FAN_BUILDING_IDS.includes(buildingId)) return; // Fans go through the two-click aiming flow in the click handler above, not drag-placement
   const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
+  // Per direct request, a build tool can't place anything in open water —
+  // the click handler's own effectiveToolAt already treats a plain click up
+  // there as Food instead; this just makes sure the drag-placement path
+  // (which is what actually places most buildings — see this function's own
+  // header comment) never even attempts (and fails) a building placement in
+  // the same spot, which would otherwise flash a spurious "out of bounds"
+  // error every tick while dragging through open water.
+  if (world.y < SEABED_FLOOR_Y) return;
   const { col, row } = worldToTile(world.x, world.y);
   const cellKey = `${col},${row}`;
   if (cellKey === lastBuildCell) return;
@@ -607,7 +758,16 @@ function updateBuildDrag() {
   const angle = angleFromTileToPoint(col, row, world.x, world.y);
   const check = canPlaceTile(state, col, row, buildingId);
   if (!check.ok) handleBuildPlacementFailure(check.reason);
-  placeTile(state, col, row, buildingId, angle);
+  const placed = placeTile(state, col, row, buildingId, angle);
+  // Post-alien guided tutorial's final step — any successful Turret
+  // placement (the family's currently-armed tier, forced to the base Waste
+  // Turret when this step's own icon was selected — see UI.js's
+  // buildFamilyButton) completes the flow. Checked by family membership
+  // rather than one exact tile id so it's not brittle if the player happens
+  // to place a different tier.
+  if (placed && BUILDING_FAMILIES.turret.includes(buildingId)) {
+    advanceTutorialFlow(state, 'postalien', 'place');
+  }
 }
 
 // Runs every tick a combine-drag is active (after updateEntities, so this
@@ -627,6 +787,16 @@ function updateFishDrag() {
   dragged.vy = 0;
 }
 
+// Mirrors Engine.js's own updateCamera vertical clamp (camera.y's max is
+// WORLD_H + CAMERA_BOTTOM_BUFFER_PX - viewH) to answer "is the camera
+// currently panned all the way down" — used by the post-alien guided
+// tutorial's "scroll" step to know when to advance/skip itself.
+function isScrolledToBottom(state) {
+  const viewH = canvas.height / state.camera.zoom;
+  const maxY = Math.max(0, WORLD_H + CAMERA_BOTTOM_BUFFER_PX - viewH);
+  return state.camera.y >= maxY - 1;
+}
+
 function update(dtMs) {
   // Ambience (bubbles/seaweed) deliberately does NOT run before the game
   // has started — the start screen's #start-overlay blurs the tank behind
@@ -643,15 +813,34 @@ function update(dtMs) {
   if (!state.ui.gameStarted) return; // frozen until the player clicks Start on the first-launch start screen — render() still runs (a static frame), same "frozen but visible" pattern the pause menu already uses
   if (state.ui.paused) return; // frozen behind the pause menu — render() still runs so the tank stays visible
   if (state.level.gameOver) return; // lost — frozen the same way, but via a separate flag so Escape still reaches the pause menu's Restart without also un-freezing a lost game (see Systems.js's updateBankruptcy)
+  if (state.level.firstAlienIntroActive) return; // frozen for the cinematic first-alien spotlight — see Entities.js's updateAlienPortals for what sets this and the click handler below for what clears it
 
   updateCamera(state.camera, input, canvas, dtMs);
   updateBuildDrag();
+  // Guided tutorial flows (see UI.js's TUTORIAL_FLOWS) freeze everything
+  // else below — fish AI, coin/waste production, aliens, elapsed time —
+  // deliberately NOT camera panning or build-drag placement above, since the
+  // "scroll" and "place" steps need both to keep working while a flow is
+  // active. The overlay's own clip-path "hole" is what restricts WHICH
+  // clicks actually reach anything (see UI.js's updateTutorialOverlay).
+  if (state.level.tutorialFlow) {
+    // The "scroll" step's advance condition isn't a click — there's nothing
+    // to click for "pan the camera" — so it's checked here, every tick,
+    // resolving the instant the camera reaches the bottom (immediately, with
+    // no visible flash of the arrows, if it was already there when this step
+    // started).
+    if (state.level.tutorialFlow.id === 'postalien' && state.level.tutorialFlow.step === 'scroll' && isScrolledToBottom(state)) {
+      state.level.tutorialFlow.step = 'place';
+    }
+    return;
+  }
   if (state.ui.buildErrorText) {
     state.ui.buildErrorElapsedMs += dtMs;
     if (state.ui.buildErrorElapsedMs >= BUILD_ERROR_TEXT_DURATION_MS) state.ui.buildErrorText = null;
   }
   updateEntities(state, dtMs);
   updateFishDrag();
+  updateWasteDrag();
   updateStoryTriggers(state);
   state.level.elapsed += dtMs;
 
@@ -717,6 +906,73 @@ function lerpRgbToString(from, to, t) {
   return `rgb(${r}, ${g}, ${b})`;
 }
 
+// An alien's body — reworked per direct request ("rework the alien fish so
+// they are not flat, and so they match the same style of the fish") from a
+// single flat circle into an oval body + trailing tail fin + dorsal spikes,
+// with the same darker-underside/glossy-highlight "pop more, less flat"
+// pass FishRenderer.js's own drawFish already gives every real fish. `color`
+// is whatever the caller already resolved (including the hit-flash blend),
+// `facing` is ±1 (which way the alien is currently moving), used to trail
+// the tail fin and highlight the same direction a fish's own facing would.
+function drawAlienBody(ctx, x, y, radius, facing, color) {
+  ctx.save();
+
+  // Tail fin, trailing behind the direction of travel.
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
+  ctx.beginPath();
+  ctx.moveTo(x - facing * radius * 1.15, y);
+  ctx.lineTo(x - facing * radius * 0.55, y - radius * 0.5);
+  ctx.lineTo(x - facing * radius * 0.55, y + radius * 0.5);
+  ctx.closePath();
+  ctx.fill();
+
+  // Main body — an oval, not a perfect circle.
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.ellipse(x, y, radius * 1.05, radius * 0.85, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // A few dorsal spikes along the top — the one purely "alien/sea-monster"
+  // flourish, keeping it visually distinct from an ordinary fish silhouette
+  // despite sharing the same shading language.
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+  for (let i = -1; i <= 1; i++) {
+    const sx = x + i * radius * 0.32;
+    ctx.beginPath();
+    ctx.moveTo(sx, y - radius * 0.95);
+    ctx.lineTo(sx - radius * 0.12, y - radius * 0.55);
+    ctx.lineTo(sx + radius * 0.12, y - radius * 0.55);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  // Darker underside + glossy highlight — the same treatment every fish
+  // body already gets.
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
+  ctx.beginPath();
+  ctx.ellipse(x, y + radius * 0.32, radius * 0.8, radius * 0.35, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.28)';
+  ctx.beginPath();
+  ctx.ellipse(x - facing * radius * 0.28, y - radius * 0.35, radius * 0.32, radius * 0.18, -0.3 * facing, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  ctx.ellipse(x, y, radius * 1.05, radius * 0.85, 0, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // Menacing red eyes on top of everything else.
+  ctx.fillStyle = '#ff5b5b';
+  ctx.beginPath();
+  ctx.arc(x - radius * 0.32, y - radius * 0.15, radius * 0.16, 0, Math.PI * 2);
+  ctx.arc(x + radius * 0.32, y - radius * 0.15, radius * 0.16, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.restore();
+}
+
 // Cursor changes to match the active tool — a hammer for Demolish, a glove
 // for the new Merge tool — per direct request. Built as a small inline SVG
 // data-URI cursor (an emoji rendered onto a tiny canvas-less SVG) rather
@@ -739,7 +995,9 @@ function circleCursorCss(color) {
 const CURSOR_BY_TOOL = { demolish: emojiCursorCss('🔨'), merge: emojiCursorCss('🧤'), food: circleCursorCss(FOOD_COLOR) };
 let lastCursorTool = null;
 function updateCanvasCursor() {
-  const cursorKey = CURSOR_BY_TOOL[state.ui.selectedTool] ? state.ui.selectedTool : 'default';
+  const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
+  const effectiveTool = effectiveToolAt(world.y);
+  const cursorKey = CURSOR_BY_TOOL[effectiveTool] ? effectiveTool : 'default';
   if (cursorKey === lastCursorTool) return;
   lastCursorTool = cursorKey;
   canvas.style.cursor = CURSOR_BY_TOOL[cursorKey] || '';
@@ -769,17 +1027,28 @@ function render() {
   renderMound(ctx, state);
   renderScienceLab(ctx, state);
 
+  // Shared by every ghost-preview branch below, and — via effectiveToolAt —
+  // what makes a Build/Demolish tool's ghost simply not show at all while
+  // hovering open water (no branch below ever matches 'food', so the chain
+  // falls through with nothing drawn, exactly matching the plain Food
+  // tool's own "just the cursor, no ghost" look — see effectiveToolAt's
+  // own comment for the full rationale).
+  const hoverWorld = input.mouse.inside ? screenToWorld(input.mouse.x, input.mouse.y, state.camera) : null;
+  const hoverEffectiveTool = hoverWorld ? effectiveToolAt(hoverWorld.y) : state.ui.selectedTool;
+
   if (isFanAimingActive() && input.mouse.inside && !state.ui.paused) {
     // Click 1 already happened — the ghost stays fixed at the armed cell
     // and only its aim rotates with the cursor, until click 2 confirms it.
-    const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
-    const angle = angleFromTileToPoint(fanAimingCell.col, fanAimingCell.row, world.x, world.y);
+    // Deliberately NOT gated by hoverEffectiveTool — aiming an already-armed
+    // Fan up into open water is normal and its ghost should still track the
+    // cursor there, same reasoning as the click handler's own click-2 path.
+    const angle = angleFromTileToPoint(fanAimingCell.col, fanAimingCell.row, hoverWorld.x, hoverWorld.y);
     const cellCenterX = fanAimingCell.col * TILE_SIZE + TILE_SIZE / 2;
     const cellCenterY = fanAimingCell.row * TILE_SIZE + TILE_SIZE / 2;
     renderBuildGhost(ctx, state, cellCenterX, cellCenterY, fanAimingCell.buildingId, angle);
-  } else if (state.ui.selectedTool.startsWith('build:') && input.mouse.inside && !state.ui.paused) {
-    const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
-    const buildingId = state.ui.selectedTool.slice('build:'.length);
+  } else if (hoverEffectiveTool.startsWith('build:') && input.mouse.inside && !state.ui.paused) {
+    const world = hoverWorld;
+    const buildingId = hoverEffectiveTool.slice('build:'.length);
     const { col, row } = worldToTile(world.x, world.y);
     const angle = angleFromTileToPoint(col, row, world.x, world.y);
     // showCone: false — this is the plain-hover phase, before a Fan's
@@ -791,14 +1060,14 @@ function render() {
     // around while trying to choose the fan location") no cone shows until
     // the location itself is actually confirmed.
     renderBuildGhost(ctx, state, world.x, world.y, buildingId, angle, false);
-  } else if (state.ui.selectedTool === 'demolish' && input.mouse.inside && !state.ui.paused) {
+  } else if (hoverEffectiveTool === 'demolish' && input.mouse.inside && !state.ui.paused) {
     // Ghost-mode preview of whatever's under the cursor, plus the refund
     // it'll pay out — TILE_REFUND_FRACTION is 1.0 (a full refund) per
     // direct request, since removal now requires deliberately picking this
     // tool rather than being an always-available right-click. Refund is read
     // off the tile's current live/dynamic cost (getBuildingCost), matching
     // what removeTile actually pays out — see Grid.js's comment there.
-    const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
+    const world = hoverWorld;
     const { col, row } = worldToTile(world.x, world.y);
     const tile = getTile(state.level.grid, col, row);
     if (tile && tile !== TILE_EMPTY) {
@@ -1057,27 +1326,34 @@ function render() {
     const bounceProgress = 1 - flashFrac; // 0 (just hit) -> 1 (flash fully decayed)
     const bounceScaleMul = alien.hitFlashMs > 0 ? 1 + ALIEN_HIT_BOUNCE_SCALE * Math.sin(bounceProgress * Math.PI) : 1;
     const radius = baseRadius * bounceScaleMul;
-    ctx.beginPath();
-    ctx.fillStyle = flashFrac > 0 ? lerpRgbToString(ALIEN_COLOR_RGB, ALIEN_HIT_FLASH_COLOR, flashFrac) : ALIEN_COLOR;
-    ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
-    ctx.lineWidth = 1.5;
-    ctx.stroke();
-    ctx.fillStyle = '#ff5b5b'; // a couple of menacing eye dots so it doesn't read as a plain blob
-    ctx.beginPath();
-    ctx.arc(pos.x - radius * 0.32, pos.y - radius * 0.15, radius * 0.16, 0, Math.PI * 2);
-    ctx.arc(pos.x + radius * 0.32, pos.y - radius * 0.15, radius * 0.16, 0, Math.PI * 2);
-    ctx.fill();
+    const color = flashFrac > 0 ? lerpRgbToString(ALIEN_COLOR_RGB, ALIEN_HIT_FLASH_COLOR, flashFrac) : ALIEN_COLOR;
+    const facing = alien.vx >= 0 ? 1 : -1;
+    drawAlienBody(ctx, pos.x, pos.y, radius, facing, color);
 
     const barW = ALIEN_HEALTH_BAR_WIDTH * state.camera.zoom;
     const barH = ALIEN_HEALTH_BAR_HEIGHT * state.camera.zoom;
     const barX = pos.x - barW / 2;
-    const barY = pos.y - baseRadius - barH - 6;
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-    ctx.fillRect(barX, barY, barW, barH);
-    ctx.fillStyle = '#ff4d4d';
-    ctx.fillRect(barX, barY, barW * Math.max(0, alien.hp / alien.maxHp), barH);
+    const barY = pos.y - baseRadius - barH - 8;
+    const barRadius = barH / 2;
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(barX, barY, barW, barH, barRadius);
+    ctx.fillStyle = 'rgba(20, 8, 8, 0.65)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+    ctx.lineWidth = Math.max(0.5, 0.6 * state.camera.zoom);
+    ctx.stroke();
+    const hpFrac = Math.max(0, alien.hp / alien.maxHp);
+    if (hpFrac > 0) {
+      ctx.beginPath();
+      ctx.roundRect(barX, barY, Math.max(barH, barW * hpFrac), barH, barRadius);
+      const barGradient = ctx.createLinearGradient(barX, barY, barX, barY + barH);
+      barGradient.addColorStop(0, '#ff9a8a');
+      barGradient.addColorStop(1, '#e0392b');
+      ctx.fillStyle = barGradient;
+      ctx.fill();
+    }
+    ctx.restore();
   }
 
   // Turret projectiles — a small bright bolt plus a short motion trail
@@ -1219,6 +1495,43 @@ function render() {
     ctx.textAlign = 'center';
     ctx.fillText(state.ui.buildErrorText, input.mouse.x, input.mouse.y - 22);
     ctx.restore();
+  }
+
+  // Cinematic first-alien intro spotlight — per direct request: "overlay
+  // semi transparent black over the whole screen except for a circle
+  // around the new alien." Drawn last, on top of literally everything else
+  // in this render pass. A radial gradient (not a hard-edged circle) for
+  // the "hole" reads as a genuine spotlight with a soft edge rather than a
+  // cookie-cutter cutout.
+  if (state.level.firstAlienIntroActive) {
+    const alien = state.level.entities.find(
+      (e) => e.id === state.level.firstAlienIntroTargetId && e.type === 'alien' && e.hp > 0
+    );
+    if (alien) {
+      const pos = worldToScreen(alien.x, alien.y, state.camera);
+      const holeRadius = ALIEN_RADIUS * state.camera.zoom * 3.2;
+      ctx.save();
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.globalCompositeOperation = 'destination-out';
+      const holeGradient = ctx.createRadialGradient(pos.x, pos.y, holeRadius * 0.55, pos.x, pos.y, holeRadius);
+      holeGradient.addColorStop(0, 'rgba(0, 0, 0, 1)');
+      holeGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = holeGradient;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, holeRadius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      ctx.save();
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 22px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+      ctx.shadowBlur = 8;
+      ctx.fillText('An alien! Click it to fight back.', canvas.width / 2, 70);
+      ctx.restore();
+    }
   }
 
   updateHUD(state);

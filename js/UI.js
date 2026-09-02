@@ -35,6 +35,10 @@ import {
   COIN_CAP_UPGRADE_COSTS,
   COIN_CAP_UPGRADE_MAX_LEVEL,
   SCIENCE_CAP_BY_LEVEL,
+  WORLD_W,
+  WORLD_H,
+  TILE_SIZE,
+  POST_ALIEN_TUTORIAL_MESSAGE,
   SPECIES,
   WASTE_POOP_INTERVAL_MS,
   FISH_SPEED_MULTIPLIER,
@@ -191,9 +195,14 @@ export function initUI(state) {
     alienCountdown: document.getElementById('alien-countdown'),
     alienCountdownSeconds: document.getElementById('alien-countdown-seconds'),
     scrollHint: document.getElementById('scroll-hint'),
+    pauseToggleBtn: document.getElementById('pause-toggle-btn'),
+    buildLegend: document.getElementById('build-legend'),
+    tutorialOverlay: document.getElementById('tutorial-overlay'),
+    tutorialText: document.getElementById('tutorial-text'),
     powerGraphCanvas: document.getElementById('hud-power-graph-canvas'),
     shopPanel: document.getElementById('shop-panel'),
     shopCollapseBtn: document.getElementById('shop-collapse-btn'),
+    shopMoney: document.getElementById('shop-money'),
     shopGrid: document.getElementById('shop-species-grid'),
     previewEmpty: document.getElementById('shop-preview-empty'),
     previewContent: document.getElementById('shop-preview-content'),
@@ -332,8 +341,26 @@ export function initUI(state) {
   // that happened to land on an eligible fish regardless of tool.
   els.toolMergeBtn.addEventListener('click', () => selectTool(state, 'merge'));
 
-  els.shopCollapseBtn.addEventListener('click', () => toggleShopCollapse(state));
-  els.tankCollapseBtn.addEventListener('click', () => toggleTankPanel(state));
+  els.shopCollapseBtn.addEventListener('click', () => {
+    toggleShopCollapse(state);
+    // Guided tutorials that stop on this exact button (game-start and
+    // post-alien flows both open with "click the Shop") advance the moment
+    // it's actually open — see advanceTutorialFlow.
+    if (!state.ui.shopCollapsed) {
+      advanceTutorialFlow(state, 'start', 'shop');
+      advanceTutorialFlow(state, 'postalien', 'shop');
+    }
+  });
+  els.tankCollapseBtn.addEventListener('click', () => {
+    toggleTankPanel(state);
+    if (!state.ui.tankPanelCollapsed) advanceTutorialFlow(state, 'tankpoint', 'tankbtn');
+  });
+
+  // Per direct request, the pause menu is opened by a dedicated circular
+  // button now (top-right, below #hud, matching the Shop/Tank Upgrades
+  // toggle style) instead of the Escape key — see main.js's keydown handler
+  // for Escape's new job (cancelling an armed build/demolish/merge tool).
+  els.pauseToggleBtn.addEventListener('click', () => togglePauseMenu(state));
 
   els.pauseResumeBtn.addEventListener('click', () => closePauseMenu(state));
   els.pauseRestartBtn.addEventListener('click', () => restartLevel(state));
@@ -1156,6 +1183,24 @@ export function selectTool(state, tool) {
   updateToolbar(state);
 }
 
+// Called by the Escape key (main.js) — per direct request, replacing the old
+// "Escape opens the pause menu" behavior (see the new #pause-toggle-btn
+// button instead): cancels an actively-armed build/demolish/merge tool and
+// defaults back to Food. A no-op while Food (or a fish) is selected — Escape
+// was only asked to cancel these three. Building selection reuses
+// deselectShopSelection so its preview window clears too, exactly like
+// clicking the same building icon a second time already does; Demolish/
+// Merge have no preview to clear, just the tool itself.
+export function cancelActiveTool(state) {
+  const tool = state.ui.selectedTool;
+  if (tool.startsWith('build:')) {
+    deselectShopSelection(state);
+  } else if (tool === 'demolish' || tool === 'merge') {
+    state.ui.selectedTool = 'food';
+    updateToolbar(state);
+  }
+}
+
 function updateToolbar(state) {
   // Grayed-out + genuinely disabled until there's something to demolish /
   // merging or splicing is unlocked — re-checked every frame (called from
@@ -1248,8 +1293,17 @@ function buildFamilyButton(state, familyId, memberIds) {
       const idx = memberIds.indexOf(currentId);
       familySelectedTier[familyId] = memberIds[(idx + 1) % memberIds.length];
     }
+    // The post-alien guided tutorial's "turret" step always wants the base
+    // Waste Turret specifically ("place the waste turret"), regardless of
+    // which tier this slot happened to be cycled to — force it back to the
+    // family's lowest (first-unlocked) tier rather than whatever the click
+    // above just landed on.
+    if (familyId === 'turret' && state.level.tutorialFlow?.id === 'postalien' && state.level.tutorialFlow.step === 'turret') {
+      familySelectedTier[familyId] = memberIds[0];
+    }
     refreshFamilyButton(state, familyId); // sync dataset.tool to the (possibly just-cycled) tier before selecting it
     selectBuildingForPreview(state, BUILDING_TYPES[familySelectedTier[familyId]]);
+    if (familyId === 'turret') advanceTutorialFlow(state, 'postalien', 'turret');
   });
 
   refreshFamilyButton(state, familyId);
@@ -1432,9 +1486,20 @@ function buildTankPanel(state) {
     state.level.upgrades.coinCapLevel += 1;
     playUpgrade();
     refreshTankPanel(state);
+    // Tank-Point guided tutorial's second (final) step stops on this exact
+    // button — see TUTORIAL_FLOWS. Level 1 costs only 1 Tank Point (see
+    // Config.js's COIN_CAP_UPGRADE_COSTS) specifically so a player who just
+    // earned their very first Tank Point can always afford this.
+    advanceTutorialFlow(state, 'tankpoint', 'coincapbuy');
   });
 
-  els.tankUpgradeList.append(foodQuality.card, fishMovement.card, coinCapacity.card, fishMerging.card);
+  // Fish Merging first, Coin Capacity second — per direct request ("put Gene
+  // Splicing at the top of the tank upgrades" for the first reorder; Fish
+  // Merging is the card actually in this panel that unlocks the same Merge
+  // tool, since Gene-Splicing itself lives in the Science Lab tree now — and
+  // later, "move the Coin capacity tank upgrade to be the second one after
+  // the fish merging").
+  els.tankUpgradeList.append(fishMerging.card, coinCapacity.card, foodQuality.card, fishMovement.card);
 
   // Defensive Capabilities: shown per the design update's Phase 2 UI-shell
   // scope, but locked — there's no alien system to upgrade yet (Phase 5).
@@ -1730,6 +1795,9 @@ function buildShopPanel(state) {
     btn.addEventListener('click', () => {
       if (state.ui.selectedTool === `fish:${species.id}`) deselectShopSelection(state);
       else selectSpeciesForPreview(state, species);
+      // Game-start guided tutorial's second step stops specifically on the
+      // Guppy icon — see TUTORIAL_FLOWS.
+      if (species.id === 'guppy') advanceTutorialFlow(state, 'start', 'guppy');
     });
 
     els.shopGrid.appendChild(btn);
@@ -1877,6 +1945,10 @@ export function updateHUD(state) {
   const money = state.level.money;
   const moneyText = `💰 $${Math.floor(money)}`;
   els.money.textContent = moneyText;
+  // Per direct request, the Shop panel gets its own live money readout back
+  // — the one exception to "the main #hud is the only copy of everything"
+  // above — inline with the "Shop" title (see style.css's #shop-header-row).
+  els.shopMoney.textContent = moneyText;
   const cleanliness = state.level.cleanliness;
   const cleanlinessText = `✨ ${Math.round(cleanliness)}%`;
   els.cleanliness.textContent = cleanlinessText;
@@ -1981,6 +2053,11 @@ export function updateHUD(state) {
 
   updateAlienCountdown(state);
   updateScrollHint(state);
+  updateTutorialOverlay(state);
+  // Build legend — "Click to purchase" / "(Esc) to cancel", shown only while
+  // a building is armed (state.ui.selectedTool starts with 'build:') per
+  // direct request.
+  els.buildLegend.classList.toggle('hidden', !state.ui.selectedTool.startsWith('build:'));
 }
 
 // A row of bouncing down-arrows nudging the player to pan the camera down,
@@ -1998,8 +2075,190 @@ function updateScrollHint(state) {
   if (!state.level.tutorialFlags.hasScrolledDown && state.camera.y > 0) {
     state.level.tutorialFlags.hasScrolledDown = true;
   }
-  const shouldShow = state.level.elapsed >= SCROLL_HINT_DELAY_MS && !state.level.tutorialFlags.hasScrolledDown;
+  // Per direct request, the post-alien guided tutorial's "scroll" step
+  // reuses these same 5 arrows — forced visible regardless of the normal
+  // 10s-delay/hasScrolledDown gating below, since by the time that step is
+  // reached the game may be many minutes in (hasScrolledDown already true
+  // from earlier casual scrolling) and what matters here is whether the
+  // camera is AT THE BOTTOM right now, which main.js's own per-tick check
+  // (isScrolledToBottom) already tracks independently to skip/advance the
+  // step itself — this is purely the visual nudge.
+  const forcedByTutorial = state.level.tutorialFlow?.id === 'postalien' && state.level.tutorialFlow.step === 'scroll';
+  const shouldShow = forcedByTutorial || (state.level.elapsed >= SCROLL_HINT_DELAY_MS && !state.level.tutorialFlags.hasScrolledDown);
   els.scrollHint.classList.toggle('hidden', !shouldShow);
+}
+
+// ---- Guided tutorial flows ----
+// Three short scripted sequences (game-start; the first Tank Point; ~10s
+// after the first alien kill), all built on the same small engine per direct
+// request ("just like the first alien tutorial"). state.level.tutorialFlow
+// is plain data ({ id, step } | null) — whoever detects a flow's trigger
+// condition (main.js at Start, Entities.js's awardTankPoint, Systems.js's
+// updateStoryTriggers) just sets it directly, the same way
+// firstAlienIntroActive is already set directly from wherever it triggers.
+// main.js's update() freezes most systems while any flow is active (camera
+// panning and build-drag placement stay live — see its own comment); the
+// #tutorial-overlay DOM element below does the rest of the "pause" work by
+// PHYSICALLY restricting clicks to the current step's target circle via a
+// live CSS clip-path "hole" (a real browser hit-test punch-through, not a
+// forwarded/synthetic click) — so every step's real action (opening the
+// Shop, clicking a species icon, buying an upgrade, placing a building)
+// fires through its own already-existing, already-proven handler; this
+// engine's only job is telling those handlers when to call
+// advanceTutorialFlow, and drawing the spotlight.
+//
+// getCircle(state) returns { cx, cy, r } in fixed (viewport) CSS pixels, or
+// null if the target isn't currently on screen (e.g. a DOM element that
+// hasn't been built yet) — unifies DOM-element targets (via
+// tutorialCircleForDom, reading a live getBoundingClientRect every frame, so
+// it tracks a CSS transition like the Shop panel's own grow-in animation
+// for free) and world-space targets (via worldToScreen against the live
+// camera, so it tracks camera panning too) under one shape. A step with
+// noSpotlight skips the dark overlay/hole entirely — just the instruction
+// text (and, for the postalien "scroll" step, forces #scroll-hint visible —
+// see updateScrollHint above).
+function tutorialCircleForDom(el, padding = 12) {
+  if (!el) return null;
+  const rect = el.getBoundingClientRect();
+  if (rect.width === 0 && rect.height === 0) return null; // not rendered right now (e.g. a panel that's still collapsed)
+  return { cx: rect.left + rect.width / 2, cy: rect.top + rect.height / 2, r: Math.max(rect.width, rect.height) / 2 + padding };
+}
+
+// World point high in the open-water column — where the game-start
+// tutorial's final step asks the player to click to place their first
+// Guppy. Deliberately near the TOP of the water column rather than dead
+// center: the Shop panel is still open at this point (that's how the
+// player has a fish armed to place at all — see the 'guppy' step before
+// this one), and its fly-out box grows upward from the bottom tool-bar tall
+// enough to cover a good chunk of the screen's vertical middle, which would
+// otherwise visually (and click-wise, since the panel sits above the canvas
+// in stacking order) obscure a spotlight placed at the water column's true
+// midpoint.
+const START_TUTORIAL_FISH_SPOT = { x: WORLD_W / 2, y: SEABED_FLOOR_Y * 0.15 };
+// World point near (but not AT) the left edge of the world's absolute
+// bottom row (needs no Platform anchor — see Grid.js's canPlaceTile/
+// isAnchored) — "the bottom of the tank, just left of and above the shop
+// icon" per direct request. 0.12 * WORLD_W (not a small fixed px offset)
+// deliberately stays clear of two things: the camera's own horizontal
+// centering offset (camera.x = (WORLD_W - viewW) / 2 is often 100+ world px,
+// since the world is usually a little wider than the viewport — see
+// CLAUDE.md's world-shrink note — so a spot within that offset would render
+// OFF-SCREEN to the left entirely), and — since the Shop panel is meant to
+// stay open through this step ("visible with the shop open") — the panel's
+// own fly-out box, which grows upward from its (horizontally-centered-ish)
+// toggle button and can cover a real chunk of the lower-middle screen; a
+// point safely toward the left edge stays clear of it regardless.
+const POST_ALIEN_TURRET_SPOT = { x: WORLD_W * 0.12, y: WORLD_H - TILE_SIZE / 2 };
+
+const TUTORIAL_FLOWS = {
+  start: [
+    { id: 'shop', text: 'Click the Shop to buy your first fish!', getCircle: () => tutorialCircleForDom(els.shopCollapseBtn) },
+    { id: 'guppy', text: 'Pick a Guppy!', getCircle: () => tutorialCircleForDom(els.shopGrid.querySelector('[data-tool="fish:guppy"]')) },
+    {
+      id: 'buyfish',
+      text: 'Click in the tank to place it!',
+      getCircle: (state) => {
+        const screen = worldToScreen(START_TUTORIAL_FISH_SPOT.x, START_TUTORIAL_FISH_SPOT.y, state.camera);
+        return { cx: screen.x, cy: screen.y, r: 90 };
+      },
+    },
+  ],
+  tankpoint: [
+    { id: 'tankbtn', text: 'Open Tank Upgrades to spend your Tank Point!', getCircle: () => tutorialCircleForDom(els.tankCollapseBtn) },
+    { id: 'coincapbuy', text: 'Buy your first Coin Capacity upgrade!', getCircle: () => tutorialCircleForDom(tankCards?.coinCapacity.buyBtn) },
+  ],
+  postalien: [
+    { id: 'shop', text: 'Time to arm up — open the Shop!', getCircle: () => tutorialCircleForDom(els.shopCollapseBtn) },
+    { id: 'turret', text: 'Grab the Waste Turret!', getCircle: () => tutorialCircleForDom(familyButtons.turret?.btn) },
+    { id: 'scroll', text: 'Scroll all the way down to the bottom of the tank!', noSpotlight: true },
+    {
+      id: 'place',
+      text: 'Place the Waste Turret down here!',
+      getCircle: (state) => {
+        const screen = worldToScreen(POST_ALIEN_TURRET_SPOT.x, POST_ALIEN_TURRET_SPOT.y, state.camera);
+        return { cx: screen.x, cy: screen.y, r: 70 };
+      },
+    },
+  ],
+};
+
+// Fires once a flow finishes its last step — id-specific rewards/messages,
+// per direct request. The 'start' flow ends silently (nothing was asked for
+// beyond the fish itself getting placed).
+function onTutorialFlowComplete(state, id) {
+  if (id === 'tankpoint') {
+    // Per direct request: after this tutorial, grant one more Tank Point
+    // with its own chat message — deliberately NOT routed through
+    // awardTankPoint (that's a per-fish-growth award with its own
+    // "isFirst" bookkeeping this isn't part of).
+    state.level.tankPoints.total += 1;
+    state.level.tankPoints.available += 1;
+    const notifications = state.level.notifications;
+    notifications.push({ id: notifications.length + 1, text: "Here's an extra tank point, don't spend it all in one place", elapsed: state.level.elapsed });
+    if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
+  } else if (id === 'postalien') {
+    const notifications = state.level.notifications;
+    notifications.push({ id: notifications.length + 1, text: POST_ALIEN_TUTORIAL_MESSAGE, elapsed: state.level.elapsed });
+    if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
+  }
+}
+
+// Starts (or continues) a guided flow — exported for main.js to call once at
+// game start ('start' id) and after a successful turret placement
+// ('postalien' id's final step, since that's detected in main.js's
+// updateBuildDrag, not a DOM click UI.js already owns a handler for).
+// Idempotent no-op if the flow/step doesn't match what's currently active,
+// so every call site can just call this unconditionally after its own real
+// action succeeds, with no need to check state.level.tutorialFlow itself.
+export function advanceTutorialFlow(state, id, step) {
+  const flow = state.level.tutorialFlow;
+  if (!flow || flow.id !== id || flow.step !== step) return;
+  const steps = TUTORIAL_FLOWS[id];
+  const idx = steps.findIndex((s) => s.id === step);
+  const next = steps[idx + 1];
+  if (next) {
+    flow.step = next.id;
+  } else {
+    state.level.tutorialFlow = null;
+    onTutorialFlowComplete(state, id);
+  }
+}
+
+// Called every frame (from updateHUD) — positions/shows the spotlight for
+// whatever step is currently active, or hides everything if no flow is
+// running.
+function updateTutorialOverlay(state) {
+  const flow = state.level.tutorialFlow;
+  if (!flow) {
+    els.tutorialOverlay.classList.add('hidden');
+    els.tutorialText.classList.add('hidden');
+    return;
+  }
+  const stepDef = TUTORIAL_FLOWS[flow.id].find((s) => s.id === flow.step);
+  if (!stepDef) return; // defensive — shouldn't happen
+  els.tutorialText.textContent = stepDef.text;
+  els.tutorialText.classList.remove('hidden');
+  if (stepDef.noSpotlight) {
+    els.tutorialOverlay.classList.add('hidden');
+    return;
+  }
+  const circle = stepDef.getCircle(state);
+  if (!circle) { els.tutorialOverlay.classList.add('hidden'); return; }
+  els.tutorialOverlay.classList.remove('hidden');
+  const { cx, cy, r } = circle;
+  const w = window.innerWidth;
+  const h = window.innerHeight;
+  // A real hole, not just a visual one: an SVG path covering the full
+  // viewport rect MINUS the target circle, evenodd-filled — clip-path
+  // restricts both rendering AND pointer hit-testing to the clipped-IN
+  // region, so a click inside the circle passes straight through to
+  // whatever real element sits underneath (the actual Shop button, the
+  // canvas, etc.), while a click anywhere else in the darkened area never
+  // reaches anything below it at all. No synthetic-event forwarding needed.
+  const path =
+    `M0,0 H${w} V${h} H0 Z ` +
+    `M${cx - r},${cy} A${r},${r} 0 1,0 ${cx + r},${cy} A${r},${r} 0 1,0 ${cx - r},${cy} Z`;
+  els.tutorialOverlay.style.clipPath = `path(evenodd, "${path}")`;
 }
 
 // Alien Invasion: the top-of-screen countdown banner, per direct request —
