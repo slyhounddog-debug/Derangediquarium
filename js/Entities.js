@@ -691,14 +691,12 @@ export function findFishAt(state, worldX, worldY, excludeId = null) {
   return best;
 }
 
-// Whether a fish is a legal SOURCE for starting a combine-drag: fish merging
-// itself has to be unlocked (state.level.upgrades.fishMergingUnlocked — a
-// one-time Tank Upgrade purchase, not a Tier unlock any more, see Config.js's
-// FISH_MERGING_UNLOCK_COST), the fish an economy species, Adult, and not
-// already at the combining cap (a Tier-4 fish has nothing left to combine
-// into).
+// Whether a fish is a legal SOURCE for starting a combine-drag — always
+// available now, per direct request (the old fishMergingUnlocked Tank
+// Upgrade gate is gone entirely): the fish just needs to be an economy
+// species, Adult, and not already at the combining cap (a Tier-4 fish has
+// nothing left to combine into).
 export function isCombinableFish(state, fish) {
-  if (!state.level.upgrades.fishMergingUnlocked) return false;
   if (!fish || fish.type !== 'fish') return false;
   if (!ECONOMY_SPECIES_IDS.includes(fish.speciesId)) return false;
   const def = SPECIES[fish.speciesId];
@@ -871,6 +869,60 @@ export function spliceFish(state, utilityFish, targetFish) {
     pushStoryNotification(state, FIRST_SPLICE_MESSAGE);
   }
   return hybrid;
+}
+
+// The first pair of two fish currently on screen that could legally be
+// combined (or null) — per direct request, drives both the Merge tool's
+// grayed-out/available state (via hasAnyMergeOpportunity below) and the
+// first-time merge guided tutorial's trigger (Systems.js's
+// updateMergeTutorialTrigger) and its target-pair spotlight (see
+// resolveMergeTutorialPair below). O(n^2) over the fish on screen, same
+// cost class as this game's other per-tick pairwise scans (e.g. Grid.js's
+// item collision resolution) — the fish count is small enough this is
+// never a real expense.
+export function findCombinablePair(state) {
+  const fish = state.level.entities.filter((e) => e.type === 'fish');
+  for (let i = 0; i < fish.length; i++) {
+    for (let j = i + 1; j < fish.length; j++) {
+      if (canCombineFish(state, fish[i], fish[j])) return [fish[i], fish[j]];
+    }
+  }
+  return null;
+}
+
+// Whether ANY two fish on screen could currently be combined OR spliced —
+// the Merge tool handles both interactions, so its availability has to
+// cover both, not just combining (see UI.js's isMergeToolAvailable).
+export function hasAnyMergeOpportunity(state) {
+  if (findCombinablePair(state)) return true;
+  const fish = state.level.entities.filter((e) => e.type === 'fish');
+  for (const a of fish) {
+    for (const b of fish) {
+      if (a.id !== b.id && canSpliceFish(state, a, b)) return true;
+    }
+  }
+  return false;
+}
+
+// Resolves the two fish the first-time merge guided tutorial's "drag" step
+// should spotlight — locks onto whichever pair `findCombinablePair` first
+// found (state.level.mergeTutorialTargetIds, just the two fish ids) rather
+// than re-picking fresh every frame, same "don't let a newly-eligible pair
+// steal the spotlight mid-step" fix already applied to the waste-drag
+// tutorial (see Grid.js's findNearestWasteTurretAndWaste for the identical
+// reasoning). Falls back to a fresh pick if the locked pair is no longer
+// valid (one of them merged with something else, died, etc.).
+export function resolveMergeTutorialPair(state) {
+  const ids = state.level.mergeTutorialTargetIds;
+  if (ids) {
+    const a = state.level.entities.find((e) => e.id === ids[0] && e.type === 'fish');
+    const b = state.level.entities.find((e) => e.id === ids[1] && e.type === 'fish');
+    if (a && b && canCombineFish(state, a, b)) return [a, b];
+    state.level.mergeTutorialTargetIds = null;
+  }
+  const pair = findCombinablePair(state);
+  if (pair) state.level.mergeTutorialTargetIds = [pair[0].id, pair[1].id];
+  return pair;
 }
 
 // While item.y < SEABED_FLOOR_Y it's still in open water — gravity plus any

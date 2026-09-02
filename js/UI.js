@@ -21,7 +21,6 @@ import {
   NOTIFICATION_LOG_MAX,
   BUILDING_FAMILIES,
   BUILDING_TYPES,
-  FISH_MERGING_UNLOCK_COST,
   CLEANLINESS_MAX,
   CLEANLINESS_COLOR_CLEAN,
   CLEANLINESS_COLOR_DIRTY,
@@ -42,7 +41,6 @@ import {
   SPECIES,
   WASTE_POOP_INTERVAL_MS,
   FISH_SPEED_MULTIPLIER,
-  GENE_SPLICING_LAB_ID,
   ALIEN_COUNTDOWN_START_MS,
   CAP_WARNING_THRESHOLD_FRACTION,
   TURRET_STATS,
@@ -51,7 +49,7 @@ import {
   WASTE_TURRET_MAX_WASTE,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings, loadLevel } from './Levels.js';
-import { getFishPurchaseCost, effectiveCoinCapacity, effectiveScienceCapacity, countTankItemsByType } from './Entities.js';
+import { getFishPurchaseCost, effectiveCoinCapacity, effectiveScienceCapacity, countTankItemsByType, hasAnyMergeOpportunity, resolveMergeTutorialPair } from './Entities.js';
 import { getTile, worldToTile, getBuildingCost, FAN_STATS, hasAnyBuildingPlaced, findNearestWasteTurretAndWaste } from './Grid.js';
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
@@ -193,6 +191,7 @@ export function initUI(state) {
     scrollHint: document.getElementById('scroll-hint'),
     pauseToggleBtn: document.getElementById('pause-toggle-btn'),
     buildLegend: document.getElementById('build-legend'),
+    buildLegendPurchase: document.getElementById('build-legend-purchase'),
     tutorialSkipLegend: document.getElementById('tutorial-skip-legend'),
     tutorialOverlay: document.getElementById('tutorial-overlay'),
     tutorialText: document.getElementById('tutorial-text'),
@@ -325,8 +324,13 @@ export function initUI(state) {
   els.toolDemolishBtn.addEventListener('click', () => selectTool(state, 'demolish'));
   // Merge tool (🧤) — combining/splicing fish now requires this to be
   // selected first, per direct request, instead of firing on any mousedown
-  // that happened to land on an eligible fish regardless of tool.
-  els.toolMergeBtn.addEventListener('click', () => selectTool(state, 'merge'));
+  // that happened to land on an eligible fish regardless of tool. Also the
+  // first-time merge tutorial's own 'switch' step target — a no-op unless
+  // that exact flow/step is currently active, so safe to call unconditionally.
+  els.toolMergeBtn.addEventListener('click', () => {
+    selectTool(state, 'merge');
+    advanceTutorialFlow(state, 'mergefish', 'switch');
+  });
 
   els.shopCollapseBtn.addEventListener('click', () => {
     toggleShopCollapse(state);
@@ -1172,8 +1176,18 @@ function restartLevel(state) {
 export function isDemolishToolAvailable(state) {
   return hasAnyBuildingPlaced(state) && !state.level.tutorialFlow;
 }
+// Per direct request, merging is always available now (no Tank Upgrade
+// gate any more) — the Merge tool instead grays out based on live board
+// state: is there actually a combinable or spliceable pair on screen right
+// now (Entities.js's hasAnyMergeOpportunity)? Blocked during any OTHER
+// guided tutorial (same reasoning as isDemolishToolAvailable — a stray
+// selection mid-flow could strand a later step), but NOT during the
+// first-time merge tutorial's own flow, which needs to select this exact
+// tool as its whole first step.
 export function isMergeToolAvailable(state) {
-  return (state.level.upgrades.fishMergingUnlocked || state.meta.labUpgradesPurchased.includes(GENE_SPLICING_LAB_ID)) && !state.level.tutorialFlow;
+  const flow = state.level.tutorialFlow;
+  const blockedByOtherTutorial = flow && flow.id !== 'mergefish';
+  return hasAnyMergeOpportunity(state) && !blockedByOtherTutorial;
 }
 
 export function selectTool(state, tool) {
@@ -1204,8 +1218,8 @@ export function cancelActiveTool(state) {
 
 function updateToolbar(state) {
   // Grayed-out + genuinely disabled until there's something to demolish /
-  // merging or splicing is unlocked — re-checked every frame (called from
-  // updateHUD) so a building placed/removed or an upgrade just bought takes
+  // merge or splice — re-checked every frame (called from updateHUD) so a
+  // building placed/removed or the board's mergeable fish changes takes
   // effect immediately, not just the next time a tool happens to be picked.
   // Resolved BEFORE reading state.ui.selectedTool below, so if the
   // currently-selected tool just became unavailable (e.g. the last building
@@ -1217,7 +1231,12 @@ function updateToolbar(state) {
   els.toolDemolishBtn.disabled = !demolishAvailable;
   els.toolMergeBtn.disabled = !mergeAvailable;
   if (state.ui.selectedTool === 'demolish' && !demolishAvailable) state.ui.selectedTool = 'food';
-  if (state.ui.selectedTool === 'merge' && !mergeAvailable) state.ui.selectedTool = 'food';
+  // Merge deliberately does NOT auto-revert to Food the moment it becomes
+  // unavailable — per direct request ("don't force the player off the tool
+  // if they merge the last mergeable fish"). The button above still reads
+  // disabled/grayed in that moment; the tool just stays armed and ready in
+  // case a new mergeable pair appears again shortly after (a fish growing
+  // to Adult, say), rather than making the player reselect it.
 
   const foodSelected = state.ui.selectedTool === 'food';
   const demolishSelected = state.ui.selectedTool === 'demolish';
@@ -1443,20 +1462,7 @@ function buildTankPanel(state) {
   const foodQuality = createUpgradeCard('Food Quality', '🍽️');
   const fishMovement = createUpgradeCard('Fish Movement', '🏊');
   const coinCapacity = createUpgradeCard('Coin Capacity', '🪙');
-  const fishMerging = createUpgradeCard('Fish Merging', '🧬');
-  tankCards = { foodQuality, fishMovement, coinCapacity, fishMerging };
-
-  // A one-time unlock, not a leveled ladder like the three above — per
-  // direct request, drag-to-combine (Entities.js's isCombinableFish) is now
-  // gated on this Tank Upgrade purchase instead of any Tier.
-  fishMerging.buyBtn.addEventListener('click', () => {
-    if (state.level.upgrades.fishMergingUnlocked) return;
-    if (state.level.tankPoints.available < FISH_MERGING_UNLOCK_COST) return;
-    state.level.tankPoints.available -= FISH_MERGING_UNLOCK_COST;
-    state.level.upgrades.fishMergingUnlocked = true;
-    playUpgrade();
-    refreshTankPanel(state);
-  });
+  tankCards = { foodQuality, fishMovement, coinCapacity };
 
   foodQuality.buyBtn.addEventListener('click', () => {
     const level = state.level.upgrades.foodQuality;
@@ -1494,13 +1500,11 @@ function buildTankPanel(state) {
     advanceTutorialFlow(state, 'tankpoint', 'coincapbuy');
   });
 
-  // Fish Merging first, Coin Capacity second — per direct request ("put Gene
-  // Splicing at the top of the tank upgrades" for the first reorder; Fish
-  // Merging is the card actually in this panel that unlocks the same Merge
-  // tool, since Gene-Splicing itself lives in the Science Lab tree now — and
-  // later, "move the Coin capacity tank upgrade to be the second one after
-  // the fish merging").
-  els.tankUpgradeList.append(fishMerging.card, coinCapacity.card, foodQuality.card, fishMovement.card);
+  // Fish Merging's own card is gone entirely — per direct request, merging
+  // is always available now, no Tank Upgrade purchase needed (see
+  // Entities.js's isCombinableFish). Coin Capacity kept its position at the
+  // top of the list from the reorder that used to put Fish Merging there.
+  els.tankUpgradeList.append(coinCapacity.card, foodQuality.card, fishMovement.card);
 
   // Defensive Capabilities: shown per the design update's Phase 2 UI-shell
   // scope, but locked — there's no alien system to upgrade yet (Phase 5).
@@ -1519,7 +1523,7 @@ function buildTankPanel(state) {
 // state can all change while the player has it open.
 function refreshTankPanel(state) {
   if (!tankCards) return;
-  const { foodQuality, fishMovement, coinCapacity, fishMerging } = tankCards;
+  const { foodQuality, fishMovement, coinCapacity } = tankCards;
   const available = state.level.tankPoints.available;
 
   const fqLevel = state.level.upgrades.foodQuality;
@@ -1556,18 +1560,6 @@ function refreshTankPanel(state) {
     const cost = COIN_CAP_UPGRADE_COSTS[ccLevel];
     coinCapacity.buyBtn.textContent = `${cost} 🏆`;
     coinCapacity.buyBtn.disabled = available < cost;
-  }
-
-  const merged = state.level.upgrades.fishMergingUnlocked;
-  fishMerging.levelEl.textContent = merged ? 'Unlocked' : 'Locked';
-  fishMerging.descEl.textContent =
-    'Lets you drag one Adult economy fish (Guppy/Dartfin/Blimpfish) onto another matching one to combine them into a bigger, shinier, more valuable fish.';
-  if (merged) {
-    fishMerging.buyBtn.textContent = 'Unlocked';
-    fishMerging.buyBtn.disabled = true;
-  } else {
-    fishMerging.buyBtn.textContent = `Unlock — ${FISH_MERGING_UNLOCK_COST} 🏆`;
-    fishMerging.buyBtn.disabled = available < FISH_MERGING_UNLOCK_COST;
   }
 
   els.tankPointsDisplay.textContent = `🏆 ${available}`;
@@ -2071,9 +2063,17 @@ export function updateHUD(state) {
   // TUTORIAL_FLOWS' own comment), it skips the tutorial instead, so showing
   // "Esc to cancel" here would be actively misleading; the skip legend
   // below covers that case instead.
+  //
+  // Per a later direct request, the Merge tool also shows this legend
+  // while selected — cancelActiveTool already sends Escape back to Food
+  // from Merge, same as Demolish/a build tool — but ONLY the "(Esc) to
+  // cancel" half, since nothing is being purchased via Merge; the "Click to
+  // purchase" span is hidden in that case (buildLegendPurchase).
   const tutorialActive = !!state.level.tutorialFlow;
   const toolIsPurchasable = state.ui.selectedTool.startsWith('build:') || state.ui.selectedTool.startsWith('fish:');
-  els.buildLegend.classList.toggle('hidden', tutorialActive || !toolIsPurchasable);
+  const mergeSelected = state.ui.selectedTool === 'merge';
+  els.buildLegend.classList.toggle('hidden', tutorialActive || !(toolIsPurchasable || mergeSelected));
+  els.buildLegendPurchase.classList.toggle('hidden', !toolIsPurchasable);
   // Tutorial-skip legend — "(Esc) to skip tutorial" — shown for the whole
   // duration of any guided tutorial flow, per direct request; main.js's
   // Escape handler now actually honors this (see its own comment).
@@ -2205,6 +2205,22 @@ function wasteDragStepCircle(state) {
   return { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, r };
 }
 
+// The first-time merge guided tutorial's "drag" step spotlight — a circle
+// encompassing BOTH locked-in target fish (Entities.js's
+// resolveMergeTutorialPair, same locking rationale as wasteDragStepCircle's
+// own target above). Padding is a bit larger than the waste/turret case
+// since fish are bigger and keep swimming around inside the circle, not
+// sitting still. Returns null (hides the spotlight) if the locked pair is
+// gone and no fresh combinable pair exists to fall back to.
+function mergeFishStepCircle(state) {
+  const pair = resolveMergeTutorialPair(state);
+  if (!pair) return null;
+  const a = worldToScreen(pair[0].x, pair[0].y, state.camera);
+  const b = worldToScreen(pair[1].x, pair[1].y, state.camera);
+  const r = Math.hypot(a.x - b.x, a.y - b.y) / 2 + 60;
+  return { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, r };
+}
+
 const TUTORIAL_FLOWS = {
   // The cinematic first-alien intro — per direct report, unified onto this
   // exact same engine ("the tutorial event... seemed different") instead of
@@ -2285,6 +2301,16 @@ const TUTORIAL_FLOWS = {
   wastedrag: [
     { id: 'drag', text: 'Drag the Waste into the Turret!', tool: 'food', getCircle: wasteDragStepCircle },
   ],
+  // Fires the first time two Adult, same-species-and-star-tier fish exist on
+  // screen at once (Systems.js's updateMergeTutorialTrigger) — per direct
+  // request. 'switch' spotlights the Merge tool button itself; clicking it
+  // (see the button's own click handler) advances to 'drag', which
+  // spotlights the two locked-in target fish and completes the instant a
+  // real combine happens anywhere (main.js's mouseup handler).
+  mergefish: [
+    { id: 'switch', text: 'Two matching fish! Switch to the Merge tool.', tool: 'food', getCircle: () => tutorialCircleForDom(els.toolMergeBtn) },
+    { id: 'drag', text: 'Drag one fish onto the other to merge them!', tool: 'merge', getCircle: mergeFishStepCircle },
+  ],
 };
 
 // Fires once a flow finishes its last step — id-specific rewards/messages,
@@ -2341,6 +2367,13 @@ export function advanceTutorialFlow(state, id, step) {
   // exist by then). See Grid.js's findNearestWasteTurretAndWaste.
   if ((id === 'postalien' && step === 'dragwaste') || (id === 'wastedrag' && step === 'drag')) {
     state.level.wasteDragTutorialTargetId = null;
+  }
+  // The merge-drag step is done — clear its own locked target pair the same
+  // way, so a later fresh trigger of this flow (shouldn't normally happen
+  // since it's one-shot, but matches the same defensive pattern) doesn't
+  // reuse a stale pair.
+  if (id === 'mergefish' && step === 'drag') {
+    state.level.mergeTutorialTargetIds = null;
   }
   const steps = TUTORIAL_FLOWS[id];
   const idx = steps.findIndex((s) => s.id === step);

@@ -310,8 +310,16 @@ input.mouseUpHandlers.push((sx, sy) => {
   const dragged = state.level.entities.find((e) => e.id === draggedFishId);
   const target = findFishAt(state, world.x, world.y, draggedFishId);
   if (dragged && target) {
-    if (canCombineFish(state, dragged, target)) combineFish(state, dragged, target);
-    else if (canSpliceFish(state, dragged, target)) spliceFish(state, dragged, target);
+    if (canCombineFish(state, dragged, target)) {
+      combineFish(state, dragged, target);
+      // The first-time merge guided tutorial's own final step — a no-op
+      // unless that exact flow/step is currently active (see UI.js's
+      // advanceTutorialFlow), so this is safe to call on every ordinary
+      // combine outside the tutorial too.
+      advanceTutorialFlow(state, 'mergefish', 'drag');
+    } else if (canSpliceFish(state, dragged, target)) {
+      spliceFish(state, dragged, target);
+    }
   }
   draggedFishId = null;
 });
@@ -654,6 +662,7 @@ input.keydownHandlers.push((e) => {
   if (e.code === 'Escape' && state.level.tutorialFlow) {
     state.level.tutorialFlow = null;
     state.level.wasteDragTutorialTargetId = null; // clear any locked drag-Waste target — see Grid.js's findNearestWasteTurretAndWaste
+    state.level.mergeTutorialTargetIds = null; // clear any locked merge-tutorial target pair — see Entities.js's resolveMergeTutorialPair
     return;
   }
   // Guided tutorial flows (see UI.js's TUTORIAL_FLOWS) swallow every OTHER

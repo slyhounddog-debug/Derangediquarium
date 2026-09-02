@@ -674,15 +674,6 @@ export const SCIENCE_CAP_BY_LEVEL = [5, 10, 20, 30, 40, 50]; // index 0 = unupgr
 export const SCIENCE_CAP_UPGRADE_SCIENCE_COSTS = [10, 20, 35, 60, 100]; // placeholder balance, tune once real playtesting exists
 export const SCIENCE_CAP_UPGRADE_GOLD_COSTS = [500, 1500, 3500, 7500, 15000];
 
-// Fish Merging (Economy Fish Combining's drag-to-combine interaction) is a
-// Tank Upgrade now, not a Tier unlock — a one-time, unleveled purchase
-// (state.level.upgrades.fishMergingUnlocked, false until bought) rather than
-// a 0-N ladder like the three above. Entities.js's isCombinableFish checks
-// this flag before anything else; dynamic economy-fish pricing itself is
-// unaffected (that was never actually tier-gated in code, only in an older
-// doc pass — see CLAUDE.md) — only the drag-combine interaction is gated.
-export const FISH_MERGING_UNLOCK_COST = 5; // Tank Points, flat, one-time — cut from 10 per direct request
-
 // Defensive Capabilities (click damage/offense vs invading aliens) has no
 // system to upgrade yet — Phase 5 aliens don't exist. The Tank Upgrades
 // panel still shows this as a fourth card (Phase 2 UI shell scope), just

@@ -39,7 +39,7 @@ import {
   SEABED_FLOOR_Y,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings } from './Levels.js';
-import { getFishPurchaseCost } from './Entities.js';
+import { getFishPurchaseCost, findCombinablePair } from './Entities.js';
 import { hasWasteTurretPlaced } from './Grid.js';
 
 const BANKRUPTCY_BAILOUT_MESSAGE =
@@ -113,6 +113,19 @@ function updateAlienIntroTrigger(state) {
   const alien = state.level.entities.find((e) => e.id === state.level.firstAlienIntroTargetId && e.type === 'alien' && e.hp > 0);
   if (!alien) return;
   state.level.tutorialFlow = { id: 'alienintro', step: 'click' };
+}
+
+// Starts the "switch to Merge and drag two matching fish together" guided
+// tutorial (UI.js's TUTORIAL_FLOWS' 'mergefish') the first time two Adult,
+// same-species-and-star-tier fish genuinely exist on screen at once — per
+// direct request. One-shot via tutorialFlags.mergeTutorialShown, deferred
+// (not consumed) while any OTHER tutorial flow is already active, same
+// "just check again next tick" pattern every other trigger here uses.
+function updateMergeTutorialTrigger(state) {
+  if (state.level.tutorialFlags.mergeTutorialShown || state.level.tutorialFlow) return;
+  if (!findCombinablePair(state)) return;
+  state.level.tutorialFlags.mergeTutorialShown = true;
+  state.level.tutorialFlow = { id: 'mergefish', step: 'switch' };
 }
 
 // Starts the post-alien "arm up" guided tutorial (Shop -> Waste Turret ->
@@ -295,4 +308,5 @@ export function updateStoryTriggers(state) {
   updateAlienWaves(state);
   updateAlienIntroTrigger(state);
   updatePostAlienTutorial(state);
+  updateMergeTutorialTrigger(state);
 }
