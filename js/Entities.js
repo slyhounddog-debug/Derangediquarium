@@ -103,7 +103,7 @@ import { stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemFo
 // Sound is a fire-and-forget side effect at the moment something already
 // happened — the same pattern this file already uses for floatingTexts/
 // notifications, just for audio instead of a visual/text readout.
-import { playPurchase, playFoodPlace, playEat, playFishDeath, playCoinBank, playTankPoint, playProductionBlocked, playHunger } from './Sound.js';
+import { playPurchase, playFoodPlace, playEat, playFishDeath, playCoinBank, playTankPoint, playProductionBlocked, playHunger, playAlienHit, playAlienDeath, playDispense } from './Sound.js';
 
 let _nextId = 1;
 function nextId() {
@@ -290,6 +290,7 @@ function updateAlien(alien, state, dtMs) {
     // the alien entity itself (which is removed right here), same
     // independent-particle pattern state.level.floatingTexts already uses.
     state.level.alienDeathEffects.push({ x: alien.x, y: alien.y, age: 0 });
+    playAlienDeath();
     // The very first alien ever killed starts the countdown to the
     // post-alien "arm up" guided tutorial (Systems.js's updateStoryTriggers
     // checks state.level.elapsed against this ALIEN_TUTORIAL_DELAY_MS later).
@@ -1037,6 +1038,7 @@ function updateScience(item, state, dtMs) {
     bankScience(state, 1);
     state.level.floatingTexts.push(createPickupText(item.x, item.y, '+1 🔬', SCIENCE_COLOR));
     state.level.gridStats.itemsRoutedTotal += 1;
+    playDispense(); // a Processor finishing a Science Bubble's hold — the coin equivalent already has its own playCoinBank blip, so this is the "output" sound that path was missing
     return false;
   }
   if (status === 'lost') {
@@ -1554,6 +1556,10 @@ function updateTurretProjectiles(state, dtMs) {
     if (dist <= TURRET_PROJECTILE_HIT_RADIUS) {
       target.hp -= shot.damage;
       target.hitFlashMs = ALIEN_HIT_FLASH_MS; // per direct request — a hit flashes red and "bounces," read back by main.js's render
+      // Only the "still alive" hit sound here — a killing blow instead gets
+      // playAlienDeath from updateAlien's own death branch next tick, so a
+      // fatal hit doesn't fire both sounds on top of each other.
+      if (target.hp > 0) playAlienHit();
       return false; // consumed on impact
     }
     const travel = Math.min(dist, TURRET_PROJECTILE_SPEED * dt);

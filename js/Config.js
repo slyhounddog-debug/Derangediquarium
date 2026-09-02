@@ -1154,7 +1154,10 @@ export const TURRET_STATS = {
 export const WASTE_TURRET_SHOTS_PER_WASTE = 10;
 export const WASTE_TURRET_MAX_WASTE = 5; // -> 50 max stored shots
 export const WASTE_TURRET_MAX_AMMO = WASTE_TURRET_SHOTS_PER_WASTE * WASTE_TURRET_MAX_WASTE;
-export const TURRET_INTAKE_RADIUS = TILE_SIZE * 0.65; // same as COLLECTOR_INTAKE_RADIUS — a Waste item has to genuinely touch the tile to get sucked in as ammo
+// Retired in favor of a real circle-vs-tile touch test (Grid.js's
+// isTouchingBuildingTile) — per direct report, this fixed radius left the
+// tile's own corners (including the top edge) under-covered, so waste
+// resting there wasn't recognized as "touching" even though it visibly was.
 
 // A turret's shot is a real, visible, homing projectile (Entities.js's
 // createTurretProjectile/updateTurretProjectiles) — Grid.js's updateBuildings

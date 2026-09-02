@@ -415,12 +415,13 @@ export function initUI(state) {
 }
 
 // Closes whichever side panel (Shop or Tank Upgrades) is currently open —
-// shared by opening the Science Lab and selecting a bottom-tool-bar tool
-// (see openLabMenu/selectTool below), per direct request: neither the Lab
-// nor an armed tool should have to compete with a panel left open behind
-// it. No sound of its own — whatever triggered the close (opening the Lab,
-// picking a tool) already has its own feedback.
-function closeSidePanels(state) {
+// shared by opening the Science Lab, selecting a bottom-tool-bar tool (see
+// openLabMenu/selectTool below), and main.js's Escape handler, per direct
+// request: neither the Lab, an armed tool, nor Escape should have to
+// compete with a panel left open behind it. No sound of its own — whatever
+// triggered the close (opening the Lab, picking a tool, pressing Escape)
+// already has its own feedback.
+export function closeSidePanels(state) {
   if (!state.ui.shopCollapsed) { state.ui.shopCollapsed = true; updateShopCollapse(state); }
   if (!state.ui.tankPanelCollapsed) { state.ui.tankPanelCollapsed = true; updateTankPanelCollapse(state); }
 }
@@ -914,21 +915,17 @@ function refreshLabPurchaseButton(state) {
 }
 
 // A fish's real stats, in the same compact chip format buildingStatsHtml
-// below already uses for buildings — role, purchase cost, then the shared
-// hunger/coin/waste economy stats (see fishEconomyStatsHtml). Shown
-// identically in the shop preview (selectSpeciesForPreview) and the Science
-// Lab purchase modal (openLabPurchaseModal), per direct request.
+// below already uses for buildings — just the shared hunger/coin/waste
+// economy stats (see fishEconomyStatsHtml). Shown identically in the shop
+// preview (selectSpeciesForPreview) and the Science Lab purchase modal
+// (openLabPurchaseModal). Per direct request ("too much small text in the
+// shop... remove the Role stat line, and the Cost stat line for each fish,
+// since there's other places it says the cost"), Role and Cost are gone —
+// the live price already shows next to the fish's name (refreshPreviewInfo/
+// getFishPurchaseCost), so repeating it here was redundant, and Role wasn't
+// named as useful anywhere else this panel is shown.
 function speciesStatsHtml(speciesId) {
-  const s = SPECIES[speciesId];
-  if (!s) return '';
-  const role = s.behavior.includes('SCAVENGER') ? 'Scavenger'
-    : s.behavior.includes('GENERATOR') ? 'Generator'
-    : s.behavior.includes('RESEARCHER') ? 'Researcher'
-    : 'Feeder';
-  let html = `<div class="building-stat">🎭 Role: <b>${role}</b></div>`;
-  html += `<div class="building-stat">💰 Cost: <b>$${s.cost}</b></div>`;
-  html += fishEconomyStatsHtml(speciesId);
-  return html;
+  return fishEconomyStatsHtml(speciesId);
 }
 
 // Hunger (as food/min, not a raw hunger-points/sec rate — per direct
@@ -1167,13 +1164,18 @@ function restartLevel(state) {
 // Per direct request: Demolish is meaningless with nothing built yet, and
 // Merge is meaningless until either combining or splicing is actually
 // unlocked — both stay grayed out (and genuinely unusable, not just dimmed)
-// until then. Exported so main.js's 1/2/3 hotkeys can check before calling
-// selectTool at all.
+// until then. Also unavailable for the entire duration of any guided
+// tutorial flow — per direct report, a stray Demolish/Merge selection
+// mid-flow (there's nothing stopping a click from reaching the bottom
+// tool-bar during a noSpotlight step like the post-alien flow's "scroll,"
+// which hides the whole overlay) could strand the player on the wrong tool
+// with no way for a later step's own click to ever succeed. Exported so
+// main.js's 1/2/3 hotkeys can check before calling selectTool at all.
 export function isDemolishToolAvailable(state) {
-  return hasAnyBuildingPlaced(state);
+  return hasAnyBuildingPlaced(state) && !state.level.tutorialFlow;
 }
 export function isMergeToolAvailable(state) {
-  return state.level.upgrades.fishMergingUnlocked || state.meta.labUpgradesPurchased.includes(GENE_SPLICING_LAB_ID);
+  return (state.level.upgrades.fishMergingUnlocked || state.meta.labUpgradesPurchased.includes(GENE_SPLICING_LAB_ID)) && !state.level.tutorialFlow;
 }
 
 export function selectTool(state, tool) {
@@ -2183,12 +2185,24 @@ const TUTORIAL_FLOWS = {
       },
     },
   ],
+  // Every step below carries an explicit `tool` — applied the instant that
+  // step becomes active (see startTutorialFlow/advanceTutorialFlow) — per
+  // direct request ("make sure the correct tool is selected at the start of
+  // each step of the tutorial so it can't break where you are stuck on the
+  // wrong tool"). This is what actually fixes the reported break (the post-
+  // alien flow's "scroll" step hides the whole overlay — noSpotlight — so
+  // nothing was stopping a click from reaching the bottom tool-bar and
+  // selecting Demolish there, stranding the following "place" step with no
+  // build tool armed); isDemolishToolAvailable/isMergeToolAvailable also now
+  // refuse Demolish/Merge outright for the whole duration of any flow, so
+  // this is belt-and-suspenders, not the only fix.
   start: [
-    { id: 'shop', text: 'Click the Shop to buy your first fish!', getCircle: () => tutorialCircleForDom(els.shopCollapseBtn) },
-    { id: 'guppy', text: 'Pick a Guppy!', getCircle: () => tutorialCircleForDom(els.shopGrid.querySelector('[data-tool="fish:guppy"]')) },
+    { id: 'shop', text: 'Click the Shop to buy your first fish!', tool: 'food', getCircle: () => tutorialCircleForDom(els.shopCollapseBtn) },
+    { id: 'guppy', text: 'Pick a Guppy!', tool: 'food', getCircle: () => tutorialCircleForDom(els.shopGrid.querySelector('[data-tool="fish:guppy"]')) },
     {
       id: 'buyfish',
       text: 'Click in the tank to place it!',
+      tool: 'fish:guppy',
       getCircle: (state) => {
         const screen = worldToScreen(START_TUTORIAL_FISH_SPOT.x, START_TUTORIAL_FISH_SPOT.y, state.camera);
         return { cx: screen.x, cy: screen.y, r: 90 };
@@ -2196,16 +2210,17 @@ const TUTORIAL_FLOWS = {
     },
   ],
   tankpoint: [
-    { id: 'tankbtn', text: 'Open Tank Upgrades to spend your Tank Point!', getCircle: () => tutorialCircleForDom(els.tankCollapseBtn) },
-    { id: 'coincapbuy', text: 'Buy your first Coin Capacity upgrade!', getCircle: () => tutorialCircleForDom(tankCards?.coinCapacity.buyBtn) },
+    { id: 'tankbtn', text: 'Open Tank Upgrades to spend your Tank Point!', tool: 'food', getCircle: () => tutorialCircleForDom(els.tankCollapseBtn) },
+    { id: 'coincapbuy', text: 'Buy your first Coin Capacity upgrade!', tool: 'food', getCircle: () => tutorialCircleForDom(tankCards?.coinCapacity.buyBtn) },
   ],
   postalien: [
-    { id: 'shop', text: 'Time to arm up — open the Shop!', getCircle: () => tutorialCircleForDom(els.shopCollapseBtn) },
-    { id: 'turret', text: 'Grab the Waste Turret!', getCircle: () => tutorialCircleForDom(familyButtons.turret?.btn) },
-    { id: 'scroll', text: 'Scroll all the way down to the bottom of the tank!', noSpotlight: true },
+    { id: 'shop', text: 'Time to arm up — open the Shop!', tool: 'food', getCircle: () => tutorialCircleForDom(els.shopCollapseBtn) },
+    { id: 'turret', text: 'Grab the Waste Turret!', tool: 'food', getCircle: () => tutorialCircleForDom(familyButtons.turret?.btn) },
+    { id: 'scroll', text: 'Scroll all the way down to the bottom of the tank!', tool: `build:${TILE_TURRET_WASTE}`, noSpotlight: true },
     {
       id: 'place',
       text: 'Place the Waste Turret down here!',
+      tool: `build:${TILE_TURRET_WASTE}`,
       getCircle: (state) => {
         const screen = worldToScreen(POST_ALIEN_TURRET_SPOT.x, POST_ALIEN_TURRET_SPOT.y, state.camera);
         return { cx: screen.x, cy: screen.y, r: 70 };
@@ -2242,6 +2257,13 @@ function onTutorialFlowComplete(state, id) {
 // Idempotent no-op if the flow/step doesn't match what's currently active,
 // so every call site can just call this unconditionally after its own real
 // action succeeds, with no need to check state.level.tutorialFlow itself.
+// Doesn't apply the next step's `tool` itself — updateTutorialOverlay below
+// re-asserts it every frame instead (see that function's own comment), so
+// there's exactly one enforcement path regardless of which module started
+// or advanced the flow (Entities.js/Systems.js both set
+// state.level.tutorialFlow directly, plain data, same as
+// firstAlienIntroActive always has — importing UI.js from either would be
+// circular).
 export function advanceTutorialFlow(state, id, step) {
   const flow = state.level.tutorialFlow;
   if (!flow || flow.id !== id || flow.step !== step) return;
@@ -2268,6 +2290,16 @@ function updateTutorialOverlay(state) {
   }
   const stepDef = TUTORIAL_FLOWS[flow.id].find((s) => s.id === flow.step);
   if (!stepDef) return; // defensive — shouldn't happen
+  // Per direct request ("make sure the correct tool is selected at the
+  // start of each step of the tutorial so it can't break where you are
+  // stuck on the wrong tool") — re-asserted every frame this step is
+  // active, not just once on entry, so it's self-healing the same way
+  // isFanAimingActive() already is: whatever else might have nudged
+  // selectedTool away gets corrected right back on the very next frame.
+  if (stepDef.tool && state.ui.selectedTool !== stepDef.tool) {
+    state.ui.selectedTool = stepDef.tool;
+    updateToolbar(state);
+  }
   els.tutorialText.textContent = stepDef.text;
   els.tutorialText.classList.remove('hidden');
   if (stepDef.noSpotlight) {

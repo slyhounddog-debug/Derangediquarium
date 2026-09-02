@@ -164,13 +164,14 @@ html, body {
 
 /* Build legend — "Click to purchase" / "(Esc) to cancel", shown only while
    a building is armed (state.ui.selectedTool starts with 'build:'), per
-   direct request. Sits just above the fixed bottom tool-bar, same slot
-   #scroll-hint uses (the two are never shown at the same time in practice —
-   scroll-hint only appears before a building would ever be selected, or
-   during a guided tutorial step that has no building armed). */
+   direct request. Moved to top-middle (was just above the fixed bottom
+   tool-bar) per direct follow-up report that it was covering the bottom of
+   the tank — now sits below #alien-countdown/#tutorial-text's own top:14px
+   slot, same "stacked, not overlapping" spacing #pause-toggle-btn uses
+   below #hud. */
 #build-legend {
   position: fixed;
-  bottom: 100px; left: 50%; transform: translateX(-50%);
+  top: 70px; left: 50%; transform: translateX(-50%);
   display: flex; gap: 14px;
   padding: 9px 20px;
   background: linear-gradient(160deg, #fffdf8 0%, #ffe9f4 100%);
@@ -258,15 +259,33 @@ html, body {
   position: fixed;
   bottom: 100px; left: 0; right: 0;
   display: flex;
-  justify-content: center;
-  gap: 44px;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
   pointer-events: none;
   z-index: 14; /* just under #bottom-bar-row's 15, so the toolbar always stays the topmost thing down there */
 }
 #scroll-hint.hidden { display: none; }
+/* "Scroll down" — per direct request, the arrows alone weren't explicit
+   enough. Same pill styling every other short instructional readout in this
+   game already uses (#tutorial-text, #alien-countdown). */
+#scroll-hint-text {
+  padding: 6px 18px;
+  background: linear-gradient(160deg, #fffdf8 0%, #ffe9f4 100%);
+  color: #6b4c6b;
+  font-size: 15px;
+  font-weight: 800;
+  border-radius: 999px;
+  border: 2px solid #ffffff;
+  box-shadow: 0 4px 10px rgba(107, 76, 107, 0.3), inset 0 2px 0 rgba(255, 255, 255, 0.9);
+}
+#scroll-hint-arrows {
+  display: flex;
+  justify-content: center;
+  gap: 44px;
+}
 .scroll-hint-arrow {
   font-size: 28px;
-  color: #ffffff;
   text-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
   animation: scroll-hint-bounce 1s ease-in-out infinite;
 }
@@ -781,9 +800,14 @@ html, body {
   box-shadow: 0 2px 6px rgba(107, 76, 107, 0.2);
 }
 #shop-preview-text { flex: 1; min-width: 0; }
-#shop-preview-name { font-size: 14px; font-weight: 800; color: #c25f8f; }
+/* Per direct request ("there's too much small text in the shop... reduce
+   the amount of text in everything and increase the size of the font") —
+   every size in this preview block bumped up a notch, alongside actually
+   removing text elsewhere (speciesStatsHtml dropping its Role/Cost lines —
+   see UI.js). */
+#shop-preview-name { font-size: 17px; font-weight: 800; color: #c25f8f; }
 #shop-preview-desc {
-  font-size: 11px; line-height: 1.4; opacity: 0.85; margin-top: 2px;
+  font-size: 13px; line-height: 1.4; opacity: 0.85; margin-top: 2px;
   overflow: hidden; /* clip rather than grow the fixed-height box, if a future longer description would otherwise overflow */
 }
 /* No Buy button any more — a fish is armed as the active click-tool exactly
@@ -792,19 +816,19 @@ html, body {
 #shop-preview-hint {
   margin-top: auto; /* pins to the bottom of the fixed-height column no matter how tall the description above it is */
   text-align: center;
-  font-size: 11px; font-weight: 700; opacity: 0.6;
+  font-size: 13px; font-weight: 700; opacity: 0.6;
 }
 /* Processor/Auto-Feeder/Fan stats block — shown instead of/alongside the
    prose description when one of those is previewed, per direct request
    ("show the stats associated with that building"). A small wrapped row of
    compact stat chips rather than a paragraph, so it reads at a glance. */
 #shop-preview-stats {
-  display: flex; flex-wrap: wrap; gap: 4px 8px;
+  display: flex; flex-wrap: wrap; gap: 5px 10px;
   margin-top: 6px;
 }
 #shop-preview-stats.hidden { display: none; }
 .building-stat {
-  font-size: 10.5px;
+  font-size: 13px;
   color: #6b4c6b;
   opacity: 0.85;
 }

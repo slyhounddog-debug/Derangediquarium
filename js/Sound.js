@@ -204,6 +204,69 @@ export function playPanelClose() {
   playTone(493.88, 0.07, { type: 'sine', gain: 0.08, when: 0.04 }); // B4
 }
 
+// A quick descending pitch sweep (real oscillator frequency automation, not
+// two separate tones) — reads as a punchier "pew" than the fixed-pitch
+// playTone building block can produce on its own. Used for the Turret's
+// shot below; kept private (not exported) since nothing else needs it yet.
+function playSweep(freqFrom, freqTo, duration, { type = 'square', gain = 0.14, when = 0 } = {}) {
+  const audioCtx = ensureContext();
+  if (!audioCtx) return;
+  const start = audioCtx.currentTime + when;
+  const end = start + duration;
+  const osc = audioCtx.createOscillator();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freqFrom, start);
+  osc.frequency.exponentialRampToValueAtTime(Math.max(1, freqTo), end);
+  const env = audioCtx.createGain();
+  env.gain.setValueAtTime(0, start);
+  env.gain.linearRampToValueAtTime(gain, start + 0.006);
+  env.gain.setValueAtTime(gain, Math.max(start + 0.006, end - 0.02));
+  env.gain.linearRampToValueAtTime(0, end);
+  osc.connect(env);
+  env.connect(sfxGain);
+  osc.start(start);
+  osc.stop(end + 0.02);
+}
+
+// A quick "pew" — a Turret (any tier) firing a shot.
+export function playTurretShoot() {
+  playSweep(950, 260, 0.08, { type: 'square', gain: 0.1 });
+}
+
+// A short, sharp impact — an alien taking a hit (click damage or a landed
+// Turret projectile) without dying. Distinct from playAlienDeath below —
+// this should read as "hit, still alive," not a defeat.
+export function playAlienHit() {
+  playNoise(0.05, { gain: 0.09 });
+  playTone(180, 0.05, { type: 'sawtooth', gain: 0.08, when: 0.005 });
+}
+
+// A bigger descending burst — an alien actually dying. Louder/longer than
+// playAlienHit, with a genuine low-end resolve so it reads as "defeated,"
+// not just another hit.
+export function playAlienDeath() {
+  playNoise(0.16, { gain: 0.15 });
+  playTone(220, 0.1, { type: 'sawtooth', gain: 0.12, when: 0.02 });
+  playTone(110, 0.16, { type: 'sawtooth', gain: 0.1, when: 0.09 });
+}
+
+// A soft rising whoosh — any item (coin, Science Bubble, Waste) getting
+// pulled into a Processor/Auto-Feeder/Waste Turret's intake. Deliberately
+// quiet/short, since this can fire often in a busy factory.
+export function playIntake() {
+  playSweep(300, 700, 0.07, { type: 'sine', gain: 0.055 });
+}
+
+// A soft falling pop — a Processor/Auto-Feeder actually dispensing/
+// finishing off with something (the Auto-Feeder's Food output; a
+// Processor's Science Bubble finishing its hold — the coin equivalent
+// already has its own dedicated playCoinBank blip, so this doesn't also
+// fire there, to avoid two sounds landing on one event).
+export function playDispense() {
+  playTone(880, 0.05, { type: 'sine', gain: 0.08 });
+  playTone(660, 0.06, { type: 'sine', gain: 0.07, when: 0.04 });
+}
+
 // ---- Background music ----
 // Reworked a third time, per direct request ("I hate it... more melodic,
 // upbeat and adventurous feeling, with more substance, and no random

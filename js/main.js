@@ -66,7 +66,7 @@ import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop
 import { loadLevel, LEVELS } from './Levels.js';
 import { updateStoryTriggers } from './Systems.js';
 import { updateAmbience, renderAmbience } from './Ambience.js';
-import { resumeAudio } from './Sound.js';
+import { resumeAudio, playAlienHit } from './Sound.js';
 import {
   updateEntities,
   trySpawnFood,
@@ -122,6 +122,7 @@ import {
   scheduleShopButtonReminder,
   cancelActiveTool,
   advanceTutorialFlow,
+  closeSidePanels,
 } from './UI.js';
 
 const canvas = document.getElementById('game-canvas');
@@ -415,6 +416,10 @@ input.clickHandlers.push((sx, sy) => {
     if (Math.hypot(entity.x - world.x, entity.y - world.y) <= ALIEN_RADIUS * ALIEN_CLICK_RADIUS_MULTIPLIER) {
       entity.hp -= ALIEN_CLICK_DAMAGE;
       entity.hitFlashMs = ALIEN_HIT_FLASH_MS; // per direct request — a hit flashes red and "bounces," read back by the render loop below
+      // Only the "still alive" hit sound — a killing click instead gets
+      // Entities.js's playAlienDeath from updateAlien's own death branch the
+      // very next tick, so a fatal click doesn't fire both sounds at once.
+      if (entity.hp > 0) playAlienHit();
       // The cinematic first-alien intro (see UI.js's TUTORIAL_FLOWS' 'alienintro'
       // flow) is just this exact same click-damage path with a guided
       // spotlight overlaid on top — during it, the overlay's own clip-path
@@ -468,10 +473,17 @@ input.clickHandlers.push((sx, sy) => {
     return;
   }
 
-  if (isPointOnMound(state, world.x, world.y)) { openMoundMenu(state); return; } // opens the "Throw money at it" popup — see UI.js
-  if (isPointOnScienceLab(state, world.x, world.y)) { openLabMenu(state); return; } // Phase 4 — the Mound's replacement once it's fully shattered
+  // Per direct request: a coin or Science Bubble sitting in front of (i.e.
+  // overlapping) the Mound/Science Lab's own click area gets the click
+  // consumed on IT first — the Mound is ignored entirely that click, not
+  // just deprioritized — so banking something isn't ever mistaken for a
+  // Mound-menu-open because it happened to be resting in the wrong spot.
+  // Checked ahead of the Mound/Lab hit-tests below (previously the other
+  // way around).
   if (tryBankCoinAt(state, world.x, world.y)) return; // clicking a coin always banks it, regardless of selected tool
   if (tryBankScienceAt(state, world.x, world.y)) return; // same for a Science Bubble
+  if (isPointOnMound(state, world.x, world.y)) { openMoundMenu(state); return; } // opens the "Throw money at it" popup — see UI.js
+  if (isPointOnScienceLab(state, world.x, world.y)) { openLabMenu(state); return; } // Phase 4 — the Mound's replacement once it's fully shattered
   if (effectiveTool === 'food') {
     const reason = trySpawnFood(state, world.x, world.y);
     if (reason === 'no_money') flashMoneyInsufficient(state);
@@ -567,8 +579,9 @@ input.keydownHandlers.push((e) => {
   if (e.code === 'Escape') {
     // Per direct request, Escape no longer opens the pause menu — that's now
     // the dedicated #pause-toggle-btn button (top-right, below the HUD).
-    // Escape's new job: close whatever popup is on top, or cancel an armed
-    // build/demolish/merge tool back to Food. A no-op if none of those apply
+    // Escape's new job: close whatever popup is on top (or the Shop/Tank
+    // Upgrades panel, if one's open), and cancel an armed build/demolish/
+    // merge tool back to Food. A no-op beyond that if none of those apply
     // (Food or a fish selection stay armed).
     if (!state.level.tutorialFlags.escapePressed) {
       state.level.tutorialFlags.escapePressed = true;
@@ -582,6 +595,7 @@ input.keydownHandlers.push((e) => {
       cancelActiveTool(state); // ...and the armed Fan tool itself, back to Food — a Fan is still a "building selected" per direct request
       return;
     }
+    closeSidePanels(state); // per direct request — Escape also closes the Shop/Tank Upgrades panel if one's open
     cancelActiveTool(state);
     return;
   }

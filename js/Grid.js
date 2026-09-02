@@ -27,7 +27,6 @@ import {
   PROCESSOR_STATS,
   AUTO_FEEDER_STATS,
   TURRET_STATS,
-  TURRET_INTAKE_RADIUS,
   WASTE_TURRET_SHOTS_PER_WASTE,
   WASTE_TURRET_MAX_AMMO,
   WASTE_TURRET_MAX_WASTE,
@@ -59,7 +58,7 @@ import {
   CAMERA_BOTTOM_BUFFER_PX,
 } from './Config.js';
 import { worldToScreen } from './Engine.js';
-import { playBuildPlace, playDemolish } from './Sound.js';
+import { playBuildPlace, playDemolish, playTurretShoot, playIntake, playDispense } from './Sound.js';
 
 // One-time story/tutorial notifications — see state.level.tutorialFlags and
 // CLAUDE.md's "Story & Tutorial Notifications" section.
@@ -521,6 +520,24 @@ function isNearBuildingCenter(centerX, centerY, itemX, itemY, radius) {
   return Math.hypot(itemX - centerX, itemY - centerY) <= radius;
 }
 
+// A proper circle-vs-tile-square touch test — per direct report, a fixed
+// radius-from-center check (isNearBuildingCenter above) leaves the tile's
+// own corners under-covered: a waste item resting near a top corner sits
+// roughly TILE_SIZE*0.5*sqrt(2) (~22.6px) from center, which a same-sized
+// intake radius doesn't reach even though the item is visibly touching the
+// tile's top edge. This instead measures the distance from the item's
+// center to the CLOSEST point on the tile's own square footprint, so
+// anything genuinely touching the tile from any side (including a corner)
+// registers, regardless of where exactly it landed. Used by the Waste
+// Turret's intake specifically — per direct request ("waste touching any
+// side, including the top of a turret, should go in").
+function isTouchingBuildingTile(centerX, centerY, itemX, itemY, itemRadius) {
+  const half = TILE_SIZE / 2;
+  const dx = Math.max(Math.abs(itemX - centerX) - half, 0);
+  const dy = Math.max(Math.abs(itemY - centerY) - half, 0);
+  return Math.hypot(dx, dy) <= itemRadius;
+}
+
 // Starts the same pull-to-center hold stepCollectorProcessing eases through
 // every tick — previously only ever kicked off by a top-landing event
 // (handleLanding); now triggered by updateBuildings' intake scan below
@@ -588,6 +605,7 @@ export function updateBuildings(state, dtMs) {
           if (isNearBuildingCenter(centerX, centerY, it.x, it.y, COLLECTOR_INTAKE_RADIUS)) {
             beginCollectorProcessing(it, centerX, centerY, data.type);
             anyProcessing = true;
+            playIntake();
             break;
           }
         }
@@ -619,9 +637,14 @@ export function updateBuildings(state, dtMs) {
         for (let i = 0; i < items.length; i++) {
           const it = items[i];
           if (it.type !== 'waste') continue;
-          if (isNearBuildingCenter(centerX, centerY, it.x, it.y, TURRET_INTAKE_RADIUS)) {
+          // A real touch test, not a fixed radius-from-center — see
+          // isTouchingBuildingTile's own comment for why: a waste item
+          // resting near a corner (including the top edge, which used to
+          // sit just outside the old fixed-radius check) still counts.
+          if (isTouchingBuildingTile(centerX, centerY, it.x, it.y, it.radius)) {
             items.splice(i, 1);
             data.ammo = Math.min(WASTE_TURRET_MAX_AMMO, data.ammo + WASTE_TURRET_SHOTS_PER_WASTE);
+            playIntake();
             break;
           }
         }
@@ -661,6 +684,7 @@ export function updateBuildings(state, dtMs) {
           data.cooldownMs = 1000 / turretStats.shotsPerSec;
           if (data.type === TILE_TURRET_WASTE) data.ammo -= 1;
           firedThisTick = true;
+          playTurretShoot();
         }
       }
       data.firing = firedThisTick;
@@ -689,6 +713,7 @@ export function updateBuildings(state, dtMs) {
           state.level.cleanliness = Math.min(CLEANLINESS_MAX, state.level.cleanliness + CLEANLINESS_PER_WASTE_EVENT);
           data.absorbing = true;
           data.progressMs = 0;
+          playIntake();
           break;
         }
       }
@@ -704,6 +729,7 @@ export function updateBuildings(state, dtMs) {
         if (data.wasteCount >= afStats.wasteRequired) {
           data.wasteCount = 0;
           foodSpawnPoints.push({ x: outputX, y: outputY });
+          playDispense();
         }
       }
     }
