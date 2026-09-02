@@ -1040,38 +1040,62 @@ function waterBackgroundGradient(ctx, canvasHeight, cleanliness) {
 // to be for the current viewport — nothing but glass is ever visible past
 // the inner seam, so the screen edge itself reads as the outside of the
 // tank.
+// Reworked a second time into a "glassmorphism" treatment, per direct
+// request ("modern glassmorphic look... inner box shadow, thin white
+// translucent borders, and a subtle linear gradient to make them look like
+// thick, refractive glass panels facing sideways"). Canvas has no native
+// box-shadow, so the inset look is faked with two short gradient strips
+// hugging each edge that darken slightly before fading back into the main
+// fill — the same trick an inset CSS box-shadow produces, just hand-drawn.
+// The old hard-edged diagonal "shine stroke" from the previous pass is
+// gone, replaced by a soft brightness bump built into the main fill's own
+// gradient stops instead — reads as light refracting through the glass's
+// thickness rather than a painted-on streak.
 const TANK_WALL_MIN_WIDTH = 22; // world px — the guaranteed-minimum glass width, used as a fallback when the true boundary would otherwise be off-screen (see renderTankWalls) or nearly flush with the screen edge
+const TANK_WALL_INSET_SHADOW_FRACTION = 0.3; // how much of the panel's own width each inset-shadow strip reaches in from its edge
 function renderGlassWall(ctx, innerX, outerX, topY, bottomY) {
   const left = Math.min(innerX, outerX);
   const width = Math.abs(outerX - innerX);
   if (width <= 0) return;
-  const signedWidth = outerX - innerX;
   ctx.save();
-  // A gentle gradient — near-transparent right at the seam (blends into the
-  // water) brightening to a soft frosted white toward the outer/screen
-  // edge, like looking through glass at whatever's outside the tank.
+
+  // Base glass fill — a soft, mostly-neutral white gradient (glassmorphism
+  // leans neutral/frosted rather than tinted) that brightens gradually
+  // toward the outer edge with one gentle extra lift just past halfway,
+  // reading as light passing through the pane's real thickness rather than
+  // a flat tint.
   const fill = ctx.createLinearGradient(innerX, 0, outerX, 0);
-  fill.addColorStop(0, 'rgba(210, 235, 250, 0.12)');
-  fill.addColorStop(0.5, 'rgba(220, 240, 252, 0.32)');
-  fill.addColorStop(1, 'rgba(232, 246, 255, 0.55)');
+  fill.addColorStop(0, 'rgba(255, 255, 255, 0.08)');
+  fill.addColorStop(0.45, 'rgba(255, 255, 255, 0.16)');
+  fill.addColorStop(0.6, 'rgba(255, 255, 255, 0.26)');
+  fill.addColorStop(1, 'rgba(255, 255, 255, 0.34)');
   ctx.fillStyle = fill;
   ctx.fillRect(left, topY, width, bottomY - topY);
 
-  // One soft diagonal shine streak.
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
-  ctx.lineWidth = Math.max(1, width * 0.22);
-  ctx.beginPath();
-  ctx.moveTo(innerX + signedWidth * 0.3, topY);
-  ctx.lineTo(innerX + signedWidth * 0.55, bottomY);
-  ctx.stroke();
+  // Faked inner box-shadow — a short, soft dark gradient hugging each edge
+  // from the inside, fading to nothing within TANK_WALL_INSET_SHADOW_FRACTION
+  // of the panel's own width, the same visual an `inset` CSS box-shadow
+  // gives a card.
+  const insetReach = width * TANK_WALL_INSET_SHADOW_FRACTION;
+  const innerShadow = ctx.createLinearGradient(innerX, 0, innerX + Math.sign(outerX - innerX) * insetReach, 0);
+  innerShadow.addColorStop(0, 'rgba(5, 15, 25, 0.22)');
+  innerShadow.addColorStop(1, 'rgba(5, 15, 25, 0)');
+  ctx.fillStyle = innerShadow;
+  ctx.fillRect(left, topY, width, bottomY - topY);
+  const outerShadow = ctx.createLinearGradient(outerX, 0, outerX - Math.sign(outerX - innerX) * insetReach, 0);
+  outerShadow.addColorStop(0, 'rgba(5, 15, 25, 0.16)');
+  outerShadow.addColorStop(1, 'rgba(5, 15, 25, 0)');
+  ctx.fillStyle = outerShadow;
+  ctx.fillRect(left, topY, width, bottomY - topY);
 
-  // Inner seam — a thin, crisp line exactly where a resting item touches
-  // the glass, so the stopping point still reads unambiguously.
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
-  ctx.lineWidth = 1.5;
+  // Thin white translucent borders along both edges of the panel.
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+  ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.moveTo(innerX, topY);
   ctx.lineTo(innerX, bottomY);
+  ctx.moveTo(outerX, topY);
+  ctx.lineTo(outerX, bottomY);
   ctx.stroke();
   ctx.restore();
 }
