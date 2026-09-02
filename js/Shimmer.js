@@ -52,6 +52,22 @@ export function updateShimmerTimer(timer, elapsed) {
   return t;
 }
 
+// Per direct report ("kinda jarring"), the fish shimmer's own one-shot sweep
+// now eases in/out via a plain alpha ramp over its first/last
+// SHIMMER_FADE_MS instead of snapping to full opacity/disappearing
+// instantly — a separate helper (not baked into drawShimmerSweep itself, so
+// the Mound/Science Lab's own recurring shimmer — never reported as
+// jarring — is untouched) the caller multiplies into ctx.globalAlpha before
+// drawing. Symmetric fade in/out around the same 0..1 progress
+// oneShotShimmerProgress already returns.
+const SHIMMER_FADE_MS = 300;
+export function shimmerFadeAlpha(t) {
+  const fadeFrac = SHIMMER_FADE_MS / SHIMMER_SWEEP_DURATION_MS;
+  if (t < fadeFrac) return t / fadeFrac;
+  if (t > 1 - fadeFrac) return (1 - t) / fadeFrac;
+  return 1;
+}
+
 // One-shot progress for an EVENT-triggered shimmer (fish) — pass the
 // elapsed ms the event happened at (a plain field on the entity, e.g.
 // fish.shimmerStartedAt); returns 0..1 progress or null once it's finished.

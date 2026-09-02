@@ -13,6 +13,7 @@ import {
   BANKRUPTCY_BAILOUT_AMOUNT,
   ESCAPE_DARE_DELAY_MS,
   ALIEN_TUTORIAL_DELAY_MS,
+  ALIEN_INTRO_DELAY_MS,
   NOTIFICATION_LOG_MAX,
   ALIEN_WAVE_INTERVAL_MIN_MS,
   ALIEN_WAVE_INTERVAL_MAX_MS,
@@ -109,6 +110,24 @@ function updateEscapeDare(state) {
   pushNotification(state, ESCAPE_DARE_MESSAGE);
 }
 
+// Starts the cinematic first-alien intro's 'alienintro' guided-tutorial flow
+// (UI.js's TUTORIAL_FLOWS) once the alien Entities.js's updateAlienPortals
+// flagged (state.level.firstAlienIntroTargetId) has actually been alive and
+// moving normally on screen for ALIEN_INTRO_DELAY_MS — per direct request,
+// no longer the instant it spawns. One-shot via clearing
+// firstAlienIntroAppearedAtMs back to null the moment this resolves, whether
+// that's a real trigger or the defensive "it already died in that window"
+// case below (which just lets the game continue normally with no intro at
+// all, rather than soft-locking waiting for a target that no longer exists).
+function updateAlienIntroTrigger(state) {
+  if (state.level.firstAlienIntroAppearedAtMs === null || state.level.tutorialFlow) return;
+  if (state.level.elapsed - state.level.firstAlienIntroAppearedAtMs < ALIEN_INTRO_DELAY_MS) return;
+  state.level.firstAlienIntroAppearedAtMs = null;
+  const alien = state.level.entities.find((e) => e.id === state.level.firstAlienIntroTargetId && e.type === 'alien' && e.hp > 0);
+  if (!alien) return;
+  state.level.tutorialFlow = { id: 'alienintro', step: 'click' };
+}
+
 // Starts the post-alien "arm up" guided tutorial (Shop -> Waste Turret ->
 // scroll -> place — see UI.js's TUTORIAL_FLOWS) ALIEN_TUTORIAL_DELAY_MS
 // after the very first alien ever dies. Gated the same one-time way every
@@ -198,6 +217,24 @@ function spawnAlienWave(state) {
 // decides WHEN a wave should start and pushes the resulting portal data.
 function updateAlienWaves(state) {
   const elapsed = state.level.elapsed;
+
+  // Per direct request, the countdown to the NEXT wave doesn't even start
+  // until every alien from the current one is actually dead — previously
+  // alienNextWaveAtMs was rescheduled the instant a wave SPAWNED, so a
+  // lingering survivor could get "reinforced" by a fresh wave before the
+  // player finished it off. alienWaveActive covers both halves of "a wave
+  // is still in progress": its portals haven't all finished opening into
+  // real aliens yet (alienPortals still has entries), or an alien it did
+  // spawn is still alive — either one means the clock stays paused.
+  if (state.level.alienWaveActive) {
+    const wavePortalsPending = state.level.alienPortals.length > 0;
+    const aliensAlive = state.level.entities.some((e) => e.type === 'alien' && e.hp > 0);
+    if (wavePortalsPending || aliensAlive) return;
+    state.level.alienWaveActive = false;
+    state.level.alienNextWaveAtMs = elapsed + randomWaveIntervalMs(); // the real countdown starts fresh right now, not back when the wave spawned
+    return;
+  }
+
   const nextWaveAt = state.level.alienNextWaveAtMs;
 
   if (!state.level.alienWarning1Shown && elapsed >= nextWaveAt - ALIEN_WARNING_MS_1) {
@@ -220,7 +257,7 @@ function updateAlienWaves(state) {
 
   if (elapsed >= nextWaveAt) {
     spawnAlienWave(state);
-    state.level.alienNextWaveAtMs = elapsed + randomWaveIntervalMs();
+    state.level.alienWaveActive = true; // the branch above now owns rescheduling alienNextWaveAtMs, once this wave is fully cleared
     state.level.alienWarning1Shown = false;
     state.level.alienWarning2Shown = false;
   }
@@ -231,5 +268,6 @@ export function updateStoryTriggers(state) {
   updateBankruptcy(state);
   updateEscapeDare(state);
   updateAlienWaves(state);
+  updateAlienIntroTrigger(state);
   updatePostAlienTutorial(state);
 }

@@ -99,7 +99,7 @@ import {
 } from './Grid.js';
 import { isPointOnMound, crackMound, renderMound, centerCameraOnMound, isPointOnScienceLab, renderScienceLab } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
-import { oneShotShimmerProgress, drawShimmerSweep } from './Shimmer.js';
+import { oneShotShimmerProgress, drawShimmerSweep, shimmerFadeAlpha } from './Shimmer.js';
 import {
   initUI,
   updateHUD,
@@ -165,8 +165,16 @@ for (const [i, char] of splashLetters.entries()) {
   span.style.animationDelay = `${SPLASH_GROW_IN_DURATION_S + i * SPLASH_LETTER_STAGGER_S}s`;
   splashTitle.appendChild(span);
 }
+const START_TUTORIAL_DELAY_AFTER_SPLASH_MS = 3000; // per direct request — the game-start guided tutorial no longer starts the instant Start is clicked; it waits this long after the splash screen has actually finished fading away
 splashTitle.addEventListener('animationend', (e) => {
-  if (e.target === splashTitle) splashScreen.remove(); // ignore bubbled per-letter animationend events, only the title's own grow-fade ending means it's done
+  if (e.target !== splashTitle) return; // ignore bubbled per-letter animationend events, only the title's own grow-fade ending means it's done
+  splashScreen.remove();
+  setTimeout(() => {
+    if (!state.level.tutorialFlags.startTutorialShown) {
+      state.level.tutorialFlags.startTutorialShown = true;
+      state.level.tutorialFlow = { id: 'start', step: 'shop' };
+    }
+  }, START_TUTORIAL_DELAY_AFTER_SPLASH_MS);
 });
 function triggerSplash() {
   splashScreen.classList.add('play');
@@ -393,28 +401,6 @@ function effectiveToolAt(worldY) {
 }
 
 input.clickHandlers.push((sx, sy) => {
-  // Cinematic first-alien intro (see Entities.js's updateAlienPortals for
-  // what sets this): swallow every click except one that actually lands on
-  // the intro alien — that one damages it (same click-radius as ordinary
-  // alien damage) and ends the intro, un-freezing the game. A miss does
-  // nothing at all — per direct request, "the whole game pause[s] until
-  // they click the alien," not until they click anywhere. Checked before
-  // absolutely everything else, including the fish-drag suppression below,
-  // since nothing else should be interactable while this is active.
-  if (state.level.firstAlienIntroActive) {
-    const world = screenToWorld(sx, sy, state.camera);
-    const alien = state.level.entities.find(
-      (e) => e.id === state.level.firstAlienIntroTargetId && e.type === 'alien' && e.hp > 0
-    );
-    if (!alien) { state.level.firstAlienIntroActive = false; return; } // defensive: target somehow gone, don't soft-lock the game
-    if (Math.hypot(alien.x - world.x, alien.y - world.y) <= ALIEN_RADIUS * ALIEN_CLICK_RADIUS_MULTIPLIER) {
-      alien.hp -= ALIEN_CLICK_DAMAGE;
-      alien.hitFlashMs = ALIEN_HIT_FLASH_MS;
-      state.level.firstAlienIntroActive = false;
-    }
-    return;
-  }
-
   if (fishDragArmed) { fishDragArmed = false; return; } // this click followed a fish-combine drag gesture — don't also bank/feed/mound-click at the release point
   if (wasteDragArmed) { wasteDragArmed = false; return; } // same, for a Waste-drag gesture
   const world = screenToWorld(sx, sy, state.camera);
@@ -429,6 +415,13 @@ input.clickHandlers.push((sx, sy) => {
     if (Math.hypot(entity.x - world.x, entity.y - world.y) <= ALIEN_RADIUS * ALIEN_CLICK_RADIUS_MULTIPLIER) {
       entity.hp -= ALIEN_CLICK_DAMAGE;
       entity.hitFlashMs = ALIEN_HIT_FLASH_MS; // per direct request — a hit flashes red and "bounces," read back by the render loop below
+      // The cinematic first-alien intro (see UI.js's TUTORIAL_FLOWS' 'alienintro'
+      // flow) is just this exact same click-damage path with a guided
+      // spotlight overlaid on top — during it, the overlay's own clip-path
+      // hole only ever lets a click reach the canvas near the intro alien in
+      // the first place, so this same loop is what actually damages it; this
+      // just also ends the flow once it does.
+      advanceTutorialFlow(state, 'alienintro', 'click');
       return;
     }
   }
@@ -563,10 +556,6 @@ input.keydownHandlers.push((e) => {
   // sub-views) is the only thing on screen, and it has its own buttons for
   // navigating back, not Escape.
   if (!state.ui.gameStarted) return;
-  // Cinematic first-alien intro — per direct request, "the whole game
-  // pause[s]" until the intro alien is clicked, so no hotkey (including
-  // Escape/the pause menu) should be reachable while it's active either.
-  if (state.level.firstAlienIntroActive) return;
   // The debug overlay toggle is a pure observability tool, not a gameplay
   // action — deliberately never blocked by anything below (the cinematic
   // intro/tutorial-flow gates included), so it's always reachable for QA.
@@ -696,13 +685,10 @@ initStartScreen(state, () => {
   state.ui.gameStarted = true;
   triggerSplash();
   scheduleShopButtonReminder(state); // per direct request — bounces the shop toggle until it's opened for the first time
-  // Game-start guided tutorial (Shop -> Guppy -> buy your first fish) — see
-  // UI.js's TUTORIAL_FLOWS/advanceTutorialFlow. One-time, like every other
-  // tutorial trigger in this codebase.
-  if (!state.level.tutorialFlags.startTutorialShown) {
-    state.level.tutorialFlags.startTutorialShown = true;
-    state.level.tutorialFlow = { id: 'start', step: 'shop' };
-  }
+  // Game-start guided tutorial (Shop -> Guppy -> buy your first fish) no
+  // longer starts here — see the splashTitle 'animationend' handler above,
+  // which now starts it START_TUTORIAL_DELAY_AFTER_SPLASH_MS after the
+  // splash has actually finished fading away, per direct request.
 });
 
 // ---- Perf counters for the debug overlay ----
@@ -813,7 +799,20 @@ function update(dtMs) {
   if (!state.ui.gameStarted) return; // frozen until the player clicks Start on the first-launch start screen — render() still runs (a static frame), same "frozen but visible" pattern the pause menu already uses
   if (state.ui.paused) return; // frozen behind the pause menu — render() still runs so the tank stays visible
   if (state.level.gameOver) return; // lost — frozen the same way, but via a separate flag so Escape still reaches the pause menu's Restart without also un-freezing a lost game (see Systems.js's updateBankruptcy)
-  if (state.level.firstAlienIntroActive) return; // frozen for the cinematic first-alien spotlight — see Entities.js's updateAlienPortals for what sets this and the click handler below for what clears it
+  // The cinematic first-alien intro ('alienintro' in UI.js's TUTORIAL_FLOWS)
+  // is the one guided-tutorial flow that freezes EVERYTHING, camera panning
+  // included — per direct request, "the whole game pauses" — unlike every
+  // other flow (see the general tutorialFlow check below, which
+  // deliberately keeps camera/build-drag alive for the scroll/place steps).
+  // Checked here, before updateCamera even runs. Defensive: if the target
+  // alien is somehow already gone (shouldn't happen — nothing can kill it
+  // while everything's frozen except the click that also ends this flow),
+  // clear the flow instead of soft-locking the game frozen forever.
+  if (state.level.tutorialFlow?.id === 'alienintro') {
+    const alien = state.level.entities.find((e) => e.id === state.level.firstAlienIntroTargetId && e.type === 'alien' && e.hp > 0);
+    if (!alien) state.level.tutorialFlow = null;
+    return;
+  }
 
   updateCamera(state.camera, input, canvas, dtMs);
   updateBuildDrag();
@@ -914,7 +913,11 @@ function lerpRgbToString(from, to, t) {
 // is whatever the caller already resolved (including the hit-flash blend),
 // `facing` is ±1 (which way the alien is currently moving), used to trail
 // the tail fin and highlight the same direction a fish's own facing would.
-function drawAlienBody(ctx, x, y, radius, facing, color) {
+// `gazeAngle` (radians, world-space atan2 toward the nearest fish — see the
+// render loop below) drives the single cyclops eye's pupil, per direct
+// request ("one eye like a cyclops... with a pupil that looks at the
+// closest fish").
+function drawAlienBody(ctx, x, y, radius, facing, color, gazeAngle) {
   ctx.save();
 
   // Tail fin, trailing behind the direction of travel.
@@ -963,11 +966,34 @@ function drawAlienBody(ctx, x, y, radius, facing, color) {
   ctx.ellipse(x, y, radius * 1.05, radius * 0.85, 0, 0, Math.PI * 2);
   ctx.stroke();
 
-  // Menacing red eyes on top of everything else.
+  // A single cyclops eye, centered where the two separate eyes used to sit
+  // and bigger than either of them was — per direct request. A dark pupil
+  // sits inside it, offset toward gazeAngle (the nearest fish, computed by
+  // the caller) so it visibly tracks whatever's closest, clamped well
+  // inside the eye's own edge so it never pokes out of the socket.
+  const eyeX = x;
+  const eyeY = y - radius * 0.15;
+  const eyeRadius = radius * 0.34;
   ctx.fillStyle = '#ff5b5b';
   ctx.beginPath();
-  ctx.arc(x - radius * 0.32, y - radius * 0.15, radius * 0.16, 0, Math.PI * 2);
-  ctx.arc(x + radius * 0.32, y - radius * 0.15, radius * 0.16, 0, Math.PI * 2);
+  ctx.arc(eyeX, eyeY, eyeRadius, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  const pupilOffset = eyeRadius * 0.4;
+  const pupilRadius = eyeRadius * 0.42;
+  const pupilX = eyeX + Math.cos(gazeAngle) * pupilOffset;
+  const pupilY = eyeY + Math.sin(gazeAngle) * pupilOffset;
+  ctx.fillStyle = '#1a0505';
+  ctx.beginPath();
+  ctx.arc(pupilX, pupilY, pupilRadius, 0, Math.PI * 2);
+  ctx.fill();
+  // A tiny glossy highlight on the pupil so it doesn't read as a flat dot.
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+  ctx.beginPath();
+  ctx.arc(pupilX - pupilRadius * 0.3, pupilY - pupilRadius * 0.3, pupilRadius * 0.32, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.restore();
@@ -1246,6 +1272,7 @@ function render() {
       ctx.beginPath();
       ctx.arc(pos.x, pos.y, size, 0, Math.PI * 2);
       ctx.clip();
+      ctx.globalAlpha = shimmerFadeAlpha(shimmerT); // per direct report — eases in/out over 0.3s instead of snapping on/off
       drawShimmerSweep(ctx, shimmerT, pos.x - size, pos.y - size, size * 2, size * 2);
       ctx.restore();
     }
@@ -1328,7 +1355,19 @@ function render() {
     const radius = baseRadius * bounceScaleMul;
     const color = flashFrac > 0 ? lerpRgbToString(ALIEN_COLOR_RGB, ALIEN_HIT_FLASH_COLOR, flashFrac) : ALIEN_COLOR;
     const facing = alien.vx >= 0 ? 1 : -1;
-    drawAlienBody(ctx, pos.x, pos.y, radius, facing, color);
+    // Nearest fish, for the cyclops eye's pupil to track — a plain O(n)
+    // scan over entities is cheap enough here (at most ALIEN_MAX_ALIVE
+    // aliens, each doing this once per frame). Falls back to looking
+    // straight ahead (the alien's own facing direction) if no fish exist.
+    let nearestFish = null;
+    let nearestDist = Infinity;
+    for (const other of state.level.entities) {
+      if (other.type !== 'fish') continue;
+      const d = Math.hypot(other.x - alien.x, other.y - alien.y);
+      if (d < nearestDist) { nearestDist = d; nearestFish = other; }
+    }
+    const gazeAngle = nearestFish ? Math.atan2(nearestFish.y - alien.y, nearestFish.x - alien.x) : (facing > 0 ? 0 : Math.PI);
+    drawAlienBody(ctx, pos.x, pos.y, radius, facing, color, gazeAngle);
 
     const barW = ALIEN_HEALTH_BAR_WIDTH * state.camera.zoom;
     const barH = ALIEN_HEALTH_BAR_HEIGHT * state.camera.zoom;
@@ -1497,42 +1536,11 @@ function render() {
     ctx.restore();
   }
 
-  // Cinematic first-alien intro spotlight — per direct request: "overlay
-  // semi transparent black over the whole screen except for a circle
-  // around the new alien." Drawn last, on top of literally everything else
-  // in this render pass. A radial gradient (not a hard-edged circle) for
-  // the "hole" reads as a genuine spotlight with a soft edge rather than a
-  // cookie-cutter cutout.
-  if (state.level.firstAlienIntroActive) {
-    const alien = state.level.entities.find(
-      (e) => e.id === state.level.firstAlienIntroTargetId && e.type === 'alien' && e.hp > 0
-    );
-    if (alien) {
-      const pos = worldToScreen(alien.x, alien.y, state.camera);
-      const holeRadius = ALIEN_RADIUS * state.camera.zoom * 3.2;
-      ctx.save();
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      ctx.globalCompositeOperation = 'destination-out';
-      const holeGradient = ctx.createRadialGradient(pos.x, pos.y, holeRadius * 0.55, pos.x, pos.y, holeRadius);
-      holeGradient.addColorStop(0, 'rgba(0, 0, 0, 1)');
-      holeGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
-      ctx.fillStyle = holeGradient;
-      ctx.beginPath();
-      ctx.arc(pos.x, pos.y, holeRadius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-
-      ctx.save();
-      ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 22px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
-      ctx.shadowBlur = 8;
-      ctx.fillText('An alien! Click it to fight back.', canvas.width / 2, 70);
-      ctx.restore();
-    }
-  }
+  // The cinematic first-alien intro's spotlight is drawn by UI.js's
+  // #tutorial-overlay now (a real clip-path DOM hole, same as every other
+  // guided-tutorial step) instead of a bespoke canvas destination-out
+  // gradient — per direct report that the two "seemed different," this
+  // unifies them into the exact same mechanism, called from updateHUD below.
 
   updateHUD(state);
   updateNotificationTicker(state);

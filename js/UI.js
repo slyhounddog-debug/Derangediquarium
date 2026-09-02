@@ -38,6 +38,7 @@ import {
   WORLD_W,
   WORLD_H,
   TILE_SIZE,
+  ALIEN_RADIUS,
   POST_ALIEN_TUTORIAL_MESSAGE,
   SPECIES,
   WASTE_POOP_INTERVAL_MS,
@@ -2070,21 +2071,30 @@ export function updateHUD(state) {
 // the player scrolled down at all" signal with no need to hook into
 // Engine.js's own input handling (which deliberately has no knowledge of
 // tutorial state — see its module header).
-const SCROLL_HINT_DELAY_MS = 10000;
+const SCROLL_HINT_DELAY_MS = 40000; // 10s + 30 more, per direct request
 function updateScrollHint(state) {
   if (!state.level.tutorialFlags.hasScrolledDown && state.camera.y > 0) {
     state.level.tutorialFlags.hasScrolledDown = true;
   }
   // Per direct request, the post-alien guided tutorial's "scroll" step
   // reuses these same 5 arrows — forced visible regardless of the normal
-  // 10s-delay/hasScrolledDown gating below, since by the time that step is
-  // reached the game may be many minutes in (hasScrolledDown already true
-  // from earlier casual scrolling) and what matters here is whether the
-  // camera is AT THE BOTTOM right now, which main.js's own per-tick check
-  // (isScrolledToBottom) already tracks independently to skip/advance the
-  // step itself — this is purely the visual nudge.
+  // delay/hasScrolledDown/item-in-city gating below, since by the time that
+  // step is reached the game may be many minutes in (hasScrolledDown
+  // already true from earlier casual scrolling) and what matters here is
+  // whether the camera is AT THE BOTTOM right now, which main.js's own
+  // per-tick check (isScrolledToBottom) already tracks independently to
+  // skip/advance the step itself — this is purely the visual nudge.
   const forcedByTutorial = state.level.tutorialFlow?.id === 'postalien' && state.level.tutorialFlow.step === 'scroll';
-  const shouldShow = forcedByTutorial || (state.level.elapsed >= SCROLL_HINT_DELAY_MS && !state.level.tutorialFlags.hasScrolledDown);
+  // Per direct request, the normal (non-tutorial-forced) nudge now ALSO
+  // requires at least one Coin/Waste/Food actually sitting in the city —
+  // both conditions must hold — so it doesn't nag a player who has nothing
+  // down there worth scrolling to see yet.
+  const somethingInCity = state.level.items.some(
+    (item) => item.y >= SEABED_FLOOR_Y && (item.type === 'coin' || item.type === 'waste' || item.type === 'food')
+  );
+  const shouldShow =
+    forcedByTutorial ||
+    (state.level.elapsed >= SCROLL_HINT_DELAY_MS && !state.level.tutorialFlags.hasScrolledDown && somethingInCity);
   els.scrollHint.classList.toggle('hidden', !shouldShow);
 }
 
@@ -2151,6 +2161,28 @@ const START_TUTORIAL_FISH_SPOT = { x: WORLD_W / 2, y: SEABED_FLOOR_Y * 0.15 };
 const POST_ALIEN_TURRET_SPOT = { x: WORLD_W * 0.12, y: WORLD_H - TILE_SIZE / 2 };
 
 const TUTORIAL_FLOWS = {
+  // The cinematic first-alien intro — per direct report, unified onto this
+  // exact same engine ("the tutorial event... seemed different") instead of
+  // main.js's old bespoke canvas destination-out spotlight. A single step
+  // whose target TRACKS the alien's live position every frame (it's frozen
+  // in place the whole time this flow is active — see main.js's update(),
+  // which stops even camera panning for this one flow — but getCircle is
+  // still recomputed live rather than cached, same as every other step).
+  // Returns null (hides the spotlight entirely) if the target alien is
+  // somehow already gone — defensive, shouldn't happen since nothing ticks
+  // while this flow is active other than the click that ends it.
+  alienintro: [
+    {
+      id: 'click',
+      text: 'An alien! Click it to fight back.',
+      getCircle: (state) => {
+        const alien = state.level.entities.find((e) => e.id === state.level.firstAlienIntroTargetId && e.type === 'alien' && e.hp > 0);
+        if (!alien) return null;
+        const screen = worldToScreen(alien.x, alien.y, state.camera);
+        return { cx: screen.x, cy: screen.y, r: ALIEN_RADIUS * state.camera.zoom * 3.2 };
+      },
+    },
+  ],
   start: [
     { id: 'shop', text: 'Click the Shop to buy your first fish!', getCircle: () => tutorialCircleForDom(els.shopCollapseBtn) },
     { id: 'guppy', text: 'Pick a Guppy!', getCircle: () => tutorialCircleForDom(els.shopGrid.querySelector('[data-tool="fish:guppy"]')) },

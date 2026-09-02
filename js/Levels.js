@@ -99,13 +99,20 @@ export function loadLevel(state, levelId) {
       postAlienTutorialShown: false, // gates the "arm up" guided tutorial (Shop -> Waste Turret -> scroll down -> place it) to once, ever — see Systems.js's updateStoryTriggers, fired ~10s after the first alien kill
     },
     // Cinematic first-alien intro — per direct request, the very first alien
-    // to ever spawn gets a dedicated teaching moment: the whole game freezes
-    // (main.js's update() also checks this, alongside paused/gameOver) and
-    // render() draws a full-screen spotlight (dimmed everywhere except a
-    // circle around the alien) until the player actually clicks it. Both
-    // level-scoped/reset on restart like everything else here.
-    firstAlienIntroActive: false,
+    // to ever spawn gets a dedicated teaching moment: once it's been alive
+    // and moving normally on screen for ALIEN_INTRO_DELAY_MS (1s —
+    // firstAlienIntroAppearedAtMs, set by Entities.js's updateAlienPortals
+    // the instant it spawns, checked by Systems.js's updateStoryTriggers),
+    // it starts UI.js's 'alienintro' guided-tutorial flow (state.level.
+    // tutorialFlow), which fully freezes the game (main.js's update()) and
+    // spotlights it via the same #tutorial-overlay every other guided step
+    // uses, until the player clicks it. firstAlienIntroTargetId records
+    // which alien throughout (set once, read by both the delay check and
+    // the flow's own world-position spotlight target). Both level-scoped/
+    // reset on restart like everything else here.
+    firstAlienIntroAppearedAtMs: null,
     firstAlienIntroTargetId: null,
+    alienFoodBlockZones: [], // { x, y, expiresAtMs } — per direct request, Food can't be placed within a just-killed alien's old click radius for ALIEN_FOOD_BLOCK_DURATION_MS; see Entities.js's trySpawnFood/isInAlienFoodBlockZone
     // Guided tutorial flows (Shop->Guppy->buy fish at game start; Tank
     // Upgrades->Coin Capacity on the first Tank Point; Shop->Waste Turret->
     // scroll->place ~10s after the first alien kill) — see UI.js's
@@ -126,6 +133,7 @@ export function loadLevel(state, levelId) {
     // land at the exact same moment every playthrough.
     alienNextWaveAtMs: ALIEN_WAVE_INTERVAL_MIN_MS + Math.random() * (ALIEN_WAVE_INTERVAL_MAX_MS - ALIEN_WAVE_INTERVAL_MIN_MS),
     alienWavesSpawned: 0,
+    alienWaveActive: false, // true from the moment a wave spawns until every one of its portals has opened AND every alien it produced is dead — see Systems.js's updateAlienWaves; the next wave's own countdown doesn't even start until this clears
     alienWarning1Shown: false,
     alienWarning2Shown: false,
     alienPortals: [], // { x, y, hp, openAtMs, spawned, spawnedAtMs } — see Systems.js's spawnAlienWave/Entities.js's updateEntities

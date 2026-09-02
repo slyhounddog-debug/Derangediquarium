@@ -8,7 +8,6 @@ import {
   WORLD_TILES_W,
   WORLD_TILES_H,
   WORLD_H,
-  ROCK_SHELF_Y,
   SEABED_ROW_START,
   TILE_EMPTY,
   TILE_PLATFORM,
@@ -395,27 +394,27 @@ function sweepVertical(item, grid, dy) {
       item.vy = 0;
       return { landed: true, tile, row, col: colAt(item.x) };
     }
-    // The Rocky Shelf, ROCK_SHELF_Y (4 tiles above the world's absolute
-    // bottom) — nothing built here, just a hard stop so EVERY uncaught item
-    // (coin, Science, Food, or Waste — used to be Waste only) always comes
-    // to rest at a fixed, visible height (see renderRockShelf below) instead
-    // of falling off the bottom of the world and being permanently lost, per
-    // direct request ("the rocky shelf is now a hard barrier for all
-    // objects... all drops stop on it and don't pass to the bottom of the
-    // tank"). Only triggers while actually falling into it (stepY > 0) — an
-    // item already resting here that a Fan built in the rows underneath is
+    // The world's absolute bottom, WORLD_H — nothing built here, just a hard
+    // stop so EVERY uncaught item (coin, Science, Food, or Waste) always
+    // comes to rest there instead of falling off the bottom of the world and
+    // being permanently lost. Per direct request, this replaced the old mid-
+    // height Rocky Shelf stop entirely — "remove the upper and lower
+    // sections of the city... food, money, waste, and science should all
+    // fall to the very bottom of the tank" — so there's no longer an
+    // intermediate barrier partway down; everything now falls all the way
+    // to the true floor. Only triggers while actually falling into it
+    // (stepY > 0) — an item already resting here that a Fan built nearby is
     // actively pushing back up has stepY < 0 and sails right through,
     // unaffected. A real tile placed anywhere above this line (a Collector,
-    // another Platform) still catches an item first via the isSolid check
-    // above, same as always — this is only the fallback for whatever
-    // nothing else caught, which — per this same direct request — is now
-    // also the reason stepItemOnGrid's 'lost' status below is effectively
-    // unreachable through normal gravity any more: it's kept purely as a
+    // a Platform) still catches an item first via the isSolid check above,
+    // same as always — this is only the fallback for whatever nothing else
+    // caught, which is also why stepItemOnGrid's 'lost' status below stays
+    // effectively unreachable through normal gravity: kept purely as a
     // defensive fallback (see its own comment).
-    if (stepY > 0 && nextBottom >= ROCK_SHELF_Y) {
-      item.y = ROCK_SHELF_Y - item.radius;
+    if (stepY > 0 && nextBottom >= WORLD_H) {
+      item.y = WORLD_H - item.radius;
       item.vy = 0;
-      return { landed: true, tile: null, row: rowAt(ROCK_SHELF_Y), col: colAt(item.x) };
+      return { landed: true, tile: null, row: rowAt(WORLD_H), col: colAt(item.x) };
     }
     item.y += stepY;
   }
@@ -478,10 +477,10 @@ function stepCollectorProcessing(item, grid, dt) {
 //   'consumed'   — a Collector finished processing it; caller removes it from the array
 //   'lost'       — fell off the bottom of the world; caller removes it from the array, no payout.
 //                  Effectively unreachable through normal gravity any more —
-//                  sweepVertical's Rocky Shelf stop (ROCK_SHELF_Y, see
-//                  Config.js) now catches every item type well above
-//                  WORLD_H, per direct request that nothing ever falls off
-//                  the bottom of the tank and gets lost. Left in place
+//                  sweepVertical's own hard stop at WORLD_H catches every
+//                  item type right at the world's real bottom edge, per
+//                  direct request that nothing ever falls off the bottom of
+//                  the tank and gets lost. Left in place
 //                  purely as a defensive fallback (an item somehow ending up
 //                  with a NaN/out-of-range position bypasses tile physics
 //                  entirely), same "leave the safety net in place even once
@@ -937,109 +936,14 @@ function getUndergroundTexturePattern(ctx) {
   return undergroundTexturePattern;
 }
 
-// A rocky shelf at ROCK_SHELF_Y, the fixed height EVERY uncaught item rests
-// at now (see that constant's comment in Config.js — originally Waste only,
-// generalized to coins/Science/Food/Waste alike per direct request that it
-// "is now a hard barrier for all objects"). Reworked per direct request to
-// read as a real geological boundary rather than a decorative outcrop: the
-// TOP edge is flat (mirroring renderSeabedGrid's own tank/city surface
-// line — a solid fill plus a thin lighter highlight strip, the same
-// "boundary" language this file already uses at SEABED_ROW_START), and the
-// jaggedness moves to the BOTTOM edge instead, reading as the shelf's rocky
-// underside hanging down into the underground biome beneath it (see
-// renderSeabedGrid's own underground fill, painted before this so the jagged
-// underside visibly overlaps into it) — that hanging silhouette, not a
-// jagged top, is now "the part extending the 3D look."
-//
-// The jagged bottom edge is a fixed set of world-space (x, yOffset) points
-// spanning the full world width, generated once at module load — NOT
-// reseeded every frame — so panning never makes the rock "jitter." Each
-// frame only maps the currently-visible points to screen space and fills/
-// strokes a shaded polygon; no ctx.filter anywhere (see CLAUDE.md's canvas
-// performance note), just a real linear gradient plus a flat highlight strip
-// and one cheap stroke along the jagged underside for shadow/depth.
-const ROCK_SHELF_POINT_SPACING = TILE_SIZE * 0.4;
-// Cut roughly in half per direct request ("not quite so dramatic between
-// the upper city and lower city sections") — was 14, a gentler undulation
-// along the jagged underside instead of a sharp, spiky one.
-const ROCK_SHELF_JAG_PX = 7;
-const ROCK_SHELF_THICKNESS = TILE_SIZE * 0.9; // average distance from the flat top down to the jagged underside
-const ROCK_SHELF_POINTS = (() => {
-  const points = [];
-  const worldWidth = WORLD_TILES_W * TILE_SIZE;
-  let y = 0;
-  for (let x = 0; x <= worldWidth + ROCK_SHELF_POINT_SPACING; x += ROCK_SHELF_POINT_SPACING) {
-    y += (Math.random() - 0.5) * ROCK_SHELF_JAG_PX;
-    y = Math.max(-ROCK_SHELF_JAG_PX, Math.min(ROCK_SHELF_JAG_PX, y));
-    points.push({ x, y: Math.round(y) });
-  }
-  return points;
-})();
-
-function renderRockShelf(ctx, camera, canvasWidth, canvasHeight) {
-  const topScreenY = worldToScreen(0, ROCK_SHELF_Y, camera).y;
-  const bottomScreenY = worldToScreen(0, ROCK_SHELF_Y + ROCK_SHELF_THICKNESS + ROCK_SHELF_JAG_PX, camera).y;
-  if (topScreenY > canvasHeight || bottomScreenY < 0) return;
-
-  const worldLeft = camera.x;
-  const worldRight = camera.x + canvasWidth / camera.zoom;
-  const margin = ROCK_SHELF_POINT_SPACING * 2;
-  const visible = ROCK_SHELF_POINTS.filter((p) => p.x >= worldLeft - margin && p.x <= worldRight + margin);
-  if (visible.length === 0) return;
-
-  // The jagged edge now sits along the BOTTOM (ROCK_SHELF_Y + THICKNESS +
-  // per-point jitter), not the top.
-  const screenPoints = visible.map((p) => worldToScreen(p.x, ROCK_SHELF_Y + ROCK_SHELF_THICKNESS + p.y, camera));
-  const topY = topScreenY;
-
-  ctx.save();
-
-  // Rock body: a flat top edge, a shaded fill, and a jagged bottom edge —
-  // reads as a solid ledge whose underside is the irregular, "3D" part,
-  // rather than a thin line items happen to rest on.
-  ctx.beginPath();
-  ctx.moveTo(-4, topY);
-  ctx.lineTo(canvasWidth + 4, topY);
-  ctx.lineTo(canvasWidth + 4, screenPoints[screenPoints.length - 1].y);
-  for (let i = screenPoints.length - 1; i >= 0; i--) ctx.lineTo(screenPoints[i].x, screenPoints[i].y);
-  ctx.lineTo(-4, screenPoints[0].y);
-  ctx.closePath();
-  // Colors softened per direct request ("not quite so dramatic between the
-  // upper city and lower city sections") — the gradient used to run from a
-  // bright tan top down to a near-black bottom, a much harder jump than the
-  // city fill (#4a3624) above or the underground fill (softened alongside
-  // this, see renderSeabedGrid below) it hands off to on either side. Now a
-  // narrower range that sits closer to both neighbors, so the shelf still
-  // reads as a distinct boundary without the stark light-to-black plunge.
-  const bodyGradient = ctx.createLinearGradient(0, topY, 0, bottomScreenY);
-  bodyGradient.addColorStop(0, '#77644c');
-  bodyGradient.addColorStop(0.4, '#5f5140');
-  bodyGradient.addColorStop(1, '#463a2c');
-  ctx.fillStyle = bodyGradient;
-  ctx.fill();
-
-  // A flat, sunlit-looking highlight strip right along the flat top edge —
-  // the same "solid fill plus a thin lighter strip" treatment
-  // renderSeabedGrid uses for the tank/city surface line, so this reads as
-  // the same kind of boundary rather than a different visual language.
-  // Dimmed and thinned alongside the gradient softening above.
-  ctx.fillStyle = '#8f7a5e';
-  ctx.fillRect(-4, topY, canvasWidth + 8, Math.max(2, 3 * camera.zoom));
-
-  // A darker shadow stroke along the jagged underside, selling depth where
-  // the shelf's rock hangs down into the underground biome beneath it —
-  // lightened alongside the rest of this pass, so it reads as soft shading
-  // rather than a hard cut line.
-  ctx.beginPath();
-  ctx.moveTo(screenPoints[0].x, screenPoints[0].y);
-  for (const sp of screenPoints) ctx.lineTo(sp.x, sp.y);
-  ctx.strokeStyle = 'rgba(20, 14, 10, 0.32)';
-  ctx.lineWidth = Math.max(1, 1.5 * camera.zoom);
-  ctx.lineJoin = 'round';
-  ctx.stroke();
-
-  ctx.restore();
-}
+// The jagged Rocky Shelf (a hard physical barrier partway down, splitting
+// the seabed into a visually distinct "city" and "underground") is gone
+// entirely — per direct request, "remove the upper and lower sections of
+// the city... make it all the same section," with the only remaining trace
+// of the old two-tone look being a plain top-to-bottom color gradient on
+// the single unified fill (see renderSeabedGrid above). sweepVertical's own
+// hard stop moved from the old ROCK_SHELF_Y down to WORLD_H, the world's
+// real bottom edge.
 
 export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
   const { camera } = state;
@@ -1060,8 +964,23 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
   // bottom edge into a pure-visual buffer strip (see Config.js), and this
   // fill needs to keep covering the screen there too so the buffer "looks
   // the same as the rest of the city background," per direct request.
+  //
+  // Per direct request, the old two-tone "city" (above the Rocky Shelf) /
+  // "underground" (below it) split — with a jagged rock ledge as a hard
+  // physical barrier in between — is gone entirely: "remove the upper and
+  // lower sections of the city, make it all the same section... food,
+  // money, waste, and science should all fall to the very bottom of the
+  // tank" (see sweepVertical's own updated stop, now at WORLD_H instead of
+  // the old ROCK_SHELF_Y). What's left of the two-tone look is purely a
+  // color gradient across the same single fill — top stop is the old city
+  // color, bottom stop (at the world's real bottom edge) is the old
+  // underground color — one continuous surface, not two.
   const topOfSeabed = worldToScreen(0, SEABED_ROW_START * TILE_SIZE, camera);
-  ctx.fillStyle = '#4a3624';
+  const bottomOfWorld = worldToScreen(0, WORLD_H, camera);
+  const seabedGradient = ctx.createLinearGradient(0, topOfSeabed.y, 0, bottomOfWorld.y);
+  seabedGradient.addColorStop(0, '#4a3624');
+  seabedGradient.addColorStop(1, '#3d3122');
+  ctx.fillStyle = seabedGradient;
   ctx.fillRect(0, Math.max(0, topOfSeabed.y), canvasWidth, canvasHeight);
   ctx.fillStyle = '#6b4f34';
   ctx.fillRect(0, Math.max(0, topOfSeabed.y), canvasWidth, 4); // seabed surface highlight line
@@ -1072,30 +991,6 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
   ctx.fillRect(0, Math.max(0, topOfSeabed.y) + 4, canvasWidth, canvasHeight);
   ctx.restore();
 
-  // Underground biome: a visually distinct "deeper rock" version of the
-  // dirt-city fill above, painted over it starting exactly at the Rocky
-  // Shelf's flat top edge — per direct request, everything below the shelf
-  // now reads as its own mini-biome (same speckled-texture technique as the
-  // city above, just a darker, cooler palette) rather than a continuation
-  // of the same dirt. renderRockShelf (below) then draws its jagged
-  // underside on top of this boundary, so the rock visibly hangs down into
-  // the underground fill rather than the fill starting at a hard edge.
-  // Lightened from #352a1f, alongside the Rocky Shelf's own softened colors
-  // above, per direct request that the upper/lower city boundary "not be
-  // quite so dramatic" — still visibly darker/cooler than the city fill
-  // (#4a3624) above it, just a smaller jump than before.
-  const undergroundTop = worldToScreen(0, ROCK_SHELF_Y, camera).y;
-  if (undergroundTop < canvasHeight) {
-    ctx.fillStyle = '#3d3122';
-    ctx.fillRect(0, Math.max(0, undergroundTop), canvasWidth, canvasHeight);
-    ctx.save();
-    ctx.fillStyle = getUndergroundTexturePattern(ctx);
-    ctx.globalAlpha = 0.6;
-    ctx.fillRect(0, Math.max(0, undergroundTop), canvasWidth, canvasHeight);
-    ctx.restore();
-  }
-
-  renderRockShelf(ctx, camera, canvasWidth, canvasHeight);
   renderCameraBottomBuffer(ctx, camera, canvasWidth, canvasHeight);
 
   // The real tile loop is skipped (not the whole function) once every real
@@ -1175,16 +1070,21 @@ function renderCameraBottomBuffer(ctx, camera, canvasWidth, canvasHeight) {
   const clampedBottom = Math.min(canvasHeight, bottomScreenY);
   const bufferHeight = clampedBottom - clampedTop;
 
+  // Softened per direct request ("change the texture of the toolbar to be
+  // slightly less aggressive/obtrusive") — the gradient's darkest stop
+  // lightened and pulled closer to its lighter neighbors (a narrower overall
+  // range reads as less of a stark plunge to near-black), the texture
+  // overlay/glow/rivets all toned down alongside it, all further down.
   const gradient = ctx.createLinearGradient(0, topScreenY, 0, bottomScreenY);
-  gradient.addColorStop(0, '#2e2115');
-  gradient.addColorStop(0.45, '#1c150e');
-  gradient.addColorStop(1, '#0a0705');
+  gradient.addColorStop(0, '#332619');
+  gradient.addColorStop(0.45, '#241a10');
+  gradient.addColorStop(1, '#160f09');
   ctx.fillStyle = gradient;
   ctx.fillRect(0, clampedTop, canvasWidth, bufferHeight);
 
   ctx.save();
   ctx.fillStyle = getUndergroundTexturePattern(ctx);
-  ctx.globalAlpha = 0.3;
+  ctx.globalAlpha = 0.18;
   ctx.fillRect(0, clampedTop, canvasWidth, bufferHeight);
   ctx.restore();
 
@@ -1194,7 +1094,7 @@ function renderCameraBottomBuffer(ctx, camera, canvasWidth, canvasHeight) {
       canvasWidth / 2, clampedTop, 0,
       canvasWidth / 2, clampedTop, canvasWidth * 0.42
     );
-    glowGradient.addColorStop(0, 'rgba(255, 200, 120, 0.16)');
+    glowGradient.addColorStop(0, 'rgba(255, 200, 120, 0.1)');
     glowGradient.addColorStop(1, 'rgba(255, 200, 120, 0)');
     ctx.fillStyle = glowGradient;
     ctx.fillRect(0, clampedTop, canvasWidth, bufferHeight);
@@ -1216,11 +1116,11 @@ function renderCameraBottomBuffer(ctx, camera, canvasWidth, canvasHeight) {
       const screenX = worldToScreen(wx, 0, camera).x;
       const r = Math.max(1.5, BUFFER_RIVET_RADIUS * camera.zoom);
       ctx.beginPath();
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
       ctx.arc(screenX, rivetScreenY, r, 0, Math.PI * 2);
       ctx.fill();
       ctx.beginPath();
-      ctx.fillStyle = 'rgba(255, 220, 180, 0.35)';
+      ctx.fillStyle = 'rgba(255, 220, 180, 0.22)';
       ctx.arc(screenX - r * 0.3, rivetScreenY - r * 0.3, r * 0.4, 0, Math.PI * 2);
       ctx.fill();
     }

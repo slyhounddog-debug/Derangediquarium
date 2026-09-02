@@ -59,29 +59,22 @@ export const SEABED_FLOOR_Y = SEABED_ROW_START * TILE_SIZE; // world-y of the wa
 // NOT compensated by moving tiles into WORLD_TILES_H, since this pass is
 // purely "make the buffer itself shorter," not "reclaim buildable space."
 // Bumped back up slightly, 100 -> 105 (+5%), per a still-later direct
-// request ("make the toolbar area at the bottom 5% taller"). See Grid.js's
-// renderCameraBottomBuffer for what fills it.
-export const CAMERA_BOTTOM_BUFFER_PX = 105;
-// A fixed rest height, 4 tiles above the world's absolute bottom row, that
-// NOTHING falls past — coins, Science Bubbles, Food, and Waste alike, per
-// direct request ("the rocky shelf is now a hard barrier for all objects...
-// don't pass to the bottom of the tank"). Previously this was a Waste-only
-// virtual floor (everything else could fall through an unbuilt gap all the
-// way past the world's bottom and be permanently lost — see "Items can't
-// stack, and can fall off the bottom"); Grid.js's sweepVertical now applies
-// it to every item type unconditionally, so nothing the player produces can
-// ever just vanish any more. Bumped from 2 tiles above the bottom to 4 (see
-// WORLD_TILES_H above) so the 2 real rows underneath it stay fully
-// buildable — 4 now, not 2 — while landing at the exact same absolute pixel
-// height (WORLD_H - 4*TILE_SIZE == the OLD WORLD_H - 2*TILE_SIZE) it always
-// rendered at, so the shelf itself doesn't visibly move at all. It doesn't
-// occupy or block a real grid tile, so a Fan built underneath it and aimed
-// up can still blow a resting item back off this line into the water
-// column, same as it would push one off any real solid tile. Grid.js's
-// renderSeabedGrid also draws a jagged rock-shelf visual at this height (see
-// its renderRockShelf) so the rest line reads as a physical ledge, not items
-// floating in empty space.
-export const ROCK_SHELF_Y = WORLD_H - 4 * TILE_SIZE;
+// request ("make the toolbar area at the bottom 5% taller"), then again,
+// 105 -> 126 (+20%), per direct request once items started falling all the
+// way to the world's real bottom edge instead of stopping partway down at
+// the old Rocky Shelf — "add a small visual buffer now that everything will
+// fall to the bottom of the tank." See Grid.js's renderCameraBottomBuffer
+// for what fills it.
+export const CAMERA_BOTTOM_BUFFER_PX = 126;
+// The old Rocky Shelf — a fixed rest height 4 tiles above the world's
+// absolute bottom that nothing (coins, Science Bubbles, Food, Waste) fell
+// past, splitting the seabed into a visually distinct "city" and
+// "underground" — is gone entirely per direct request ("remove the upper
+// and lower sections of the city... make it all the same section... food,
+// money, waste, and science should all fall to the very bottom of the
+// tank"). Grid.js's sweepVertical now stops everything at WORLD_H itself
+// instead; the underground/city split is now purely a color gradient on one
+// unified fill (see Grid.js's renderSeabedGrid), no physical barrier at all.
 
 // ---- Seabed grid tile types (Phase 2) ----
 // state.level.grid is a full WORLD_TILES_H x WORLD_TILES_W array of these
@@ -1583,6 +1576,8 @@ export const BANKRUPTCY_BAILOUT_AMOUNT = 100; // $ granted the first time the pl
 export const MONEY_MILESTONE_1K = 1000; // lifetime money EARNED (not current balance) that triggers the one-time "save some for the fishes" notification — see Entities.js's bankMoney
 export const ESCAPE_DARE_DELAY_MS = 120000; // 2 minutes of state.level.elapsed with Escape never pressed before the "press escape, I dare you" notification fires
 export const ALIEN_TUTORIAL_DELAY_MS = 10000; // 10s of state.level.elapsed after the first alien is ever killed (Entities.js's updateAlien sets state.level.firstAlienKilledAtMs) before the post-alien "arm up" guided tutorial starts — see Systems.js's updateStoryTriggers
+export const ALIEN_INTRO_DELAY_MS = 1000; // per direct request, the cinematic first-alien intro no longer triggers the instant the alien spawns — it has to actually be alive and visibly moving on screen for this long first (Entities.js's updateAlienPortals records when it appeared; Systems.js's updateStoryTriggers checks this delay before starting the 'alienintro' guided-tutorial flow)
+export const ALIEN_FOOD_BLOCK_DURATION_MS = 1000; // per direct request ("so you don't accidentally place 4 food after killing a fish") — Food can't be placed within a just-killed alien's old click radius for this long; see Entities.js's trySpawnFood/isInAlienFoodBlockZone
 export const POST_ALIEN_TUTORIAL_MESSAGE = "Now that's I'm talking about. A little firepower never hurt no one."; // per direct request's exact wording — posted once the player finishes placing the guided Waste Turret
 export const FISH_VANISH_DURATION_MS = 3500; // ms every fish freezes (position/hunger/coin-timer all frozen, not just hidden) and stops rendering — raised from 2500 per direct request
 export const FISH_VANISH_DELAY_MS = 1500; // ms between the chat closing and the vanish actually starting — per direct request ("delay the fish disappearing for 1.5 seconds first"), gives the "curiosity kills the fish" line a beat to land before anything visibly happens

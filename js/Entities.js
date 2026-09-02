@@ -95,6 +95,9 @@ import {
   TURRET_PROJECTILE_HIT_RADIUS,
   COIN_BLOCKED_EFFECT_DURATION_MS,
   WASTE_MAX_ON_SCREEN,
+  ALIEN_RADIUS,
+  ALIEN_CLICK_RADIUS_MULTIPLIER,
+  ALIEN_FOOD_BLOCK_DURATION_MS,
 } from './Config.js';
 import { stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemForces, updateBuildings } from './Grid.js';
 // Sound is a fire-and-forget side effect at the moment something already
@@ -291,6 +294,15 @@ function updateAlien(alien, state, dtMs) {
     // post-alien "arm up" guided tutorial (Systems.js's updateStoryTriggers
     // checks state.level.elapsed against this ALIEN_TUTORIAL_DELAY_MS later).
     if (state.level.firstAlienKilledAtMs === null) state.level.firstAlienKilledAtMs = state.level.elapsed;
+    // Per direct request ("so you don't accidentally place 4 food after
+    // killing a fish"): Food can't be placed for ALIEN_FOOD_BLOCK_DURATION_MS
+    // within what was the alien's own clickable radius — a rapid-click kill
+    // very often ends with a couple of leftover clicks landing right where
+    // the alien just was, which used to plant a small cluster of unwanted
+    // Food pellets there. See trySpawnFood's isInAlienFoodBlockZone check;
+    // expired zones are lazily filtered out there rather than aged every
+    // tick, since nothing else ever needs to read this list.
+    state.level.alienFoodBlockZones.push({ x: alien.x, y: alien.y, expiresAtMs: state.level.elapsed + ALIEN_FOOD_BLOCK_DURATION_MS });
     return false;
   }
   const dt = dtMs / 1000;
@@ -496,6 +508,18 @@ function maybeWarnFoodRot(state) {
 // differently to each failure — main.js flashes the money HUD red on
 // 'no_money'. No capacity check any more — see the module comment above
 // countTankItemsByType.
+// Lazily prunes expired zones as a side effect of checking — cheap enough
+// (at most a handful of zones ever exist at once, each living 1s) that a
+// dedicated per-tick age/cull pass (like alienDeathEffects gets) isn't
+// worth it; nothing else ever reads this array.
+function isInAlienFoodBlockZone(state, x, y) {
+  const zones = state.level.alienFoodBlockZones;
+  const now = state.level.elapsed;
+  state.level.alienFoodBlockZones = zones.filter((z) => z.expiresAtMs > now);
+  const radius = ALIEN_RADIUS * ALIEN_CLICK_RADIUS_MULTIPLIER;
+  return state.level.alienFoodBlockZones.some((z) => Math.hypot(z.x - x, z.y - y) <= radius);
+}
+
 export function trySpawnFood(state, x, y) {
   // Food can only be dropped in open water, never directly into the seabed
   // city — per direct request, after going back and forth on whether to
@@ -503,6 +527,7 @@ export function trySpawnFood(state, x, y) {
   // UP once it's fallen there naturally (still routes/rests on tiles as
   // normal) — only where a fresh pellet can be manually placed.
   if (y >= SEABED_FLOOR_Y) return 'in_city';
+  if (isInAlienFoodBlockZone(state, x, y)) return 'alien_zone';
   if (state.level.money < FOOD_COST) return 'no_money';
   state.level.money -= FOOD_COST;
   state.level.items.push(createFood(x, y));
@@ -1483,14 +1508,16 @@ function updateAlienPortals(state) {
       // Cinematic first-alien intro — per direct request, the very first
       // alien to ever spawn (wave 1 is forced to exactly one, see
       // Systems.js's spawnAlienWave) freezes the whole game and spotlights
-      // itself until the player clicks it. One-time, ever, via
-      // tutorialFlags.firstAlienIntroShown — main.js's update()/render()
-      // and click handler are what actually enforce the freeze/spotlight/
-      // click-to-end.
+      // itself until the player clicks it — but only once it's actually
+      // been alive and visibly moving on screen for a beat first (per
+      // direct request), not the instant it spawns. This just records WHEN
+      // it appeared; Systems.js's updateStoryTriggers checks the delay and
+      // actually starts the 'alienintro' tutorial flow once it elapses.
+      // One-time, ever, via tutorialFlags.firstAlienIntroShown.
       if (!state.level.tutorialFlags.firstAlienIntroShown) {
         state.level.tutorialFlags.firstAlienIntroShown = true;
-        state.level.firstAlienIntroActive = true;
         state.level.firstAlienIntroTargetId = alien.id;
+        state.level.firstAlienIntroAppearedAtMs = state.level.elapsed;
       }
     }
   }
