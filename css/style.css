@@ -162,17 +162,24 @@ html, body {
 }
 #pause-toggle-btn:hover { background: linear-gradient(160deg, #ffdcee 0%, #ffb0d8 100%); transform: scale(1.08); }
 
-/* Build legend — "Click to purchase" / "(Esc) to cancel", shown only while
-   a building is armed (state.ui.selectedTool starts with 'build:'), per
-   direct request. Moved to top-middle (was just above the fixed bottom
-   tool-bar) per direct follow-up report that it was covering the bottom of
-   the tank — now sits below #alien-countdown/#tutorial-text's own top:14px
-   slot, same "stacked, not overlapping" spacing #pause-toggle-btn uses
-   below #hud. */
-#build-legend {
-  position: fixed;
-  top: 70px; left: 50%; transform: translateX(-50%);
-  display: flex; gap: 14px;
+/* Build/fish legend — "Click to purchase" / "(Esc) to cancel" — and the
+   tutorial-skip legend — "(Esc) to skip tutorial" — per direct
+   request/report. Went through two placements: first just above the fixed
+   bottom tool-bar (blocked the view of the tank), then top-middle (still
+   in the way, per a direct follow-up — asked the user directly for a new
+   spot rather than guessing again). Landed on tucked into the bottom-left
+   corner, right next to the Shop toggle button — both are children of
+   #shop-anchor (position:relative, same anchor #shop-panel itself already
+   uses) so they track the button's real position regardless of viewport
+   width, positioned to its LEFT (not above, like the panel — that would
+   collide with it whenever the shop happens to be open at the same time)
+   and bottom-aligned with it. The two are mutually exclusive (UI.js's
+   updateHUD never shows both at once — the purchase legend is suppressed
+   entirely while a tutorial's active), so they can safely share the exact
+   same position/sizing. */
+#build-legend, #tutorial-skip-legend {
+  position: absolute;
+  right: calc(100% + 12px); bottom: 0;
   padding: 9px 20px;
   background: linear-gradient(160deg, #fffdf8 0%, #ffe9f4 100%);
   color: #6b4c6b;
@@ -184,7 +191,8 @@ html, body {
   z-index: 16;
   white-space: nowrap;
 }
-#build-legend.hidden { display: none; }
+#build-legend { display: flex; gap: 14px; }
+#build-legend.hidden, #tutorial-skip-legend.hidden { display: none; }
 
 /* Guided tutorial spotlight — see UI.js's TUTORIAL_FLOWS/
    updateTutorialOverlay. #tutorial-overlay covers the whole viewport and
@@ -314,7 +322,13 @@ html, body {
   max-width: 100%;
   background: linear-gradient(160deg, #fffdf8 0%, #ffe9f4 100%);
   color: #6b4c6b;
-  font-size: 13px;
+  /* A distinct, more "chat-like" font from the rest of the game's Baloo 2
+     UI chrome — per direct request ("more interesting font"), a casual
+     handwritten-comic face reads well for this game's sarcastic notification
+     voice. Bumped a size too ("slightly bigger"), with 700 weight for
+     legibility at that style (Comic Neue's regular weight reads thin). */
+  font-family: 'Comic Neue', 'Baloo 2', sans-serif;
+  font-size: 15px;
   font-weight: 700;
   text-align: left;
   padding: 9px 16px;
@@ -348,7 +362,8 @@ html, body {
 #notification-log::-webkit-scrollbar-thumb { background: #ffb6d5; border-radius: 999px; }
 #notification-log::-webkit-scrollbar-thumb:hover { background: #ff9ac4; }
 .notification-line {
-  font-size: 12px;
+  font-family: 'Comic Neue', 'Baloo 2', sans-serif;
+  font-size: 14px;
   line-height: 1.5;
   color: #6b4c6b;
   padding: 6px 0;

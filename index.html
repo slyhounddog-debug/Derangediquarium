@@ -6,7 +6,7 @@
 <title>Derangiquarium</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Comic+Neue:wght@400;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -56,11 +56,6 @@
 </div>
 
 <button id="pause-toggle-btn" class="sheen-target" title="Menu">☰</button>
-
-<div id="build-legend" class="hidden">
-  <span>Click to purchase</span>
-  <span>(Esc) to cancel</span>
-</div>
 
 <div id="tutorial-overlay" class="hidden"></div>
 <div id="tutorial-text" class="hidden"></div>
@@ -153,6 +148,11 @@
 <div id="bottom-bar-row">
   <div id="shop-anchor">
     <button id="shop-collapse-btn" title="Shop (S)">🛍️</button>
+    <div id="build-legend" class="hidden">
+      <span>Click to purchase</span>
+      <span>(Esc) to cancel</span>
+    </div>
+    <div id="tutorial-skip-legend" class="hidden">(Esc) to skip tutorial</div>
     <div id="shop-panel">
       <div id="shop-panel-scroll">
         <div id="shop-header-row">

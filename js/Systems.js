@@ -14,6 +14,7 @@ import {
   ESCAPE_DARE_DELAY_MS,
   ALIEN_TUTORIAL_DELAY_MS,
   ALIEN_INTRO_DELAY_MS,
+  WASTE_DRAG_TUTORIAL_WAIT_MS,
   NOTIFICATION_LOG_MAX,
   ALIEN_WAVE_INTERVAL_MIN_MS,
   ALIEN_WAVE_INTERVAL_MAX_MS,
@@ -40,6 +41,7 @@ import {
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings } from './Levels.js';
 import { getFishPurchaseCost } from './Entities.js';
+import { hasWasteTurretPlaced } from './Grid.js';
 
 const BANKRUPTCY_BAILOUT_MESSAGE =
   "Oopah, looks like someone got their CDL so they could drive the struggle bus! Here's 100 gold to get you back on your feet. I'll be expecting that back (I'm lying).";
@@ -140,8 +142,34 @@ function updatePostAlienTutorial(state) {
   if (flags.postAlienTutorialShown || state.level.tutorialFlow) return;
   if (state.level.firstAlienKilledAtMs === null) return;
   if (state.level.elapsed - state.level.firstAlienKilledAtMs < ALIEN_TUTORIAL_DELAY_MS) return;
+
+  // Per direct request ("make sure the turret tutorial only triggers if
+  // there's not a turret") — the full Shop -> Turret -> scroll -> place
+  // walkthrough only makes sense if the player hasn't already placed one.
+  if (!hasWasteTurretPlaced(state)) {
+    flags.postAlienTutorialShown = true;
+    state.level.tutorialFlow = { id: 'postalien', step: 'shop' };
+    return;
+  }
+
+  // A Waste Turret already exists — per direct request, skip straight to
+  // teaching just the "drag Waste into it" mechanic instead of the whole
+  // flow, so the player still learns it even though they built ahead of the
+  // tutorial. Waits until there's actually some Waste sitting in the city to
+  // drag (nothing to demonstrate on otherwise), then WASTE_DRAG_TUTORIAL_WAIT_MS
+  // (1s) more once it appears, per direct request.
+  const wasteInCity = state.level.items.some((it) => it.type === 'waste' && it.y >= SEABED_FLOOR_Y);
+  if (!wasteInCity) {
+    state.level.wasteDragTutorialWaitStartMs = null;
+    return;
+  }
+  if (state.level.wasteDragTutorialWaitStartMs === null) {
+    state.level.wasteDragTutorialWaitStartMs = state.level.elapsed;
+    return;
+  }
+  if (state.level.elapsed - state.level.wasteDragTutorialWaitStartMs < WASTE_DRAG_TUTORIAL_WAIT_MS) return;
   flags.postAlienTutorialShown = true;
-  state.level.tutorialFlow = { id: 'postalien', step: 'shop' };
+  state.level.tutorialFlow = { id: 'wastedrag', step: 'drag' };
 }
 
 function randomWaveIntervalMs() {

@@ -53,7 +53,7 @@ import {
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings, loadLevel } from './Levels.js';
 import { getFishPurchaseCost, effectiveCoinCapacity, effectiveScienceCapacity, countTankItemsByType } from './Entities.js';
-import { getTile, worldToTile, getBuildingCost, FAN_STATS, hasAnyBuildingPlaced } from './Grid.js';
+import { getTile, worldToTile, getBuildingCost, FAN_STATS, hasAnyBuildingPlaced, findNearestWasteTurretAndWaste } from './Grid.js';
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
@@ -198,6 +198,7 @@ export function initUI(state) {
     scrollHint: document.getElementById('scroll-hint'),
     pauseToggleBtn: document.getElementById('pause-toggle-btn'),
     buildLegend: document.getElementById('build-legend'),
+    tutorialSkipLegend: document.getElementById('tutorial-skip-legend'),
     tutorialOverlay: document.getElementById('tutorial-overlay'),
     tutorialText: document.getElementById('tutorial-text'),
     powerGraphCanvas: document.getElementById('hud-power-graph-canvas'),
@@ -2017,6 +2018,16 @@ export function updateHUD(state) {
     playFlash(els.coinCap, 'flash-spend');
   }
 
+  // Same cross-module-flag pattern — see main.js's state.ui declaration for
+  // why Grid.js can't call advanceTutorialFlow directly. Calling both is
+  // safe: each is a no-op unless that exact flow/step is the one currently
+  // active.
+  if (state.ui.wasteTurretAmmoGainedPending) {
+    state.ui.wasteTurretAmmoGainedPending = false;
+    advanceTutorialFlow(state, 'postalien', 'dragwaste');
+    advanceTutorialFlow(state, 'wastedrag', 'drag');
+  }
+
   // Science Cap — hidden until the Science Octopus is unlocked, same
   // "hidden until relevant" precedent as the electricity readout below.
   const octopusUnlocked = state.meta.speciesUnlocked.includes('octopus');
@@ -2069,10 +2080,21 @@ export function updateHUD(state) {
   updateAlienCountdown(state);
   updateScrollHint(state);
   updateTutorialOverlay(state);
-  // Build legend — "Click to purchase" / "(Esc) to cancel", shown only while
-  // a building is armed (state.ui.selectedTool starts with 'build:') per
-  // direct request.
-  els.buildLegend.classList.toggle('hidden', !state.ui.selectedTool.startsWith('build:'));
+  // Purchase legend — "Click to purchase" / "(Esc) to cancel" — shown while
+  // a building OR a fish is armed (state.ui.selectedTool starts with
+  // 'build:'/'fish:'), per direct request ("for the fish as well as the
+  // buildings"). Suppressed during a guided tutorial — Escape doesn't
+  // cancel the tool while one's active (it's locked/self-healing, see
+  // TUTORIAL_FLOWS' own comment), it skips the tutorial instead, so showing
+  // "Esc to cancel" here would be actively misleading; the skip legend
+  // below covers that case instead.
+  const tutorialActive = !!state.level.tutorialFlow;
+  const toolIsPurchasable = state.ui.selectedTool.startsWith('build:') || state.ui.selectedTool.startsWith('fish:');
+  els.buildLegend.classList.toggle('hidden', tutorialActive || !toolIsPurchasable);
+  // Tutorial-skip legend — "(Esc) to skip tutorial" — shown for the whole
+  // duration of any guided tutorial flow, per direct request; main.js's
+  // Escape handler now actually honors this (see its own comment).
+  els.tutorialSkipLegend.classList.toggle('hidden', !tutorialActive);
 }
 
 // A row of bouncing down-arrows nudging the player to pan the camera down,
@@ -2148,17 +2170,22 @@ function tutorialCircleForDom(el, padding = 12) {
   return { cx: rect.left + rect.width / 2, cy: rect.top + rect.height / 2, r: Math.max(rect.width, rect.height) / 2 + padding };
 }
 
-// World point high in the open-water column — where the game-start
-// tutorial's final step asks the player to click to place their first
-// Guppy. Deliberately near the TOP of the water column rather than dead
-// center: the Shop panel is still open at this point (that's how the
-// player has a fish armed to place at all — see the 'guppy' step before
-// this one), and its fly-out box grows upward from the bottom tool-bar tall
-// enough to cover a good chunk of the screen's vertical middle, which would
-// otherwise visually (and click-wise, since the panel sits above the canvas
-// in stacking order) obscure a spotlight placed at the water column's true
-// midpoint.
-const START_TUTORIAL_FISH_SPOT = { x: WORLD_W / 2, y: SEABED_FLOOR_Y * 0.15 };
+// Per direct report ("the first tutorial breaks if the player scrolls down
+// first") — a FIXED world-Y target (this used to be a plain constant,
+// SEABED_FLOOR_Y * 0.15) could scroll off the top of the screen entirely if
+// the camera had already panned down before reaching this step, leaving the
+// spotlight (and its clickable hole) unreachable. Anchored to the CURRENT
+// camera position instead: a small fixed offset below whatever's at the top
+// of the viewport right now (so it tracks scrolling and is always on
+// screen), clamped so it never crosses into the seabed city — has to stay
+// valid open water for the fish placement to actually succeed. Still
+// deliberately near the TOP of the current view, not dead center: the Shop
+// panel is open at this point (that's how the player has a fish armed to
+// place at all) and its fly-out box grows upward from the bottom tool-bar
+// tall enough to cover a good chunk of the screen's vertical middle.
+function startTutorialFishSpotWorld(state) {
+  return { x: WORLD_W / 2, y: Math.min(state.camera.y + 100, SEABED_FLOOR_Y - 50) };
+}
 // World point near (but not AT) the left edge of the world's absolute
 // bottom row (needs no Platform anchor — see Grid.js's canPlaceTile/
 // isAnchored) — "the bottom of the tank, just left of and above the shop
@@ -2173,6 +2200,24 @@ const START_TUTORIAL_FISH_SPOT = { x: WORLD_W / 2, y: SEABED_FLOOR_Y * 0.15 };
 // toggle button and can cover a real chunk of the lower-middle screen; a
 // point safely toward the left edge stays clear of it regardless.
 const POST_ALIEN_TURRET_SPOT = { x: WORLD_W * 0.12, y: WORLD_H - TILE_SIZE / 2 };
+
+// Shared by the post-alien flow's final step AND the standalone 'wastedrag'
+// flow below (used when a Waste Turret already existed before the tutorial
+// could walk the player through placing one) — a circle that encompasses
+// BOTH the target Waste Turret and the nearest Waste item to it, per direct
+// request ("the tutorial circle encapsulates the waste and the turret").
+// Returns null (hides the spotlight) if there's no turret, or no Waste to
+// drag yet — both should be unreachable given each flow's own trigger
+// conditions, but this avoids a crash if the turret gets demolished or the
+// Waste gets absorbed by something else mid-step.
+function wasteDragStepCircle(state) {
+  const target = findNearestWasteTurretAndWaste(state);
+  if (!target || !target.waste) return null;
+  const a = worldToScreen(target.turret.x, target.turret.y, state.camera);
+  const b = worldToScreen(target.waste.x, target.waste.y, state.camera);
+  const r = Math.hypot(a.x - b.x, a.y - b.y) / 2 + 40; // padding so both sit comfortably inside, not right at the edge
+  return { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, r };
+}
 
 const TUTORIAL_FLOWS = {
   // The cinematic first-alien intro — per direct report, unified onto this
@@ -2216,7 +2261,8 @@ const TUTORIAL_FLOWS = {
       text: 'Click in the tank to place it!',
       tool: 'fish:guppy',
       getCircle: (state) => {
-        const screen = worldToScreen(START_TUTORIAL_FISH_SPOT.x, START_TUTORIAL_FISH_SPOT.y, state.camera);
+        const spot = startTutorialFishSpotWorld(state);
+        const screen = worldToScreen(spot.x, spot.y, state.camera);
         return { cx: screen.x, cy: screen.y, r: 90 };
       },
     },
@@ -2238,6 +2284,20 @@ const TUTORIAL_FLOWS = {
         return { cx: screen.x, cy: screen.y, r: 70 };
       },
     },
+    // Per direct request — one more step teaching the Waste-drag mechanic
+    // itself: grab the nearest Waste and drag it into the Turret just
+    // placed. main.js draws a looping "ghost" Waste animating from its own
+    // position to the Turret while this step is active (hidden the instant
+    // the player actually grabs the real one — see its own render code) and
+    // ends the step the moment any Waste Turret's ammo goes up.
+    { id: 'dragwaste', text: 'Drag the Waste into the Turret!', tool: 'food', getCircle: wasteDragStepCircle },
+  ],
+  // Standalone one-step flow for the "already had a Turret" case (see
+  // Systems.js's updatePostAlienTutorial) — same step shape/logic as
+  // postalien's own final 'dragwaste' step above, just not preceded by the
+  // Shop/turret-selection/scroll/place steps, since those are already done.
+  wastedrag: [
+    { id: 'drag', text: 'Drag the Waste into the Turret!', tool: 'food', getCircle: wasteDragStepCircle },
   ],
 };
 
@@ -2255,7 +2315,10 @@ function onTutorialFlowComplete(state, id) {
     const notifications = state.level.notifications;
     notifications.push({ id: notifications.length + 1, text: "Here's an extra tank point, don't spend it all in one place", elapsed: state.level.elapsed });
     if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
-  } else if (id === 'postalien') {
+  } else if (id === 'postalien' || id === 'wastedrag') {
+    // Same closing line for both — 'wastedrag' is teaching the exact same
+    // "you've got a Turret, now feed it" lesson, just entered from the
+    // "already placed one" shortcut instead of the full walkthrough.
     const notifications = state.level.notifications;
     notifications.push({ id: notifications.length + 1, text: POST_ALIEN_TUTORIAL_MESSAGE, elapsed: state.level.elapsed });
     if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();

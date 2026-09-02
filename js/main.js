@@ -59,6 +59,7 @@ import {
   WORLD_H,
   CAMERA_BOTTOM_BUFFER_PX,
   WASTE_RADIUS,
+  WASTE_DRAG_GHOST_CYCLE_MS,
   WASTE_DRAG_CLICK_RADIUS_MULTIPLIER,
   BUILDING_FAMILIES,
 } from './Config.js';
@@ -96,6 +97,7 @@ import {
   getBuildingCost,
   getTile,
   computeCurrentPowerDemand,
+  findNearestWasteTurretAndWaste,
 } from './Grid.js';
 import { isPointOnMound, crackMound, renderMound, centerCameraOnMound, isPointOnScienceLab, renderScienceLab } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
@@ -166,7 +168,7 @@ for (const [i, char] of splashLetters.entries()) {
   span.style.animationDelay = `${SPLASH_GROW_IN_DURATION_S + i * SPLASH_LETTER_STAGGER_S}s`;
   splashTitle.appendChild(span);
 }
-const START_TUTORIAL_DELAY_AFTER_SPLASH_MS = 3000; // per direct request — the game-start guided tutorial no longer starts the instant Start is clicked; it waits this long after the splash screen has actually finished fading away
+const START_TUTORIAL_DELAY_AFTER_SPLASH_MS = 2000; // per direct request (cut from 3000) — the game-start guided tutorial no longer starts the instant Start is clicked; it waits this long after the splash screen has actually finished fading away
 splashTitle.addEventListener('animationend', (e) => {
   if (e.target !== splashTitle) return; // ignore bubbled per-letter animationend events, only the title's own grow-fade ending means it's done
   splashScreen.remove();
@@ -215,6 +217,13 @@ const state = {
     // UI.js's updateHUD on its very next frame to trigger the "shake red"
     // flash on the Coin HUD readout. See Config.js's COIN_CAP_BY_LEVEL.
     coinCapFlashPending: false,
+    // Same cross-module-flag pattern as coinCapFlashPending above, set by
+    // Grid.js's updateBuildings the instant a Waste Turret's ammo actually
+    // goes up (Grid.js importing UI.js directly would be circular, since
+    // UI.js already imports from Grid.js) — read and cleared by UI.js's
+    // updateHUD to advance the 'postalien'/'wastedrag' guided-tutorial
+    // flows' "drag Waste into the Turret" step.
+    wasteTurretAmmoGainedPending: false,
     // Small red reason text shown just above the cursor after a failed
     // building-placement attempt ("Can't afford" / "Needs Platform") — see
     // showBuildError/handleBuildPlacementFailure and render()'s draw call.
@@ -572,6 +581,16 @@ input.keydownHandlers.push((e) => {
   // action — deliberately never blocked by anything below (the cinematic
   // intro/tutorial-flow gates included), so it's always reachable for QA.
   if (e.code === 'Backquote') { state.debug.overlayVisible = !state.debug.overlayVisible; return; }
+  // Escape can always skip an active guided tutorial — per direct request
+  // ("make sure escape can actually skip any tutorial"), checked here,
+  // ahead of the general tutorial-flow hotkey block below, so it's the one
+  // exception to "every hotkey is swallowed during a tutorial." Just clears
+  // the flow outright — UI.js's updateTutorialOverlay reacts on the very
+  // next frame (hides the overlay/text), same as a normal completion.
+  if (e.code === 'Escape' && state.level.tutorialFlow) {
+    state.level.tutorialFlow = null;
+    return;
+  }
   // Guided tutorial flows (see UI.js's TUTORIAL_FLOWS) swallow every OTHER
   // hotkey, same reasoning as the cinematic intro above — the overlay's own
   // click-through "hole" is the only interaction that should work.
@@ -845,7 +864,19 @@ function update(dtMs) {
     if (state.level.tutorialFlow.id === 'postalien' && state.level.tutorialFlow.step === 'scroll' && isScrolledToBottom(state)) {
       state.level.tutorialFlow.step = 'place';
     }
-    return;
+    // The "drag Waste into the Turret" step needs the WHOLE simulation
+    // running normally, not just camera/build-drag like every other step's
+    // exemption — dragging itself is driven by updateWasteDrag below, but
+    // actually getting absorbed depends on updateEntities' own turret-
+    // intake scan (deep inside Grid.js's updateBuildings), which needs real
+    // per-tick execution to ever fire at all. Falls through to the normal
+    // path below instead of freezing — updateStoryTriggers' own tutorial
+    // triggers all self-gate on state.level.tutorialFlow already being set
+    // (this exact flow), so nothing else can start while this runs.
+    const isWasteDragStep =
+      (state.level.tutorialFlow.id === 'postalien' && state.level.tutorialFlow.step === 'dragwaste') ||
+      (state.level.tutorialFlow.id === 'wastedrag' && state.level.tutorialFlow.step === 'drag');
+    if (!isWasteDragStep) return;
   }
   if (state.ui.buildErrorText) {
     state.ui.buildErrorElapsedMs += dtMs;
@@ -1555,6 +1586,36 @@ function render() {
   // guided-tutorial step) instead of a bespoke canvas destination-out
   // gradient — per direct report that the two "seemed different," this
   // unifies them into the exact same mechanism, called from updateHUD below.
+
+  // Ghost Waste animation — per direct request, a translucent Waste circle
+  // loops from the target Waste's own position to the target Waste
+  // Turret's while the "drag Waste into the Turret" guided-tutorial step is
+  // active, showing the player exactly what to do. Hidden the instant they
+  // actually grab the real one (draggedWasteId != null) — the whole point
+  // was showing WHERE to drag, not competing for attention once they're
+  // already doing it.
+  const wasteDragStepActive =
+    (state.level.tutorialFlow?.id === 'postalien' && state.level.tutorialFlow.step === 'dragwaste') ||
+    (state.level.tutorialFlow?.id === 'wastedrag' && state.level.tutorialFlow.step === 'drag');
+  if (wasteDragStepActive && draggedWasteId == null) {
+    const target = findNearestWasteTurretAndWaste(state);
+    if (target && target.waste) {
+      const t = (state.level.elapsed % WASTE_DRAG_GHOST_CYCLE_MS) / WASTE_DRAG_GHOST_CYCLE_MS;
+      const worldX = target.waste.x + (target.turret.x - target.waste.x) * t;
+      const worldY = target.waste.y + (target.turret.y - target.waste.y) * t;
+      const screen = worldToScreen(worldX, worldY, state.camera);
+      ctx.save();
+      ctx.globalAlpha = 0.55;
+      ctx.fillStyle = WASTE_COLOR;
+      ctx.beginPath();
+      ctx.arc(screen.x, screen.y, WASTE_RADIUS * state.camera.zoom, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
 
   updateHUD(state);
   updateNotificationTicker(state);

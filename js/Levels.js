@@ -113,6 +113,7 @@ export function loadLevel(state, levelId) {
     firstAlienIntroAppearedAtMs: null,
     firstAlienIntroTargetId: null,
     alienFoodBlockZones: [], // { x, y, expiresAtMs } — per direct request, Food can't be placed within a just-killed alien's old click radius for ALIEN_FOOD_BLOCK_DURATION_MS; see Entities.js's trySpawnFood/isInAlienFoodBlockZone
+    wasteDragTutorialWaitStartMs: null, // set the instant Waste first appears in the city while waiting to start the 'wastedrag' guided-tutorial flow (a Waste Turret already existed before the normal post-alien tutorial would fire) — see Systems.js's updatePostAlienTutorial
     // Guided tutorial flows (Shop->Guppy->buy fish at game start; Tank
     // Upgrades->Coin Capacity on the first Tank Point; Shop->Waste Turret->
     // scroll->place ~10s after the first alien kill) — see UI.js's

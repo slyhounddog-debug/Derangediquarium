@@ -187,6 +187,47 @@ export function hasAnyBuildingPlaced(state) {
   return false;
 }
 
+// Whether a base Waste Turret is already placed — per direct request, the
+// post-alien guided tutorial's own "place a Waste Turret" leg only runs if
+// there isn't one yet (see Systems.js's updatePostAlienTutorial). Only the
+// base tier counts — Electric/Advanced Turrets don't consume Waste as ammo
+// at all (unlimited ammo, a power cost instead — see TURRET_STATS' own
+// comment), so they're not a substitute for "learn to feed a Waste Turret."
+export function hasWasteTurretPlaced(state) {
+  for (const key in state.level.buildingData) {
+    if (state.level.buildingData[key].type === TILE_TURRET_WASTE) return true;
+  }
+  return false;
+}
+
+// Finds the nearest Waste Turret (first one found — there's realistically
+// only ever one during the tutorial this feeds) and, if one exists, the
+// nearest Waste item to IT — shared by UI.js's guided-tutorial spotlight
+// (which needs both positions to draw one circle encompassing them) and
+// main.js's ghost-waste animation/drag-completion check, so all three
+// always agree on the exact same target pair rather than each picking
+// independently. Returns null if there's no Waste Turret at all; `waste` is
+// null (turret still populated) if none exists yet either.
+export function findNearestWasteTurretAndWaste(state) {
+  let turret = null;
+  for (const key in state.level.buildingData) {
+    const data = state.level.buildingData[key];
+    if (data.type !== TILE_TURRET_WASTE) continue;
+    const [row, col] = key.split(',').map(Number);
+    turret = { x: col * TILE_SIZE + TILE_SIZE / 2, y: row * TILE_SIZE + TILE_SIZE / 2 };
+    break;
+  }
+  if (!turret) return null;
+  let waste = null;
+  let wasteDist = Infinity;
+  for (const item of state.level.items) {
+    if (item.type !== 'waste') continue;
+    const d = Math.hypot(item.x - turret.x, item.y - turret.y);
+    if (d < wasteDist) { wasteDist = d; waste = item; }
+  }
+  return { turret, waste };
+}
+
 // Every building's live shop cost — Platform is a flat PLATFORM_FLAT_COST
 // regardless of how many exist; every other building's cost climbs by
 // BUILDING_COST_INCREMENT for each tile of that exact type already placed —
@@ -645,6 +686,13 @@ export function updateBuildings(state, dtMs) {
             items.splice(i, 1);
             data.ammo = Math.min(WASTE_TURRET_MAX_AMMO, data.ammo + WASTE_TURRET_SHOTS_PER_WASTE);
             playIntake();
+            // Cross-module flag (UI.js reads/clears it next frame — see
+            // main.js's state.ui.wasteTurretAmmoGainedPending for why this
+            // isn't just a direct call) — advances the "drag Waste into the
+            // Turret" guided-tutorial step, regardless of whether this
+            // particular Waste got here by an active drag or just drifted
+            // in naturally.
+            state.ui.wasteTurretAmmoGainedPending = true;
             break;
           }
         }
