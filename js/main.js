@@ -1011,87 +1011,79 @@ function waterBackgroundGradient(ctx, canvasHeight, cleanliness) {
 // Glass tank walls at the world's left/right edges — per direct request
 // ("so it's obvious where objects will stop on the sides"). Items already
 // clamp their own position flush against x=0/WORLD_W when they drift into
-// them (Entities.js's clampItemToWorldWalls), so drawing the wall's inner
-// face at those exact same coordinates means a resting item visually
-// touches the glass, not an arbitrary nearby line. Spans the full vertical
-// scroll range (world y=0 down through the camera's bottom-buffer strip)
-// so the wall is always present regardless of how far the player has
-// panned. Rendered right after the seabed grid/Mound, before any
-// fish/item/alien — a background structural element the tank's contents
-// sit in front of, same layering a real aquarium's side glass would read
-// as from this viewing angle.
-const TANK_WALL_WIDTH = 30; // world px the glass reads as thick — the material extends OUTWARD from x=0/WORLD_W (into space nothing ever occupies), not inward into the play area
-function renderGlassWall(ctx, innerX, topY, bottomY, widthPxSigned) {
-  const outerX = innerX + widthPxSigned;
+// them (Entities.js's clampItemToWorldWalls), so the wall's inner seam sits
+// at those exact same coordinates — a resting item visually touches the
+// glass, not an arbitrary nearby line. Spans the full vertical scroll range
+// (world y=0 down through the camera's bottom-buffer strip) so it's always
+// present regardless of how far the player has panned. Rendered right after
+// the seabed grid/Mound, before any fish/item/alien — a background
+// structural element the tank's contents sit in front of.
+//
+// Reworked per direct follow-up report ("I don't like the glass walls...
+// make the frosted part extend all the way to the outermost edges... so it
+// looks like [you're] inside a glass tank, rather than the tank being on
+// both sides of a random glass wall"). The original version drew a fixed-
+// width band a short distance out from the boundary, leaving plain water
+// color still visible beyond it out to the screen edge — reading as a thin
+// glass PILLAR floating in open water with tank on both sides of it, not
+// the actual edge of the tank. Now the glass fill spans the ENTIRE gap from
+// the true boundary out to the real screen edge, however wide that happens
+// to be for the current viewport — nothing but glass is ever visible past
+// the inner seam, so the screen edge itself reads as the outside of the
+// tank.
+const TANK_WALL_MIN_WIDTH = 22; // world px — the guaranteed-minimum glass width, used as a fallback when the true boundary would otherwise be off-screen (see renderTankWalls) or nearly flush with the screen edge
+function renderGlassWall(ctx, innerX, outerX, topY, bottomY) {
   const left = Math.min(innerX, outerX);
-  const width = Math.abs(widthPxSigned);
+  const width = Math.abs(outerX - innerX);
+  if (width <= 0) return;
+  const signedWidth = outerX - innerX;
   ctx.save();
-  // The glass itself — a solid-reading translucent frame (a real aquarium's
-  // side trim/bezel, not a subtle refraction effect that'd be too faint to
-  // register at a glance — per direct request, "obvious where objects will
-  // stop"), brighter/more opaque toward the outer edge and softening toward
-  // the inner edge where it meets the water.
+  // A gentle gradient — near-transparent right at the seam (blends into the
+  // water) brightening to a soft frosted white toward the outer/screen
+  // edge, like looking through glass at whatever's outside the tank.
   const fill = ctx.createLinearGradient(innerX, 0, outerX, 0);
-  fill.addColorStop(0, 'rgba(235, 248, 255, 0.28)');
-  fill.addColorStop(0.55, 'rgba(225, 244, 255, 0.55)');
-  fill.addColorStop(1, 'rgba(205, 232, 250, 0.78)');
+  fill.addColorStop(0, 'rgba(210, 235, 250, 0.12)');
+  fill.addColorStop(0.5, 'rgba(220, 240, 252, 0.32)');
+  fill.addColorStop(1, 'rgba(232, 246, 255, 0.55)');
   ctx.fillStyle = fill;
   ctx.fillRect(left, topY, width, bottomY - topY);
 
-  // A bright glossy highlight core running down the middle of the frame.
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
-  ctx.lineWidth = Math.max(2, width * 0.28);
+  // One soft diagonal shine streak.
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+  ctx.lineWidth = Math.max(1, width * 0.22);
   ctx.beginPath();
-  ctx.moveTo(innerX + widthPxSigned * 0.42, topY);
-  ctx.lineTo(innerX + widthPxSigned * 0.42, bottomY);
+  ctx.moveTo(innerX + signedWidth * 0.3, topY);
+  ctx.lineTo(innerX + signedWidth * 0.55, bottomY);
   ctx.stroke();
 
-  // Two soft diagonal reflection streaks for a glassy sheen on top of that.
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
-  ctx.lineWidth = Math.max(1, width * 0.14);
-  for (const frac of [0.12, 0.72]) {
-    const streakX = innerX + widthPxSigned * frac;
-    ctx.beginPath();
-    ctx.moveTo(streakX, topY);
-    ctx.lineTo(streakX + widthPxSigned * 0.3, bottomY);
-    ctx.stroke();
-  }
-
-  // Inner seam — a crisp, solid line exactly where an item resting against
-  // the wall actually touches it, so the stopping point reads unambiguously.
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.9)';
-  ctx.lineWidth = 2.5;
+  // Inner seam — a thin, crisp line exactly where a resting item touches
+  // the glass, so the stopping point still reads unambiguously.
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+  ctx.lineWidth = 1.5;
   ctx.beginPath();
   ctx.moveTo(innerX, topY);
   ctx.lineTo(innerX, bottomY);
-  ctx.stroke();
-
-  // Outer frame seam — a darker structural edge marking the tank's rim.
-  ctx.strokeStyle = 'rgba(10, 30, 45, 0.7)';
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(outerX, topY);
-  ctx.lineTo(outerX, bottomY);
   ctx.stroke();
   ctx.restore();
 }
 function renderTankWalls(ctx, state, canvasWidth) {
   const topY = worldToScreen(0, 0, state.camera).y;
   const bottomY = worldToScreen(0, WORLD_H + CAMERA_BOTTOM_BUFFER_PX, state.camera).y;
-  const wallWidthPx = TANK_WALL_WIDTH * state.camera.zoom;
-  // Clamp each wall's inner seam to stay fully on-screen even when the true
-  // world boundary itself would fall off-canvas on a narrower viewport
-  // (viewW < WORLD_W — see Engine.js's updateCamera's own comment on this).
-  // An item resting at that true, off-screen boundary is equally invisible
-  // in that case, so pinning the wall to the nearest screen edge instead
-  // keeps "where things stop" legible on every viewport rather than
-  // sometimes rendering nothing at all.
+  const minWidthPx = TANK_WALL_MIN_WIDTH * state.camera.zoom;
+  // The inner seam sits at the true world boundary whenever that's already
+  // comfortably on-screen; otherwise it falls back to a fixed minimum
+  // distance from the screen edge instead, so the wall never vanishes
+  // entirely on a narrower viewport (viewW < WORLD_W — see Engine.js's
+  // updateCamera's own comment on when the true boundary can fall
+  // off-canvas). The fill (above) always spans from this seam out to the
+  // real screen edge either way, so there's never a gap of plain water
+  // color between the glass and the edge of the canvas.
   const trueLeftInnerX = worldToScreen(0, 0, state.camera).x;
   const trueRightInnerX = worldToScreen(WORLD_W, 0, state.camera).x;
-  const leftInnerX = Math.max(trueLeftInnerX, wallWidthPx);
-  const rightInnerX = Math.min(trueRightInnerX, canvasWidth - wallWidthPx);
-  renderGlassWall(ctx, leftInnerX, topY, bottomY, -wallWidthPx);
-  renderGlassWall(ctx, rightInnerX, topY, bottomY, wallWidthPx);
+  const leftInnerX = Math.max(trueLeftInnerX, minWidthPx);
+  const rightInnerX = Math.min(trueRightInnerX, canvasWidth - minWidthPx);
+  renderGlassWall(ctx, leftInnerX, 0, topY, bottomY);
+  renderGlassWall(ctx, rightInnerX, canvasWidth, topY, bottomY);
 }
 
 // Alien hit-flash — per direct request ("aliens flash red and bounce when
