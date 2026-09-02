@@ -959,12 +959,21 @@ function speciesStatsHtml(speciesId) {
 function fishEconomyStatsHtml(speciesId) {
   const s = SPECIES[speciesId];
   if (!s) return '';
+  const baby = s.growthStages[0];
   const adult = s.growthStages[s.growthStages.length - 1];
   const foodPerMin = (s.hungerRate * 60) / FOOD_HUNGER_RELIEF_BY_LEVEL[0];
   let html = `<div class="building-stat">🍽️ Hunger: <b>${foodPerMin.toFixed(1)} food/min</b></div>`;
   if (s.behavior.includes('FEEDER') && adult.dropValue) {
-    const moneyPerMin = (adult.dropValue / adult.dropInterval) * 60000;
-    html += `<div class="building-stat">🪙 Money: <b>$${moneyPerMin.toFixed(2)}/min</b></div>`;
+    // Shown as a baby -> adult range, not just the adult figure — per direct
+    // request. Every stage now shares the same dropInterval (see Config.js's
+    // Guppy/Dartfin/Blimpfish growthStages — "fish spawn coins at the same
+    // rate as adult"), so the range comes entirely from each stage's own
+    // dropValue; babyMoneyPerMin still divides by baby's own dropInterval
+    // rather than assuming it equals adult's, so this stays correct even if
+    // that ever changes again.
+    const babyMoneyPerMin = (baby.dropValue / baby.dropInterval) * 60000;
+    const adultMoneyPerMin = (adult.dropValue / adult.dropInterval) * 60000;
+    html += `<div class="building-stat">🪙 Money: <b>$${babyMoneyPerMin.toFixed(2)} - $${adultMoneyPerMin.toFixed(2)}/min</b></div>`;
   }
   if (!s.behavior.includes('SCAVENGER')) {
     // Real bug fix: this used to read the flat global WASTE_POOP_INTERVAL_MS

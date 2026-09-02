@@ -732,10 +732,17 @@ export const SPECIES = {
     swimSpeed: 35, // px/sec — 5 below the original 40; the Level 1 Fish Movement Tank Upgrade restores it, see Config.js's FISH_MOVEMENT_UPGRADE_SPEED_BONUS
     lifespan: 300000, // ms, not enforced until a later phase
     hungerRate: 1.218, // hunger points/sec — 25% slower again per direct request ("all fish get hungrier 25% slower"); was 1.624
+    // Per direct request ("fish spawn coins at the same rate as adult, they
+    // are just worth more value, and they should around double from baby to
+    // adult in the coin value... guppies adult gets a boost up to $15 per
+    // coin") — every stage now shares the ADULT's own dropInterval (19382,
+    // unchanged from before), so growing up no longer speeds up production
+    // at all, only raises the payout: 0.5x/0.75x/1.0x of the new $15 adult
+    // value, replacing the old flat-7.5-at-every-stage table entirely.
     growthStages: [
-      { feedsRequired: 0, scale: 0.5, dropInterval: 37284, dropValue: 7.5 }, // stage 1: hatchling — money production 10% slower again per direct request (dropInterval / 0.9); was 33556; feeding fills the timer, see COIN_TIMER_FEED_BONUS_FRACTION. dropValue *1.25 then *1.2 again per two direct requests ("guppies give 25% more gold, so they give more money than the dartfin", then "guppies produce 20% more valuable coins still") — was 5, then 6.25; the fractional value is intentional, Math.ceil'd at drop time same as every star-tier-scaled drop already is
-      { feedsRequired: 3, scale: 0.75, dropInterval: 29877, dropValue: 7.5 }, // stage 2: juvenile — was 26889 / dropValue 5, then 6.25
-      { feedsRequired: 6, scale: 1.0, dropInterval: 19382, dropValue: 7.5 }, // stage 3: adult — was 17444 / dropValue 5, then 6.25
+      { feedsRequired: 0, scale: 0.5, dropInterval: 19382, dropValue: 7.5 }, // stage 1: hatchling — half the adult value
+      { feedsRequired: 3, scale: 0.75, dropInterval: 19382, dropValue: 11.25 }, // stage 2: juvenile — three-quarters
+      { feedsRequired: 6, scale: 1.0, dropInterval: 19382, dropValue: 15 }, // stage 3: adult — boosted from $7.5 to $15 per direct request
     ],
     // Per-species multiplier on the flat WASTE_POOP_INTERVAL_MS fish-poop
     // timer (Entities.js's updateFish) — omitted here since Guppy IS the
@@ -750,10 +757,13 @@ export const SPECIES = {
     swimSpeed: 65, // -5, see FISH_MOVEMENT_UPGRADE_SPEED_BONUS
     lifespan: 240000,
     hungerRate: 0.948, // 25% slower again per direct request — was 1.264 — lowest coin value of the three, so it's the least demanding to keep fed
+    // Same "share the adult's own dropInterval, scale only the value ~2x
+    // baby-to-adult" treatment as Guppy above — adult dropValue (3) is
+    // unchanged, only the per-stage split and the now-flat interval are new.
     growthStages: [
-      { feedsRequired: 0, scale: 0.5, dropInterval: 22408, dropValue: 3 }, // money production 10% slower again per direct request — was 20167
-      { feedsRequired: 3, scale: 0.75, dropInterval: 14074, dropValue: 3 }, // was 12667
-      { feedsRequired: 6, scale: 1.0, dropInterval: 9382, dropValue: 3 }, // was 8444 — still the high-frequency coin firehose of the three, just slightly less so
+      { feedsRequired: 0, scale: 0.5, dropInterval: 9382, dropValue: 1.5 }, // hatchling — half the adult value
+      { feedsRequired: 3, scale: 0.75, dropInterval: 9382, dropValue: 2.25 }, // juvenile — three-quarters
+      { feedsRequired: 6, scale: 1.0, dropInterval: 9382, dropValue: 3 }, // adult — still the high-frequency coin firehose of the three, just slightly less so
     ],
     // 10% slower waste production than Guppy, per direct request — same
     // "÷(1-x)" convention this codebase already uses for "X% slower"
@@ -771,10 +781,15 @@ export const SPECIES = {
     swimSpeed: 17, // 10% faster than the original 20, then -5, see FISH_MOVEMENT_UPGRADE_SPEED_BONUS
     lifespan: 360000,
     hungerRate: 1.554, // 25% slower again per direct request — was 2.072 — highest coin value of the three, so it's still the most demanding to keep fed
+    // Same "share the adult's own dropInterval, scale only the value ~2x
+    // baby-to-adult" treatment as Guppy/Dartfin above — adult dropValue (22)
+    // is unchanged, only the per-stage split and the now-flat interval (the
+    // old table already shrank per stage — 41852/35802/29259 — that
+    // speed-up is gone now, every stage fires at the adult's own 29259ms).
     growthStages: [
-      { feedsRequired: 0, scale: 0.6, dropInterval: 41852, dropValue: 16 }, // money production 10% slower again per direct request — was 37667
-      { feedsRequired: 3, scale: 0.8, dropInterval: 35802, dropValue: 17 }, // was 32222
-      { feedsRequired: 6, scale: 1.0, dropInterval: 29259, dropValue: 22 }, // was 26333
+      { feedsRequired: 0, scale: 0.6, dropInterval: 29259, dropValue: 11 }, // hatchling — half the adult value
+      { feedsRequired: 3, scale: 0.8, dropInterval: 29259, dropValue: 16.5 }, // juvenile — three-quarters
+      { feedsRequired: 6, scale: 1.0, dropInterval: 29259, dropValue: 22 }, // adult
     ],
     // 5% faster waste production than Guppy, per direct request — same
     // per-species multiplier mechanism as Dartfin's own (slower) one above,
