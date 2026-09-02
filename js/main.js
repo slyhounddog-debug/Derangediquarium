@@ -125,6 +125,7 @@ import {
   cancelActiveTool,
   advanceTutorialFlow,
   closeSidePanels,
+  tutorialScrollDirectionNeeded,
 } from './UI.js';
 
 const canvas = document.getElementById('game-canvas');
@@ -930,7 +931,21 @@ function update(dtMs) {
   // clear the flow instead of soft-locking the game frozen forever.
   if (state.level.tutorialFlow?.id === 'alienintro') {
     const alien = state.level.entities.find((e) => e.id === state.level.firstAlienIntroTargetId && e.type === 'alien' && e.hp > 0);
-    if (!alien) state.level.tutorialFlow = null;
+    if (!alien) { state.level.tutorialFlow = null; return; }
+    // Real bug fix, per direct report ("the alien tutorial doesn't work if
+    // I'm scrolled to the bottom of the tank") — this flow's own blanket
+    // camera freeze above is exactly what turned an off-screen alien into a
+    // hard softlock: the player had no way to ever scroll it into view, or
+    // even see it, to click it. Camera panning is allowed for exactly as
+    // long as the target isn't visible yet — UI.js's
+    // tutorialScrollDirectionNeeded is the same shared check
+    // updateTutorialOverlay/updateScrollHint use to show the "scroll to
+    // find it" prompt, so all three always agree on the same condition.
+    // Nothing else runs either way (fish/aliens/elapsed all stay frozen),
+    // preserving "the whole game pauses" the instant the alien IS visible.
+    if (tutorialScrollDirectionNeeded(state)) {
+      updateCamera(state.camera, input, canvas, dtMs);
+    }
     return;
   }
 

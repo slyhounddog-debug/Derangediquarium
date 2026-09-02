@@ -189,6 +189,8 @@ export function initUI(state) {
     alienCountdown: document.getElementById('alien-countdown'),
     alienCountdownSeconds: document.getElementById('alien-countdown-seconds'),
     scrollHint: document.getElementById('scroll-hint'),
+    scrollHintText: document.getElementById('scroll-hint-text'),
+    scrollHintArrows: document.querySelectorAll('.scroll-hint-arrow'),
     pauseToggleBtn: document.getElementById('pause-toggle-btn'),
     buildLegend: document.getElementById('build-legend'),
     buildLegendPurchase: document.getElementById('build-legend-purchase'),
@@ -2096,14 +2098,26 @@ function updateScrollHint(state) {
     state.level.tutorialFlags.hasScrolledDown = true;
   }
   // Per direct request, the post-alien guided tutorial's "scroll" step
-  // reuses these same 5 arrows — forced visible regardless of the normal
-  // delay/hasScrolledDown/item-in-city gating below, since by the time that
-  // step is reached the game may be many minutes in (hasScrolledDown
-  // already true from earlier casual scrolling) and what matters here is
-  // whether the camera is AT THE BOTTOM right now, which main.js's own
-  // per-tick check (isScrolledToBottom) already tracks independently to
-  // skip/advance the step itself — this is purely the visual nudge.
-  const forcedByTutorial = state.level.tutorialFlow?.id === 'postalien' && state.level.tutorialFlow.step === 'scroll';
+  // reuses these same 5 arrows — forced visible (always pointing down)
+  // regardless of the normal delay/hasScrolledDown/item-in-city gating
+  // below, since by the time that step is reached the game may be many
+  // minutes in (hasScrolledDown already true from earlier casual
+  // scrolling) and what matters here is whether the camera is AT THE
+  // BOTTOM right now, which main.js's own per-tick check
+  // (isScrolledToBottom) already tracks independently to skip/advance the
+  // step itself — this is purely the visual nudge.
+  const forcedByPostAlienScrollStep = state.level.tutorialFlow?.id === 'postalien' && state.level.tutorialFlow.step === 'scroll';
+  // Per direct report ("the alien tutorial doesn't work if I'm scrolled to
+  // the bottom of the tank... add in a scroll step to each tutorial if the
+  // player is not scrolled to the correct place") — ANY guided-tutorial
+  // step whose spotlight target is currently off-screen also arms this
+  // same nudge now, generalized to point whichever direction actually
+  // brings it back into view (tutorialScrollDirectionNeeded, shared with
+  // updateTutorialOverlay's own text-swap for the same condition — see its
+  // own comment for the full rationale). The postalien 'scroll' step above
+  // has no getCircle at all (noSpotlight), so this always returns null for
+  // it and the two conditions never fight over the arrow direction.
+  const autoScrollDirection = tutorialScrollDirectionNeeded(state);
   // Per direct request, the normal (non-tutorial-forced) nudge now ALSO
   // requires at least one Coin/Waste/Food actually sitting in the city —
   // both conditions must hold — so it doesn't nag a player who has nothing
@@ -2112,9 +2126,13 @@ function updateScrollHint(state) {
     (item) => item.y >= SEABED_FLOOR_Y && (item.type === 'coin' || item.type === 'waste' || item.type === 'food')
   );
   const shouldShow =
-    forcedByTutorial ||
+    forcedByPostAlienScrollStep ||
+    autoScrollDirection != null ||
     (state.level.elapsed >= SCROLL_HINT_DELAY_MS && !state.level.tutorialFlags.hasScrolledDown && somethingInCity);
   els.scrollHint.classList.toggle('hidden', !shouldShow);
+  const pointUp = !forcedByPostAlienScrollStep && autoScrollDirection === 'up';
+  els.scrollHintText.textContent = pointUp ? 'Scroll up' : 'Scroll down';
+  for (const arrow of els.scrollHintArrows) arrow.textContent = pointUp ? '⬆️' : '⬇️';
 }
 
 // ---- Guided tutorial flows ----
@@ -2386,6 +2404,51 @@ export function advanceTutorialFlow(state, id, step) {
   }
 }
 
+// Whether the CURRENTLY ACTIVE guided-tutorial step's spotlight target is
+// off-screen vertically right now, and which way the camera needs to pan
+// to bring it into view — 'up', 'down', or null (already visible, or this
+// step has no world-space target at all: a DOM-anchored button spotlight
+// like the Shop/Merge buttons, which are always on screen regardless of
+// camera position, or a noSpotlight step like the postalien flow's own
+// 'scroll' step, which already handles its own scrolling explicitly).
+//
+// Per direct report ("the alien tutorial doesn't work if I'm scrolled to
+// the bottom of the tank... make sure every tutorial step is scrolled to
+// the right place, and add in a scroll step to each tutorial if the player
+// is not scrolled to the correct place") — this is the shared, GENERIC
+// version of that fix, derived straight from whatever each step's own
+// getCircle already computes rather than needing every flow to separately
+// author its own scroll-detection: if the circle's vertical center (plus
+// its own radius, so a target only partially poking on-screen still counts
+// as visible) falls outside the real viewport, scrolling is needed.
+// main.js's update() calls this too, to decide whether to keep allowing
+// camera panning during a step that would otherwise freeze it entirely
+// (see the alienintro flow's own fix, the actual reported bug — every
+// other flow already lets the camera pan during any step by default, so
+// only that one flow needed a simulation-level change; every flow still
+// benefits from the visual scroll-prompt below).
+export function tutorialScrollDirectionNeeded(state) {
+  const flow = state.level.tutorialFlow;
+  if (!flow) return null;
+  const stepDef = TUTORIAL_FLOWS[flow.id]?.find((s) => s.id === flow.step);
+  if (!stepDef || stepDef.noSpotlight || !stepDef.getCircle) return null;
+  const circle = stepDef.getCircle(state);
+  if (!circle) return null;
+  // Checked against the circle's CENTER, not just whether any edge of it
+  // merely touches the viewport — a real bug caught during verification:
+  // requiring only `cy + r >= 0` let the target count as "found" the
+  // instant a sub-pixel sliver of it poked on screen, at which point this
+  // function (and the alienintro freeze-exemption reading it) immediately
+  // stops permitting further scrolling — leaving a target whose actual
+  // center, and therefore virtually all of its real clickable area, was
+  // still off-screen, genuinely unreachable by a real mouse position. Using
+  // the center means "no longer needs scrolling" only fires once there's a
+  // comfortably-sized, actually-clickable area on screen around it.
+  if (circle.cy < 0) return 'up';
+  if (circle.cy > window.innerHeight) return 'down';
+  return null;
+}
+
 // Called every frame (from updateHUD) — positions/shows the spotlight for
 // whatever step is currently active, or hides everything if no flow is
 // running.
@@ -2407,6 +2470,22 @@ function updateTutorialOverlay(state) {
   if (stepDef.tool && state.ui.selectedTool !== stepDef.tool) {
     state.ui.selectedTool = stepDef.tool;
     updateToolbar(state);
+  }
+  // The target isn't on screen right now — show a plain "scroll to find
+  // it" prompt instead of the step's real text/spotlight (which would
+  // otherwise render its clickable hole somewhere the player can't see or
+  // reach), and hide the darkening overlay entirely so scrolling itself
+  // isn't visually impeded. updateScrollHint (below) arms the actual
+  // bouncing-arrows nudge for the same condition; this just swaps the text
+  // pill. Reverts to the step's own real text/circle automatically the
+  // instant the target scrolls back into view (recomputed fresh every
+  // frame, nothing latched).
+  const scrollDirection = tutorialScrollDirectionNeeded(state);
+  if (scrollDirection) {
+    els.tutorialText.textContent = scrollDirection === 'up' ? 'Scroll up to find it!' : 'Scroll down to find it!';
+    els.tutorialText.classList.remove('hidden');
+    els.tutorialOverlay.classList.add('hidden');
+    return;
   }
   els.tutorialText.textContent = stepDef.text;
   els.tutorialText.classList.remove('hidden');
