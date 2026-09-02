@@ -621,7 +621,7 @@ html, body {
 #tool-bar {
   display: grid;
   grid-template-columns: repeat(3, 56px);
-  justify-content: start;
+  justify-content: center; /* was 'start' — left-aligning the grid tracks put the leftmost column flush against the panel edge, clipping its hover-grow scale (.tool-btn:hover) against that edge; centering leaves room on both sides */
   gap: 8px;
   margin-bottom: 10px;
 }
@@ -728,6 +728,7 @@ html, body {
 #shop-species-grid {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center; /* was left-aligned by default (flex-start) — clipped the leftmost icon's hover-grow scale (.species-icon-btn:hover) against the panel edge, same fix as #tool-bar above */
   gap: 14px 12px;
   margin-bottom: 14px; /* breathing room above the tool-bar below it, now that fish are reordered above food/buildings */
 }

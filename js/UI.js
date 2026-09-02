@@ -2187,9 +2187,12 @@ function startTutorialFishSpotWorld(state) {
   return { x: WORLD_W / 2, y: Math.min(state.camera.y + 100, SEABED_FLOOR_Y - 50) };
 }
 // World point near (but not AT) the left edge of the world's absolute
-// bottom row (needs no Platform anchor — see Grid.js's canPlaceTile/
-// isAnchored) — "the bottom of the tank, just left of and above the shop
-// icon" per direct request. 0.12 * WORLD_W (not a small fixed px offset)
+// bottom row — any empty city tile is a legal Turret placement now (see
+// Grid.js's canPlaceTile — buildings no longer need to anchor to a Platform
+// or the seabed floor at all), this particular spot is just a fine, always-
+// empty-at-this-point-in-the-tutorial one — "the bottom of the tank, just
+// left of and above the shop icon" per direct request. 0.12 * WORLD_W (not a
+// small fixed px offset)
 // deliberately stays clear of two things: the camera's own horizontal
 // centering offset (camera.x = (WORLD_W - viewW) / 2 is often 100+ world px,
 // since the world is usually a little wider than the viewport — see

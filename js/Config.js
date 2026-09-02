@@ -82,7 +82,7 @@ export const CAMERA_BOTTOM_BUFFER_PX = 126;
 // reachable from build mode). Absolute indexing (not seabed-relative) keeps
 // every row/col calc a single division by TILE_SIZE, no offset to remember.
 export const TILE_EMPTY = 'empty'; // passable — items fall straight through
-export const TILE_PLATFORM = 'platform'; // solid — items land and rest on top. The structural anchor: every other building must be placed adjacent to a Platform (or directly on the world's bottom row) — see BUILDING_TYPES' anchoring rule and Grid.js's canPlaceTile.
+export const TILE_PLATFORM = 'platform'; // solid — items land and rest on top. Purely an optional routing aid now (a cheap flat surface to catch a falling item before a Fan/Processor grabs it) — placement no longer requires anything to anchor to it; see Grid.js's canPlaceTile.
 export const TILE_COLLECTOR = 'collector'; // solid — the base Processor: items landing here are immediately consumed (coins auto-banked)
 export const TILE_COLLECTOR_ELECTRIC = 'collector_electric'; // solid — Electric Processor, faster processing, draws power — see PROCESSOR_STATS
 export const TILE_COLLECTOR_ADVANCED = 'collector_advanced'; // solid — Advanced Processor, bought in the Science Lab — see PROCESSOR_STATS
@@ -93,10 +93,9 @@ export const TILE_AUTO_FEEDER = 'auto_feeder'; // solid — absorbs Waste pushed
 export const TILE_AUTO_FEEDER_ELECTRIC = 'auto_feeder_electric'; // solid — Electric Auto-Feeder — see AUTO_FEEDER_STATS
 export const TILE_AUTO_FEEDER_ADVANCED = 'auto_feeder_advanced'; // solid — Advanced Auto-Feeder, bought in the Science Lab — see AUTO_FEEDER_STATS
 // ---- Turrets (Alien Invasion) ----
-// Anchored/placed exactly like a Collector or Auto-Feeder (same simple
-// single-click flow, same Platform-anchoring rule — see BUILDING_TYPES/
-// canPlaceTile, nothing turret-specific needed there since only Platform is
-// ever exempt). Unlike those two, a Turret has no aim/intake side at all —
+// Placed exactly like a Collector or Auto-Feeder (same simple single-click
+// flow, same placement rule — see canPlaceTile, nothing turret-specific
+// needed there). Unlike those two, a Turret has no aim/intake side at all —
 // it auto-targets whatever alien is nearest within TURRET_STATS[type].range,
 // same "no directional input side" simplification the Collector/Auto-Feeder
 // just got. The Waste Turret is granted at Tier 1 alongside Platform itself
@@ -993,12 +992,13 @@ export const SPECIES_LIST = Object.values(SPECIES);
 // level start. See TIER_UNLOCKS below for what the Mound grants at each
 // tier, and Mound.js.
 //
-// Placement Constraint: nothing here can float freely in open water. Every
-// building except Platform itself must be placed adjacent (up/down/left/
-// right) to a Platform tile, or directly on the world's absolute bottom row
-// (the true seabed floor) — enforced by Grid.js's canPlaceTile. Platform is
-// the one exception: it places freely anywhere in the seabed band, same as
-// the old Wall did, since it's the thing everything else anchors to.
+// Placement: any building can be placed on any empty tile anywhere in the
+// seabed band (Grid.js's canPlaceTile — bounds/occupancy/cost are the only
+// checks left) — nothing needs to anchor to a Platform or the seabed floor
+// any more. Per direct request, buildings can "float" freely in the city;
+// Platform itself is now purely an optional routing aid (a cheap flat
+// surface to catch falling items before a Fan/Processor grabs them), not a
+// structural requirement anything else depends on.
 // Full refund on removal (100%, not a fraction any more) — per direct
 // request, since removal is now a deliberate Demolish-tool action (see
 // UI.js's tool-demolish-btn) rather than an always-available right-click,
@@ -1008,8 +1008,7 @@ export const TILE_REFUND_FRACTION = 1.0;
 // Every building's shop cost is dynamic now, mirroring the Economy Fish
 // dynamic-pricing pattern but additive instead of multiplicative — per
 // direct request. Platform is a flat $3 regardless of how many are already
-// placed (it's the cheap, unlimited structural anchor everything else needs
-// — see Platform Anchoring). Every other building's live cost is its base
+// placed. Every other building's live cost is its base
 // BUILDING_TYPES cost plus BUILDING_COST_INCREMENT for each tile of that
 // exact type already placed on the grid (Grid.js's getBuildingCost, counted
 // live off state.level.grid every call, same "no separate counter to keep in
@@ -1022,8 +1021,8 @@ export const BUILDING_COST_INCREMENT = 1;
 export const BUILDING_TYPES = {
   [TILE_PLATFORM]: {
     id: TILE_PLATFORM, name: 'Platform', icon: '🧱', cost: PLATFORM_FLAT_COST,
-    description: 'Solid structural floor. Items land and rest on top. Every other building must be anchored to a Platform (or the seabed floor) to be placed.',
-    color: '#dba36f', unlockedByDefault: true, // available from level start — every other building needs one to anchor to, so it can't be gated behind any Mound tier
+    description: 'Solid floor. Items land and rest on top — a cheap, optional way to help route Coins/Waste/Food/Science toward a Fan or Processor.',
+    color: '#dba36f', unlockedByDefault: true, // available from level start, unchanged — no longer load-bearing for whether anything ELSE can be placed, though (see canPlaceTile's own comment)
   },
   [TILE_COLLECTOR]: {
     id: TILE_COLLECTOR, name: 'Processor', icon: '🧲', cost: 12,
@@ -1239,9 +1238,10 @@ export const MOUND_CRACK_COST = { 1: 1000, 2: 5000 }; // 1: Tier 1->2 (Processor
 export const MOUND_WIDTH_TILES = 4.4; // how many seabed tiles wide its clickable footprint is — 10% bigger than the original 4
 export const MOUND_HEIGHT_PX = 62; // how far it mounds up above the seabed surface — 10% bigger than the original 56
 // Platform itself is NOT tier-gated at all — see BUILDING_TYPES'
-// unlockedByDefault above — since every other building needs one to anchor
-// to, per direct request it's available from level start rather than
-// waiting on any crack. The Rudimentary Fan isn't granted by a
+// unlockedByDefault above — per direct request it's available from level
+// start rather than waiting on any crack (unrelated to whether anything
+// else needs to anchor to it — see canPlaceTile's own comment). The
+// Rudimentary Fan isn't granted by a
 // TIER_UNLOCKS entry at all — it's granted by the Mound's paid "Tier 1.75"
 // step (FAN_UNLOCK_COST, $500); the Auto-Feeder likewise isn't granted here
 // — it's the paid "Tier 2.5" step (AUTO_FEEDER_UNLOCK_COST, $2500). Both

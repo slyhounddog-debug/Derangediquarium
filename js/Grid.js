@@ -1,5 +1,5 @@
 // Grid.js — seabed tile array, gravity/fan-force physics for items once they
-// reach the seabed, collector/auto-feeder routing, platform anchoring.
+// reach the seabed, collector/auto-feeder routing, building placement rules.
 // Owns state.level.grid and state.level.buildingData.
 // Forbidden: no fish logic, no camera math.
 
@@ -138,22 +138,6 @@ export function worldToTile(x, y) {
   return { col: colAt(x), row: rowAt(y) };
 }
 
-// A non-Platform building must be adjacent (up/down/left/right) to a
-// Platform tile, or sit directly on the world's absolute bottom row (the
-// true seabed floor, resting on solid ground with nothing needed to anchor
-// to). Platform itself is exempt — it's what everything else anchors to, so
-// it has to be placeable on its own.
-function isAnchored(grid, col, row, buildingId) {
-  if (buildingId === TILE_PLATFORM) return true;
-  if (row === WORLD_TILES_H - 1) return true; // resting on the literal seabed floor
-  const neighbors = [[row - 1, col], [row + 1, col], [row, col - 1], [row, col + 1]];
-  for (const [r, c] of neighbors) {
-    if (r < 0 || r >= WORLD_TILES_H || c < 0 || c >= WORLD_TILES_W) continue;
-    if (grid[r][c] === TILE_PLATFORM) return true;
-  }
-  return false;
-}
-
 // Live count of tiles of one exact type currently on the grid — what
 // getBuildingCost scales off of. Counted fresh every call rather than
 // tracked as a running counter, same "no separate bookkeeping to keep in
@@ -273,9 +257,6 @@ export function canPlaceTile(state, col, row, buildingId) {
   const building = BUILDING_TYPES[buildingId];
   if (!building) return { ok: false, reason: 'unknown building' };
   if (state.level.money < getBuildingCost(state, buildingId)) return { ok: false, reason: 'cannot afford' };
-  if (!isAnchored(state.level.grid, col, row, buildingId)) {
-    return { ok: false, reason: 'must be anchored to a Platform or the seabed floor' };
-  }
   return { ok: true, reason: null };
 }
 
@@ -1436,7 +1417,7 @@ function renderDirectionIndicator(ctx, type, x, y, size, angle, zoom, showCone =
 
 // Build-mode cursor preview — a translucent square at the snapped tile under
 // the cursor, tinted green if placing there is currently valid or red if
-// not (occupied, out of bounds, unaffordable, or unanchored). `angle`/
+// not (occupied, out of bounds, or unaffordable). `angle`/
 // `showCone` (only relevant for a Fan now — see renderDirectionIndicator's
 // own comment) draw the same aim cone the placed version gets, live-
 // following the cursor's exact position within the tile. `showCone`

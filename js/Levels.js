@@ -86,7 +86,6 @@ export function loadLevel(state, levelId) {
       firstChatClosed: false, // fires the "you found the chat" gag on the first CLOSE of the log, not the first open — see UI.js's notificationLatest click handler
       cleanlinessWarningShown: false, // fires once cleanliness first crosses below CLEANLINESS_WARNING_THRESHOLD — see Entities.js's adjustCleanliness
       firstSplice: false, // Phase 4 — first successful Gene-Splicing drag, see Entities.js's spliceFish
-      firstPlatformNeeded: false, // first building placement attempt refused for lacking a Platform to anchor to — see main.js's handleBuildPlacementFailure
       foodRotWarningShown: false, // fires once on whichever comes first — 5 Food items existing at once, or the first Food-to-Waste conversion — see Entities.js's maybeWarnFoodRot
       firstShopOpened: false, // set the first time the Shop panel is ever expanded — until then, UI.js's scheduleShopButtonReminder keeps bouncing the shop toggle button as a reminder it exists
       firstAlienWaveTipShown: false, // fires the alien-combat tip the moment the very first wave's aliens actually spawn — see Systems.js's spawnAlienWave

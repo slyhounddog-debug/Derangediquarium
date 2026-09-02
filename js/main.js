@@ -225,7 +225,7 @@ const state = {
     // flows' "drag Waste into the Turret" step.
     wasteTurretAmmoGainedPending: false,
     // Small red reason text shown just above the cursor after a failed
-    // building-placement attempt ("Can't afford" / "Needs Platform") — see
+    // building-placement attempt ("Can't afford") — see
     // showBuildError/handleBuildPlacementFailure and render()'s draw call.
     // null (or elapsed past BUILD_ERROR_TEXT_DURATION_MS) means nothing's
     // shown right now.
@@ -430,13 +430,14 @@ function isFanAimingActive() {
 }
 
 // Per direct request: a Build or Demolish tool can't do anything in open
-// water anyway — every building needs seabed anchoring, and there's nothing
-// to demolish up there — so the cursor icon, ghost preview, and click
-// behavior all default back to Food while hovering open water with one of
-// those two tools selected. Crucially, state.ui.selectedTool itself is
-// NEVER changed by this — only what a click/hover DOES is reinterpreted —
-// so a building stays armed exactly as selected the moment the cursor
-// comes back down to the seabed, no need to reselect it in the shop. Fish
+// water anyway — every building still has to be placed within the seabed
+// band, and there's nothing to demolish up there — so the cursor icon,
+// ghost preview, and click behavior all default back to Food while hovering
+// open water with one of those two tools selected. Crucially,
+// state.ui.selectedTool itself is NEVER changed by this — only what a
+// click/hover DOES is reinterpreted — so a building stays armed exactly as
+// selected the moment the cursor comes back down to the seabed, no need to
+// reselect it in the shop. Fish
 // and Merge are deliberately excluded, since both are genuinely used in
 // open water and should stay exactly as selected everywhere. Shared by the
 // click handler, updateBuildDrag, the cursor icon, and the ghost-preview
@@ -568,6 +569,15 @@ input.rightClickHandlers.push((sx, sy) => {
 // without re-spending money on a cell it's already sitting over.
 let lastBuildCell = null;
 
+// Demolish-mode drag-removal — per direct request ("click and drag over
+// multiple buildings to delete them quickly, so you don't have to click each
+// one"), mirrors updateBuildDrag's own "once per newly-entered cell, not
+// once per physics tick" shape exactly, just calling removeTile instead of
+// placeTile. removeTile is already a safe no-op on an empty cell (returns
+// false, no refund/sound — see Grid.js), so this doesn't need its own
+// occupancy check before calling it.
+let lastDemolishCell = null;
+
 // Story trigger: the first time Escape is EVER pressed (tracked ahead of
 // every early-return below, so closing the Mound popup or cancelling a Fan
 // aim both still count) — if the 2-minute dare already fired
@@ -581,15 +591,13 @@ function pushMainNotification(text) {
 }
 
 // Per direct request: any failed building-placement attempt shows a small
-// red reason above the cursor ("Can't afford" / "Needs Platform"), and the
-// very first time a placement fails specifically for lacking a Platform to
-// anchor to, that also posts a one-time explanatory HUD notification —
-// mirrors every other "first X" story beat's pattern (see CLAUDE.md's
-// "Story & Tutorial Notifications"). Shared by every placement-attempt call
-// site (the Fan's two-click aim flow and updateBuildDrag's single-click-or-
-// drag flow below) so the behavior can't drift between them.
-const PLATFORM_NEEDED_MESSAGE =
-  "You're gonna need platform for that. Can't have your buildings floating, we are all about our commitment to realistic physics";
+// red reason above the cursor ("Can't afford"). Shared by every placement-
+// attempt call site (the Fan's two-click aim flow and updateBuildDrag's
+// single-click-or-drag flow below) so the behavior can't drift between them.
+// Per a later direct request, buildings no longer need to anchor to a
+// Platform at all (Grid.js's canPlaceTile dropped that check entirely — see
+// its own comment), so the "Needs Platform" branch this function used to
+// have, and the one-time explanatory notification it posted, are gone.
 const BUILD_ERROR_TEXT_DURATION_MS = 1100; // how long the cursor text stays up before render() stops drawing it
 
 function showBuildError(text) {
@@ -601,12 +609,6 @@ function handleBuildPlacementFailure(reason) {
   if (reason === 'cannot afford') {
     flashMoneyInsufficient(state);
     showBuildError("Can't afford");
-  } else if (reason === 'must be anchored to a Platform or the seabed floor') {
-    showBuildError('Needs Platform');
-    if (!state.level.tutorialFlags.firstPlatformNeeded) {
-      state.level.tutorialFlags.firstPlatformNeeded = true;
-      pushMainNotification(PLATFORM_NEEDED_MESSAGE);
-    }
   }
 }
 
@@ -828,6 +830,23 @@ function updateBuildDrag() {
   }
 }
 
+// Demolish-mode drag-removal — see lastDemolishCell's own comment above.
+function updateDemolishDrag() {
+  if (!input.mouseDown) {
+    lastDemolishCell = null;
+    return;
+  }
+  if (draggedFishId != null || draggedWasteId != null) return; // a fish-combine or Waste drag is in progress — don't also demolish under it
+  if (!input.mouse.inside) return;
+  const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
+  if (effectiveToolAt(world.y) !== 'demolish') return;
+  const { col, row } = worldToTile(world.x, world.y);
+  const cellKey = `${col},${row}`;
+  if (cellKey === lastDemolishCell) return;
+  lastDemolishCell = cellKey;
+  removeTile(state, col, row);
+}
+
 // Runs every tick a combine-drag is active (after updateEntities, so this
 // unconditionally overrides whatever that tick's normal AI/physics did),
 // snapping the dragged fish's position to the cursor and zeroing its
@@ -888,6 +907,7 @@ function update(dtMs) {
 
   updateCamera(state.camera, input, canvas, dtMs);
   updateBuildDrag();
+  updateDemolishDrag();
   // Guided tutorial flows (see UI.js's TUTORIAL_FLOWS) freeze everything
   // else below — fish AI, coin/waste production, aliens, elapsed time —
   // deliberately NOT camera panning or build-drag placement above, since the
@@ -1086,9 +1106,9 @@ function drawAlienBody(ctx, x, y, radius, facing, color, gazeAngle) {
 // than a real cursor image asset, same "no external file, generate it"
 // spirit as this project's synthesized audio. Only ever written to the DOM
 // when the tool actually changed, not every frame.
-function emojiCursorCss(emoji) {
+function emojiCursorCss(emoji, hotspotX = 4, hotspotY = 26) {
   const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'><text x='0' y='26' font-size='26'>${emoji}</text></svg>`;
-  return `url("data:image/svg+xml,${encodeURIComponent(svg)}") 4 26, auto`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${hotspotX} ${hotspotY}, auto`;
 }
 // The Food tool's cursor is a plain colored dot instead of an emoji — per
 // direct request ("make the cursor look like the food"), matching the same
@@ -1099,7 +1119,18 @@ function circleCursorCss(color) {
   const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='20' height='20'><circle cx='10' cy='10' r='8' fill='${color}' stroke='rgba(0,0,0,0.35)' stroke-width='1.5'/></svg>`;
   return `url("data:image/svg+xml,${encodeURIComponent(svg)}") 10 10, auto`;
 }
-const CURSOR_BY_TOOL = { demolish: emojiCursorCss('🔨'), merge: emojiCursorCss('🧤'), food: circleCursorCss(FOOD_COLOR) };
+const CURSOR_BY_TOOL = {
+  // Per direct report, the default hotspot (near the bottom of the glyph —
+  // roughly where the handle's grip end sits) read as "the click point is in
+  // the middle of the icon." (13, 8) was measured directly off a rendered
+  // 32x32 copy of this exact glyph/font-size (a small offscreen-canvas pixel
+  // scan for the topmost non-transparent pixel, then nudged a few px down
+  // into the solid head shape) — it sits at the top of the hammer's head,
+  // not its very tip corner.
+  demolish: emojiCursorCss('🔨', 13, 8),
+  merge: emojiCursorCss('🧤'),
+  food: circleCursorCss(FOOD_COLOR),
+};
 let lastCursorTool = null;
 function updateCanvasCursor() {
   const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
@@ -1597,7 +1628,7 @@ function render() {
     ctx.restore();
   }
 
-  // Small red "Can't afford"/"Needs Platform" reason text, glued to the
+  // Small red "Can't afford" reason text, glued to the
   // cursor's own screen position (not a world point — this is pure UI
   // feedback, drawn in plain screen space like every other ctx.fillText
   // call in this function already is) — see handleBuildPlacementFailure.
