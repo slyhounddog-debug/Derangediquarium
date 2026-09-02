@@ -81,9 +81,7 @@ export function loadLevel(state, levelId) {
       firstCombine: false,
       firstFanPlaced: false,
       moneyMilestone1k: false,
-      escapePressed: false, // set true the first time Escape is ever pressed, regardless of context — read by the 2-minute dare check and the "made ya look" follow-up
-      escapeDareShown: false,
-      firstChatClosed: false, // fires the "you found the chat" gag on the first CLOSE of the log, not the first open — see UI.js's notificationLatest click handler
+      firstChatClosed: false, // fires the "you found the chat" line on the first CLOSE of the log, not the first open — see UI.js's notificationLatest click handler
       cleanlinessWarningShown: false, // fires once cleanliness first crosses below CLEANLINESS_WARNING_THRESHOLD — see Entities.js's adjustCleanliness
       firstSplice: false, // Phase 4 — first successful Gene-Splicing drag, see Entities.js's spliceFish
       foodRotWarningShown: false, // fires once on whichever comes first — 5 Food items existing at once, or the first Food-to-Waste conversion — see Entities.js's maybeWarnFoodRot
@@ -130,9 +128,8 @@ export function loadLevel(state, levelId) {
     // Alien Invasion (see Config.js's ALIEN_* constants, Systems.js's updateAlienWaves,
     // Entities.js's createAlien/updateAlien) — all level-scoped/reset on restart like
     // everything else here. alienNextWaveAtMs is an absolute state.level.elapsed target,
-    // not a countdown-from value, matching this file's existing ESCAPE_DARE_DELAY_MS
-    // pattern. Seeded with a real random interval so the very first wave doesn't always
-    // land at the exact same moment every playthrough.
+    // not a countdown-from value. Seeded with a real random interval so the very first
+    // wave doesn't always land at the exact same moment every playthrough.
     alienNextWaveAtMs: ALIEN_WAVE_INTERVAL_MIN_MS + Math.random() * (ALIEN_WAVE_INTERVAL_MAX_MS - ALIEN_WAVE_INTERVAL_MIN_MS),
     alienWavesSpawned: 0,
     alienWaveActive: false, // true from the moment a wave spawns until every one of its portals has opened AND every alien it produced is dead — see Systems.js's updateAlienWaves; the next wave's own countdown doesn't even start until this clears
@@ -143,8 +140,6 @@ export function loadLevel(state, levelId) {
     coinBlockedEffects: [], // { x, y, age } — a "coin on fire, disintegrating" burst pushed by Entities.js's triggerProductionBlocked the instant a coin drop is blocked by the Coin Cap, aged out by updateCoinBlockedEffects; purely decorative, rendered by main.js
     turretProjectiles: [], // { id, x, y, targetId, damage } — a turret's homing shot, see Grid.js's updateBuildings (fires) / Entities.js's updateTurretProjectiles (homes + applies damage on impact) / main.js (renders)
     lifetimeMoneyEarned: 0, // real in-play income only (coins banked) — NOT the starting endowment or the bankruptcy bailout gift; see Entities.js's bankMoney and Config.js's MONEY_MILESTONE_1K
-    fishVanishTimer: 0, // ms remaining on the "you found the chat" gag — see Entities.js's updateEntities; every fish freezes in place (not just hidden) and stops rendering while this is > 0
-    fishVanishDelayMs: 0, // ms remaining before fishVanishTimer above actually starts — see Entities.js's updateFishVanish/Config.js's FISH_VANISH_DELAY_MS
     bankruptcyActive: false, // true while "no fish + can't afford anything" is CURRENTLY true, so the bailout/game-over response only fires once per fresh occurrence of that condition, not every tick it holds — see Systems.js's updateStoryTriggers
     bankruptciesTriggered: 0, // 0 = never happened, 1 = the one-time $100 bailout already used, 2+ = game over
     gameOver: false, // set true on the second bankruptcy — main.js's update() stops simulating while this is true, same as state.ui.paused, but Escape still opens the pause menu so Restart stays reachable

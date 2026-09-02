@@ -77,7 +77,6 @@ import {
   COIN_CAP_BY_LEVEL,
   SCIENCE_CAP_BY_LEVEL,
   PRODUCTION_BLOCKED_COLOR,
-  FISH_VANISH_DURATION_MS,
   ALIEN_AWARENESS_RADIUS,
   ALIEN_CHASE_CHANCE,
   ALIEN_FLEE_CHANCE,
@@ -722,8 +721,6 @@ export function canCombineFish(state, a, b) {
 
 const FIRST_COMBINE_MESSAGE =
   "You just smooshed two fish into one bigger, shinier fish. They're fine. Probably. It's basically fusion, and fusion is science, and science is great.";
-
-const FISH_VANISH_REAPPEAR_MESSAGE = 'JK! You should have seen your face tho';
 
 // Consumes both fish and spawns one Adult fish of the next star tier at
 // their midpoint — see Config.js's FISH_STAR_TIER_VALUE_MULTIPLIER for the
@@ -1464,34 +1461,6 @@ function updatePickupText(item, dtMs) {
   return item.age < PICKUP_TEXT_LIFETIME_MS;
 }
 
-// "You found the chat" gag (UI.js's notification-log expand handler starts
-// the DELAY, not the vanish itself — see fishVanishDelayMs below) — every
-// fish freezes exactly as it was (position, hunger, coin-drop timer,
-// everything) for FISH_VANISH_DURATION_MS by simply skipping updateFish
-// entirely while the timer is running, then resumes on its own the tick the
-// timer reaches 0. main.js's render() separately skips drawing any fish for
-// the same duration — this function only owns the freeze/timer, not the
-// "invisible" part.
-//
-// Per direct request, the vanish itself doesn't start the instant the chat
-// closes any more — fishVanishDelayMs counts down first (FISH_VANISH_DELAY_MS,
-// set by UI.js), so the "curiosity kills the fish" line gets a beat to land
-// before anything visibly happens. The delay and the real vanish timer are
-// deliberately two separate fields rather than one repurposed countdown —
-// main.js's render loop and this function's own "is anything frozen right
-// now" checks only ever look at fishVanishTimer, so nothing needs to learn
-// about the delay's existence except this one function that resolves it.
-function updateFishVanish(state, dtMs) {
-  if (state.level.fishVanishDelayMs > 0) {
-    state.level.fishVanishDelayMs = Math.max(0, state.level.fishVanishDelayMs - dtMs);
-    if (state.level.fishVanishDelayMs === 0) state.level.fishVanishTimer = FISH_VANISH_DURATION_MS; // the delay just elapsed — start the real vanish now
-    return;
-  }
-  if (state.level.fishVanishTimer <= 0) return;
-  state.level.fishVanishTimer = Math.max(0, state.level.fishVanishTimer - dtMs);
-  if (state.level.fishVanishTimer === 0) pushStoryNotification(state, FISH_VANISH_REAPPEAR_MESSAGE);
-}
-
 // Turns a due alien-wave portal into a real alien entity, and cleans up
 // portals once their close animation has finished. Systems.js's
 // updateAlienWaves owns the TIMING (when a wave starts, how many portals,
@@ -1590,7 +1559,6 @@ function updateCoinBlockedEffects(state, dtMs) {
 }
 
 export function updateEntities(state, dtMs) {
-  updateFishVanish(state, dtMs);
   updateAlienPortals(state);
   updateAlienDeathEffects(state, dtMs);
   updateCoinBlockedEffects(state, dtMs);
@@ -1628,7 +1596,7 @@ export function updateEntities(state, dtMs) {
   state.level.floatingTexts = state.level.floatingTexts.filter((ft) => updatePickupText(ft, dtMs));
 
   state.level.entities = state.level.entities.filter((entity) => {
-    if (entity.type === 'fish') return state.level.fishVanishTimer > 0 ? true : updateFish(entity, state, dtMs);
+    if (entity.type === 'fish') return updateFish(entity, state, dtMs);
     if (entity.type === 'alien') return updateAlien(entity, state, dtMs);
     return true;
   });

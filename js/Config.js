@@ -818,7 +818,7 @@ export const SPECIES = {
   // isSpliceSource.
   suckerfish: {
     id: 'suckerfish', name: 'Suckerfish', tier: 2, unlockPhase: 3, cost: 20, // cut from 25 per direct request
-    description: 'Only eats Waste, never Food — cleans up after the rest of the tank instead of adding to the mess.',
+    description: 'Only eats Waste, never Food — keeps the tank clean.',
     behavior: ['SCAVENGER'], dropType: 'waste_cleared',
     swimSpeed: 30, lifespan: 300000,
     hungerRate: 0.609, // 25% slower again per direct request — was 0.812. Entities.js's updateFish targets Waste items (never Food) for any species carrying the SCAVENGER tag. Deliberately flat across all 3 stages (unlike dropInterval below) — per direct request, a baby eats less OFTEN than an adult but still starves on the same overall clock.
@@ -854,7 +854,7 @@ export const SPECIES = {
   },
   octopus: {
     id: 'octopus', name: 'Science Octopus', tier: 3, unlockPhase: 4, cost: 60, // cut from 90 per direct request
-    description: 'Slowly brews one Science Bubble at a time — collect it like a coin once it drops.',
+    description: 'Slowly brews Science Bubbles — collect them like coins.',
     behavior: ['RESEARCHER'], dropType: 'science_blue',
     swimSpeed: 25, lifespan: 300000, hungerRate: 0.468, // 25% slower again per direct request — was 0.624
     // dropInterval is now a real long brew cycle, not a short speed-scaled
@@ -1021,67 +1021,67 @@ export const BUILDING_COST_INCREMENT = 1;
 export const BUILDING_TYPES = {
   [TILE_PLATFORM]: {
     id: TILE_PLATFORM, name: 'Platform', icon: '🧱', cost: PLATFORM_FLAT_COST,
-    description: 'Solid floor. Items land and rest on top — a cheap, optional way to help route Coins/Waste/Food/Science toward a Fan or Processor.',
+    description: 'Solid floor. Items land and rest on top — cheap, optional item routing.',
     color: '#dba36f', unlockedByDefault: true, // available from level start, unchanged — no longer load-bearing for whether anything ELSE can be placed, though (see canPlaceTile's own comment)
   },
   [TILE_COLLECTOR]: {
     id: TILE_COLLECTOR, name: 'Processor', icon: '🧲', cost: 12,
-    description: 'Auto-banks any coin or Science Bubble pulled into its intake side — aim it like a Fan. Unpowered, so it leaves waste behind while it works.',
+    description: 'Auto-banks coins and Science pulled into its intake. Unpowered — leaves Waste behind.',
     color: '#8fe0b8', unlockedByDefault: false,
   },
   [TILE_COLLECTOR_ELECTRIC]: {
     id: TILE_COLLECTOR_ELECTRIC, name: 'Electric Processor', icon: '🧲', cost: 60,
-    description: 'A powered Processor — noticeably faster at both coins and Science, and produces waste more slowly. Draws power while actively holding an item.',
+    description: 'Faster than the base Processor, less Waste. Draws power while holding an item.',
     color: '#5fb8ff', unlockedByDefault: false,
   },
   [TILE_COLLECTOR_ADVANCED]: {
     id: TILE_COLLECTOR_ADVANCED, name: 'Advanced Processor', icon: '🧲', cost: 150,
-    description: 'The fastest Processor money (and a little Science) can buy. Purchased once in the Science Lab, then placeable like any other building.',
+    description: 'The fastest Processor money can buy.',
     color: '#c9a8ff', unlockedByDefault: false,
   },
   [TILE_FAN_T2]: {
     id: TILE_FAN_T2, name: 'Rudimentary Fan', icon: '🌀', cost: 15,
-    description: `Blows a narrow cone of force in whatever direction you aim it at placement. Free to run, but short reach (${FAN_T2_MAX_RANGE}px) and low force — struggles to lift a coin.`,
+    description: `Blows a cone of force wherever you aim it. Free, but short reach (${FAN_T2_MAX_RANGE}px) and weak — struggles to lift a coin.`,
     color: '#9fd8ff', unlockedByDefault: false,
   },
   [TILE_FAN_T3]: {
     id: TILE_FAN_T3, name: 'Electric Fan', icon: '💨', cost: 45,
-    description: `Draws a little power from the grid for medium reach (${FAN_T3_MAX_RANGE}px) and force — enough to route most coins.`,
+    description: `Draws power for medium reach (${FAN_T3_MAX_RANGE}px) — enough to route most coins.`,
     color: '#5fb8ff', unlockedByDefault: false,
   },
   [TILE_FAN_T4]: {
     id: TILE_FAN_T4, name: 'Turbo Fan', icon: '🌪️', cost: 120,
-    description: `The longest reach (${FAN_T4_MAX_RANGE}px) of any Fan, gentle enough to suspend a coin mid-air rather than launching it. Draws a little power.`,
+    description: `Longest reach (${FAN_T4_MAX_RANGE}px), gentle enough to suspend a coin mid-air. Draws power.`,
     color: '#2f7fd6', unlockedByDefault: false,
   },
   [TILE_AUTO_FEEDER]: {
     id: TILE_AUTO_FEEDER, name: 'Auto-Feeder', icon: '♻️', cost: 35,
-    description: 'Absorbs Waste pushed into its intake side and dispenses Food from the opposite side — aim it the same way as a Fan.',
+    description: 'Absorbs Waste on one side, dispenses Food on the other. Aim it like a Fan.',
     color: '#c9e88f', unlockedByDefault: false,
   },
   [TILE_AUTO_FEEDER_ELECTRIC]: {
     id: TILE_AUTO_FEEDER_ELECTRIC, name: 'Electric Auto-Feeder', icon: '♻️', cost: 90,
-    description: 'A powered Auto-Feeder — processes each Waste load faster. Draws power while actively processing.',
+    description: 'Processes Waste faster than the base Auto-Feeder. Draws power while working.',
     color: '#4fd6e0', unlockedByDefault: false, // was #7fd6a8 — too close to the base Processor's own #8fe0b8 (both light minty greens), per direct report; this is a distinct cyan/teal instead
   },
   [TILE_AUTO_FEEDER_ADVANCED]: {
     id: TILE_AUTO_FEEDER_ADVANCED, name: 'Advanced Auto-Feeder', icon: '♻️', cost: 200,
-    description: 'The fastest Auto-Feeder — needs the least Waste per Food output. Purchased once in the Science Lab, then placeable like any other building.',
+    description: 'The fastest Auto-Feeder — least Waste per Food.',
     color: '#ffd76f', unlockedByDefault: false,
   },
   [TILE_TURRET_WASTE]: {
     id: TILE_TURRET_WASTE, name: 'Waste Turret', icon: '🔫', cost: 25,
-    description: 'Auto-fires on the nearest alien within range. Runs on Waste — feeds itself from any Waste touching it, same as an Auto-Feeder.',
+    description: 'Auto-fires on the nearest alien. Feeds itself from any Waste touching it.',
     color: '#9c8a6b', unlockedByDefault: true, // free from the start, alongside Platform — the only defense before the Science Lab exists
   },
   [TILE_TURRET_ELECTRIC]: {
     id: TILE_TURRET_ELECTRIC, name: 'Electric Turret', icon: '🔫', cost: 55,
-    description: 'A powered turret — faster fire rate and harder-hitting than the Waste Turret, with unlimited ammo. Draws power per shot fired.',
+    description: 'Faster and harder-hitting than the Waste Turret, unlimited ammo. Draws power per shot.',
     color: '#5fb8ff', unlockedByDefault: false,
   },
   [TILE_TURRET_ADVANCED]: {
     id: TILE_TURRET_ADVANCED, name: 'Advanced Turret', icon: '🔫', cost: 130,
-    description: 'The strongest turret — fastest fire rate, hardest-hitting. Purchased once in the Science Lab, then placeable like any other building.',
+    description: 'The strongest turret — fastest, hardest-hitting.',
     color: '#c9a8ff', unlockedByDefault: false,
   },
 };
@@ -1595,16 +1595,12 @@ export const NOTIFICATION_LOG_MAX = 50; // oldest entries drop off past this man
 // else in this file, even though their triggers live in several modules.
 export const BANKRUPTCY_BAILOUT_AMOUNT = 100; // $ granted the first time the player has no fish left AND can't afford anything in the shop — see Systems.js's updateStoryTriggers
 export const MONEY_MILESTONE_1K = 1000; // lifetime money EARNED (not current balance) that triggers the one-time "save some for the fishes" notification — see Entities.js's bankMoney
-export const ESCAPE_DARE_DELAY_MS = 120000; // 2 minutes of state.level.elapsed with Escape never pressed before the "press escape, I dare you" notification fires
 export const ALIEN_TUTORIAL_DELAY_MS = 10000; // 10s of state.level.elapsed after the first alien is ever killed (Entities.js's updateAlien sets state.level.firstAlienKilledAtMs) before the post-alien "arm up" guided tutorial starts — see Systems.js's updateStoryTriggers
 export const ALIEN_INTRO_DELAY_MS = 1000; // per direct request, the cinematic first-alien intro no longer triggers the instant the alien spawns — it has to actually be alive and visibly moving on screen for this long first (Entities.js's updateAlienPortals records when it appeared; Systems.js's updateStoryTriggers checks this delay before starting the 'alienintro' guided-tutorial flow)
 export const ALIEN_FOOD_BLOCK_DURATION_MS = 1000; // per direct request ("so you don't accidentally place 4 food after killing a fish") — Food can't be placed within a just-killed alien's old click radius for this long; see Entities.js's trySpawnFood/isInAlienFoodBlockZone
 export const WASTE_DRAG_TUTORIAL_WAIT_MS = 1000; // per direct request — if the player already placed a Waste Turret before the post-alien tutorial would fire, it waits this long after Waste first appears in the city before teaching just the "drag Waste into it" step — see Systems.js's updatePostAlienTutorial
 export const WASTE_DRAG_GHOST_CYCLE_MS = 1400; // one full waste->turret sweep of the "drag me here" ghost animation shown during that tutorial step — see main.js's render()
 export const POST_ALIEN_TUTORIAL_MESSAGE = "Now that's I'm talking about. A little firepower never hurt no one."; // per direct request's exact wording — posted once the player finishes placing the guided Waste Turret
-export const FISH_VANISH_DURATION_MS = 3500; // ms every fish freezes (position/hunger/coin-timer all frozen, not just hidden) and stops rendering — raised from 2500 per direct request
-export const FISH_VANISH_DELAY_MS = 1500; // ms between the chat closing and the vanish actually starting — per direct request ("delay the fish disappearing for 1.5 seconds first"), gives the "curiosity kills the fish" line a beat to land before anything visibly happens
-
 // ---- Alien Invasion (Aliens.js) ----
 // A "wave" is one spawn burst — a handful of aliens emerging from portals at
 // once, after which the timer restarts for the next one. Difficulty scales

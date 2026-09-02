@@ -1,5 +1,5 @@
 // Systems.js — cross-cutting simulation systems: the bankruptcy/game-over
-// and Escape-dare story triggers, and Alien Invasion wave timing/scheduling
+// story trigger, and Alien Invasion wave timing/scheduling
 // (updateAlienWaves — genuinely cross-cutting: reads/writes elapsed time,
 // notifications, and pushes into state.level.alienPortals, which Entities.js
 // then turns into real alien entities — see that function's own comment for
@@ -11,7 +11,6 @@
 import {
   FOOD_COST,
   BANKRUPTCY_BAILOUT_AMOUNT,
-  ESCAPE_DARE_DELAY_MS,
   ALIEN_TUTORIAL_DELAY_MS,
   ALIEN_INTRO_DELAY_MS,
   WASTE_DRAG_TUTORIAL_WAIT_MS,
@@ -47,7 +46,6 @@ const BANKRUPTCY_BAILOUT_MESSAGE =
   "Oopah, looks like someone got their CDL so they could drive the struggle bus! Here's 100 gold to get you back on your feet. I'll be expecting that back (I'm lying).";
 const GAME_OVER_MESSAGE =
   'My mama always said "Shooting a fish out of water in a barrel with bigger fish to fry" and I always took that to heart. Better luck next time! (Restart in the menu)';
-const ESCAPE_DARE_MESSAGE = 'yoo, press escape. I dare you';
 
 function pushNotification(state, text) {
   const notifications = state.level.notifications;
@@ -97,19 +95,6 @@ function updateBankruptcy(state) {
     state.level.gameOver = true;
     pushNotification(state, GAME_OVER_MESSAGE);
   }
-}
-
-// Fires once, if Escape has genuinely never been pressed by the 2-minute
-// mark — main.js's keydown handler sets tutorialFlags.escapePressed the
-// instant Escape is pressed for the first time (regardless of what it did
-// contextually — closing the Mound popup still counts), so this simply
-// never fires once that's already true.
-function updateEscapeDare(state) {
-  const flags = state.level.tutorialFlags;
-  if (flags.escapePressed || flags.escapeDareShown) return;
-  if (state.level.elapsed < ESCAPE_DARE_DELAY_MS) return;
-  flags.escapeDareShown = true;
-  pushNotification(state, ESCAPE_DARE_MESSAGE);
 }
 
 // Starts the cinematic first-alien intro's 'alienintro' guided-tutorial flow
@@ -253,8 +238,7 @@ function spawnAlienWave(state) {
 // Wave timing/warnings/difficulty ramp — the "wave timers" scope this
 // module's own header comment has reserved since Phase 1. alienNextWaveAtMs
 // is an absolute state.level.elapsed target (Levels.js seeds the first one),
-// matching updateEscapeDare's own ESCAPE_DARE_DELAY_MS pattern above, rather
-// than a countdown-from value. Portal/alien creation itself lives in
+// not a countdown-from value. Portal/alien creation itself lives in
 // Entities.js (see spawnAlienWave's own comment) — this function only ever
 // decides WHEN a wave should start and pushes the resulting portal data.
 function updateAlienWaves(state) {
@@ -308,7 +292,6 @@ function updateAlienWaves(state) {
 // Called once per tick from main.js's update().
 export function updateStoryTriggers(state) {
   updateBankruptcy(state);
-  updateEscapeDare(state);
   updateAlienWaves(state);
   updateAlienIntroTrigger(state);
   updatePostAlienTutorial(state);

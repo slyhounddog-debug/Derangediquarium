@@ -30,7 +30,6 @@ import {
   TILE_FAN_T3,
   TILE_FAN_T4,
   TILE_REFUND_FRACTION,
-  NOTIFICATION_LOG_MAX,
   CLEANLINESS_MAX,
   SCIENCE_LAB_UPGRADES,
   SCIENCE_ITEM_COLOR_A,
@@ -355,6 +354,10 @@ function isWasteDragTutorialStepActive(state) {
 // already does for a fish that starves mid-drag.
 let draggedWasteId = null;
 let wasteDragArmed = false;
+// Short rolling history of the cursor's own raw world position while a drag
+// is active — see updateWasteDrag's own comment for why release velocity is
+// now averaged over this window instead of read off a single tick's delta.
+let wasteDragPositionHistory = [];
 
 input.mouseDownHandlers.push((sx, sy) => {
   // A guided tutorial normally blocks starting a Waste drag like every
@@ -374,6 +377,7 @@ input.mouseDownHandlers.push((sx, sy) => {
   if (waste) {
     draggedWasteId = waste.id;
     wasteDragArmed = true;
+    wasteDragPositionHistory = [];
   }
 });
 
@@ -384,29 +388,60 @@ input.mouseUpHandlers.push(() => {
   // seabed physics (Grid.js's stepItemOnGrid/integrateItemForces) to carry
   // on from, same as if gravity/drag had been acting on it the whole time.
   draggedWasteId = null;
+  wasteDragPositionHistory = [];
 });
+
+// How many recent ticks' worth of cursor movement to average into the
+// release velocity — see updateWasteDrag's own comment for why a single
+// tick's delta wasn't good enough. ~100ms at the fixed 60Hz sim rate: long
+// enough to smooth out a single noisy sample, short enough to still track a
+// genuine fast flick rather than dragging down its speed.
+const WASTE_DRAG_VELOCITY_SAMPLE_TICKS = 6;
 
 function updateWasteDrag() {
   if (draggedWasteId == null) return;
   const dragged = state.level.items.find((item) => item.id === draggedWasteId && item.type === 'waste');
-  if (!dragged) { draggedWasteId = null; return; } // absorbed by a Turret/Auto-Feeder (or otherwise removed) mid-drag
+  if (!dragged) { draggedWasteId = null; wasteDragPositionHistory = []; return; } // absorbed by a Turret/Auto-Feeder (or otherwise removed) mid-drag
   const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
   const dtSec = SIM_DT_MS / 1000;
   // Per direct request ("when a player is dragging waste around and lets
   // go, the waste still has the same momentum from when the player is
   // holding it... the player should essentially be able to throw waste back
-  // up into the tank"): velocity is derived from the cursor's own raw
-  // world-space movement each tick — using `world.y` (unclamped) rather
-  // than the item's actual clamped position below — so a fast upward swing
-  // right at the city boundary still registers real upward speed even
-  // though the item's own on-screen position can't visually follow the
-  // cursor up past that boundary while still held (see the clamp right
-  // after). On release, this last-computed vx/vy just carries straight into
-  // the normal per-tick gravity+drag integration every seabed item already
-  // gets (Grid.js's stepItemOnGrid/integrateItemForces) — nothing extra is
-  // needed for it to keep flying, arc, and gradually decelerate.
-  dragged.vx = (world.x - dragged.x) / dtSec;
-  dragged.vy = (world.y - dragged.y) / dtSec;
+  // up into the tank"): velocity carries into the normal per-tick
+  // gravity+drag integration every seabed item already gets (Grid.js's
+  // stepItemOnGrid/integrateItemForces) on release — nothing extra is needed
+  // for it to keep flying, arc, and gradually decelerate.
+  //
+  // Real bug fixed here, per direct report ("occasionally the momentum
+  // shoots in the wrong direction, sometimes faster than the mouse was
+  // moving"): the original version derived vx/vy from a SINGLE tick's
+  // position delta — exactly the "only taking the momentum of the frame of
+  // release" the report suspected. A single tick's sample is noisy: a
+  // mousemove event landing right on a tick boundary, a momentary stutter,
+  // or the raw cursor otherwise jittering by a pixel or two between two
+  // ticks all get divided by the same tiny dtSec, so a small, meaningless
+  // wobble on the very last tick before release could produce a huge,
+  // wrong-direction velocity completely disconnected from the actual drag
+  // gesture. Fixed by tracking a short rolling history of the cursor's own
+  // raw world position (wasteDragPositionHistory, capped at
+  // WASTE_DRAG_VELOCITY_SAMPLE_TICKS entries) and computing vx/vy from the
+  // OLDEST sample in that window to the current one, divided by the real
+  // elapsed time across however many ticks are actually in the window —
+  // averaging away a single outlier tick while still tracking a genuine
+  // fast flick almost as responsively (the window is only ~100ms).
+  wasteDragPositionHistory.push({ x: world.x, y: world.y });
+  if (wasteDragPositionHistory.length > WASTE_DRAG_VELOCITY_SAMPLE_TICKS + 1) wasteDragPositionHistory.shift();
+  const oldest = wasteDragPositionHistory[0];
+  const sampleTicks = wasteDragPositionHistory.length - 1;
+  if (sampleTicks > 0) {
+    // Uses `world.y` (unclamped) for both ends of the sample, not the item's
+    // actual clamped position — so a fast upward swing right at the city
+    // boundary still registers real upward speed even though the item's own
+    // on-screen position can't visually follow the cursor up past that
+    // boundary while still held (see the clamp right below).
+    dragged.vx = (world.x - oldest.x) / (sampleTicks * dtSec);
+    dragged.vy = (world.y - oldest.y) / (sampleTicks * dtSec);
+  }
   dragged.x = world.x;
   dragged.y = Math.max(world.y, SEABED_FLOOR_Y); // stays in the city while actively held — can't drag it back up into open water (only the carried-over velocity above can take it there, on release)
   dragged.resting = false;
@@ -578,18 +613,6 @@ let lastBuildCell = null;
 // occupancy check before calling it.
 let lastDemolishCell = null;
 
-// Story trigger: the first time Escape is EVER pressed (tracked ahead of
-// every early-return below, so closing the Mound popup or cancelling a Fan
-// aim both still count) — if the 2-minute dare already fired
-// (tutorialFlags.escapeDareShown, see Systems.js's updateEscapeDare), this
-// is the "gotcha" follow-up. See CLAUDE.md's "Story & Tutorial Notifications".
-const MADE_YA_LOOK_MESSAGE = 'Made ya look. tehe';
-function pushMainNotification(text) {
-  const notifications = state.level.notifications;
-  notifications.push({ id: notifications.length + 1, text, elapsed: state.level.elapsed });
-  if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
-}
-
 // Per direct request: any failed building-placement attempt shows a small
 // red reason above the cursor ("Can't afford"). Shared by every placement-
 // attempt call site (the Fan's two-click aim flow and updateBuildDrag's
@@ -643,10 +666,6 @@ input.keydownHandlers.push((e) => {
     // Upgrades panel, if one's open), and cancel an armed build/demolish/
     // merge tool back to Food. A no-op beyond that if none of those apply
     // (Food or a fish selection stay armed).
-    if (!state.level.tutorialFlags.escapePressed) {
-      state.level.tutorialFlags.escapePressed = true;
-      if (state.level.tutorialFlags.escapeDareShown) pushMainNotification(MADE_YA_LOOK_MESSAGE);
-    }
     if (isMoundMenuOpen()) { closeMoundMenu(); return; }
     if (isLabPurchaseModalOpen()) { closeLabPurchaseModal(); return; }
     if (isLabMenuOpen()) { closeLabMenu(); return; }
@@ -1328,11 +1347,7 @@ function render() {
     }
   }
 
-  // "You found the chat" gag: every fish is frozen (Entities.js's
-  // updateFishVanish/updateEntities) AND hidden for FISH_VANISH_DURATION_MS
-  // — skip the whole draw loop rather than each fish individually, since
-  // nothing about them should be visible, not even the hunger indicator.
-  for (const fish of state.level.fishVanishTimer > 0 ? [] : state.level.entities) {
+  for (const fish of state.level.entities) {
     if (fish.type !== 'fish') continue; // state.level.entities also holds Alien Invasion aliens now — rendered separately below
     const pos = worldToScreen(fish.x, fish.y, state.camera);
     if (pos.x < -60 || pos.x > canvas.width + 60 || pos.y < -60 || pos.y > canvas.height + 60) continue; // cull offscreen

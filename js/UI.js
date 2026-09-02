@@ -19,7 +19,6 @@ import {
   FISH_MOVEMENT_UPGRADE_MAX_LEVEL,
   FISH_MOVEMENT_UPGRADE_SPEED_BONUS,
   NOTIFICATION_LOG_MAX,
-  FISH_VANISH_DELAY_MS,
   BUILDING_FAMILIES,
   BUILDING_TYPES,
   FISH_MERGING_UNLOCK_COST,
@@ -67,11 +66,7 @@ const LAB_MENU_TRANSITION_MS = 220; // must match #lab-modal's CSS transition du
 // CLAUDE.md's "Story & Tutorial Notifications" section. (First-fish-bought
 // moved to Entities.js's trySpawnPurchasedFish, since buying is now a canvas
 // click rather than a UI.js button handler.)
-const FOUND_THE_CHAT_MESSAGE = 'You found the chat. Curiosity kills the fish.';
-// Per direct request, the vanish gag only fires if the player has actually
-// bought a fish (nothing to make disappear otherwise) — this is the line
-// shown instead when they haven't, on the exact same first-close trigger.
-const FOUND_THE_CHAT_NO_FISH_MESSAGE = 'You found the chat, you curious little fish.';
+const FOUND_THE_CHAT_MESSAGE = 'You found the chat, you curious little fish.';
 
 let els = null;
 let currentPreviewSpecies = null; // species currently shown in the in-panel preview, if any
@@ -311,27 +306,17 @@ export function initUI(state) {
     if (notificationLogExpanded) notificationUnread = false;
     // Story trigger: the first time the log is ever CLOSED again (not
     // opened) — per direct request, so the player has actually read
-    // whatever's in there before the "curiosity kills the fish" gag lands,
-    // rather than firing the instant they open it. Only on the
-    // expanded->collapsed transition, which can only happen after it's
-    // been opened at least once already. See CLAUDE.md's "Story & Tutorial
-    // Notifications".
+    // whatever's in there before this line lands, rather than firing the
+    // instant they open it. Only on the expanded->collapsed transition,
+    // which can only happen after it's been opened at least once already.
+    // Per a later direct request, this used to also freeze/hide every fish
+    // for a few seconds as a "curiosity kills the fish" gag — removed
+    // entirely; it's just the one line now, no other effect. See
+    // CLAUDE.md's "Story & Tutorial Notifications".
     if (!notificationLogExpanded && !state.level.tutorialFlags.firstChatClosed) {
       state.level.tutorialFlags.firstChatClosed = true;
       const notifications = state.level.notifications;
-      // Per direct request, the vanish gag only makes sense if there's a
-      // fish to vanish — gated on the same flag trySpawnPurchasedFish sets
-      // the first time the player actually buys one. No fish yet? A
-      // different line, and nothing disappears at all.
-      if (state.level.tutorialFlags.firstFishBought) {
-        notifications.push({ id: notifications.length + 1, text: FOUND_THE_CHAT_MESSAGE, elapsed: state.level.elapsed });
-        // Doesn't hide any fish immediately any more — starts the DELAY
-        // instead (see Entities.js's updateFishVanish), per direct request
-        // ("delay the fish disappearing for 1.5 seconds first").
-        state.level.fishVanishDelayMs = FISH_VANISH_DELAY_MS;
-      } else {
-        notifications.push({ id: notifications.length + 1, text: FOUND_THE_CHAT_NO_FISH_MESSAGE, elapsed: state.level.elapsed });
-      }
+      notifications.push({ id: notifications.length + 1, text: FOUND_THE_CHAT_MESSAGE, elapsed: state.level.elapsed });
       if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
     }
   });
@@ -1667,41 +1652,39 @@ function selectBuildingForPreview(state, building) {
 // electricity cost, range) instead of just the prose description. Each
 // building type only shows the lines that actually apply to it — a Fan has
 // no processing/waste stats, a Processor/Auto-Feeder has no range.
+// Per direct request ("shorten the verbiage... so the shop window doesn't
+// also need a scroll bar"), each building type's stats are paired two-to-a-
+// line (shorter labels too) instead of one stat per line — halves the line
+// count for the 3-4-stat buildings (Processor, Turret) that were the only
+// things actually overflowing the fixed-height preview box.
 function buildingStatsHtml(buildingId) {
   const p = PROCESSOR_STATS[buildingId];
   if (p) {
     return (
-      `<div class="building-stat">⏱️ Coin: <b>${p.coinMs / 1000}s</b></div>` +
-      `<div class="building-stat">🔬 Science: <b>${p.scienceMs / 1000}s</b></div>` +
-      `<div class="building-stat">💩 Waste: every <b>${p.wasteEveryMs / 1000}s</b> processing</div>` +
-      `<div class="building-stat">⚡ <b>${p.powerCostPerSec}</b> mw/sec</div>`
+      `<div class="building-stat">⏱️ Coin <b>${p.coinMs / 1000}s</b> · 🔬 Sci <b>${p.scienceMs / 1000}s</b></div>` +
+      `<div class="building-stat">💩 Waste <b>${p.wasteEveryMs / 1000}s</b> · ⚡ <b>${p.powerCostPerSec}</b> mw/s</div>`
     );
   }
   const a = AUTO_FEEDER_STATS[buildingId];
   if (a) {
     return (
-      `<div class="building-stat">⏱️ Waste: <b>${a.wasteProcessMs / 1000}s</b> per load</div>` +
-      `<div class="building-stat">💩 Needs: <b>${a.wasteRequired}</b> loads per Food</div>` +
+      `<div class="building-stat">⏱️ <b>${a.wasteProcessMs / 1000}s</b>/load · 💩 <b>${a.wasteRequired}</b>/Food</div>` +
       `<div class="building-stat">⚡ <b>${a.powerCostPerSec}</b> mw/sec</div>`
     );
   }
   const f = FAN_STATS[buildingId];
   if (f) {
-    return (
-      `<div class="building-stat">📏 Range: <b>${f.maxRange}px</b></div>` +
-      `<div class="building-stat">⚡ <b>${f.powerCost}</b> mw/sec</div>`
-    );
+    return `<div class="building-stat">📏 <b>${f.maxRange}px</b> · ⚡ <b>${f.powerCost}</b> mw/sec</div>`;
   }
   const t = TURRET_STATS[buildingId];
   if (t) {
-    let html =
-      `<div class="building-stat">🔫 Fire rate: <b>${t.shotsPerSec}/sec</b></div>` +
-      `<div class="building-stat">💥 Damage: <b>${t.damage}/shot</b></div>` +
-      `<div class="building-stat">📏 Range: <b>Global</b></div>`;
-    html += buildingId === TILE_TURRET_WASTE
-      ? `<div class="building-stat">🗑️ Ammo: <b>${WASTE_TURRET_SHOTS_PER_WASTE}/waste, holds ${WASTE_TURRET_MAX_WASTE}</b></div>`
-      : `<div class="building-stat">⚡ <b>${t.powerCostPerSec}</b> mw/sec</div>`;
-    return html;
+    const line2 = buildingId === TILE_TURRET_WASTE
+      ? `📏 Global · 🗑️ <b>${WASTE_TURRET_SHOTS_PER_WASTE}</b>/waste, holds <b>${WASTE_TURRET_MAX_WASTE}</b>`
+      : `📏 Global · ⚡ <b>${t.powerCostPerSec}</b> mw/sec`;
+    return (
+      `<div class="building-stat">🔫 <b>${t.shotsPerSec}</b>/sec · 💥 <b>${t.damage}</b> dmg</div>` +
+      `<div class="building-stat">${line2}</div>`
+    );
   }
   return '';
 }
