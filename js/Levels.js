@@ -96,7 +96,8 @@ export function loadLevel(state, levelId) {
       firstAlienIntroShown: false, // gates the cinematic first-alien intro (spotlight + forced pause) to only ever trigger once, ever — see Entities.js's updateAlienPortals
       startTutorialShown: false, // gates the game-start guided tutorial (shop -> Guppy -> buy your first fish) to once, ever — see UI.js's tutorialFlow system, started by main.js the moment the player clicks Start
       tankPointTutorialShown: false, // gates the "spend your first Tank Point" guided tutorial (Tank Upgrades -> Coin Capacity) to once, ever — see Entities.js's awardTankPoint
-      postAlienTutorialShown: false, // gates the "arm up" guided tutorial (Shop -> Waste Turret -> scroll down -> place it) to once, ever — see Systems.js's updateStoryTriggers, fired ~10s after the first alien kill
+      postAlienTutorialShown: false, // gates the ONE-TIME decision of whether to offer the "arm up" guided walkthrough (Shop -> Waste Turret -> scroll down -> place it) — see Systems.js's updatePostAlienTutorial, fired ~10s after the first alien kill. Does NOT by itself mean the drag-Waste lesson was ever shown — see wasteDragTutorialShown below
+      wasteDragTutorialShown: false, // set only once the "drag Waste into the Turret" lesson genuinely completes — via the tail of the full postalien walkthrough OR the standalone 'wastedrag' flow, see UI.js's onTutorialFlowComplete. Kept separate from postAlienTutorialShown so Escape-skipping the walkthrough before reaching that step doesn't permanently block the standalone fallback from firing later — see Systems.js's updatePostAlienTutorial
     },
     // Cinematic first-alien intro — per direct request, the very first alien
     // to ever spawn gets a dedicated teaching moment: once it's been alive
@@ -114,6 +115,7 @@ export function loadLevel(state, levelId) {
     firstAlienIntroTargetId: null,
     alienFoodBlockZones: [], // { x, y, expiresAtMs } — per direct request, Food can't be placed within a just-killed alien's old click radius for ALIEN_FOOD_BLOCK_DURATION_MS; see Entities.js's trySpawnFood/isInAlienFoodBlockZone
     wasteDragTutorialWaitStartMs: null, // set the instant Waste first appears in the city while waiting to start the 'wastedrag' guided-tutorial flow (a Waste Turret already existed before the normal post-alien tutorial would fire) — see Systems.js's updatePostAlienTutorial
+    wasteDragTutorialTargetId: null, // the specific Waste item locked in as the "drag this into the Turret" tutorial target, once one's been picked — per direct report, re-picking "nearest Waste" fresh every frame let a piece that fell closer to the Turret steal the spotlight/ghost-animation target away from whatever the player was already lining up to grab; see Grid.js's findNearestWasteTurretAndWaste
     // Guided tutorial flows (Shop->Guppy->buy fish at game start; Tank
     // Upgrades->Coin Capacity on the first Tank Point; Shop->Waste Turret->
     // scroll->place ~10s after the first alien kill) — see UI.js's

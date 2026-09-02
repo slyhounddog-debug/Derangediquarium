@@ -2318,7 +2318,13 @@ function onTutorialFlowComplete(state, id) {
   } else if (id === 'postalien' || id === 'wastedrag') {
     // Same closing line for both — 'wastedrag' is teaching the exact same
     // "you've got a Turret, now feed it" lesson, just entered from the
-    // "already placed one" shortcut instead of the full walkthrough.
+    // "already placed one" shortcut instead of the full walkthrough. Either
+    // path completing means the drag-Waste lesson itself was genuinely
+    // shown — 'postalien' only ever reaches this point via its own last
+    // step, 'dragwaste' — so this is the one place to mark it done (see
+    // Systems.js's updatePostAlienTutorial for why this is tracked
+    // separately from postAlienTutorialShown).
+    state.level.tutorialFlags.wasteDragTutorialShown = true;
     const notifications = state.level.notifications;
     notifications.push({ id: notifications.length + 1, text: POST_ALIEN_TUTORIAL_MESSAGE, elapsed: state.level.elapsed });
     if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
@@ -2342,6 +2348,14 @@ function onTutorialFlowComplete(state, id) {
 export function advanceTutorialFlow(state, id, step) {
   const flow = state.level.tutorialFlow;
   if (!flow || flow.id !== id || flow.step !== step) return;
+  // The drag-Waste step is done (whether completing 'postalien' outright or
+  // the standalone 'wastedrag' flow) — clear the locked target so a later
+  // re-trigger of either flow starts a fresh pick instead of reusing
+  // whatever this run happened to lock onto (which may no longer even
+  // exist by then). See Grid.js's findNearestWasteTurretAndWaste.
+  if ((id === 'postalien' && step === 'dragwaste') || (id === 'wastedrag' && step === 'drag')) {
+    state.level.wasteDragTutorialTargetId = null;
+  }
   const steps = TUTORIAL_FLOWS[id];
   const idx = steps.findIndex((s) => s.id === step);
   const next = steps[idx + 1];

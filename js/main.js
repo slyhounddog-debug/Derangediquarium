@@ -316,6 +316,18 @@ input.mouseUpHandlers.push((sx, sy) => {
   draggedFishId = null;
 });
 
+// Whether the "drag Waste into the Turret" guided-tutorial step is the one
+// currently active — shared by the mousedown-arming gate below, update()'s
+// tutorial freeze gate, and the ghost-Waste render code, so all three agree
+// on exactly the same condition instead of drifting out of sync (an earlier
+// version duplicated this check three times).
+function isWasteDragTutorialStepActive(state) {
+  return (
+    (state.level.tutorialFlow?.id === 'postalien' && state.level.tutorialFlow.step === 'dragwaste') ||
+    (state.level.tutorialFlow?.id === 'wastedrag' && state.level.tutorialFlow.step === 'drag')
+  );
+}
+
 // Waste dragging (city only) — per direct request. Mirrors the Economy Fish
 // combine-drag pattern above (draggedFishId/fishDragArmed), just for a
 // single Waste item instead of a fish, with no tool requirement (grabbing a
@@ -345,7 +357,14 @@ let draggedWasteId = null;
 let wasteDragArmed = false;
 
 input.mouseDownHandlers.push((sx, sy) => {
-  if (state.ui.paused || state.level.tutorialFlow) return;
+  // A guided tutorial normally blocks starting a Waste drag like every
+  // other input mechanic (see the general tutorial-flow hotkey-swallow
+  // block in the keydown handler) — EXCEPT for the one tutorial step this
+  // drag exists to teach in the first place, which would otherwise make the
+  // step's own mechanic completely unusable while it's active. Per direct
+  // report ("make it so the waste can actually be dragged during the
+  // tutorial").
+  if (state.ui.paused || (state.level.tutorialFlow && !isWasteDragTutorialStepActive(state))) return;
   if (draggedFishId != null) return; // a fish-drag already claimed this press
   const world = screenToWorld(sx, sy, state.camera);
   if (world.y < SEABED_FLOOR_Y) return; // city only, per direct request
@@ -359,6 +378,11 @@ input.mouseDownHandlers.push((sx, sy) => {
 });
 
 input.mouseUpHandlers.push(() => {
+  // Deliberately doesn't touch the dragged item's vx/vy — updateWasteDrag
+  // (below) already leaves it carrying real, cursor-derived velocity every
+  // tick it's held, so letting go here just hands that off to the normal
+  // seabed physics (Grid.js's stepItemOnGrid/integrateItemForces) to carry
+  // on from, same as if gravity/drag had been acting on it the whole time.
   draggedWasteId = null;
 });
 
@@ -367,11 +391,25 @@ function updateWasteDrag() {
   const dragged = state.level.items.find((item) => item.id === draggedWasteId && item.type === 'waste');
   if (!dragged) { draggedWasteId = null; return; } // absorbed by a Turret/Auto-Feeder (or otherwise removed) mid-drag
   const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
+  const dtSec = SIM_DT_MS / 1000;
+  // Per direct request ("when a player is dragging waste around and lets
+  // go, the waste still has the same momentum from when the player is
+  // holding it... the player should essentially be able to throw waste back
+  // up into the tank"): velocity is derived from the cursor's own raw
+  // world-space movement each tick — using `world.y` (unclamped) rather
+  // than the item's actual clamped position below — so a fast upward swing
+  // right at the city boundary still registers real upward speed even
+  // though the item's own on-screen position can't visually follow the
+  // cursor up past that boundary while still held (see the clamp right
+  // after). On release, this last-computed vx/vy just carries straight into
+  // the normal per-tick gravity+drag integration every seabed item already
+  // gets (Grid.js's stepItemOnGrid/integrateItemForces) — nothing extra is
+  // needed for it to keep flying, arc, and gradually decelerate.
+  dragged.vx = (world.x - dragged.x) / dtSec;
+  dragged.vy = (world.y - dragged.y) / dtSec;
   dragged.x = world.x;
-  dragged.y = Math.max(world.y, SEABED_FLOOR_Y); // stays in the city — can't drag it back up into open water
-  dragged.vx = 0;
-  dragged.vy = 0;
-  dragged.resting = true;
+  dragged.y = Math.max(world.y, SEABED_FLOOR_Y); // stays in the city while actively held — can't drag it back up into open water (only the carried-over velocity above can take it there, on release)
+  dragged.resting = false;
 }
 
 // Fan placement is a two-click flow, not a single click: click 1 arms
@@ -589,6 +627,7 @@ input.keydownHandlers.push((e) => {
   // next frame (hides the overlay/text), same as a normal completion.
   if (e.code === 'Escape' && state.level.tutorialFlow) {
     state.level.tutorialFlow = null;
+    state.level.wasteDragTutorialTargetId = null; // clear any locked drag-Waste target — see Grid.js's findNearestWasteTurretAndWaste
     return;
   }
   // Guided tutorial flows (see UI.js's TUTORIAL_FLOWS) swallow every OTHER
@@ -873,10 +912,7 @@ function update(dtMs) {
     // path below instead of freezing — updateStoryTriggers' own tutorial
     // triggers all self-gate on state.level.tutorialFlow already being set
     // (this exact flow), so nothing else can start while this runs.
-    const isWasteDragStep =
-      (state.level.tutorialFlow.id === 'postalien' && state.level.tutorialFlow.step === 'dragwaste') ||
-      (state.level.tutorialFlow.id === 'wastedrag' && state.level.tutorialFlow.step === 'drag');
-    if (!isWasteDragStep) return;
+    if (!isWasteDragTutorialStepActive(state)) return;
   }
   if (state.ui.buildErrorText) {
     state.ui.buildErrorElapsedMs += dtMs;
@@ -1594,10 +1630,7 @@ function render() {
   // actually grab the real one (draggedWasteId != null) — the whole point
   // was showing WHERE to drag, not competing for attention once they're
   // already doing it.
-  const wasteDragStepActive =
-    (state.level.tutorialFlow?.id === 'postalien' && state.level.tutorialFlow.step === 'dragwaste') ||
-    (state.level.tutorialFlow?.id === 'wastedrag' && state.level.tutorialFlow.step === 'drag');
-  if (wasteDragStepActive && draggedWasteId == null) {
+  if (isWasteDragTutorialStepActive(state) && draggedWasteId == null) {
     const target = findNearestWasteTurretAndWaste(state);
     if (target && target.waste) {
       const t = (state.level.elapsed % WASTE_DRAG_GHOST_CYCLE_MS) / WASTE_DRAG_GHOST_CYCLE_MS;

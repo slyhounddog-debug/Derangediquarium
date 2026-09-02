@@ -201,13 +201,27 @@ export function hasWasteTurretPlaced(state) {
 }
 
 // Finds the nearest Waste Turret (first one found — there's realistically
-// only ever one during the tutorial this feeds) and, if one exists, the
-// nearest Waste item to IT — shared by UI.js's guided-tutorial spotlight
-// (which needs both positions to draw one circle encompassing them) and
-// main.js's ghost-waste animation/drag-completion check, so all three
-// always agree on the exact same target pair rather than each picking
-// independently. Returns null if there's no Waste Turret at all; `waste` is
-// null (turret still populated) if none exists yet either.
+// only ever one during the tutorial this feeds) and its target Waste item —
+// shared by UI.js's guided-tutorial spotlight (which needs both positions to
+// draw one circle encompassing them) and main.js's ghost-waste animation/
+// drag-completion check, so all three always agree on the exact same target
+// pair rather than each picking independently. Returns null if there's no
+// Waste Turret at all; `waste` is null (turret still populated) if none
+// exists yet either.
+//
+// The Waste target LOCKS onto whichever item is first picked
+// (state.level.wasteDragTutorialTargetId) instead of re-resolving "nearest
+// to the Turret" fresh every call — per direct report, re-picking every
+// frame let a fresh piece of Waste that happened to fall closer to the
+// Turret steal the spotlight/ghost-animation destination out from under
+// whatever the player was already lining up to grab, and the tutorial's own
+// spotlight circle (centered on the two targets) would jump along with it,
+// meaning a click aimed at the original piece could land outside the
+// overlay's clickable hole and get swallowed instead of reaching the
+// canvas. The lock is cleared (falls through to a fresh pick) if the
+// tracked item is ever gone — absorbed some other way — and reset to null
+// whenever the drag step itself starts or ends (see UI.js's
+// startTutorialFlow/advanceTutorialFlow and main.js's Escape-skip handler).
 export function findNearestWasteTurretAndWaste(state) {
   let turret = null;
   for (const key in state.level.buildingData) {
@@ -218,6 +232,15 @@ export function findNearestWasteTurretAndWaste(state) {
     break;
   }
   if (!turret) return null;
+
+  if (state.level.wasteDragTutorialTargetId !== null) {
+    const locked = state.level.items.find(
+      (item) => item.id === state.level.wasteDragTutorialTargetId && item.type === 'waste'
+    );
+    if (locked) return { turret, waste: locked };
+    state.level.wasteDragTutorialTargetId = null;
+  }
+
   let waste = null;
   let wasteDist = Infinity;
   for (const item of state.level.items) {
@@ -225,6 +248,7 @@ export function findNearestWasteTurretAndWaste(state) {
     const d = Math.hypot(item.x - turret.x, item.y - turret.y);
     if (d < wasteDist) { wasteDist = d; waste = item; }
   }
+  if (waste) state.level.wasteDragTutorialTargetId = waste.id;
   return { turret, waste };
 }
 
