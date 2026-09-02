@@ -87,7 +87,13 @@ html, body {
      while either panel is open any more. Both toggle buttons moved down to
      #bottom-bar-row, so the old "clear the collapsed shop panel" right
      offset isn't needed either — plain 14px like every other corner pill. */
-  position: fixed; top: 14px; right: 14px;
+  /* right offset clears the right glass tank wall's own live width (main.js's
+     renderTankWalls sets --glass-wall-right-width every frame) plus the usual
+     14px corner margin, so the pill never visually overlaps the glass panel
+     — per direct request. --glass-wall-right-width defaults to 22px (the
+     glass's own guaranteed-minimum width, TANK_WALL_MIN_WIDTH) for the one
+     frame before the canvas has rendered and actually set it. */
+  position: fixed; top: 14px; right: calc(14px + var(--glass-wall-right-width, 22px));
   display: flex; gap: 14px; align-items: center;
   padding: 9px 18px;
   /* Poppy, non-flat pass, per direct request — a soft diagonal gradient plus
@@ -148,7 +154,10 @@ html, body {
    pill is ~46px tall at this font size, so 68px clears it with a visible
    gap while staying tight to the same corner. */
 #pause-toggle-btn {
-  position: fixed; top: 68px; right: 14px; z-index: 10;
+  /* Same live glass-wall-clearing offset as #hud above, so it stays aligned
+     under it at every viewport size instead of drifting sideways relative
+     to it. */
+  position: fixed; top: 68px; right: calc(14px + var(--glass-wall-right-width, 22px)); z-index: 10;
   width: 54px; height: 54px;
   display: flex; align-items: center; justify-content: center;
   background: linear-gradient(160deg, #ffe4f2 0%, #ffc2e0 100%);
@@ -313,7 +322,10 @@ html, body {
    (Mound crack narration, tips, alerts once later phases write to it).
    Click the pill to expand a scrollback of recent messages. */
 #notification-ticker {
-  position: fixed; top: 14px; left: 14px;
+  /* Same live glass-wall-clearing offset as #hud (see that rule's own
+     comment) — mirrored to the left edge, per direct request that the chat
+     shouldn't visually overlap the left glass panel either. */
+  position: fixed; top: 14px; left: calc(14px + var(--glass-wall-left-width, 22px));
   max-width: 360px;
   z-index: 10;
 }
@@ -429,15 +441,26 @@ html, body {
   border-radius: 26px;
   border: 2px solid #ffffff;
   box-shadow: 0 8px 26px rgba(107, 76, 107, 0.25), inset 0 2px 0 rgba(255, 255, 255, 0.7);
+  /* Centered on its own anchor button (left:50% + translateX(-50%), same
+     centering pattern #bottom-bar-row itself already uses) — per direct
+     request ("have the center of the shop line up with the center of the
+     shop button"), replacing the old left:0/right:0 edge-alignment, which
+     put the panel's center off to one side of the button instead since the
+     panel (286px) is much wider than the button (54px). The translateX has
+     to stay part of the SAME transform property the open/close scale
+     animation below also drives (a single `transform` can't be split across
+     two rules without one clobbering the other), so it's baked into both
+     this base rule and the .collapsed rule beneath it. */
+  left: 50%;
+  transform: translateX(-50%);
+  transform-origin: 50% 100%; /* grows from/shrinks into its icon, now centered under it */
   transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.18s ease;
 }
 /* Shop got an extra 10% on top of that half-height, per direct request —
    #tank-panel stays at the plain half-height above. */
 #shop-panel { height: calc((100vh - 28px) / 2 * 1.1); }
-#shop-panel { left: 0; transform-origin: 0% 100%; } /* grows from/shrinks into its icon, which is the left button in the row */
-#tank-panel { right: 0; transform-origin: 100% 100%; } /* grows from/shrinks into its icon, the right button in the row */
 #shop-panel.collapsed, #tank-panel.collapsed {
-  transform: scale(0.05);
+  transform: translateX(-50%) scale(0.05);
   opacity: 0;
   pointer-events: none;
 }

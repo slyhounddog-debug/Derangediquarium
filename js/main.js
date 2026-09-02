@@ -1117,7 +1117,29 @@ function renderTankWalls(ctx, state, canvasWidth) {
   const rightInnerX = Math.min(trueRightInnerX, canvasWidth - minWidthPx);
   renderGlassWall(ctx, leftInnerX, 0, topY, bottomY);
   renderGlassWall(ctx, rightInnerX, canvasWidth, topY, bottomY);
+  // Exposes each wall's actual live on-screen width as a CSS custom property
+  // — per direct request, the HUD/chat pill (both fixed-position DOM
+  // elements pinned near the corners) read these (see style.css's #hud/
+  // #pause-toggle-btn/#notification-ticker) to offset themselves clear of
+  // the glass instead of visually overlapping it, at every viewport size
+  // rather than guessing one fixed margin that only happens to work for
+  // some. Only written when actually changed (camera/canvas size are
+  // otherwise stable frame-to-frame) to avoid triggering a layout
+  // recalculation on the fixed-position elements above every single frame
+  // for no reason.
+  const leftWidthPx = Math.round(leftInnerX);
+  const rightWidthPx = Math.round(canvasWidth - rightInnerX);
+  if (leftWidthPx !== lastGlassWallLeftWidth) {
+    lastGlassWallLeftWidth = leftWidthPx;
+    document.documentElement.style.setProperty('--glass-wall-left-width', `${leftWidthPx}px`);
+  }
+  if (rightWidthPx !== lastGlassWallRightWidth) {
+    lastGlassWallRightWidth = rightWidthPx;
+    document.documentElement.style.setProperty('--glass-wall-right-width', `${rightWidthPx}px`);
+  }
 }
+let lastGlassWallLeftWidth = null;
+let lastGlassWallRightWidth = null;
 
 // Alien hit-flash — per direct request ("aliens flash red and bounce when
 // they take damage"). ALIEN_COLOR is a hex string everywhere else it's used
