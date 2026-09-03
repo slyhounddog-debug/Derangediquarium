@@ -44,6 +44,7 @@ import {
   ALIEN_COUNTDOWN_START_MS,
   CAP_WARNING_THRESHOLD_FRACTION,
   TURRET_STATS,
+  TURRET_AMMO_TILES,
   TILE_TURRET_WASTE,
   WASTE_TURRET_SHOTS_PER_WASTE,
   WASTE_TURRET_MAX_WASTE,
@@ -1679,9 +1680,18 @@ function buildingStatsHtml(buildingId) {
   }
   const t = TURRET_STATS[buildingId];
   if (t) {
-    const line2 = buildingId === TILE_TURRET_WASTE
-      ? `📏 Global · 🗑️ <b>${WASTE_TURRET_SHOTS_PER_WASTE}</b>/waste, holds <b>${WASTE_TURRET_MAX_WASTE}</b>`
-      : `📏 Global · ⚡ <b>${t.powerCostPerSec}</b> mw/sec`;
+    // "Global" range dropped entirely per direct request; the electrical
+    // figure is per-shot now, not per-second (t.powerCostPerShot — the
+    // player-facing number; powerCostPerSec is purely the derived rate
+    // computeCurrentPowerDemand needs). Any ammo-consuming tier (Waste +
+    // Electric Waste Turret — see TURRET_AMMO_TILES) shows the ammo stat;
+    // the Electric tier ALSO needs power, so it shows both.
+    const ammoText = `🗑️ <b>${WASTE_TURRET_SHOTS_PER_WASTE}</b>/waste, holds <b>${WASTE_TURRET_MAX_WASTE}</b>`;
+    const powerText = `⚡ <b>${t.powerCostPerShot}</b> mw/shot`;
+    let line2;
+    if (TURRET_AMMO_TILES.has(buildingId) && t.powerCostPerShot > 0) line2 = `🗑️ <b>${WASTE_TURRET_SHOTS_PER_WASTE}</b>/waste · ${powerText}`;
+    else if (TURRET_AMMO_TILES.has(buildingId)) line2 = ammoText;
+    else line2 = powerText;
     return (
       `<div class="building-stat">🔫 <b>${t.shotsPerSec}</b>/sec · 💥 <b>${t.damage}</b> dmg</div>` +
       `<div class="building-stat">${line2}</div>`
@@ -1874,10 +1884,12 @@ function cleanlinessColor(cleanliness) {
 }
 
 // Rolling one-minute (POWER_HISTORY_MAX samples, one per second) area/line
-// graph of demand vs. accumulated supply — matches the game's own poppy
-// pastel aesthetic (cream card, pink/blue accents) rather than a generic
-// chart style. Redrawn only while the popup is actually open (from
-// updateHUD, once per second when a new sample lands).
+// graph of demand vs. supply — matches the game's own poppy pastel aesthetic
+// (cream card, pink/blue accents) rather than a generic chart style.
+// Redrawn only while the popup is actually open (from updateHUD, once per
+// second when a new sample lands). supply is each second's freshly generated
+// MW now, not an accumulated running total — see Levels.js's powerGenAccumMw
+// — so this line moves up AND down like demand's, not just up.
 function renderPowerGraph(state) {
   const canvas = els.powerGraphCanvas;
   const ctx = canvas.getContext('2d');

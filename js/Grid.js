@@ -27,6 +27,7 @@ import {
   PROCESSOR_STATS,
   AUTO_FEEDER_STATS,
   TURRET_STATS,
+  TURRET_AMMO_TILES,
   WASTE_TURRET_SHOTS_PER_WASTE,
   WASTE_TURRET_MAX_AMMO,
   WASTE_TURRET_MAX_WASTE,
@@ -287,11 +288,11 @@ export function placeTile(state, col, row, buildingId, angle = 0) {
     state.level.buildingData[buildingKey(col, row)] = { type: buildingId, angle, wasteAccumMs: 0 };
   } else if (TURRET_TILES.has(buildingId)) {
     // No `angle` at all — a turret auto-targets, it doesn't have a
-    // player-chosen aim. `ammo` only ever matters for the Waste Turret
-    // (starts empty, has to be fed — see updateBuildings' turret intake
-    // scan); Electric/Advanced ignore it entirely (unlimited ammo, a power
-    // cost instead). `cooldownMs` counts down to the next shot regardless of
-    // tier — see updateBuildings' turret-fire branch.
+    // player-chosen aim. `ammo` matters for any tile in TURRET_AMMO_TILES
+    // (Waste + Electric Waste Turret — both start empty, have to be fed, see
+    // updateBuildings' turret intake scan); Advanced ignores it entirely
+    // (unlimited ammo, a power cost instead). `cooldownMs` counts down to the
+    // next shot regardless of tier — see updateBuildings' turret-fire branch.
     state.level.buildingData[buildingKey(col, row)] = { type: buildingId, ammo: 0, cooldownMs: 0 };
   }
   if (!state.level.tutorialFlags.firstBuildingPlaced) {
@@ -354,9 +355,10 @@ export function cycleTileCheat(state, worldX, worldY) {
   } else if (AUTO_FEEDER_TILES.has(next)) {
     state.level.buildingData[buildingKey(col, row)] = { type: next, angle: CHEAT_DEFAULT_ANGLE, absorbing: false, progressMs: 0, wasteCount: 0 };
   } else if (TURRET_TILES.has(next)) {
-    // Cheat-cycled turrets start pre-loaded with max ammo (Waste Turret) so
-    // testing combat doesn't require grinding real Waste first.
-    state.level.buildingData[buildingKey(col, row)] = { type: next, ammo: next === TILE_TURRET_WASTE ? WASTE_TURRET_MAX_AMMO : 0, cooldownMs: 0 };
+    // Cheat-cycled turrets start pre-loaded with max ammo (any ammo-consuming
+    // tier — see TURRET_AMMO_TILES) so testing combat doesn't require
+    // grinding real Waste first.
+    state.level.buildingData[buildingKey(col, row)] = { type: next, ammo: TURRET_AMMO_TILES.has(next) ? WASTE_TURRET_MAX_AMMO : 0, cooldownMs: 0 };
   }
 }
 
@@ -373,6 +375,7 @@ export function cycleTileCheat(state, worldX, worldY) {
 export function computeFanForce(state, item) {
   let fx = 0;
   let fy = 0;
+  const efficiency = state.level.powerEfficiency;
   for (const key in state.level.buildingData) {
     const data = state.level.buildingData[key];
     const stats = FAN_STATS[data.type];
@@ -388,7 +391,11 @@ export function computeFanForce(state, item) {
     let angleDiff = angleToItem - data.angle;
     angleDiff = Math.atan2(Math.sin(angleDiff), Math.cos(angleDiff)); // normalize to [-PI, PI]
     if (Math.abs(angleDiff) > FAN_CONE_HALF_ANGLE_RAD) continue;
-    const magnitude = stats.maxForce * (1 - dist / stats.maxRange);
+    // A free Fan (Rudimentary, powerCost 0) always runs at full force — only
+    // a power-costing tier (Electric/Turbo) gets throttled by the live grid
+    // efficiency, same "only power-costing buildings are affected at all"
+    // rule every other building below follows.
+    const magnitude = stats.maxForce * (1 - dist / stats.maxRange) * (stats.powerCost > 0 ? efficiency : 1);
     fx += Math.cos(data.angle) * magnitude;
     fy += Math.sin(data.angle) * magnitude;
   }
@@ -485,15 +492,21 @@ function handleLanding() {
 // Collector tile itself gets torn down mid-process, this bails out and hands
 // the item back to normal physics next tick, restoring its real mass, rather
 // than leaving it frozen forever at a now-empty spot.
-function stepCollectorProcessing(item, grid, dt) {
-  if (!COLLECTOR_TILES.has(tileAt(grid, item.collectorCenterX, item.collectorCenterY))) {
+function stepCollectorProcessing(item, grid, dt, efficiency) {
+  const tileType = tileAt(grid, item.collectorCenterX, item.collectorCenterY);
+  if (!COLLECTOR_TILES.has(tileType)) {
     item.mass = item.collectorOriginalMass;
     item.collectorProgressMs = null;
     return 'falling';
   }
   item.x += (item.collectorCenterX - item.x) * COLLECTOR_PULL_STRENGTH * dt;
   item.y += (item.collectorCenterY - item.y) * COLLECTOR_PULL_STRENGTH * dt;
-  item.collectorProgressMs += dt * 1000;
+  // A free base Processor (powerCostPerSec 0) always finishes at full speed;
+  // an Electric/Advanced tier's progress genuinely stalls at 0% grid
+  // efficiency instead of just running slower forever — matches "buildings
+  // using electricity should stop working" once supply can't cover demand.
+  const appliedEfficiency = PROCESSOR_STATS[tileType].powerCostPerSec > 0 ? efficiency : 1;
+  item.collectorProgressMs += dt * 1000 * appliedEfficiency;
   // Target duration is resolved once, at the moment processing started (see
   // beginCollectorProcessing) — coin vs Science Bubble, and which tier of
   // Processor tile, per PROCESSOR_STATS.
@@ -536,7 +549,7 @@ export function stepItemOnGrid(item, state, dt, physics) {
 
   const grid = state.level.grid;
 
-  if (item.collectorProgressMs != null) return stepCollectorProcessing(item, grid, dt);
+  if (item.collectorProgressMs != null) return stepCollectorProcessing(item, grid, dt, state.level.powerEfficiency);
 
   const fanForce = computeFanForce(state, item);
   integrateItemForces(item, dt, physics, fanForce);
@@ -674,12 +687,14 @@ export function updateBuildings(state, dtMs) {
     }
 
     if (TURRET_TILES.has(data.type)) {
-      // Refill (Waste Turret only) — sucks in any Waste item touching it,
-      // same radius-from-center intake pattern the Collector/Auto-Feeder
-      // just got, converting it straight to WASTE_TURRET_SHOTS_PER_WASTE
-      // ammo instead of holding it for a timed process. Electric/Advanced
-      // never read `ammo` at all — unlimited ammo, a power cost instead.
-      if (data.type === TILE_TURRET_WASTE && data.ammo < WASTE_TURRET_MAX_AMMO) {
+      // Refill — sucks in any Waste item touching it, same radius-from-center
+      // intake pattern the Collector/Auto-Feeder just got, converting it
+      // straight to WASTE_TURRET_SHOTS_PER_WASTE ammo instead of holding it
+      // for a timed process. Applies to any tile in TURRET_AMMO_TILES (the
+      // Waste Turret AND the Electric Waste Turret, per direct request — it
+      // "takes waste as ammo just like the waste turret"); the Advanced tier
+      // never reads `ammo` at all — unlimited ammo, a power cost instead.
+      if (TURRET_AMMO_TILES.has(data.type) && data.ammo < WASTE_TURRET_MAX_AMMO) {
         for (let i = 0; i < items.length; i++) {
           const it = items[i];
           if (it.type !== 'waste') continue;
@@ -717,11 +732,18 @@ export function updateBuildings(state, dtMs) {
       // only once that projectile actually connects. data.firing (read by
       // computeCurrentPowerDemand above) is still recomputed fresh every
       // tick, true only on a tick a shot actually fires.
-      data.cooldownMs = Math.max(0, data.cooldownMs - dtMs);
       const turretStats = TURRET_STATS[data.type];
-      const hasAmmo = data.type !== TILE_TURRET_WASTE || data.ammo > 0;
+      // A power-costing tier's cooldown genuinely stalls at 0% grid
+      // efficiency instead of just ticking down slower forever — a real
+      // "electricity" input alongside ammo, matching Fan force/Processor
+      // progress's identical gate below/above. A free tier (Waste Turret)
+      // is always at full "efficiency" for this purpose.
+      const turretEfficiency = turretStats.powerCostPerSec > 0 ? state.level.powerEfficiency : 1;
+      data.cooldownMs = Math.max(0, data.cooldownMs - dtMs * turretEfficiency);
+      const hasAmmo = !TURRET_AMMO_TILES.has(data.type) || data.ammo > 0;
+      const hasPower = turretStats.powerCostPerSec <= 0 || state.level.powerEfficiency > 0;
       let firedThisTick = false;
-      if (data.cooldownMs <= 0 && hasAmmo) {
+      if (data.cooldownMs <= 0 && hasAmmo && hasPower) {
         let nearestAlien = null;
         let nearestDist = Infinity;
         for (const entity of state.level.entities) {
@@ -735,7 +757,7 @@ export function updateBuildings(state, dtMs) {
         if (nearestAlien) {
           turretShots.push({ x: centerX, y: centerY, targetId: nearestAlien.id, damage: turretStats.damage });
           data.cooldownMs = 1000 / turretStats.shotsPerSec;
-          if (data.type === TILE_TURRET_WASTE) data.ammo -= 1;
+          if (TURRET_AMMO_TILES.has(data.type)) data.ammo -= 1;
           firedThisTick = true;
           playTurretShoot();
         }
@@ -771,7 +793,11 @@ export function updateBuildings(state, dtMs) {
         }
       }
     } else {
-      data.progressMs += dtMs;
+      // A free base Auto-Feeder (powerCostPerSec 0) always processes at full
+      // speed; an Electric/Advanced tier stalls at 0% grid efficiency — see
+      // stepCollectorProcessing's identical gate.
+      const afEfficiency = afStats.powerCostPerSec > 0 ? state.level.powerEfficiency : 1;
+      data.progressMs += dtMs * afEfficiency;
       if (data.progressMs >= afStats.wasteProcessMs) {
         data.absorbing = false;
         data.progressMs = 0;
@@ -827,6 +853,26 @@ export function computeCurrentPowerDemand(state) {
     }
   }
   return demand;
+}
+
+// Power efficiency — a real throughput multiplier for every power-costing
+// building now, per direct request ("if the power usage exceeds, make the
+// buildings less efficient... 3 eels generating 100MW, 10 buildings that
+// require 133MW, the buildings would have ~75% enough electricity, so
+// (100-75=25, times 2 = 50%) the buildings would run at 50% efficiency").
+// ratio is supply/demand capped at 1 (can't be "more than fully supplied"),
+// deficitPercent is how far short of 100% that ratio falls, and efficiency
+// drops TWICE as fast as the raw deficit — clamped to [0, 100] so a total
+// power loss (0 supply against any real demand) genuinely floors at 0%, not
+// a negative number. demand <= 0 is a special case (nothing is even trying
+// to draw power) rather than a divide-by-zero — full efficiency, since
+// there's nothing to be inefficient about.
+export function computePowerEfficiency(supplyMw, demandMw) {
+  if (demandMw <= 0) return 1;
+  const ratio = Math.min(1, supplyMw / demandMw);
+  const deficitPercent = 100 - ratio * 100;
+  const efficiencyPercent = Math.max(0, Math.min(100, 100 - deficitPercent * 2));
+  return efficiencyPercent / 100;
 }
 
 // ---- Item-item collision (everywhere, not just the seabed band) —
@@ -1100,8 +1146,11 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
         if (data && AUTO_FEEDER_TILES.has(type)) {
           renderAutoFeederDots(ctx, type, screen.x, screen.y, size, data.wasteCount, camera.zoom);
         }
-        if (data && type === TILE_TURRET_WASTE) {
+        if (data && TURRET_AMMO_TILES.has(type)) {
           renderTurretAmmoDots(ctx, screen.x, screen.y, size, data.ammo, camera.zoom);
+        }
+        if (getBuildingPowerCost(type) > 0) {
+          renderPowerShortageOverlay(ctx, screen.x, screen.y, size, camera.zoom, state.level.powerEfficiency, state.level.elapsed);
         }
       }
     }
@@ -1365,6 +1414,64 @@ function renderTurretAmmoDots(ctx, x, y, size, ammo, zoom) {
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
     ctx.lineWidth = Math.max(0.5, zoom * 0.5);
     ctx.stroke();
+  }
+}
+
+// A tile's own power draw rate, regardless of building type — 0 for a free
+// tier or a non-power building. Shared by the render overlay below and
+// anywhere else that just needs "does this specific tile cost power at all."
+function getBuildingPowerCost(type) {
+  if (FAN_STATS[type]) return FAN_STATS[type].powerCost;
+  if (PROCESSOR_STATS[type]) return PROCESSOR_STATS[type].powerCostPerSec;
+  if (AUTO_FEEDER_STATS[type]) return AUTO_FEEDER_STATS[type].powerCostPerSec;
+  if (TURRET_STATS[type]) return TURRET_STATS[type].powerCostPerSec;
+  return 0;
+}
+
+// Below this live grid efficiency, a power-costing building has genuinely
+// stopped doing useful work (not just running a bit slower) — see Grid.js's
+// computePowerEfficiency and every applied-efficiency gate above (Fan force,
+// Processor/Auto-Feeder progress, Turret cooldown).
+const POWER_SHORTAGE_STALLED_THRESHOLD = 0.15;
+
+// A visibly obvious cue that a power-costing building is under-supplied —
+// per direct request ("make it visually obvious when buildings aren't
+// running because of electricity"). A soft red tint scales continuously with
+// the deficit (invisible at 100% efficiency, strongest at 0%) so a partial
+// slowdown still reads as "something's wrong" without needing to be a full
+// stall; once efficiency drops low enough that the building has genuinely
+// stopped, a pulsing lightning-bolt-with-slash badge makes that unambiguous
+// rather than leaving the player to guess whether a faint tint means "a
+// little behind" or "completely dead."
+function renderPowerShortageOverlay(ctx, x, y, size, zoom, efficiency, elapsedMs) {
+  const deficit = 1 - efficiency;
+  if (deficit <= 0.02) return;
+  ctx.save();
+  ctx.globalAlpha = 0.12 + deficit * 0.4;
+  ctx.fillStyle = '#ff3b30';
+  ctx.fillRect(x, y, size, size);
+  ctx.restore();
+  if (efficiency < POWER_SHORTAGE_STALLED_THRESHOLD) {
+    const pulse = 0.55 + 0.45 * Math.sin(elapsedMs / 220);
+    ctx.save();
+    ctx.globalAlpha = pulse;
+    ctx.font = `${Math.max(10, size * 0.5)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('⚡', x + size / 2, y + size / 2);
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = Math.max(2, 2.6 * zoom);
+    ctx.beginPath();
+    ctx.moveTo(x + size * 0.16, y + size * 0.84);
+    ctx.lineTo(x + size * 0.84, y + size * 0.16);
+    ctx.stroke();
+    ctx.strokeStyle = '#ff3b30';
+    ctx.lineWidth = Math.max(1, 1.4 * zoom);
+    ctx.beginPath();
+    ctx.moveTo(x + size * 0.16, y + size * 0.84);
+    ctx.lineTo(x + size * 0.84, y + size * 0.16);
+    ctx.stroke();
+    ctx.restore();
   }
 }
 

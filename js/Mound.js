@@ -102,6 +102,22 @@ export function getMoundNextCost(state) {
   return MOUND_CRACK_COST[tier];
 }
 
+// How many crack lines should currently be visible on the dome. Driven by
+// every real money-spend milestone EXCEPT the pure-joke $150 tease (which
+// grants nothing and shouldn't visibly damage the mound at all) — the Fan
+// unlock ($500), the real Tier 1->2 crack ($1000), and the Auto-Feeder
+// unlock ($2500) each add one. This used to just be `tier - 1`, which only
+// ever reflected the two real tier crossings and so could show at most 1
+// crack (tier maxes at 2 while the mound still renders at all — tier 3 is
+// a full shatter) even though two paid sub-tier purchases happen in between.
+export function getMoundCrackCount(state) {
+  let count = 0;
+  if (state.level.fanUnlockPurchased) count++;
+  if (state.level.tier >= 2) count++;
+  if (state.level.autoFeederUnlockPurchased) count++;
+  return count;
+}
+
 export function canCrackMound(state) {
   if (state.level.tier >= MOUND_MAX_TIER) return false;
   return state.level.money >= getMoundNextCost(state);
@@ -214,7 +230,7 @@ for (let i = 0; i < 4; i++) {
 export function renderMound(ctx, state) {
   if (state.level.tier >= MOUND_MAX_TIER) return; // shattered — nothing to draw (Science Lab render is Phase 4)
   const { camera } = state;
-  const tier = state.level.tier;
+  const crackCount = getMoundCrackCount(state);
   const topLeft = worldToScreen(MOUND_X - MOUND_WIDTH_PX / 2, SEABED_FLOOR_Y - MOUND_HEIGHT_PX, camera);
   const w = MOUND_WIDTH_PX * camera.zoom;
   const h = (MOUND_HEIGHT_PX + TILE_SIZE) * camera.zoom;
@@ -247,9 +263,9 @@ export function renderMound(ctx, state) {
   // range crept close enough to the right edge at higher tiers to read as
   // "everything is bunched toward one side" against the mostly-blank rest of
   // the dome).
-  for (let i = 1; i < tier; i++) {
+  for (let i = 1; i <= crackCount; i++) {
     const shape = CRACK_SHAPES[(i - 1) % CRACK_SHAPES.length];
-    const spreadT = tier > 2 ? (i - 1) / (tier - 2) : 0.5; // 0..1 across however many cracks are actually showing
+    const spreadT = crackCount > 1 ? (i - 1) / (crackCount - 1) : 0.5; // 0..1 across however many cracks are actually showing
     const cx = topLeft.x + w * (0.35 + 0.3 * spreadT);
     const topY = topLeft.y + h * 0.12;
     const bottomY = topLeft.y + h * 0.88;

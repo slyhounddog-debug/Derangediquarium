@@ -315,8 +315,12 @@ function updateAlien(alien, state, dtMs) {
     const targetFish = Math.random() < ALIEN_CHASE_CHANCE
       ? findNearestFishWithin(state.level.entities, alien.x, alien.y, ALIEN_AWARENESS_RADIUS)
       : null;
+    // Narrowed from ±0.35*PI (63°) to ±0.2*PI (36°) per direct report that
+    // aliens didn't read as drawn to fish at all — a wide wobble on top of
+    // an already-infrequent chase roll made the bias nearly invisible; still
+    // enough spread to stay "kinda dumb," not a dead-on lock.
     const angle = targetFish
-      ? Math.atan2(targetFish.y - alien.y, targetFish.x - alien.x) + (Math.random() - 0.5) * (Math.PI * 0.7)
+      ? Math.atan2(targetFish.y - alien.y, targetFish.x - alien.x) + (Math.random() - 0.5) * (Math.PI * 0.4)
       : Math.random() * Math.PI * 2;
     alien.vx = Math.cos(angle) * ALIEN_SPEED;
     alien.vy = Math.sin(angle) * ALIEN_SPEED * FISH_VERTICAL_DAMPING;
@@ -1314,7 +1318,15 @@ function updateFish(fish, state, dtMs) {
           // per-Waste-spawn penalty above.
           fish.hunger -= WASTE_HUNGER_RELIEF;
           adjustCleanliness(state, CLEANLINESS_PER_WASTE_EVENT);
-          if (isPureScavenger) fish.eatCooldownRemainingMs = def.growthStages[fish.stage].dropInterval;
+          // eatCooldownMs overrides dropInterval when present — needed for a
+          // hybrid (Scrub-Topus) that's ALSO a pure Researcher/Generator and
+          // so already reads dropInterval for its own unrelated production
+          // cycle; every other pure Scavenger has no such conflict and just
+          // falls back to dropInterval as before.
+          if (isPureScavenger) {
+            const stage = def.growthStages[fish.stage];
+            fish.eatCooldownRemainingMs = stage.eatCooldownMs ?? stage.dropInterval;
+          }
         } else {
           // Food Quality Tank Upgrade: relief is a flat lookup by purchased
           // level, no longer clamped to the fish's current hunger — a
@@ -1432,7 +1444,11 @@ function updateFish(fish, state, dtMs) {
     fish.distanceAccumPx += speed * dt;
     while (fish.distanceAccumPx >= pixelsPerMW) {
       fish.distanceAccumPx -= pixelsPerMW;
-      state.level.powerSupply += 1;
+      // Power is not a battery — this only feeds the CURRENT in-progress
+      // real second's generation total (main.js reads and resets it once a
+      // second into state.level.powerHistory/powerEfficiency); nothing here
+      // accumulates forever any more. See Levels.js's powerGenAccumMw.
+      state.level.powerGenAccumMw += 1;
       state.level.floatingTexts.push(createPickupText(fish.x, fish.y, '+1 ⚡', POWER_COLOR));
     }
   } else if (!isPureScavenger) {

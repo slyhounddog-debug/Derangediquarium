@@ -228,10 +228,10 @@ export const FAN_T2_MAX_RANGE = 320; // px — 10 tiles (was 3, then 5, then 6, 
 export const FAN_T2_POWER_COST = 0; // per direct request — "the rudimentary fan takes 0mw electricity"
 export const FAN_T3_MAX_FORCE = 350; // Electric Fan — cut from 520, per direct request to rebalance the middle tier now that Turbo dropped to 440 (520 would otherwise have been the STRONGEST fan, backwards); sits clearly between Rudimentary (260) and Turbo (440)
 export const FAN_T3_MAX_RANGE = 496; // px — 15.5 tiles (was 5.5, then 8.5, then 9.5, then 10.5, then 13.5; +2 more tiles)
-export const FAN_T3_POWER_COST = 1; // per direct request — "the mid takes 1mw always"
+export const FAN_T3_POWER_COST = 2; // doubled from 1 per direct request ("make all the buildings take twice as much electricity as they do right now")
 export const FAN_T4_MAX_FORCE = 440; // Turbo Fan — see the hover-math comment above; was 1100 ("extreme thrust"), now a real but gentler suspension force
 export const FAN_T4_MAX_RANGE = 640; // px — 20 tiles, unchanged per direct request ("the same range, but less powerful")
-export const FAN_T4_POWER_COST = 3; // per direct request — "the advanced takes 3mw always"
+export const FAN_T4_POWER_COST = 6; // doubled from 3 per direct request ("make all the buildings take twice as much electricity as they do right now")
 
 // ---- Auto-Feeder ----
 // No longer aimed at all, per direct request ("let's remove the arrows and
@@ -388,7 +388,7 @@ export const ITEM_PUSH_IMPULSE_SPEED = 3;
 
 // ---- Economy & feeding ----
 export const FOOD_COST = 3; // $ per food pellet, matches the Buy Food shop entry — lowered from 5 so the early economy isn't so punishing to get rolling
-export const FOOD_RADIUS = 6; // px, visual + despawn-on-floor check
+export const FOOD_RADIUS = 6.6; // px, visual + despawn-on-floor check — 10% bigger (was 6) per direct request ("increase the size of all the objects by 10%")
 export const FOOD_COLOR = '#ffb238'; // orange — was a green (#8bc34a) close enough to WASTE_COLOR's olive-green to be hard to tell apart at a glance; per direct request, distinct now
 // Stationary-to-Waste (Entities.js's updateFood): replaces the old
 // FOOD_FLOOR_GRACE_MS despawn-on-the-floor mechanic and the Food Capacity
@@ -402,7 +402,7 @@ export const FOOD_COLOR = '#ffb238'; // orange — was a green (#8bc34a) close e
 // same as if the player nudged it themselves).
 export const FOOD_STATIONARY_TO_WASTE_MS = 20000; // doubled from 10000 per direct request ("make food take twice as long to turn to waste")
 export const FOOD_STATIONARY_MOVE_TOLERANCE_PX = 4; // small enough to still catch real movement, large enough to ignore sub-pixel collision-resolution jitter on something genuinely resting
-export const COIN_RADIUS = 10; // px, base visual radius (bronze size) — 25% bigger than the original 8, easier to see and aim at
+export const COIN_RADIUS = 11; // px, base visual radius (bronze size) — 10% bigger again (was 10) per direct request ("increase the size of all the objects by 10%")
 export const COIN_CLICK_RADIUS_MULTIPLIER = 1.9; // click hit-test radius is each coin's own (tier-scaled) radius times this — 90% bigger than the coin itself (was 60%, bumped again per direct request), so a click doesn't have to be pixel-perfect (and doesn't get misread as a food-placement click on a miss). Purely a hit-test radius — the coin's actual drawn/collision size (COIN_RADIUS) is untouched. tryBankCoinAt still only ever banks the first match it finds per click and returns immediately, so an overlapping pair of these bigger radii still can't bank two coins on one click.
 export const CHEAT_GRANT_AMOUNT = 10000; // $ granted by the M debug key
 export const CHEAT_TANK_POINTS_GRANT_AMOUNT = 20; // Tank Points also granted by the M debug key, so testing the Tank Upgrades panel doesn't require grinding fish growth
@@ -430,8 +430,29 @@ export const COIN_TIERS = [
 // consume it, each restoring CLEANLINESS_PER_WASTE_EVENT of cleanliness
 // when they do. Electric buildings (Tier 4+) skip producing the
 // Collector-side of it entirely, once they exist.
-export const WASTE_RADIUS = FOOD_RADIUS * 1.1; // per direct request, "10% bigger than food" — replaces the old "25% bigger than the original 5" sizing, now pinned to Food's own radius instead of a standalone number
-export const WASTE_DRAG_CLICK_RADIUS_MULTIPLIER = 1.6; // hit-test radius for grabbing a piece of Waste to drag — same "bigger than the drawn size" precedent as COIN_CLICK_RADIUS_MULTIPLIER, so a drag doesn't need to start pixel-perfect
+// A flat 8.8 now, not a Food-relative formula — per direct request ("increase
+// the size of the waste by an additional amount, so it matches the current
+// size of the science objects"), superseding the old "10% bigger than Food"
+// relationship entirely: Waste now matches SCIENCE_ITEM_RADIUS exactly
+// (both 8.8, after science's own 10% bump below), on top of every item's
+// blanket 10% size increase.
+export const WASTE_RADIUS = 8.8;
+// Generalized from Waste-only to every item type (coin/food/waste/science),
+// per direct request ("make it so that every object can be clicked and
+// dragged around, just like waste") — the hit-test radius for grabbing ANY
+// item to drag, same "bigger than the drawn size" precedent as
+// COIN_CLICK_RADIUS_MULTIPLIER, so a drag doesn't need to start
+// pixel-perfect. See main.js's updateItemDrag.
+export const ITEM_DRAG_CLICK_RADIUS_MULTIPLIER = 1.6;
+// How far the cursor has to move (screen px, mousedown to mouseup) before a
+// press-on-an-item gesture counts as a genuine drag rather than a plain
+// click — below this, the click passes through untouched so Coin/Science's
+// existing bank-on-click behavior still fires normally; at or above it, the
+// click is suppressed so a real drag-and-release doesn't ALSO bank/place
+// something at the drop point. Same "6px" threshold the Science Lab tree's
+// own drag-vs-click disambiguation already uses (UI.js's
+// LAB_TREE_DRAG_THRESHOLD_PX).
+export const ITEM_DRAG_MOVE_THRESHOLD_PX = 6;
 export const WASTE_GRAVITY = GRAVITY; // sinks like a coin, not a drifting food pellet
 export const WASTE_MAX_FALL_SPEED = MAX_FALL_SPEED;
 export const WASTE_COLOR = '#6b8e4e';
@@ -458,7 +479,7 @@ export const WASTE_POOP_INTERVAL_MS = 39683; // waste production 30% SLOWER per 
 // flat single color like a coin/food/waste — SCIENCE_ITEM_COLOR_A/B are the
 // two tones that blend across it. Slightly smaller than a bronze coin
 // (COIN_RADIUS = 10) per direct request.
-export const SCIENCE_ITEM_RADIUS = 8;
+export const SCIENCE_ITEM_RADIUS = 8.8; // 10% bigger (was 8) per direct request ("increase the size of all the objects by 10%") — Waste is now pinned to match this exact value, see WASTE_RADIUS above
 export const SCIENCE_ITEM_COLOR_A = '#b98bff'; // purple
 export const SCIENCE_ITEM_COLOR_B = '#5fc9ff'; // blue — matches the existing SCIENCE_COLOR used for floating text/HUD accents
 // While a Researcher fish (Science Octopus) is mid-cycle toward producing its
@@ -816,12 +837,16 @@ export const SPECIES = {
     // dropInterval is repurposed for a Scavenger as its EAT COOLDOWN — the
     // minimum time between two waste-eating events, not a coin-drop timer
     // (dropValue stays 0, unused) — see Entities.js's updateFish SCAVENGER
-    // branch. 35s baby/mid, 25s adult, per direct request ("every 35 seconds
-    // as a baby but every 25 seconds as an adult").
+    // branch. Quadrupled from the old 35s baby/mid / 25s adult, capped at
+    // "up to 3 times/min" per direct request — both bounds land on the same
+    // 20000ms floor (35000/4=8750 and 25000/4=6250 both undercut the 20000ms
+    // cap, so the cap wins for every stage), which also unifies baby/mid/adult
+    // onto one eating rate. hungerRate (below) is deliberately untouched —
+    // "make it take just as long as it currently does to die from starvation."
     growthStages: [
-      { feedsRequired: 0, scale: 0.5, dropInterval: 35000, dropValue: 0 },
-      { feedsRequired: 3, scale: 0.75, dropInterval: 35000, dropValue: 0 },
-      { feedsRequired: 6, scale: 1.0, dropInterval: 25000, dropValue: 0 },
+      { feedsRequired: 0, scale: 0.5, dropInterval: 20000, dropValue: 0 },
+      { feedsRequired: 3, scale: 0.75, dropInterval: 20000, dropValue: 0 },
+      { feedsRequired: 6, scale: 1.0, dropInterval: 20000, dropValue: 0 },
     ],
     unlockedByDefault: false,
   },
@@ -831,15 +856,18 @@ export const SPECIES = {
     behavior: ['GENERATOR'], dropType: 'power',
     swimSpeed: 20, lifespan: 300000, hungerRate: 0.582, // 25% slower again per direct request — was 0.776
     // pixelsPerMW replaces the old timer+speed-multiplier scheme for a pure
-    // Generator, per direct request ("produces 1MW per 10 pixels swam as a
-    // baby, and 1MW per 5 pixels as an adult") — a literal distance-traveled
-    // meter instead of an indirect speed ratio, so a faster eel (upgrades,
-    // seek-chases) naturally generates faster with no separate multiplier
-    // needed. See Entities.js's updateFish GENERATOR branch/fish.distanceAccumPx.
+    // Generator, per direct request ("makes baby eels generate 1mw per pixel
+    // swam, and adults generate 2MW per pixel swam") — a literal
+    // distance-traveled meter instead of an indirect speed ratio, so a faster
+    // eel (upgrades, seek-chases) naturally generates faster with no separate
+    // multiplier needed. Lower pixelsPerMW = more MW per pixel, so "1MW per
+    // pixel" is pixelsPerMW: 1 and "2MW per pixel" is pixelsPerMW: 0.5 — cut
+    // from the old 10/5 (which was 1MW per 10px / 1MW per 5px). See
+    // Entities.js's updateFish GENERATOR branch/fish.distanceAccumPx.
     growthStages: [
-      { feedsRequired: 0, scale: 0.5, pixelsPerMW: 10 },
-      { feedsRequired: 3, scale: 0.75, pixelsPerMW: 10 },
-      { feedsRequired: 6, scale: 1.0, pixelsPerMW: 5 },
+      { feedsRequired: 0, scale: 0.5, pixelsPerMW: 1 },
+      { feedsRequired: 3, scale: 0.75, pixelsPerMW: 1 },
+      { feedsRequired: 6, scale: 1.0, pixelsPerMW: 0.5 },
     ],
     unlockedByDefault: false,
   },
@@ -950,7 +978,9 @@ export const SPECIES = {
     description: 'Suckerfish-Eel splice — keeps the tank clean while powering the grid.',
     behavior: ['SCAVENGER', 'GENERATOR'], dropType: 'waste_cleared+power', parents: ['suckerfish', 'electric_eel'],
     swimSpeed: 25, lifespan: 300000, hungerRate: 0.546, // 25% slower again per direct request — was 0.728
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 7500, dropValue: 0 }],
+    // dropInterval is this pure Scavenger's eat cooldown (see Suckerfish's own
+    // comment above) — capped the same "up to 3 times/min" way, 20000ms.
+    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 20000, dropValue: 0 }],
     unlockedByDefault: false,
   },
   scrub_topus: {
@@ -958,7 +988,15 @@ export const SPECIES = {
     description: 'Suckerfish-Octopus splice — clears waste while trickling Blue Science.',
     behavior: ['SCAVENGER', 'RESEARCHER'], dropType: 'waste_cleared+science_blue', parents: ['suckerfish', 'octopus'],
     swimSpeed: 28, lifespan: 300000, hungerRate: 0.492, // 25% slower again per direct request — was 0.656
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 12500, dropValue: 1 }],
+    // Scrub-Topus is BOTH a pure Scavenger (eat cooldown) AND a pure
+    // Researcher (Science brew cycle) — the only hybrid where those two
+    // mechanisms would otherwise fight over the same dropInterval field (see
+    // Entities.js's updateFish: the eat branch reads eatCooldownMs ??
+    // dropInterval, the RESEARCHER branch always reads dropInterval). Kept
+    // decoupled here: dropInterval stays its original 12500ms Science brew
+    // rate, untouched, while eatCooldownMs alone gets the "up to 3 times/min"
+    // cap every other pure Scavenger got.
+    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 12500, eatCooldownMs: 20000, dropValue: 1 }],
     unlockedByDefault: false,
   },
   volt_topus: {
@@ -1066,8 +1104,8 @@ export const BUILDING_TYPES = {
     color: '#9c8a6b', unlockedByDefault: true, // free from the start, alongside Platform — the only defense before the Science Lab exists
   },
   [TILE_TURRET_ELECTRIC]: {
-    id: TILE_TURRET_ELECTRIC, name: 'Electric Turret', icon: '🔫', cost: 55,
-    description: 'Faster and harder-hitting than the Waste Turret, unlimited ammo. Draws power per shot.',
+    id: TILE_TURRET_ELECTRIC, name: 'Electric Waste Turret', icon: '🔫', cost: 55,
+    description: 'Faster and harder-hitting than the Waste Turret. Needs BOTH Waste ammo and power to fire.',
     color: '#5fb8ff', unlockedByDefault: false,
   },
   [TILE_TURRET_ADVANCED]: {
@@ -1109,10 +1147,13 @@ export const BUILDING_FAMILIES = {
 // absorbed Waste load (Auto-Feeder) — not while idle/empty, and not gated on
 // actual power availability, same not-yet-power-gated precedent every other
 // Electric building in this codebase already follows.
+// powerCostPerSec doubled across every nonzero tier per direct request
+// ("make all the buildings take twice as much electricity as they do right
+// now") — 10->20, 20->40.
 export const PROCESSOR_STATS = {
   [TILE_COLLECTOR]: { coinMs: 6000, scienceMs: 20000, wasteEveryMs: 10000, powerCostPerSec: 0 },
-  [TILE_COLLECTOR_ELECTRIC]: { coinMs: 4000, scienceMs: 15000, wasteEveryMs: 12000, powerCostPerSec: 10 },
-  [TILE_COLLECTOR_ADVANCED]: { coinMs: 3000, scienceMs: 9000, wasteEveryMs: 15000, powerCostPerSec: 20 },
+  [TILE_COLLECTOR_ELECTRIC]: { coinMs: 4000, scienceMs: 15000, wasteEveryMs: 12000, powerCostPerSec: 20 },
+  [TILE_COLLECTOR_ADVANCED]: { coinMs: 3000, scienceMs: 9000, wasteEveryMs: 15000, powerCostPerSec: 40 },
 };
 // wasteProcessMs is how long ONE absorbed Waste item takes to finish
 // processing before the next can be absorbed; wasteRequired is how many
@@ -1121,10 +1162,13 @@ export const PROCESSOR_STATS = {
 // request) each time a load finishes, resetting once Food dispenses.
 // powerCostPerSec is drawn only while actively processing an absorbed load,
 // not while idle waiting for the next one.
+// powerCostPerSec doubled across every nonzero tier per direct request
+// ("make all the buildings take twice as much electricity as they do right
+// now") — 5->10, 10->20.
 export const AUTO_FEEDER_STATS = {
   [TILE_AUTO_FEEDER]: { wasteProcessMs: 20000, wasteRequired: 3, powerCostPerSec: 0 },
-  [TILE_AUTO_FEEDER_ELECTRIC]: { wasteProcessMs: 12000, wasteRequired: 3, powerCostPerSec: 5 },
-  [TILE_AUTO_FEEDER_ADVANCED]: { wasteProcessMs: 10000, wasteRequired: 2, powerCostPerSec: 10 },
+  [TILE_AUTO_FEEDER_ELECTRIC]: { wasteProcessMs: 12000, wasteRequired: 3, powerCostPerSec: 10 },
+  [TILE_AUTO_FEEDER_ADVANCED]: { wasteProcessMs: 10000, wasteRequired: 2, powerCostPerSec: 20 },
 };
 
 // ---- Turrets (Alien Invasion) ----
@@ -1148,11 +1192,23 @@ export const AUTO_FEEDER_STATS = {
 // TURRET_PROJECTILE_* constants below) — the travel time is what makes a
 // far-off shot feel like it has distance to cover, not a range gate that
 // silently refuses to fire.
+// powerCostPerShot doubled across every nonzero tier per direct request
+// ("make all the buildings take twice as much electricity as they do right
+// now") — 2->4 (Electric), 3->6 (Advanced). powerCostPerShot is the real,
+// player-facing number (what the shop displays, per a later direct request
+// to show power "per shot, instead of per second") — powerCostPerSec is
+// still kept alongside it, purely derived (powerCostPerShot * shotsPerSec),
+// for computeCurrentPowerDemand's own rate-based math.
 export const TURRET_STATS = {
-  [TILE_TURRET_WASTE]: { shotsPerSec: 1.5, damage: 4, powerCostPerSec: 0 },
-  [TILE_TURRET_ELECTRIC]: { shotsPerSec: 2, damage: 6, powerCostPerSec: 4 },
-  [TILE_TURRET_ADVANCED]: { shotsPerSec: 3, damage: 8, powerCostPerSec: 9 },
+  [TILE_TURRET_WASTE]: { shotsPerSec: 1.5, damage: 4, powerCostPerShot: 0, powerCostPerSec: 0 },
+  [TILE_TURRET_ELECTRIC]: { shotsPerSec: 2, damage: 6, powerCostPerShot: 4, powerCostPerSec: 8 },
+  [TILE_TURRET_ADVANCED]: { shotsPerSec: 3, damage: 8, powerCostPerShot: 6, powerCostPerSec: 18 },
 };
+// Which turret tiers consume Waste as ammo (gating whether they can fire at
+// all, alongside the fire-rate cooldown) — per direct request, the Electric
+// tier ("Electric Waste Turret") now needs BOTH Waste ammo AND power to
+// shoot, not unlimited ammo any more; the Advanced tier stays ammo-free.
+export const TURRET_AMMO_TILES = new Set([TILE_TURRET_WASTE, TILE_TURRET_ELECTRIC]);
 // Waste Turret ammo — per direct request: "each waste gives it 10 shots and
 // it can hold 5 waste (with dots indicating each waste/10 ammo)." Consumes a
 // touching Waste item exactly like an Auto-Feeder absorbs one (Grid.js's
@@ -1644,12 +1700,22 @@ export const ALIEN_FIRST_WAVE_TIP_MESSAGE = "Aliens incoming! Click 'em for 1 da
 // particular wander happens to bias toward the nearest threat/prey (alien)
 // or away from it (fish) instead of a plain random direction — never a
 // hard-locked pursuit/retreat.
-export const ALIEN_CHASE_CHANCE = 0.5;
+// ALIEN_CHASE_CHANCE raised 0.5->0.85, ALIEN_AWARENESS_RADIUS 260->420, and
+// the wander interval shortened (1-2.5s -> 0.6-1.5s) per direct report that
+// aliens "don't seem drawn to fish at all" — the old combination (only a
+// coin-flip's chance of even considering a fish, re-rolled at most once
+// every ~1.75s on average, noticing fish only within a fairly tight radius)
+// made the chase bias read as nearly imperceptible in normal play. Still
+// deliberately not a hard lock — see this section's own comment above — the
+// per-pick random angle offset (Entities.js's updateAlien) still keeps it
+// "kinda dumb," just far more often and more responsively pointed at a fish
+// when one's actually nearby.
+export const ALIEN_CHASE_CHANCE = 0.85;
 export const ALIEN_FLEE_CHANCE = 0.65;
-export const ALIEN_AWARENESS_RADIUS = 260; // px — how close a fish/alien has to be to the other before either reacts to it at all
+export const ALIEN_AWARENESS_RADIUS = 420; // px — how close a fish/alien has to be to the other before either reacts to it at all
 export const ALIEN_SPEED = 40; // px/sec, base wander/chase speed
-export const ALIEN_WANDER_INTERVAL_MIN_S = 1;
-export const ALIEN_WANDER_INTERVAL_MAX_S = 2.5;
+export const ALIEN_WANDER_INTERVAL_MIN_S = 0.6;
+export const ALIEN_WANDER_INTERVAL_MAX_S = 1.5;
 
 export const ALIEN_CLICK_DAMAGE = 1; // per direct request — "clicking on them for 1 damage each"
 // Same "hit-test radius bigger than the drawn radius" pattern as

@@ -60,7 +60,8 @@ import {
   CAMERA_BOTTOM_BUFFER_PX,
   WASTE_RADIUS,
   WASTE_DRAG_GHOST_CYCLE_MS,
-  WASTE_DRAG_CLICK_RADIUS_MULTIPLIER,
+  ITEM_DRAG_CLICK_RADIUS_MULTIPLIER,
+  ITEM_DRAG_MOVE_THRESHOLD_PX,
   BUILDING_FAMILIES,
 } from './Config.js';
 import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop } from './Engine.js';
@@ -97,6 +98,7 @@ import {
   getBuildingCost,
   getTile,
   computeCurrentPowerDemand,
+  computePowerEfficiency,
   findNearestWasteTurretAndWaste,
 } from './Grid.js';
 import { isPointOnMound, crackMound, renderMound, centerCameraOnMound, isPointOnScienceLab, renderScienceLab } from './Mound.js';
@@ -362,123 +364,161 @@ function isWasteDragTutorialStepActive(state) {
   );
 }
 
-// Waste dragging (city only) — per direct request. Mirrors the Economy Fish
-// combine-drag pattern above (draggedFishId/fishDragArmed), just for a
-// single Waste item instead of a fish, with no tool requirement (grabbing a
-// piece of Waste directly always works, regardless of the currently
-// selected tool — nothing was asked for gating this behind one). Only one
-// piece of Waste can ever be dragged at a time (a second mousedown on
-// another piece while one's already held is impossible anyway, since
-// releasing the first is what clears draggedWasteId). updateWasteDrag
-// (called from update(), after updateEntities — same "override whatever
-// this tick's normal physics did" ordering updateFishDrag already uses)
-// snaps the item's position to the cursor and zeroes its velocity every
-// tick; Grid.js's resolveItemCollisions (which runs inside updateEntities,
-// unconditionally over every item every tick regardless of who's currently
-// "controlling" its position — see CLAUDE.md's "Items can't stack" section)
-// then pushes every other nearby item out of the way of wherever the
-// dragged waste currently sits, one tick behind, same as a dragged fish
-// already causes for anything it swims through — no special-casing needed
-// there at all. A Waste Turret/Auto-Feeder's own intake scan (Grid.js's
-// updateBuildings) is equally untouched: it already just looks for an
-// eligible Waste item within its intake radius each tick regardless of any
-// drag state (gated only on "not already mid-process," same as always), so
-// a dragged piece that drifts close enough still gets pulled in and
-// spliced out of state.level.items normally — updateWasteDrag just needs to
-// notice the item is gone and clear the drag, same as updateFishDrag
-// already does for a fish that starves mid-drag.
-let draggedWasteId = null;
-let wasteDragArmed = false;
+// Item dragging — generalized from a Waste-only mechanic to every item type
+// (coin/food/waste/science), per direct request ("make it so that every
+// object can be clicked and dragged around, just like waste. Make sure the
+// collision, gravity, and momentum works the same way"). Mirrors the Economy
+// Fish combine-drag pattern above (draggedFishId/fishDragArmed) for the
+// grab/hold/release shape, no tool requirement (grabbing an item directly
+// always works, regardless of the currently selected tool). Only one item
+// can ever be dragged at a time (a second mousedown on another item while
+// one's already held is impossible anyway, since releasing the first is
+// what clears draggedItemId). updateItemDrag (called from update(), after
+// updateEntities — same "override whatever this tick's normal physics did"
+// ordering updateFishDrag already uses) snaps the item's position to the
+// cursor and zeroes its velocity every tick; Grid.js's resolveItemCollisions
+// (which runs inside updateEntities, unconditionally over every item every
+// tick regardless of who's currently "controlling" its position — see
+// CLAUDE.md's "Items can't stack" section) then pushes every other nearby
+// item out of the way of wherever the dragged item currently sits, one tick
+// behind, same as a dragged fish already causes for anything it swims
+// through — no special-casing needed there at all. A Turret/Auto-Feeder/
+// Processor's own intake scan (Grid.js's updateBuildings) is equally
+// untouched: it already just looks for an eligible item within its intake
+// radius each tick regardless of any drag state, so a dragged item that
+// drifts close enough still gets pulled in and spliced out of
+// state.level.items normally — updateItemDrag just needs to notice the item
+// is gone and clear the drag, same as updateFishDrag already does for a
+// fish that starves mid-drag.
+//
+// Coin and Science are ALSO click-bankable (tryBankCoinAt/tryBankScienceAt,
+// fired from the click handler below) — a plain click (no real drag) has to
+// keep banking them normally, while a genuine drag-and-release must NOT
+// also bank/place something at the drop point. Resolved by a minimum
+// move-distance check (ITEM_DRAG_MOVE_THRESHOLD_PX) rather than always
+// suppressing the click the way the fish-drag/old waste-drag unconditionally
+// did: itemDragMoved is computed once at mouseup from how far the cursor
+// actually traveled, and only THEN suppresses the click, so an unmoved
+// press-release still reads as an ordinary click. Food/Waste have no
+// existing click-driven interaction of their own to protect, so applying
+// the same threshold to them uniformly is harmless — an unmoved press still
+// falls through to whatever the currently selected tool's click handler
+// already does, unchanged from before this mechanic existed.
+let draggedItemId = null;
+let draggedItemType = null; // 'coin' | 'food' | 'waste' | 'science' — which item is currently held, so the waste-only city clamp below and the tutorial's ghost-Waste check both still target Waste specifically
+let itemDragStartSx = 0;
+let itemDragStartSy = 0;
+let itemDragMoved = false; // set once at mouseup — read (and cleared) by the click handler right after
 // Short rolling history of the cursor's own raw world position while a drag
-// is active — see updateWasteDrag's own comment for why release velocity is
+// is active — see updateItemDrag's own comment for why release velocity is
 // now averaged over this window instead of read off a single tick's delta.
-let wasteDragPositionHistory = [];
+let itemDragPositionHistory = [];
+
+const DRAGGABLE_ITEM_TYPES = ['coin', 'food', 'waste', 'science'];
 
 input.mouseDownHandlers.push((sx, sy) => {
-  // A guided tutorial normally blocks starting a Waste drag like every
+  // A guided tutorial normally blocks starting an item drag like every
   // other input mechanic (see the general tutorial-flow hotkey-swallow
-  // block in the keydown handler) — EXCEPT for the one tutorial step this
-  // drag exists to teach in the first place, which would otherwise make the
-  // step's own mechanic completely unusable while it's active. Per direct
-  // report ("make it so the waste can actually be dragged during the
-  // tutorial").
+  // block in the keydown handler) — EXCEPT for the one tutorial step the
+  // Waste-into-Turret drag exists to teach in the first place, which would
+  // otherwise make the step's own mechanic completely unusable while it's
+  // active. Per direct report ("make it so the waste can actually be
+  // dragged during the tutorial").
   if (state.ui.paused || (state.level.tutorialFlow && !isWasteDragTutorialStepActive(state))) return;
   if (draggedFishId != null) return; // a fish-drag already claimed this press
   const world = screenToWorld(sx, sy, state.camera);
-  if (world.y < SEABED_FLOOR_Y) return; // city only, per direct request
-  const waste = state.level.items.find(
-    (item) => item.type === 'waste' && Math.hypot(item.x - world.x, item.y - world.y) <= WASTE_RADIUS * WASTE_DRAG_CLICK_RADIUS_MULTIPLIER
-  );
-  if (waste) {
-    draggedWasteId = waste.id;
-    wasteDragArmed = true;
-    wasteDragPositionHistory = [];
+  let best = null;
+  let bestDistSq = Infinity;
+  for (const item of state.level.items) {
+    if (!DRAGGABLE_ITEM_TYPES.includes(item.type)) continue;
+    // Waste keeps its own pre-existing "city only" restriction (a past
+    // direct request, unrelated to this generalization) — Coin/Food/Science
+    // never had one and are draggable wherever they exist, open water
+    // included, since that's where most of their lifetime is actually spent.
+    if (item.type === 'waste' && world.y < SEABED_FLOOR_Y) continue;
+    const distSq = (item.x - world.x) ** 2 + (item.y - world.y) ** 2;
+    const hitRadius = item.radius * ITEM_DRAG_CLICK_RADIUS_MULTIPLIER;
+    if (distSq <= hitRadius * hitRadius && distSq < bestDistSq) { best = item; bestDistSq = distSq; }
+  }
+  if (best) {
+    draggedItemId = best.id;
+    draggedItemType = best.type;
+    itemDragStartSx = sx;
+    itemDragStartSy = sy;
+    itemDragMoved = false;
+    itemDragPositionHistory = [];
   }
 });
 
 input.mouseUpHandlers.push(() => {
-  // Deliberately doesn't touch the dragged item's vx/vy — updateWasteDrag
+  if (draggedItemId != null) {
+    const movedPx = Math.hypot(input.mouse.x - itemDragStartSx, input.mouse.y - itemDragStartSy);
+    itemDragMoved = movedPx >= ITEM_DRAG_MOVE_THRESHOLD_PX;
+  }
+  // Deliberately doesn't touch the dragged item's vx/vy — updateItemDrag
   // (below) already leaves it carrying real, cursor-derived velocity every
   // tick it's held, so letting go here just hands that off to the normal
-  // seabed physics (Grid.js's stepItemOnGrid/integrateItemForces) to carry
-  // on from, same as if gravity/drag had been acting on it the whole time.
-  draggedWasteId = null;
-  wasteDragPositionHistory = [];
+  // physics (Grid.js's stepItemOnGrid/integrateItemForces, or Entities.js's
+  // own open-water integration for a coin/food/science still above the
+  // seabed line) to carry on from, same as if gravity/drag had been acting
+  // on it the whole time.
+  draggedItemId = null;
+  draggedItemType = null;
+  itemDragPositionHistory = [];
 });
 
 // How many recent ticks' worth of cursor movement to average into the
-// release velocity — see updateWasteDrag's own comment for why a single
+// release velocity — see updateItemDrag's own comment for why a single
 // tick's delta wasn't good enough. ~100ms at the fixed 60Hz sim rate: long
 // enough to smooth out a single noisy sample, short enough to still track a
 // genuine fast flick rather than dragging down its speed.
-const WASTE_DRAG_VELOCITY_SAMPLE_TICKS = 6;
+const ITEM_DRAG_VELOCITY_SAMPLE_TICKS = 6;
 
-function updateWasteDrag() {
-  if (draggedWasteId == null) return;
-  const dragged = state.level.items.find((item) => item.id === draggedWasteId && item.type === 'waste');
-  if (!dragged) { draggedWasteId = null; wasteDragPositionHistory = []; return; } // absorbed by a Turret/Auto-Feeder (or otherwise removed) mid-drag
+function updateItemDrag() {
+  if (draggedItemId == null) return;
+  const dragged = state.level.items.find((item) => item.id === draggedItemId && item.type === draggedItemType);
+  if (!dragged) { draggedItemId = null; draggedItemType = null; itemDragPositionHistory = []; return; } // absorbed by a building (or otherwise removed) mid-drag
   const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
   const dtSec = SIM_DT_MS / 1000;
   // Per direct request ("when a player is dragging waste around and lets
   // go, the waste still has the same momentum from when the player is
   // holding it... the player should essentially be able to throw waste back
-  // up into the tank"): velocity carries into the normal per-tick
-  // gravity+drag integration every seabed item already gets (Grid.js's
-  // stepItemOnGrid/integrateItemForces) on release — nothing extra is needed
-  // for it to keep flying, arc, and gradually decelerate.
+  // up into the tank" — now generalized to every item type): velocity
+  // carries into the normal per-tick gravity+drag integration every item
+  // already gets on release — nothing extra is needed for it to keep
+  // flying, arc, and gradually decelerate.
   //
   // Real bug fixed here, per direct report ("occasionally the momentum
   // shoots in the wrong direction, sometimes faster than the mouse was
-  // moving"): the original version derived vx/vy from a SINGLE tick's
-  // position delta — exactly the "only taking the momentum of the frame of
-  // release" the report suspected. A single tick's sample is noisy: a
-  // mousemove event landing right on a tick boundary, a momentary stutter,
-  // or the raw cursor otherwise jittering by a pixel or two between two
-  // ticks all get divided by the same tiny dtSec, so a small, meaningless
-  // wobble on the very last tick before release could produce a huge,
-  // wrong-direction velocity completely disconnected from the actual drag
-  // gesture. Fixed by tracking a short rolling history of the cursor's own
-  // raw world position (wasteDragPositionHistory, capped at
-  // WASTE_DRAG_VELOCITY_SAMPLE_TICKS entries) and computing vx/vy from the
-  // OLDEST sample in that window to the current one, divided by the real
-  // elapsed time across however many ticks are actually in the window —
-  // averaging away a single outlier tick while still tracking a genuine
-  // fast flick almost as responsively (the window is only ~100ms).
-  wasteDragPositionHistory.push({ x: world.x, y: world.y });
-  if (wasteDragPositionHistory.length > WASTE_DRAG_VELOCITY_SAMPLE_TICKS + 1) wasteDragPositionHistory.shift();
-  const oldest = wasteDragPositionHistory[0];
-  const sampleTicks = wasteDragPositionHistory.length - 1;
+  // moving"): an original single-tick-delta version was noisy — a mousemove
+  // landing right on a tick boundary, a momentary stutter, or the raw
+  // cursor otherwise jittering by a pixel or two between two ticks all got
+  // divided by the same tiny dtSec, so a small, meaningless wobble on the
+  // very last tick before release could produce a huge, wrong-direction
+  // velocity completely disconnected from the actual drag gesture. Fixed by
+  // tracking a short rolling history of the cursor's own raw world position
+  // (itemDragPositionHistory, capped at ITEM_DRAG_VELOCITY_SAMPLE_TICKS
+  // entries) and computing vx/vy from the OLDEST sample in that window to
+  // the current one, divided by the real elapsed time across however many
+  // ticks are actually in the window — averaging away a single outlier tick
+  // while still tracking a genuine fast flick almost as responsively (the
+  // window is only ~100ms).
+  itemDragPositionHistory.push({ x: world.x, y: world.y });
+  if (itemDragPositionHistory.length > ITEM_DRAG_VELOCITY_SAMPLE_TICKS + 1) itemDragPositionHistory.shift();
+  const oldest = itemDragPositionHistory[0];
+  const sampleTicks = itemDragPositionHistory.length - 1;
   if (sampleTicks > 0) {
     // Uses `world.y` (unclamped) for both ends of the sample, not the item's
     // actual clamped position — so a fast upward swing right at the city
-    // boundary still registers real upward speed even though the item's own
+    // boundary still registers real upward speed for Waste even though its
     // on-screen position can't visually follow the cursor up past that
-    // boundary while still held (see the clamp right below).
+    // boundary while still held (see the clamp right below — only Waste
+    // gets it, everything else can be dragged freely across the line).
     dragged.vx = (world.x - oldest.x) / (sampleTicks * dtSec);
     dragged.vy = (world.y - oldest.y) / (sampleTicks * dtSec);
   }
   dragged.x = world.x;
-  dragged.y = Math.max(world.y, SEABED_FLOOR_Y); // stays in the city while actively held — can't drag it back up into open water (only the carried-over velocity above can take it there, on release)
+  dragged.y = draggedItemType === 'waste' ? Math.max(world.y, SEABED_FLOOR_Y) : world.y;
   dragged.resting = false;
 }
 
@@ -521,7 +561,7 @@ function effectiveToolAt(worldY) {
 
 input.clickHandlers.push((sx, sy) => {
   if (fishDragArmed) { fishDragArmed = false; return; } // this click followed a fish-combine drag gesture — don't also bank/feed/mound-click at the release point
-  if (wasteDragArmed) { wasteDragArmed = false; return; } // same, for a Waste-drag gesture
+  if (itemDragMoved) { itemDragMoved = false; return; } // this click followed a genuine item-drag gesture — don't also bank/feed/place at the release point. An unmoved press-release leaves itemDragMoved false, so a plain click on a Coin/Science item still banks it normally
   const world = screenToWorld(sx, sy, state.camera);
 
   // Alien Invasion: clicking a living alien always does ALIEN_CLICK_DAMAGE,
@@ -836,10 +876,13 @@ let itemsRoutedLastTotal = 0;
 let itemsRoutedPerMinDisplay = 0;
 let lastItemsRoutedSampleTime = performance.now();
 
-// Electricity HUD/graph: samples current power demand once per real
-// sim-second (ticked off dtMs, so it still paces correctly under the debug
-// time-scale cheat) into state.level.powerHistory — see UI.js's electricity
-// readout/graph popup and Config.js's POWER_HISTORY_MAX.
+// Electricity HUD/graph: samples current power demand AND that second's
+// freshly-generated supply once per real sim-second (ticked off dtMs, so it
+// still paces correctly under the debug time-scale cheat) into
+// state.level.powerHistory/powerEfficiency — see UI.js's electricity
+// readout/graph popup and Config.js's POWER_HISTORY_MAX. Power is not a
+// battery any more (see Levels.js's powerGenAccumMw) — this is also the one
+// place that accumulator gets read and reset back to 0 for the next window.
 let powerSampleAccumMs = 0;
 
 // Places a tile at the cursor once per newly-entered cell while the left
@@ -850,7 +893,7 @@ function updateBuildDrag() {
     lastBuildCell = null;
     return;
   }
-  if (draggedFishId != null || draggedWasteId != null) return; // a fish-combine or Waste drag is in progress — don't also place tiles under it
+  if (draggedFishId != null || draggedItemId != null) return; // a fish-combine or item drag is in progress — don't also place tiles under it
   if (!input.mouse.inside || !state.ui.selectedTool.startsWith('build:')) return;
   const buildingId = state.ui.selectedTool.slice('build:'.length);
   if (FAN_BUILDING_IDS.includes(buildingId)) return; // Fans go through the two-click aiming flow in the click handler above, not drag-placement
@@ -891,7 +934,7 @@ function updateDemolishDrag() {
     lastDemolishCell = null;
     return;
   }
-  if (draggedFishId != null || draggedWasteId != null) return; // a fish-combine or Waste drag is in progress — don't also demolish under it
+  if (draggedFishId != null || draggedItemId != null) return; // a fish-combine or item drag is in progress — don't also demolish under it
   if (!input.mouse.inside) return;
   const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
   if (effectiveToolAt(world.y) !== 'demolish') return;
@@ -994,7 +1037,7 @@ function update(dtMs) {
     }
     // The "drag Waste into the Turret" step needs the WHOLE simulation
     // running normally, not just camera/build-drag like every other step's
-    // exemption — dragging itself is driven by updateWasteDrag below, but
+    // exemption — dragging itself is driven by updateItemDrag below, but
     // actually getting absorbed depends on updateEntities' own turret-
     // intake scan (deep inside Grid.js's updateBuildings), which needs real
     // per-tick execution to ever fire at all. Falls through to the normal
@@ -1009,7 +1052,7 @@ function update(dtMs) {
   }
   updateEntities(state, dtMs);
   updateFishDrag();
-  updateWasteDrag();
+  updateItemDrag();
   updateStoryTriggers(state);
   state.level.elapsed += dtMs;
 
@@ -1030,9 +1073,13 @@ function update(dtMs) {
   powerSampleAccumMs += dtMs;
   if (powerSampleAccumMs >= 1000) {
     powerSampleAccumMs -= 1000;
+    const demand = computeCurrentPowerDemand(state);
+    const supply = state.level.powerGenAccumMw; // whatever Eels generated during the window that just closed — see Levels.js's powerGenAccumMw
     const history = state.level.powerHistory;
-    history.push({ demand: computeCurrentPowerDemand(state), supply: state.level.powerSupply });
+    history.push({ demand, supply });
     if (history.length > POWER_HISTORY_MAX) history.shift();
+    state.level.powerEfficiency = computePowerEfficiency(supply, demand);
+    state.level.powerGenAccumMw = 0; // reset for the next window — generated MW that goes unused this second is gone, not carried forward
   }
 }
 
@@ -1852,10 +1899,10 @@ function render() {
   // loops from the target Waste's own position to the target Waste
   // Turret's while the "drag Waste into the Turret" guided-tutorial step is
   // active, showing the player exactly what to do. Hidden the instant they
-  // actually grab the real one (draggedWasteId != null) — the whole point
-  // was showing WHERE to drag, not competing for attention once they're
-  // already doing it.
-  if (isWasteDragTutorialStepActive(state) && draggedWasteId == null) {
+  // actually grab the real one (draggedItemId != null while holding a
+  // Waste) — the whole point was showing WHERE to drag, not competing for
+  // attention once they're already doing it.
+  if (isWasteDragTutorialStepActive(state) && !(draggedItemId != null && draggedItemType === 'waste')) {
     const target = findNearestWasteTurretAndWaste(state);
     if (target && target.waste) {
       const t = (state.level.elapsed % WASTE_DRAG_GHOST_CYCLE_MS) / WASTE_DRAG_GHOST_CYCLE_MS;

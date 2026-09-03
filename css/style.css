@@ -135,7 +135,11 @@ html, body {
 #hud-power:hover { opacity: 0.7; }
 #hud-power.hidden { display: none; }
 #hud-power-graph {
-  position: absolute; top: calc(100% + 8px); right: 0;
+  /* Shifted down and left from directly-below-the-pill, per direct report
+     that it overlapped both #hud itself and #pause-toggle-btn (which sits
+     fixed just below #hud, in roughly the same right-edge column this popup
+     used to drop straight into). */
+  position: absolute; top: calc(100% + 24px); right: 70px;
   background: linear-gradient(165deg, #fffaf3 0%, #fff3d9 100%);
   border: 2px solid #ffffff;
   border-radius: 16px;
@@ -441,7 +445,7 @@ html, body {
 
 #shop-panel, #tank-panel {
   position: absolute;
-  bottom: calc(100% + 10px); /* just above the button, with a small gap */
+  bottom: calc(100% + 25px); /* just above the button, with a visual buffer gap — widened from +10px per direct request ("have a visual buffer between the icons and their menus") */
   width: 286px;
   height: calc((100vh - 28px) / 2); /* half of the old full-height slot (100vh - 14px top - 14px bottom) */
   background: linear-gradient(165deg, #fff8f0 0%, #ffe4f2 100%);
@@ -465,9 +469,11 @@ html, body {
   transform-origin: 50% 100%; /* grows from/shrinks into its icon, now centered under it */
   transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.18s ease;
 }
-/* Shop got an extra 10% on top of that half-height, per direct request —
-   #tank-panel stays at the plain half-height above. */
-#shop-panel { height: calc((100vh - 28px) / 2 * 1.1); }
+/* Shop got an extra 10% on top of that half-height (then another +10% on
+   both axes per a later direct request — combined into one *1.21 height
+   multiplier and a 315px width, up from the shared 286px), #tank-panel stays
+   at the plain half-height/width above. */
+#shop-panel { height: calc((100vh - 28px) / 2 * 1.21); width: 315px; }
 #shop-panel.collapsed, #tank-panel.collapsed {
   transform: translateX(-50%) scale(0.05);
   opacity: 0;
@@ -505,9 +511,28 @@ html, body {
    carries (see UI.js's updateHUD's own comment on #hud being the one
    always-visible copy of everything else) — pushed to the row's far end via
    space-between while the title itself stays left. */
+/* The header row + preview card stay pinned to the top of the scrollable
+   shop, per direct request ("make the shop window at the top sticky, so
+   it's always showing and can't be scrolled off") — wrapping both in one
+   sticky container (rather than making each sticky individually) avoids
+   having to hand-compute a second `top` offset for the preview to stack
+   correctly under the header row. Needs its own opaque background (matching
+   the panel's own gradient) since the icon grid scrolls up underneath it,
+   plus a bottom border as the visual break the same request asked for
+   between the sticky window and the scrolling shop items below. Only
+   #shop-panel has this wrapper — #tank-panel's simpler card list was never
+   part of this request. */
+#shop-sticky-header {
+  position: sticky;
+  top: 0;
+  padding-bottom: 10px;
+  background: linear-gradient(165deg, #fff8f0 0%, #ffe4f2 100%);
+  border-bottom: 2px solid rgba(255, 182, 213, 0.6);
+  z-index: 2;
+}
 #shop-header-row, #tank-header-row {
   display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: 8px;
 }
 #shop-header, #tank-header { font-size: 17px; font-weight: 800; color: #c25f8f; }
 
@@ -654,8 +679,8 @@ html, body {
   display: grid;
   grid-template-columns: repeat(3, 56px);
   justify-content: center; /* was 'start' — left-aligning the grid tracks put the leftmost column flush against the panel edge, clipping its hover-grow scale (.tool-btn:hover) against that edge; centering leaves room on both sides */
-  gap: 8px;
-  margin-bottom: 10px;
+  gap: 6px; /* tightened slightly (was 8px), same vertical-compacting request as #shop-species-grid above */
+  margin-bottom: 6px;
 }
 .tool-btn {
   width: 56px; height: 56px; flex: none; /* was 40px — now matches the species icons' original size, per direct request */
@@ -761,8 +786,9 @@ html, body {
   display: flex;
   flex-wrap: wrap;
   justify-content: center; /* was left-aligned by default (flex-start) — clipped the leftmost icon's hover-grow scale (.species-icon-btn:hover) against the panel edge, same fix as #tool-bar above */
-  gap: 14px 12px;
-  margin-bottom: 14px; /* breathing room above the tool-bar below it, now that fish are reordered above food/buildings */
+  gap: 10px 10px; /* tightened slightly (was 14px 12px) per direct request to compact the shop vertically so less scrolling is needed below the sticky header */
+  margin-top: 12px; /* now the gap below #shop-sticky-header, which owns the visual break itself */
+  margin-bottom: 10px;
 }
 .species-icon-btn {
   position: relative;
@@ -809,8 +835,8 @@ html, body {
   background: linear-gradient(165deg, #fffaf3 0%, #fff0f6 100%);
   border-radius: 18px;
   border: 2px solid #ffffff;
-  padding: 14px;
-  margin-bottom: 16px;
+  padding: 12px;
+  margin-bottom: 0; /* #shop-sticky-header's own padding-bottom provides the gap now that this sits inside it */
   box-shadow: 0 4px 12px rgba(107, 76, 107, 0.16), inset 0 2px 0 rgba(255, 255, 255, 0.7);
 }
 #shop-preview-empty {
