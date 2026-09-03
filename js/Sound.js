@@ -13,6 +13,12 @@ let musicGain = null;
 let sfxGain = null;
 let musicStarted = false;
 let musicTimer = null;
+// The performance.now() wall-clock moment the currently-armed musicTimer is
+// due to fire scheduleMusicLoop again — tracked separately from the timer
+// handle itself so a blur/focus cycle can re-arm the SAME intended moment
+// (see the blur/focus listeners below) instead of restarting the loop's own
+// cadence from scratch.
+let musicNextFireAt = null;
 
 // Volume sliders in the pause menu's Settings panel (UI.js) call
 // setMusicVolume/setSfxVolume below, which need to work even before the
@@ -44,21 +50,42 @@ function ensureContext() {
 // the audio graph's actual CPU work while backgrounded, not just its
 // output, and needs no separate bookkeeping to restore the right volume
 // afterward (setMusicVolume/setSfxVolume's own musicVolume/sfxVolume
-// variables are completely untouched by this). Safe with this file's
-// music-scheduling loop: scheduleMusicLoop re-reads audioCtx.currentTime
-// fresh every time its setTimeout fires (see playTone's own `when`
-// handling, `audioCtx.currentTime + when`), so there's no accumulated
-// drift or note-burst risk from time spent suspended — resuming just picks
-// back up from wherever the (frozen-then-continuing) audio clock actually
-// is. A no-op if the context doesn't exist yet (nothing to silence before
-// the first real user gesture unlocks it) or is already in the target
-// state (switching tabs can fire blur/focus more than once in a row in
-// some browsers).
+// variables are completely untouched by this). A no-op if the context
+// doesn't exist yet (nothing to silence before the first real user gesture
+// unlocks it) or is already in the target state (switching tabs can fire
+// blur/focus more than once in a row in some browsers).
+//
+// Real bug fixed here, per direct report ("if I unfocus and re-focus, the
+// music resumes playing as well as a new music track, so multiple are
+// playing at the same time"): suspending the AudioContext freezes its own
+// `currentTime` and pauses whatever's already scheduled, but does NOT pause
+// this file's music-loop `setTimeout` chain (musicTimer) — that's a plain
+// JS timer running on real wall-clock time, completely independent of the
+// AudioContext's state. Left alone, it kept firing scheduleMusicLoop() on
+// its normal cadence throughout a long blur, and each firing scheduled a
+// WHOLE NEW loop iteration's worth of oscillators against the same frozen
+// (suspended) currentTime the ORIGINAL, still-mid-flight iteration's own
+// notes were already scheduled against — so resuming played both at once.
+// Fixed by clearing musicTimer on blur (stopping the chain from re-firing
+// while backgrounded, so no second iteration ever gets scheduled) and
+// re-arming it on focus at the SAME wall-clock moment it was always due to
+// fire (musicNextFireAt, set by scheduleMusicLoop itself), not a fresh
+// full-length delay — so the loop's real cadence isn't disturbed by
+// whatever length the blur happened to be, and only ever one continuation
+// is ever pending at a time.
 window.addEventListener('blur', () => {
   if (ctx && ctx.state === 'running') ctx.suspend();
+  if (musicTimer != null) {
+    clearTimeout(musicTimer);
+    musicTimer = null;
+  }
 });
 window.addEventListener('focus', () => {
   if (ctx && ctx.state === 'suspended') ctx.resume();
+  if (musicStarted && musicTimer == null && musicNextFireAt != null) {
+    const remainingMs = Math.max(0, musicNextFireAt - performance.now());
+    musicTimer = setTimeout(scheduleMusicLoop, remainingMs);
+  }
 });
 
 // v is 0-1 — UI.js's Settings sliders call these directly on `input`, so the
@@ -409,7 +436,9 @@ function scheduleMusicLoop() {
     }
   });
 
-  musicTimer = setTimeout(scheduleMusicLoop, totalBeats * BEAT_S * 1000);
+  const delayMs = totalBeats * BEAT_S * 1000;
+  musicNextFireAt = performance.now() + delayMs;
+  musicTimer = setTimeout(scheduleMusicLoop, delayMs);
 }
 
 function startMusic() {
@@ -421,4 +450,5 @@ function startMusic() {
 export function stopMusic() {
   if (musicTimer !== null) { clearTimeout(musicTimer); musicTimer = null; }
   musicStarted = false;
+  musicNextFireAt = null;
 }

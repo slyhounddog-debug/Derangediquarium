@@ -33,7 +33,6 @@ import {
   WASTE_TURRET_MAX_WASTE,
   TILE_REFUND_FRACTION,
   GRID_SWEEP_SUBSTEP,
-  ITEM_LOST_BELOW_WORLD_MARGIN_PX,
   ITEM_HORIZONTAL_DAMPING,
   ITEM_COLLISION_ITERATIONS,
   ITEM_MIN_HORIZONTAL_PUSH_FRACTION,
@@ -110,12 +109,9 @@ function buildingKey(col, row) {
 // Past the world's side/top edges reads as TILE_PLATFORM-equivalent solid
 // (nothing needs to fall off the sides — reuses the same "wall" behavior via
 // SOLID_TILES.has check below returning true for this sentinel). Past the
-// *bottom* edge reads as TILE_EMPTY instead — there is deliberately no floor
-// down there any more: an item that reaches it just keeps falling, and
-// stepItemOnGrid deletes it once it's fallen ITEM_LOST_BELOW_WORLD_MARGIN_PX
-// past WORLD_H (see that function). An unbuilt level doesn't catch anything
-// for free any more; the player has to build something to actually keep an
-// item.
+// *bottom* edge reads as TILE_EMPTY instead, but that's not a way out either
+// — sweepVertical's own hard stop at WORLD_H (see that function) always
+// catches an item right at the world's real floor, built or not.
 const BOUNDARY_WALL = '__boundary_wall__'; // not a real BUILDING_TYPES entry — only ever compared against via SOLID_TILES.has below, which is checked with a manual `|| tile === BOUNDARY_WALL` at each call site that needs it
 function tileAt(grid, x, y) {
   const row = rowAt(y);
@@ -533,20 +529,12 @@ function stepCollectorProcessing(item, grid, dt, efficiency) {
 //   'resting'    — has support directly beneath it *this tick* (re-evaluated every tick, not a one-way flip)
 //   'processing' — being drawn into a Collector's center, not yet consumed — caller leaves it alone
 //   'consumed'   — a Collector finished processing it; caller removes it from the array
-//   'lost'       — fell off the bottom of the world; caller removes it from the array, no payout.
-//                  Effectively unreachable through normal gravity any more —
-//                  sweepVertical's own hard stop at WORLD_H catches every
-//                  item type right at the world's real bottom edge, per
-//                  direct request that nothing ever falls off the bottom of
-//                  the tank and gets lost. Left in place
-//                  purely as a defensive fallback (an item somehow ending up
-//                  with a NaN/out-of-range position bypasses tile physics
-//                  entirely), same "leave the safety net in place even once
-//                  the normal path can't reach it" precedent as every other
-//                  defensively-retained branch in this codebase.
+// There is no 'lost' status any more — per direct request, every item is
+// caught by a hard boundary (sweepVertical's own stop at WORLD_H, plus the
+// side/top walls every item now respects — see clampItemToWorldWalls in
+// Entities.js) rather than ever being deleted for falling somewhere
+// unreachable.
 export function stepItemOnGrid(item, state, dt, physics) {
-  if (item.y > WORLD_H + ITEM_LOST_BELOW_WORLD_MARGIN_PX) return 'lost';
-
   const grid = state.level.grid;
 
   if (item.collectorProgressMs != null) return stepCollectorProcessing(item, grid, dt, state.level.powerEfficiency);

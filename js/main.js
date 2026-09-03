@@ -509,16 +509,33 @@ function updateItemDrag() {
   const sampleTicks = itemDragPositionHistory.length - 1;
   if (sampleTicks > 0) {
     // Uses `world.y` (unclamped) for both ends of the sample, not the item's
-    // actual clamped position — so a fast upward swing right at the city
-    // boundary still registers real upward speed for Waste even though its
-    // on-screen position can't visually follow the cursor up past that
-    // boundary while still held (see the clamp right below — only Waste
-    // gets it, everything else can be dragged freely across the line).
+    // actual clamped position — so a fast swing right at any boundary (the
+    // city line for Waste, or now the world's own hard edges below) still
+    // registers real speed for the release-momentum calc even though the
+    // item's own on-screen position can't visually follow the cursor past
+    // that boundary while still held.
     dragged.vx = (world.x - oldest.x) / (sampleTicks * dtSec);
     dragged.vy = (world.y - oldest.y) / (sampleTicks * dtSec);
   }
-  dragged.x = world.x;
-  dragged.y = draggedItemType === 'waste' ? Math.max(world.y, SEABED_FLOOR_Y) : world.y;
+  // Dragging can't push an item past any of the world's 4 hard boundaries
+  // either — per direct request ("dragged objects can't move past the hard
+  // barriers of the sides, top, or bottom... I shouldn't be able to drag an
+  // object into the side glass panels or into the toolbar at the bottom").
+  // The glass panels and the bottom tool-bar are purely screen-space
+  // dressing sitting just outside the world's real x=0/WORLD_W and
+  // y=WORLD_H edges (see main.js's renderTankWalls and Grid.js's
+  // renderCameraBottomBuffer) — clamping to those same world coordinates,
+  // the exact ones Entities.js's clampItemToWorldWalls/Grid.js's
+  // sweepVertical already enforce for ordinary (non-dragged) physics, keeps
+  // a dragged item out of both for free, with no separate screen-space
+  // check needed. Waste keeps its own additional, tighter "city only" floor
+  // (can't be dragged back up above SEABED_FLOOR_Y) on top of this.
+  const margin = dragged.radius || 0;
+  let clampedX = Math.min(Math.max(world.x, margin), WORLD_W - margin);
+  let clampedY = Math.min(Math.max(world.y, margin), WORLD_H - margin);
+  if (draggedItemType === 'waste') clampedY = Math.max(clampedY, SEABED_FLOOR_Y);
+  dragged.x = clampedX;
+  dragged.y = clampedY;
   dragged.resting = false;
 }
 

@@ -276,14 +276,13 @@ export const COLLECTOR_CIRCLE_RADIUS_FRACTION = 0.32; // fraction of TILE_SIZE �
 // of its center) to get pulled in, from any direction.
 export const COLLECTOR_INTAKE_RADIUS = TILE_SIZE * 0.65;
 
-// Items no longer rest at the world's bottom edge — with nothing built to
-// catch it, a coin just keeps falling and is deleted once it's fallen this
-// far past WORLD_H, so it reads as "fell off the bottom of the screen"
-// rather than popping out of existence at an invisible line. This is what
-// makes leaving coins unrouted actually costly instead of a free pile the
-// player can click at their leisure — see CLAUDE.md's item-collision note.
-export const ITEM_LOST_BELOW_WORLD_MARGIN_PX = TILE_SIZE * 2;
-export const ITEM_LOST_COLOR = '#ff9999'; // muted red "Lost!" floating text when a coin falls off the bottom — a coin is worth telling the player about; food/waste vanish silently, same as they already do elsewhere
+// Items can no longer be "lost" at all, per direct request — every side,
+// the top, and the bottom of the world are now hard barriers (see
+// Entities.js's clampItemToWorldWalls and Grid.js's sweepVertical), so
+// nothing an item does can ever put it somewhere unreachable/deleted any
+// more. The old ITEM_LOST_BELOW_WORLD_MARGIN_PX/ITEM_LOST_COLOR
+// constants and every "fell off the bottom, gone" code path they drove are
+// removed entirely.
 
 // Items in the seabed band can't occupy the same space, and this is a live,
 // continuous simulation, not a one-shot "settle and freeze" — every item is

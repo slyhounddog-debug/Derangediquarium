@@ -48,8 +48,6 @@ import {
   TANK_POINT_PER_ADULT_FISH,
   TANK_POINT_COLOR,
   NOTIFICATION_LOG_MAX,
-  ITEM_LOST_COLOR,
-  WORLD_H,
   WORLD_W,
   ITEM_MASS_BY_TYPE,
   FISH_BASE_SIZE,
@@ -950,10 +948,19 @@ export function resolveMergeTutorialPair(state) {
 // crossed horizontally (Grid.js's tileAt reads any out-of-column tile as a
 // solid BOUNDARY_WALL sentinel); open water has no tile grid to bound it the
 // same way, so this is the equivalent for it — called from each item type's
-// own per-tick open-water branch, right after integrating vx. Clamps to the
-// item's own radius in from each edge (reads as bumping the glass, not
-// overlapping it) and zeroes vx once it does, so a Fan/sway push doesn't
-// keep reapplying against a wall it can't cross.
+// own per-tick open-water branch, right after integrating vx/vy. Clamps to
+// the item's own radius in from each edge (reads as bumping the glass, not
+// overlapping it) and zeroes the offending velocity component once it does,
+// so a Fan/sway/throw push doesn't keep reapplying against a wall it can't
+// cross. The TOP edge (y=0) got the identical treatment per a later direct
+// request ("make the top of the tank a hard barrier like the other 3
+// sides") — a strong enough Fan/Turbo Fan push, or a hard upward throw via
+// the item-drag mechanic, could otherwise carry an item above the world
+// entirely, same unreachable-forever problem the side walls already solved.
+// The BOTTOM edge doesn't need an equivalent here: this function only ever
+// runs from the open-water branch (item.y < SEABED_FLOOR_Y, well above
+// WORLD_H), and once an item crosses into the seabed band, Grid.js's
+// sweepVertical already hard-stops it at WORLD_H unconditionally.
 function clampItemToWorldWalls(item) {
   const margin = item.radius || 0;
   if (item.x < margin) {
@@ -962,6 +969,10 @@ function clampItemToWorldWalls(item) {
   } else if (item.x > WORLD_W - margin) {
     item.x = WORLD_W - margin;
     if (item.vx > 0) item.vx = 0;
+  }
+  if (item.y < margin) {
+    item.y = margin;
+    if (item.vy < 0) item.vy = 0;
   }
 }
 
@@ -996,7 +1007,6 @@ function updateFood(item, state, dtMs) {
       state.level.gridStats.itemsRoutedTotal += 1;
       return false;
     }
-    if (status === 'lost') return false; // fell off the bottom of the world — gone silently
   }
 
   // Stationary-to-Waste: per direct request, replacing the old capacity cap
@@ -1060,14 +1070,6 @@ function updateCoin(item, state, dtMs) {
     // processing," not "one waste per item").
     return false;
   }
-  if (status === 'lost') {
-    // Fell off the bottom of the world with nothing built to catch it — no
-    // payout, just a small readout planted at the world's bottom edge (not
-    // the item's actual, off-screen-by-now position) so it reads as "you
-    // lost that" rather than a silent disappearance that looks like a bug.
-    state.level.floatingTexts.push(createPickupText(item.x, WORLD_H, 'Lost!', ITEM_LOST_COLOR));
-    return false;
-  }
   item.resting = status === 'resting'; // informational only — re-evaluated fresh every tick, doesn't stop future physics
   return true;
 }
@@ -1094,10 +1096,6 @@ function updateScience(item, state, dtMs) {
     playDispense(); // a Processor finishing a Science Bubble's hold — the coin equivalent already has its own playCoinBank blip, so this is the "output" sound that path was missing
     return false;
   }
-  if (status === 'lost') {
-    state.level.floatingTexts.push(createPickupText(item.x, WORLD_H, 'Lost!', ITEM_LOST_COLOR));
-    return false;
-  }
   item.resting = status === 'resting';
   return true;
 }
@@ -1120,7 +1118,7 @@ function updateWaste(item, state, dtMs) {
     return true;
   }
   const status = stepItemOnGrid(item, state, dt, physics);
-  if (status === 'consumed' || status === 'lost') return false;
+  if (status === 'consumed') return false;
   item.resting = status === 'resting';
   return true;
 }
