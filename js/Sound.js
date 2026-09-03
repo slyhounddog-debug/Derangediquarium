@@ -37,6 +37,30 @@ function ensureContext() {
   return ctx;
 }
 
+// Silence (and genuinely stop processing) all audio the instant the
+// window/tab loses focus, resuming automatically the instant it's back —
+// per direct request. AudioContext.suspend()/resume() is the correct
+// primitive for this rather than zeroing the gain nodes — it also halts
+// the audio graph's actual CPU work while backgrounded, not just its
+// output, and needs no separate bookkeeping to restore the right volume
+// afterward (setMusicVolume/setSfxVolume's own musicVolume/sfxVolume
+// variables are completely untouched by this). Safe with this file's
+// music-scheduling loop: scheduleMusicLoop re-reads audioCtx.currentTime
+// fresh every time its setTimeout fires (see playTone's own `when`
+// handling, `audioCtx.currentTime + when`), so there's no accumulated
+// drift or note-burst risk from time spent suspended — resuming just picks
+// back up from wherever the (frozen-then-continuing) audio clock actually
+// is. A no-op if the context doesn't exist yet (nothing to silence before
+// the first real user gesture unlocks it) or is already in the target
+// state (switching tabs can fire blur/focus more than once in a row in
+// some browsers).
+window.addEventListener('blur', () => {
+  if (ctx && ctx.state === 'running') ctx.suspend();
+});
+window.addEventListener('focus', () => {
+  if (ctx && ctx.state === 'suspended') ctx.resume();
+});
+
 // v is 0-1 — UI.js's Settings sliders call these directly on `input`, so the
 // volume updates live while dragging, not just on release.
 export function setMusicVolume(v) {
