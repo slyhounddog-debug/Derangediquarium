@@ -1150,6 +1150,13 @@ function restartLevel(state) {
   centerCameraOnMound(state.camera); // loadLevel resets camera.x to 0 — re-center on the Mound, same as the initial load
   refreshShopPanel(state);
   closePauseMenu(state);
+  // Per direct request, the title splash plays again on every Restart, not
+  // just the very first Start click — main.js's triggerSplash() is a local
+  // function closing over DOM refs this file can't import directly without
+  // a circular dependency, so this just arms the same cross-module pending-
+  // flag pattern coinCapFlashPending/wasteTurretAmmoGainedPending already
+  // use; render() reads and clears it the very next frame.
+  state.ui.replaySplashPending = true;
 }
 
 // Highlights whichever single shop selection is active — Food, Demolish, a
@@ -2074,12 +2081,31 @@ export function updateHUD(state) {
   const tutorialActive = !!state.level.tutorialFlow;
   const toolIsPurchasable = state.ui.selectedTool.startsWith('build:') || state.ui.selectedTool.startsWith('fish:');
   const mergeSelected = state.ui.selectedTool === 'merge';
-  els.buildLegend.classList.toggle('hidden', tutorialActive || !(toolIsPurchasable || mergeSelected));
+  const buildLegendVisible = !tutorialActive && (toolIsPurchasable || mergeSelected);
+  els.buildLegend.classList.toggle('hidden', !buildLegendVisible);
   els.buildLegendPurchase.classList.toggle('hidden', !toolIsPurchasable);
   // Tutorial-skip legend — "(Esc) to skip tutorial" — shown for the whole
   // duration of any guided tutorial flow, per direct request; main.js's
   // Escape handler now actually honors this (see its own comment).
   els.tutorialSkipLegend.classList.toggle('hidden', !tutorialActive);
+  // Both legends are now plain top-level elements (see index.html's own
+  // comment for why — escaping #bottom-bar-row's stacking context is what
+  // actually makes their z-index apply), so their "left of, bottom-aligned
+  // with, the Shop button" position has to be computed live off the
+  // button's real on-screen rect instead of plain CSS relative to a shared
+  // positioned ancestor. Only bothers with the (layout-reading)
+  // getBoundingClientRect call on a frame either one is actually visible.
+  if (buildLegendVisible || tutorialActive) positionBottomLeftLegends();
+}
+
+function positionBottomLeftLegends() {
+  const rect = els.shopCollapseBtn.getBoundingClientRect();
+  const right = `${window.innerWidth - rect.left + 12}px`;
+  const bottom = `${window.innerHeight - rect.bottom}px`;
+  els.buildLegend.style.right = right;
+  els.buildLegend.style.bottom = bottom;
+  els.tutorialSkipLegend.style.right = right;
+  els.tutorialSkipLegend.style.bottom = bottom;
 }
 
 // A row of bouncing down-arrows nudging the player to pan the camera down,

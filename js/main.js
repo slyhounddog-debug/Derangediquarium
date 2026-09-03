@@ -180,7 +180,23 @@ splashTitle.addEventListener('animationend', (e) => {
     }
   }, START_TUTORIAL_DELAY_AFTER_SPLASH_MS);
 });
+// Idempotent/replayable — per direct request, the splash also plays again
+// every time the pause menu's Restart button is used (see UI.js's
+// restartLevel, which calls this after loadLevel), not just once on the
+// very first Start click. The FIRST time this runs, splashScreen is still
+// attached (nothing has removed it yet) and has no 'play' class yet, so the
+// remove-reflow-readd below is a harmless no-op beyond adding the class.
+// Every time after the first, though, the element has already been
+// .remove()'d from the document entirely (see splashTitle's own
+// animationend listener above) — re-appending it is what makes a replay
+// actually visible at all, and the same forced-reflow trick this codebase
+// already uses to restart a CSS animation (see UI.js's playFlash) is what
+// makes it replay from the very beginning rather than being a no-op since
+// the 'play' class never actually left in between.
 function triggerSplash() {
+  if (!splashScreen.isConnected) document.body.appendChild(splashScreen);
+  splashScreen.classList.remove('play');
+  void splashScreen.offsetWidth;
   splashScreen.classList.add('play');
 }
 
@@ -232,6 +248,15 @@ const state = {
     // shown right now.
     buildErrorText: null,
     buildErrorElapsedMs: 0,
+    // Same cross-module-flag pattern as coinCapFlashPending/
+    // wasteTurretAmmoGainedPending above — set by UI.js's restartLevel
+    // (the pause menu's Restart button) the instant it calls loadLevel, per
+    // direct request ("make the splash screen animation happen again").
+    // triggerSplash() itself is a main.js-local function (closes over the
+    // splashScreen/splashTitle DOM refs), so UI.js can't call it directly
+    // without a circular import — read and cleared by render() below on the
+    // very next frame instead.
+    replaySplashPending: false,
   },
   debug: {
     overlayVisible: false,
@@ -1310,6 +1335,10 @@ function updateCanvasCursor() {
 }
 
 function render() {
+  if (state.ui.replaySplashPending) {
+    state.ui.replaySplashPending = false;
+    triggerSplash();
+  }
   updateCanvasCursor();
   fpsCounter++;
   const now = performance.now();

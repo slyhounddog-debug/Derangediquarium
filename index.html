@@ -59,6 +59,27 @@
 
 <div id="tutorial-overlay" class="hidden"></div>
 <div id="tutorial-text" class="hidden"></div>
+<!-- Deliberately NOT nested inside #bottom-bar-row (see that element's own
+     CSS comment) — #bottom-bar-row is `position: fixed` with its own
+     z-index AND a `transform`, both of which make it establish a real CSS
+     stacking context of its own; anything painted inside it is trapped
+     within that context and stacks at #bottom-bar-row's OWN z-index (15)
+     relative to the rest of the page, no matter how high a z-index is set
+     on a descendant. That's a real bug this session shipped once already —
+     raising #build-legend/#tutorial-skip-legend to z-index 702 visually did
+     nothing, since it could never escape being capped under the row's own
+     15 in the first place. Living here instead, as plain top-level
+     siblings of #tutorial-overlay, means z-index actually applies normally
+     — position is now computed and set live by UI.js's
+     positionBottomLeftLegends (the shop button's own on-screen position
+     isn't static CSS — #bottom-bar-row centers itself, so its width
+     depends on live content), instead of the old `position: absolute`
+     relative to #shop-anchor. -->
+<div id="build-legend" class="hidden">
+  <span id="build-legend-purchase">Click to purchase</span>
+  <span>(Esc) to cancel</span>
+</div>
+<div id="tutorial-skip-legend" class="hidden">(Esc) to skip tutorial</div>
 
 <div id="alien-countdown" class="hidden">👽 Alien wave incoming: <span id="alien-countdown-seconds">10</span>s</div>
 
@@ -148,11 +169,6 @@
 <div id="bottom-bar-row">
   <div id="shop-anchor">
     <button id="shop-collapse-btn" title="Shop (S)">🛍️</button>
-    <div id="build-legend" class="hidden">
-      <span id="build-legend-purchase">Click to purchase</span>
-      <span>(Esc) to cancel</span>
-    </div>
-    <div id="tutorial-skip-legend" class="hidden">(Esc) to skip tutorial</div>
     <div id="shop-panel">
       <div id="shop-panel-scroll">
         <div id="shop-header-row">

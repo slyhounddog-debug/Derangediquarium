@@ -173,22 +173,31 @@ html, body {
 
 /* Build/fish legend — "Click to purchase" / "(Esc) to cancel" — and the
    tutorial-skip legend — "(Esc) to skip tutorial" — per direct
-   request/report. Went through two placements: first just above the fixed
-   bottom tool-bar (blocked the view of the tank), then top-middle (still
-   in the way, per a direct follow-up — asked the user directly for a new
-   spot rather than guessing again). Landed on tucked into the bottom-left
-   corner, right next to the Shop toggle button — both are children of
-   #shop-anchor (position:relative, same anchor #shop-panel itself already
-   uses) so they track the button's real position regardless of viewport
-   width, positioned to its LEFT (not above, like the panel — that would
-   collide with it whenever the shop happens to be open at the same time)
-   and bottom-aligned with it. The two are mutually exclusive (UI.js's
+   request/report. Went through three placements: first just above the
+   fixed bottom tool-bar (blocked the view of the tank), then top-middle
+   (still in the way, per a direct follow-up), then tucked into the
+   bottom-left corner right next to the Shop toggle button, as a child of
+   #shop-anchor with `position: absolute` — which LOOKED right but had a
+   real bug baked in: #shop-anchor lives inside #bottom-bar-row, and
+   #bottom-bar-row (`position: fixed` + its own z-index + a `transform`) is
+   a genuine CSS stacking context of its own, so anything painted inside it
+   is trapped stacking at #bottom-bar-row's OWN z-index (15) relative to
+   the rest of the page no matter what z-index a descendant sets — raising
+   these two to 702 (see git history) visually did nothing, since they
+   could never escape that cap in the first place. Per direct report ("I've
+   already asked for this and it got skipped"), moved to plain top-level
+   siblings of #tutorial-overlay in the DOM (index.html) instead, `position:
+   fixed` with no static right/bottom — UI.js's positionBottomLeftLegends
+   sets those live off the Shop button's own on-screen rect every frame
+   they're shown (its position isn't static CSS, since #bottom-bar-row
+   centers itself and its width depends on live content), replicating the
+   exact same "left of, bottom-aligned with, the Shop button" visual spot
+   this design already settled on. The two are mutually exclusive (UI.js's
    updateHUD never shows both at once — the purchase legend is suppressed
    entirely while a tutorial's active), so they can safely share the exact
-   same position/sizing. */
+   same sizing/position logic. */
 #build-legend, #tutorial-skip-legend {
-  position: absolute;
-  right: calc(100% + 12px); bottom: 0;
+  position: fixed;
   padding: 9px 20px;
   background: linear-gradient(160deg, #fffdf8 0%, #ffe9f4 100%);
   color: #6b4c6b;
@@ -197,7 +206,7 @@ html, body {
   border-radius: 999px;
   border: 2px solid #ffffff;
   box-shadow: 0 6px 16px rgba(107, 76, 107, 0.25), inset 0 2px 0 rgba(255, 255, 255, 0.9);
-  z-index: 702;
+  z-index: 702; /* now actually applies — no longer trapped inside #bottom-bar-row's own stacking context, see the comment above */
   white-space: nowrap;
 }
 #build-legend { display: flex; gap: 14px; }
