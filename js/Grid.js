@@ -23,11 +23,21 @@ import {
   TILE_TURRET_WASTE,
   TILE_TURRET_ELECTRIC,
   TILE_TURRET_ADVANCED,
+  TILE_REFINERY,
+  TILE_BIO_FEEDER,
+  TILE_BIO_COMBUSTER,
+  TILE_BIO_REACTOR,
   BUILDING_TYPES,
   PROCESSOR_STATS,
   AUTO_FEEDER_STATS,
   TURRET_STATS,
   TURRET_AMMO_TILES,
+  REFINERY_STATS,
+  BIO_FEEDER_STATS,
+  BIO_COMBUSTER_STATS,
+  BIO_REACTOR_STATS,
+  BIO_BUILDING_INTAKE_RADIUS,
+  GREEN_SCIENCE_LAB_ID,
   WASTE_TURRET_SHOTS_PER_WASTE,
   WASTE_TURRET_MAX_AMMO,
   WASTE_TURRET_MAX_WASTE,
@@ -75,9 +85,17 @@ function pushGridNotification(state, text) {
 const COLLECTOR_TILES = new Set([TILE_COLLECTOR, TILE_COLLECTOR_ELECTRIC, TILE_COLLECTOR_ADVANCED]);
 const AUTO_FEEDER_TILES = new Set([TILE_AUTO_FEEDER, TILE_AUTO_FEEDER_ELECTRIC, TILE_AUTO_FEEDER_ADVANCED]);
 export const TURRET_TILES = new Set([TILE_TURRET_WASTE, TILE_TURRET_ELECTRIC, TILE_TURRET_ADVANCED]);
+// Bio-Building chain — each a single standalone tile, no tiers, but kept as
+// 1-member Sets for the same uniform `.has(type)` shape every other
+// building-type-group check in this file already uses.
+const REFINERY_TILES = new Set([TILE_REFINERY]);
+const BIO_FEEDER_TILES = new Set([TILE_BIO_FEEDER]);
+const BIO_COMBUSTER_TILES = new Set([TILE_BIO_COMBUSTER]);
+const BIO_REACTOR_TILES = new Set([TILE_BIO_REACTOR]);
 const SOLID_TILES = new Set([
   TILE_PLATFORM, TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4,
   ...COLLECTOR_TILES, ...AUTO_FEEDER_TILES, ...TURRET_TILES,
+  ...REFINERY_TILES, ...BIO_FEEDER_TILES, ...BIO_COMBUSTER_TILES, ...BIO_REACTOR_TILES,
 ]);
 const FAN_TILES = new Set([TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4]);
 
@@ -290,6 +308,29 @@ export function placeTile(state, col, row, buildingId, angle = 0) {
     // (unlimited ammo, a power cost instead). `cooldownMs` counts down to the
     // next shot regardless of tier — see updateBuildings' turret-fire branch.
     state.level.buildingData[buildingKey(col, row)] = { type: buildingId, ammo: 0, cooldownMs: 0 };
+  } else if (REFINERY_TILES.has(buildingId)) {
+    // No `angle` — same fixed top-center output every Bio-Building shares
+    // (see updateBuildings). lockedRecipe is null while idle, else
+    // 'waste_to_food' | 'dna_to_biomass' — set the instant its one input is
+    // absorbed, cleared again once that recipe's output ejects.
+    state.level.buildingData[buildingKey(col, row)] = { type: buildingId, lockedRecipe: null, progressMs: 0 };
+  } else if (BIO_FEEDER_TILES.has(buildingId)) {
+    // 2-ingredient recipe (Food + Biomass) — each absorbed independently,
+    // in whatever order they happen to touch the tile; `processing` only
+    // flips true once BOTH are held.
+    state.level.buildingData[buildingKey(col, row)] = { type: buildingId, hasFood: false, hasBiomass: false, processing: false, progressMs: 0 };
+  } else if (BIO_COMBUSTER_TILES.has(buildingId)) {
+    // Locks onto a recipe from whichever of its 2 possible FIRST ingredients
+    // (Waste or Blue Science) touches it first — Biomass is always the 2nd
+    // ingredient in both recipes, never the recipe-determining one, so it's
+    // only ever accepted once lockedRecipe is already set (see
+    // updateBuildings for the full reasoning).
+    state.level.buildingData[buildingKey(col, row)] = { type: buildingId, lockedRecipe: null, biomassAbsorbed: false, progressMs: 0 };
+  } else if (BIO_REACTOR_TILES.has(buildingId)) {
+    // Not an item router at all — absorbs one fuel item (Green Science or
+    // Biomass), then dumps a lump of power into the grid once processing
+    // finishes. See updateBuildings' Bio-Reactor branch.
+    state.level.buildingData[buildingKey(col, row)] = { type: buildingId, fueled: false, progressMs: 0 };
   }
   if (!state.level.tutorialFlags.firstBuildingPlaced) {
     state.level.tutorialFlags.firstBuildingPlaced = true;
@@ -334,6 +375,7 @@ const CHEAT_CYCLE = [
   TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4,
   TILE_AUTO_FEEDER, TILE_AUTO_FEEDER_ELECTRIC, TILE_AUTO_FEEDER_ADVANCED,
   TILE_TURRET_WASTE, TILE_TURRET_ELECTRIC, TILE_TURRET_ADVANCED,
+  TILE_REFINERY, TILE_BIO_FEEDER, TILE_BIO_COMBUSTER, TILE_BIO_REACTOR,
 ];
 const CHEAT_DEFAULT_ANGLE = -Math.PI / 2; // straight up
 export function cycleTileCheat(state, worldX, worldY) {
@@ -355,6 +397,14 @@ export function cycleTileCheat(state, worldX, worldY) {
     // tier — see TURRET_AMMO_TILES) so testing combat doesn't require
     // grinding real Waste first.
     state.level.buildingData[buildingKey(col, row)] = { type: next, ammo: TURRET_AMMO_TILES.has(next) ? WASTE_TURRET_MAX_AMMO : 0, cooldownMs: 0 };
+  } else if (REFINERY_TILES.has(next)) {
+    state.level.buildingData[buildingKey(col, row)] = { type: next, lockedRecipe: null, progressMs: 0 };
+  } else if (BIO_FEEDER_TILES.has(next)) {
+    state.level.buildingData[buildingKey(col, row)] = { type: next, hasFood: false, hasBiomass: false, processing: false, progressMs: 0 };
+  } else if (BIO_COMBUSTER_TILES.has(next)) {
+    state.level.buildingData[buildingKey(col, row)] = { type: next, lockedRecipe: null, biomassAbsorbed: false, progressMs: 0 };
+  } else if (BIO_REACTOR_TILES.has(next)) {
+    state.level.buildingData[buildingKey(col, row)] = { type: next, fueled: false, progressMs: 0 };
   }
 }
 
@@ -596,8 +646,9 @@ function beginCollectorProcessing(item, centerX, centerY, tileType) {
   item.collectorProgressMs = 0;
   // A coin and a Science Bubble take different amounts of time on the same
   // tile, and that time shrinks per tier — see Config.js's PROCESSOR_STATS.
+  // Green Science shares blue's own scienceMs (see the intake scan above).
   const stats = PROCESSOR_STATS[tileType];
-  item.collectorTargetMs = item.type === 'science' ? stats.scienceMs : stats.coinMs;
+  item.collectorTargetMs = (item.type === 'science' || item.type === 'science_green') ? stats.scienceMs : stats.coinMs;
   item.collectorOriginalMass = item.mass;
   item.mass = COLLECTOR_PROCESSING_MASS; // barely budges if something else piles into it mid-process — see Config.js's comment
 }
@@ -616,16 +667,20 @@ function beginCollectorProcessing(item, centerX, centerY, tileType) {
 // in place). Newly-dispensed Food is NOT created here, to avoid a circular
 // import with Entities.js's createFood — instead this returns an array of
 // spawn points `{ x, y }` for the caller to actually construct.
-// Returns { foodSpawnPoints, wasteSpawnPoints, turretShots } — Entities.js
-// constructs the actual Food/Waste items and turret projectiles from these
-// (circular-import avoidance, same reasoning as before — createTurretProjectile
-// lives in Entities.js alongside createFood/createWaste), banking coins/Science
-// itself when stepCollectorProcessing (called from each item's own per-tick
-// step) reports 'consumed'.
+// Returns { foodSpawnPoints, wasteSpawnPoints, turretShots, bioSpawnPoints }
+// — Entities.js constructs the actual Food/Waste/Bio-chain items and turret
+// projectiles from these (circular-import avoidance, same reasoning as
+// before — createTurretProjectile/createBiomass/etc. live in Entities.js
+// alongside createFood/createWaste), banking coins/Science itself when
+// stepCollectorProcessing (called from each item's own per-tick step)
+// reports 'consumed'. bioSpawnPoints entries carry an itemType alongside
+// { x, y } since the Refinery/Bio-Combuster can each eject more than one
+// kind of output depending on which recipe locked in.
 export function updateBuildings(state, dtMs) {
   const foodSpawnPoints = [];
   const wasteSpawnPoints = [];
   const turretShots = [];
+  const bioSpawnPoints = [];
   const items = state.level.items;
   for (const key in state.level.buildingData) {
     const data = state.level.buildingData[key];
@@ -637,17 +692,20 @@ export function updateBuildings(state, dtMs) {
       // Only one item processes at a time per Processor tile — skip the scan
       // entirely if this tile already has one mid-hold, so a second item
       // drifting into range while the first is still easing toward center
-      // doesn't also get pulled onto the same spot. Only coins and Science
-      // Bubbles are valid intake — per direct request, a Processor's stats
+      // doesn't also get pulled onto the same spot. Coins and both Science
+      // colors are valid intake — per direct request, a Processor's stats
       // are specifically "1 coin every Xs, 1 science every Ys," not a
-      // generic item eater; Food/Waste landing on top just rests there.
+      // generic item eater; Food/Waste/Bio-chain items landing on top just
+      // rest there. Green Science shares blue's own scienceMs duration (see
+      // beginCollectorProcessing below) — per spec, it's routed into a
+      // Collector the exact same way blue Science already is.
       let anyProcessing = items.some(
         (it) => it.collectorProgressMs != null && it.collectorCenterX === centerX && it.collectorCenterY === centerY
       );
       if (!anyProcessing) {
         for (let i = 0; i < items.length; i++) {
           const it = items[i];
-          if (it.type !== 'coin' && it.type !== 'science') continue;
+          if (it.type !== 'coin' && it.type !== 'science' && it.type !== 'science_green') continue;
           if (it.collectorProgressMs != null) continue;
           if (isNearBuildingCenter(centerX, centerY, it.x, it.y, COLLECTOR_INTAKE_RADIUS)) {
             beginCollectorProcessing(it, centerX, centerY, data.type);
@@ -754,54 +812,233 @@ export function updateBuildings(state, dtMs) {
       continue;
     }
 
-    if (!AUTO_FEEDER_TILES.has(data.type)) continue;
-    const afStats = AUTO_FEEDER_STATS[data.type];
-    // Fixed top-center now, not angle-derived — per direct request ("make it
-    // so the collectors and auto-feeders output on top, by default"). The
-    // Collector has no physical output of its own (it just banks what it
-    // consumes), so this only ever applies to the Auto-Feeder's Food
-    // dispense point.
-    const outputX = centerX;
-    const outputY = centerY - TILE_SIZE * AUTO_FEEDER_PORT_OFFSET_FRACTION;
+    if (AUTO_FEEDER_TILES.has(data.type)) {
+      const afStats = AUTO_FEEDER_STATS[data.type];
+      // Fixed top-center now, not angle-derived — per direct request ("make it
+      // so the collectors and auto-feeders output on top, by default"). The
+      // Collector has no physical output of its own (it just banks what it
+      // consumes), so this only ever applies to the Auto-Feeder's Food
+      // dispense point.
+      const outputX = centerX;
+      const outputY = centerY - TILE_SIZE * AUTO_FEEDER_PORT_OFFSET_FRACTION;
 
-    if (!data.absorbing) {
-      for (let i = 0; i < items.length; i++) {
-        const it = items[i];
-        if (it.type !== 'waste') continue;
-        if (isNearBuildingCenter(centerX, centerY, it.x, it.y, AUTO_FEEDER_INTAKE_RADIUS)) {
-          items.splice(i, 1);
-          // "Buildings" pushing cleanliness back up (see CLAUDE.md's
-          // Cleanliness section) — the Auto-Feeder is the one currently
-          // built, mirroring Entities.js's identical Suckerfish-eating case.
-          state.level.cleanliness = Math.min(CLEANLINESS_MAX, state.level.cleanliness + CLEANLINESS_PER_WASTE_EVENT);
-          data.absorbing = true;
+      if (!data.absorbing) {
+        for (let i = 0; i < items.length; i++) {
+          const it = items[i];
+          if (it.type !== 'waste') continue;
+          if (isNearBuildingCenter(centerX, centerY, it.x, it.y, AUTO_FEEDER_INTAKE_RADIUS)) {
+            items.splice(i, 1);
+            // "Buildings" pushing cleanliness back up (see CLAUDE.md's
+            // Cleanliness section) — the Auto-Feeder is the one currently
+            // built, mirroring Entities.js's identical Suckerfish-eating case.
+            state.level.cleanliness = Math.min(CLEANLINESS_MAX, state.level.cleanliness + CLEANLINESS_PER_WASTE_EVENT);
+            data.absorbing = true;
+            data.progressMs = 0;
+            playIntake();
+            break;
+          }
+        }
+      } else {
+        // A free base Auto-Feeder (powerCostPerSec 0) always processes at full
+        // speed; an Electric/Advanced tier stalls at 0% grid efficiency — see
+        // stepCollectorProcessing's identical gate.
+        const afEfficiency = afStats.powerCostPerSec > 0 ? state.level.powerEfficiency : 1;
+        data.progressMs += dtMs * afEfficiency;
+        if (data.progressMs >= afStats.wasteProcessMs) {
+          data.absorbing = false;
+          data.progressMs = 0;
+          // Lights one more of AUTO_FEEDER_STATS[type].wasteRequired dots — see
+          // Grid.js's renderAutoFeederDots — only dispensing Food once every
+          // dot is lit, per direct request.
+          data.wasteCount += 1;
+          if (data.wasteCount >= afStats.wasteRequired) {
+            data.wasteCount = 0;
+            foodSpawnPoints.push({ x: outputX, y: outputY });
+            playDispense();
+          }
+        }
+      }
+      continue;
+    }
+
+    // ---- Bio-Building production chain ----
+    // All 4 share the same fixed top-center output point every Auto-Feeder
+    // tile already ejects from, and the same BIO_BUILDING_INTAKE_RADIUS
+    // touch-scan (isNearBuildingCenter, the same helper the Collector/
+    // Auto-Feeder intakes already use).
+    const bioOutputX = centerX;
+    const bioOutputY = centerY - TILE_SIZE * AUTO_FEEDER_PORT_OFFSET_FRACTION;
+
+    if (REFINERY_TILES.has(data.type)) {
+      const stats = REFINERY_STATS[data.type];
+      if (data.lockedRecipe === null) {
+        // Rejects incoming items while actively processing (satisfied by
+        // only ever scanning here, while idle) — and if both Alien DNA and
+        // Waste touch on the exact same tick, Alien DNA takes priority, per
+        // spec. Scanned as two separate single-pass searches (not one mixed
+        // loop) specifically so DNA can always be checked and claimed first
+        // regardless of array order.
+        let dnaIdx = -1;
+        for (let i = 0; i < items.length; i++) {
+          if (items[i].type === 'alien_dna' && isNearBuildingCenter(centerX, centerY, items[i].x, items[i].y, BIO_BUILDING_INTAKE_RADIUS)) { dnaIdx = i; break; }
+        }
+        if (dnaIdx !== -1) {
+          items.splice(dnaIdx, 1);
+          data.lockedRecipe = 'dna_to_biomass';
           data.progressMs = 0;
           playIntake();
-          break;
+        } else {
+          let wasteIdx = -1;
+          for (let i = 0; i < items.length; i++) {
+            if (items[i].type === 'waste' && isNearBuildingCenter(centerX, centerY, items[i].x, items[i].y, BIO_BUILDING_INTAKE_RADIUS)) { wasteIdx = i; break; }
+          }
+          if (wasteIdx !== -1) {
+            items.splice(wasteIdx, 1);
+            data.lockedRecipe = 'waste_to_food';
+            data.progressMs = 0;
+            playIntake();
+          }
         }
-      }
-    } else {
-      // A free base Auto-Feeder (powerCostPerSec 0) always processes at full
-      // speed; an Electric/Advanced tier stalls at 0% grid efficiency — see
-      // stepCollectorProcessing's identical gate.
-      const afEfficiency = afStats.powerCostPerSec > 0 ? state.level.powerEfficiency : 1;
-      data.progressMs += dtMs * afEfficiency;
-      if (data.progressMs >= afStats.wasteProcessMs) {
-        data.absorbing = false;
-        data.progressMs = 0;
-        // Lights one more of AUTO_FEEDER_STATS[type].wasteRequired dots — see
-        // Grid.js's renderAutoFeederDots — only dispensing Food once every
-        // dot is lit, per direct request.
-        data.wasteCount += 1;
-        if (data.wasteCount >= afStats.wasteRequired) {
-          data.wasteCount = 0;
-          foodSpawnPoints.push({ x: outputX, y: outputY });
+      } else {
+        const efficiency = stats.powerCostPerSec > 0 ? state.level.powerEfficiency : 1;
+        data.progressMs += dtMs * efficiency;
+        if (data.progressMs >= stats.processMs) {
+          bioSpawnPoints.push({ x: bioOutputX, y: bioOutputY, itemType: data.lockedRecipe === 'dna_to_biomass' ? 'biomass' : 'food' });
           playDispense();
+          data.lockedRecipe = null;
+          data.progressMs = 0;
         }
       }
+      continue;
+    }
+
+    if (BIO_FEEDER_TILES.has(data.type)) {
+      const stats = BIO_FEEDER_STATS[data.type];
+      if (!data.processing) {
+        // Each ingredient absorbed independently, in whatever order it
+        // happens to touch the tile — rejects a duplicate of one it already
+        // holds (the `!data.hasFood`/`!data.hasBiomass` guards) so a second
+        // Food item drifting by doesn't get eaten for nothing.
+        if (!data.hasFood) {
+          for (let i = 0; i < items.length; i++) {
+            if (items[i].type === 'food' && isNearBuildingCenter(centerX, centerY, items[i].x, items[i].y, BIO_BUILDING_INTAKE_RADIUS)) {
+              items.splice(i, 1);
+              data.hasFood = true;
+              playIntake();
+              break;
+            }
+          }
+        }
+        if (!data.hasBiomass) {
+          for (let i = 0; i < items.length; i++) {
+            if (items[i].type === 'biomass' && isNearBuildingCenter(centerX, centerY, items[i].x, items[i].y, BIO_BUILDING_INTAKE_RADIUS)) {
+              items.splice(i, 1);
+              data.hasBiomass = true;
+              playIntake();
+              break;
+            }
+          }
+        }
+        if (data.hasFood && data.hasBiomass) {
+          data.processing = true;
+          data.progressMs = 0;
+        }
+      } else {
+        const efficiency = stats.powerCostPerSec > 0 ? state.level.powerEfficiency : 1;
+        data.progressMs += dtMs * efficiency;
+        if (data.progressMs >= stats.processMs) {
+          bioSpawnPoints.push({ x: bioOutputX, y: bioOutputY, itemType: 'mutagen_paste' });
+          playDispense();
+          data.hasFood = false;
+          data.hasBiomass = false;
+          data.processing = false;
+          data.progressMs = 0;
+        }
+      }
+      continue;
+    }
+
+    if (BIO_COMBUSTER_TILES.has(data.type)) {
+      const stats = BIO_COMBUSTER_STATS[data.type];
+      if (data.lockedRecipe === null) {
+        // "Locks into a specific recipe as soon as the first ingredient is
+        // absorbed" — Biomass is the shared 2nd ingredient in BOTH recipes,
+        // so it's never the recipe-determining one; only Waste (base) or
+        // Blue Science (upgraded, only scanned for at all once
+        // GREEN_SCIENCE_LAB_ID is researched) can be the first absorb.
+        let wasteIdx = -1;
+        for (let i = 0; i < items.length; i++) {
+          if (items[i].type === 'waste' && isNearBuildingCenter(centerX, centerY, items[i].x, items[i].y, BIO_BUILDING_INTAKE_RADIUS)) { wasteIdx = i; break; }
+        }
+        if (wasteIdx !== -1) {
+          items.splice(wasteIdx, 1);
+          data.lockedRecipe = 'base';
+          playIntake();
+        } else if (state.meta.labUpgradesPurchased.includes(GREEN_SCIENCE_LAB_ID)) {
+          let scienceIdx = -1;
+          for (let i = 0; i < items.length; i++) {
+            if (items[i].type === 'science' && isNearBuildingCenter(centerX, centerY, items[i].x, items[i].y, BIO_BUILDING_INTAKE_RADIUS)) { scienceIdx = i; break; }
+          }
+          if (scienceIdx !== -1) {
+            items.splice(scienceIdx, 1);
+            data.lockedRecipe = 'upgraded';
+            playIntake();
+          }
+        }
+      } else if (!data.biomassAbsorbed) {
+        for (let i = 0; i < items.length; i++) {
+          if (items[i].type === 'biomass' && isNearBuildingCenter(centerX, centerY, items[i].x, items[i].y, BIO_BUILDING_INTAKE_RADIUS)) {
+            items.splice(i, 1);
+            data.biomassAbsorbed = true;
+            data.progressMs = 0;
+            playIntake();
+            break;
+          }
+        }
+      } else {
+        const efficiency = stats.powerCostPerSec > 0 ? state.level.powerEfficiency : 1;
+        data.progressMs += dtMs * efficiency;
+        if (data.progressMs >= stats.processMs) {
+          bioSpawnPoints.push({ x: bioOutputX, y: bioOutputY, itemType: data.lockedRecipe === 'upgraded' ? 'science_green' : 'science' });
+          playDispense();
+          data.lockedRecipe = null;
+          data.biomassAbsorbed = false;
+          data.progressMs = 0;
+        }
+      }
+      continue;
+    }
+
+    if (BIO_REACTOR_TILES.has(data.type)) {
+      // Not an item router — no spawn point at all, just a direct credit
+      // into state.level.powerGenAccumMw, the same non-battery per-second
+      // accumulator every Electric Eel already feeds (see main.js's
+      // once-a-second power sampling). "Or" fuel per spec: either Green
+      // Science or Biomass, whichever touches it first.
+      const stats = BIO_REACTOR_STATS[data.type];
+      if (!data.fueled) {
+        let fuelIdx = -1;
+        for (let i = 0; i < items.length; i++) {
+          if ((items[i].type === 'science_green' || items[i].type === 'biomass') && isNearBuildingCenter(centerX, centerY, items[i].x, items[i].y, BIO_BUILDING_INTAKE_RADIUS)) { fuelIdx = i; break; }
+        }
+        if (fuelIdx !== -1) {
+          items.splice(fuelIdx, 1);
+          data.fueled = true;
+          data.progressMs = 0;
+          playIntake();
+        }
+      } else {
+        data.progressMs += dtMs; // never power-gated itself — it's the thing GENERATING power, not drawing it
+        if (data.progressMs >= stats.processMs) {
+          state.level.powerGenAccumMw += stats.powerOutputMw;
+          data.fueled = false;
+          data.progressMs = 0;
+        }
+      }
+      continue;
     }
   }
-  return { foodSpawnPoints, wasteSpawnPoints, turretShots };
+  return { foodSpawnPoints, wasteSpawnPoints, turretShots, bioSpawnPoints };
 }
 
 // Live, moment-to-moment sum of every currently-DRAWING power-consuming
@@ -838,7 +1075,19 @@ export function computeCurrentPowerDemand(state) {
       // branch below), same "only while actually doing something" pattern
       // the Processor/Auto-Feeder already follow above.
       if (data.firing) demand += TURRET_STATS[data.type].powerCostPerSec;
+    } else if (BIO_FEEDER_TILES.has(data.type)) {
+      // Same "only while actively processing" rule as the Auto-Feeder.
+      if (data.processing) demand += BIO_FEEDER_STATS[data.type].powerCostPerSec;
+    } else if (BIO_COMBUSTER_TILES.has(data.type)) {
+      // Draws only during its own final processMs countdown (both
+      // ingredients already absorbed) — matching-and-waiting for its 2nd
+      // ingredient doesn't cost power yet, same "not yet actually working"
+      // reasoning idle Processor/Auto-Feeder ticks already follow.
+      if (data.lockedRecipe !== null && data.biomassAbsorbed) demand += BIO_COMBUSTER_STATS[data.type].powerCostPerSec;
     }
+    // Refinery (unpowered) and Bio-Reactor (a GENERATOR, not a consumer —
+    // never appears in demand, same as the Electric Eel fish) intentionally
+    // have no branch here at all.
   }
   return demand;
 }
@@ -1413,6 +1662,11 @@ function getBuildingPowerCost(type) {
   if (PROCESSOR_STATS[type]) return PROCESSOR_STATS[type].powerCostPerSec;
   if (AUTO_FEEDER_STATS[type]) return AUTO_FEEDER_STATS[type].powerCostPerSec;
   if (TURRET_STATS[type]) return TURRET_STATS[type].powerCostPerSec;
+  if (BIO_FEEDER_STATS[type]) return BIO_FEEDER_STATS[type].powerCostPerSec;
+  if (BIO_COMBUSTER_STATS[type]) return BIO_COMBUSTER_STATS[type].powerCostPerSec;
+  // REFINERY_STATS is always 0, and BIO_REACTOR_STATS has no powerCostPerSec
+  // field at all (it's a generator, never a consumer) — both correctly fall
+  // through to the 0 default below.
   return 0;
 }
 

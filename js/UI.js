@@ -26,6 +26,10 @@ import {
   CLEANLINESS_COLOR_DIRTY,
   PROCESSOR_STATS,
   AUTO_FEEDER_STATS,
+  REFINERY_STATS,
+  BIO_FEEDER_STATS,
+  BIO_COMBUSTER_STATS,
+  BIO_REACTOR_STATS,
   POWER_HISTORY_MAX,
   SCIENCE_LAB_UPGRADES,
   SCIENCE_LAB_UPGRADE_LIST,
@@ -796,17 +800,36 @@ function buildLabTree(state) {
   refreshLabTree(state);
 }
 
-// Every Science Lab node spends BOTH Science and gold at once — a
-// deliberate first in this game's economy, per direct request, tying the
-// whole tree to two resources so it reads as the real end-goal sink. Only
-// ever called from confirmLabPurchase now (see the purchase modal below) —
-// clicking a node itself just opens that modal.
+// The Bio-Reactor's node is the one exception in the whole Science Lab tree
+// that costs GREEN Science instead of blue (`scienceGreenCost` in place of
+// the usual `scienceCost`) — per spec ("Requires: Green Science Upgrade +
+// Green Science + Money"). These three helpers are the only places that
+// distinction needs handling; every other cost/affordability check below
+// just calls through them.
+function labNodeScienceAmount(node) {
+  return node.scienceGreenCost != null ? node.scienceGreenCost : node.scienceCost;
+}
+function labNodeHasEnoughScience(state, node) {
+  const balance = node.scienceGreenCost != null ? state.level.scienceGreen : state.level.science;
+  return balance >= labNodeScienceAmount(node);
+}
+function labNodeScienceIcon(node) {
+  return node.scienceGreenCost != null ? '🟢' : '🔬';
+}
+
+// Every Science Lab node spends BOTH Science (blue, or green for the one
+// exception above) and gold at once — a deliberate first in this game's
+// economy, per direct request, tying the whole tree to two resources so it
+// reads as the real end-goal sink. Only ever called from confirmLabPurchase
+// now (see the purchase modal below) — clicking a node itself just opens
+// that modal.
 function buyLabUpgrade(state, id) {
   const node = SCIENCE_LAB_UPGRADES[id];
   if (state.meta.labUpgradesPurchased.includes(id)) return;
   if (!node.requires.every((r) => state.meta.labUpgradesPurchased.includes(r))) return;
-  if (state.level.science < node.scienceCost || state.level.money < node.goldCost) return;
-  state.level.science -= node.scienceCost;
+  if (!labNodeHasEnoughScience(state, node) || state.level.money < node.goldCost) return;
+  if (node.scienceGreenCost != null) state.level.scienceGreen -= node.scienceGreenCost;
+  else state.level.science -= node.scienceCost;
   state.level.money -= node.goldCost;
   state.meta.labUpgradesPurchased.push(id);
   if (node.grants.species) {
@@ -841,7 +864,7 @@ function openLabPurchaseModal(state, id) {
   labPurchaseNodeId = id;
   els.labPurchaseIcon.textContent = node.icon;
   els.labPurchaseName.textContent = node.name;
-  els.labPurchaseCost.textContent = `${node.scienceCost} 🔬 · $${node.goldCost}`;
+  els.labPurchaseCost.textContent = `${labNodeScienceAmount(node)} ${labNodeScienceIcon(node)} · $${node.goldCost}`;
   refreshLabPurchaseButton(state);
 
   const descLines = [];
@@ -903,7 +926,7 @@ function confirmLabPurchase(state) {
 // e.g. waiting on an Octopus's brew).
 function refreshLabPurchaseButton(state) {
   const node = SCIENCE_LAB_UPGRADES[labPurchaseNodeId];
-  const affordable = state.level.science >= node.scienceCost && state.level.money >= node.goldCost;
+  const affordable = labNodeHasEnoughScience(state, node) && state.level.money >= node.goldCost;
   els.labPurchaseConfirmBtn.disabled = !affordable;
 }
 
@@ -1003,13 +1026,14 @@ function labNodeUnlocksHtml(id) {
 // Re-checked every frame the popup is open (from updateHUD) — Science/money
 // and every node's prerequisite state can all change while it's open.
 function refreshLabTree(state) {
-  const science = state.level.science;
-  els.labScienceReadout.textContent = `🔬 ${science} · 💰 $${Math.floor(state.level.money)}`;
+  // Both Science reserves shown together now that one node (bio_reactor)
+  // spends green instead of blue — see labNodeHasEnoughScience's own comment.
+  els.labScienceReadout.textContent = `🔬 ${state.level.science} · 🟢 ${state.level.scienceGreen} · 💰 $${Math.floor(state.level.money)}`;
   for (const node of SCIENCE_LAB_UPGRADE_LIST) {
     const { btn, costEl } = labNodeButtons[node.id];
     const purchased = state.meta.labUpgradesPurchased.includes(node.id);
     const prereqsMet = node.requires.every((r) => state.meta.labUpgradesPurchased.includes(r));
-    const affordable = science >= node.scienceCost && state.level.money >= node.goldCost;
+    const affordable = labNodeHasEnoughScience(state, node) && state.level.money >= node.goldCost;
     btn.classList.toggle('purchased', purchased);
     btn.classList.toggle('locked', !purchased && !prereqsMet);
     // Per direct request, an unlocked-but-unaffordable node stays CLICKABLE
@@ -1027,7 +1051,7 @@ function refreshLabTree(state) {
       costEl.textContent = 'Locked';
       btn.disabled = true;
     } else {
-      costEl.textContent = `${node.scienceCost} 🔬 · $${node.goldCost}`;
+      costEl.textContent = `${labNodeScienceAmount(node)} ${labNodeScienceIcon(node)} · $${node.goldCost}`;
       btn.disabled = false;
     }
   }
@@ -1696,6 +1720,28 @@ function buildingStatsHtml(buildingId) {
       `<div class="building-stat">🔫 <b>${t.shotsPerSec}</b>/sec · 💥 <b>${t.damage}</b> dmg</div>` +
       `<div class="building-stat">${line2}</div>`
     );
+  }
+  const r = REFINERY_STATS[buildingId];
+  if (r) {
+    return `<div class="building-stat">⚗️ <b>${r.processMs / 1000}s</b>/item · 🗑️➜🍖 or 🧬➜🟤</div>`;
+  }
+  const bf = BIO_FEEDER_STATS[buildingId];
+  if (bf) {
+    return (
+      `<div class="building-stat">🍖+🟤 ➜ 🩷 · ⏱️ <b>${bf.processMs / 1000}s</b></div>` +
+      `<div class="building-stat">⚡ <b>${bf.powerCostPerSec}</b> mw/sec</div>`
+    );
+  }
+  const bc = BIO_COMBUSTER_STATS[buildingId];
+  if (bc) {
+    return (
+      `<div class="building-stat">🟤+🗑️➜🔬 or 🟤+🔬➜🟢 · ⏱️ <b>${bc.processMs / 1000}s</b></div>` +
+      `<div class="building-stat">⚡ <b>${bc.powerCostPerSec}</b> mw/sec</div>`
+    );
+  }
+  const br = BIO_REACTOR_STATS[buildingId];
+  if (br) {
+    return `<div class="building-stat">🟢 or 🟤 ➜ ⚡ <b>${br.powerOutputMw}</b> mw · ⏱️ <b>${br.processMs / 1000}s</b></div>`;
   }
   return '';
 }

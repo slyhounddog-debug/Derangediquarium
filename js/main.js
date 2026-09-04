@@ -34,6 +34,11 @@ import {
   SCIENCE_LAB_UPGRADES,
   SCIENCE_ITEM_COLOR_A,
   SCIENCE_ITEM_COLOR_B,
+  SCIENCE_GREEN_COLOR_A,
+  SCIENCE_GREEN_COLOR_B,
+  ALIEN_DNA_COLOR,
+  BIOMASS_COLOR,
+  MUTAGEN_PASTE_COLOR,
   POWER_HISTORY_MAX,
   SCIENCE_CAP_BY_LEVEL,
   MOUND_MAX_TIER,
@@ -75,6 +80,7 @@ import {
   trySpawnPurchasedFish,
   tryBankCoinAt,
   tryBankScienceAt,
+  tryBankScienceGreenAt,
   spawnFishCheat,
   getCoinColor,
   getFishPurchaseCost,
@@ -132,6 +138,19 @@ import {
 
 const canvas = document.getElementById('game-canvas');
 const ctx = canvas.getContext('2d');
+
+// Every flat-fill item type's own color — coin is the one exception (its
+// color is value-tier-derived via getCoinColor, checked separately), and
+// science/science_green get their own two-tone bubble treatment above this
+// lookup entirely. Bio-chain items (alien_dna, biomass, mutagen_paste)
+// slot into this exact same flat-fill render path Food/Waste already use.
+const ITEM_FLAT_COLOR_BY_TYPE = {
+  food: FOOD_COLOR,
+  waste: WASTE_COLOR,
+  alien_dna: ALIEN_DNA_COLOR,
+  biomass: BIOMASS_COLOR,
+  mutagen_paste: MUTAGEN_PASTE_COLOR,
+};
 
 // Browsers refuse to let an AudioContext make sound until a real user
 // gesture — resumeAudio() also kicks off the looping background music the
@@ -414,7 +433,11 @@ let itemDragMoved = false; // set once at mouseup — read (and cleared) by the 
 // now averaged over this window instead of read off a single tick's delta.
 let itemDragPositionHistory = [];
 
-const DRAGGABLE_ITEM_TYPES = ['coin', 'food', 'waste', 'science'];
+// Extended with the new Bio-chain item types (Architectural Update) for the
+// same "every object can be clicked and dragged around" consistency the
+// original 4 types already established — nothing about the new items makes
+// them an exception.
+const DRAGGABLE_ITEM_TYPES = ['coin', 'food', 'waste', 'science', 'science_green', 'alien_dna', 'biomass', 'mutagen_paste'];
 
 input.mouseDownHandlers.push((sx, sy) => {
   // A guided tutorial normally blocks starting an item drag like every
@@ -588,7 +611,7 @@ input.clickHandlers.push((sx, sy) => {
   // early-return branches.
   for (const entity of state.level.entities) {
     if (entity.type !== 'alien' || entity.hp <= 0) continue;
-    if (Math.hypot(entity.x - world.x, entity.y - world.y) <= ALIEN_RADIUS * ALIEN_CLICK_RADIUS_MULTIPLIER) {
+    if (Math.hypot(entity.x - world.x, entity.y - world.y) <= (entity.radius ?? ALIEN_RADIUS) * ALIEN_CLICK_RADIUS_MULTIPLIER) {
       entity.hp -= ALIEN_CLICK_DAMAGE;
       entity.hitFlashMs = ALIEN_HIT_FLASH_MS; // per direct request — a hit flashes red and "bounces," read back by the render loop below
       // Only the "still alive" hit sound — a killing click instead gets
@@ -657,6 +680,7 @@ input.clickHandlers.push((sx, sy) => {
   // way around).
   if (tryBankCoinAt(state, world.x, world.y)) return; // clicking a coin always banks it, regardless of selected tool
   if (tryBankScienceAt(state, world.x, world.y)) return; // same for a Science Bubble
+  if (tryBankScienceGreenAt(state, world.x, world.y)) return; // same for a Green Science Bubble
   if (isPointOnMound(state, world.x, world.y)) { openMoundMenu(state); return; } // opens the "Throw money at it" popup — see UI.js
   if (isPointOnScienceLab(state, world.x, world.y)) { openLabMenu(state); return; } // Phase 4 — the Mound's replacement once it's fully shattered
   if (effectiveTool === 'food') {
@@ -1246,16 +1270,20 @@ let lastGlassWallLeftWidth = null;
 let lastGlassWallRightWidth = null;
 
 // Alien hit-flash — per direct request ("aliens flash red and bounce when
-// they take damage"). ALIEN_COLOR is a hex string everywhere else it's used
-// (Grid.js's tier badges, etc.), so it's parsed to an {r,g,b} triple once
-// here rather than adding a shared hex-parsing helper for this one call
-// site — same "computed once at module scope" precedent as WATER_TOP_CLEAN
-// above.
-const ALIEN_COLOR_RGB = {
-  r: parseInt(ALIEN_COLOR.slice(1, 3), 16),
-  g: parseInt(ALIEN_COLOR.slice(3, 5), 16),
-  b: parseInt(ALIEN_COLOR.slice(5, 7), 16),
-};
+// they take damage"). Every alien color (both the flat ALIEN_COLOR fallback
+// and each archetype's own tier color — Dynamic Alien Archetypes) is a hex
+// string, parsed to an {r,g,b} triple here — Dynamic Alien Archetypes means
+// this can no longer be a single value precomputed once at module scope
+// (each alien's own color varies by tier), so it's a small helper instead;
+// at most ALIEN_MAX_ALIVE aliens ever exist, so a fresh parse per alien per
+// frame is negligible.
+function hexToRgb(hex) {
+  return {
+    r: parseInt(hex.slice(1, 3), 16),
+    g: parseInt(hex.slice(3, 5), 16),
+    b: parseInt(hex.slice(5, 7), 16),
+  };
+}
 function lerpRgbToString(from, to, t) {
   const r = Math.round(from.r + (to.r - from.r) * t);
   const g = Math.round(from.g + (to.g - from.g) * t);
@@ -1512,19 +1540,23 @@ function render() {
     const pos = worldToScreen(item.x, item.y, state.camera);
     if (pos.x < -20 || pos.x > canvas.width + 20 || pos.y < -20 || pos.y > canvas.height + 20) continue; // cull offscreen
 
-    if (item.type === 'science') {
-      // "Magical bubble" — a purple-to-blue radial blend plus a bright rim
-      // ring, per direct request, instead of the flat single-color fill
-      // every other item type gets below. A real ctx.createRadialGradient
-      // is fine here (unlike a ctx.filter, which is the actually expensive
-      // one — see Ambience.js's seaweed blur note) since it's just one more
-      // fillStyle, no per-pixel filter pass.
+    if (item.type === 'science' || item.type === 'science_green') {
+      // "Magical bubble" — a two-tone radial blend plus a bright rim ring,
+      // per direct request, instead of the flat single-color fill every
+      // other item type gets below. A real ctx.createRadialGradient is fine
+      // here (unlike a ctx.filter, which is the actually expensive one —
+      // see Ambience.js's seaweed blur note) since it's just one more
+      // fillStyle, no per-pixel filter pass. Green Science (the
+      // Bio-Combuster's upgraded output) shares the exact same bubble
+      // treatment, just with its own green tones instead of purple/blue.
+      const colorA = item.type === 'science_green' ? SCIENCE_GREEN_COLOR_A : SCIENCE_ITEM_COLOR_A;
+      const colorB = item.type === 'science_green' ? SCIENCE_GREEN_COLOR_B : SCIENCE_ITEM_COLOR_B;
       const gradient = ctx.createRadialGradient(
         pos.x - item.radius * 0.3, pos.y - item.radius * 0.3, item.radius * 0.1,
         pos.x, pos.y, item.radius
       );
-      gradient.addColorStop(0, SCIENCE_ITEM_COLOR_B);
-      gradient.addColorStop(1, SCIENCE_ITEM_COLOR_A);
+      gradient.addColorStop(0, colorB);
+      gradient.addColorStop(1, colorA);
       ctx.beginPath();
       ctx.fillStyle = gradient;
       ctx.arc(pos.x, pos.y, item.radius, 0, Math.PI * 2);
@@ -1539,7 +1571,7 @@ function render() {
       continue;
     }
 
-    const itemColor = item.type === 'food' ? FOOD_COLOR : item.type === 'waste' ? WASTE_COLOR : getCoinColor(item.value);
+    const itemColor = ITEM_FLAT_COLOR_BY_TYPE[item.type] || getCoinColor(item.value);
     ctx.beginPath();
     ctx.fillStyle = itemColor;
     ctx.arc(pos.x, pos.y, item.radius, 0, Math.PI * 2);
@@ -1630,6 +1662,27 @@ function render() {
     // a coin drop blocked by the Coin Cap (timed, ~1s) — see Entities.js's
     // fish.alienNearby/capBlockedTintRemainingMs.
     const grayed = (fish.alienNearby || fish.capBlockedTintRemainingMs > 0) ? 0.55 : 0;
+
+    // Mutagen Paste's Adult buff — per direct spec ("applies a glowing
+    // visual effect... the buff and glow clear as soon as the fish
+    // transitions back to the hungry state"). A persistent soft pulsing
+    // halo (not the one-shot shimmer sweep below, which is a completely
+    // separate, already-established effect for a different trigger — a
+    // stage advance/placement/merge) drawn behind the fish for as long as
+    // fish.mutagenBuffActive stays true (see Entities.js's updateFish).
+    if (fish.mutagenBuffActive) {
+      const glowRadius = size * state.camera.zoom * (0.9 + 0.15 * Math.sin(performance.now() / 260));
+      const glowColor = hexToRgb(MUTAGEN_PASTE_COLOR);
+      ctx.save();
+      const glowGradient = ctx.createRadialGradient(pos.x, pos.y, glowRadius * 0.2, pos.x, pos.y, glowRadius);
+      glowGradient.addColorStop(0, `rgba(${glowColor.r}, ${glowColor.g}, ${glowColor.b}, 0.45)`);
+      glowGradient.addColorStop(1, `rgba(${glowColor.r}, ${glowColor.g}, ${glowColor.b}, 0)`);
+      ctx.fillStyle = glowGradient;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, glowRadius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
     drawFish(ctx, pos.x, pos.y, fish.speciesId, fish.stage, facing, fish.tailPhase, eyeDirection, fish.starTier || 1, sickness, grayed);
 
     // Shimmer/gleam, per direct request — placed, grown a stage, or
@@ -1711,7 +1764,11 @@ function render() {
     if (alien.type !== 'alien' || alien.hp <= 0) continue;
     const pos = worldToScreen(alien.x, alien.y, state.camera);
     if (pos.x < -40 || pos.x > canvas.width + 40 || pos.y < -40 || pos.y > canvas.height + 40) continue;
-    const baseRadius = ALIEN_RADIUS * state.camera.zoom;
+    // Dynamic Alien Archetypes: each alien's own radius/color (copied from
+    // its archetype at creation — see Entities.js's createAlien) drive
+    // these now instead of the flat ALIEN_RADIUS/ALIEN_COLOR constants,
+    // which stay only as a defensive fallback.
+    const baseRadius = (alien.radius ?? ALIEN_RADIUS) * state.camera.zoom;
     // Hit flash + "bounce": both decay together over ALIEN_HIT_FLASH_MS —
     // flashFrac (1 at the instant of a hit, decaying to 0) drives the red
     // color blend directly; the bounce is a scale-punch (grows then
@@ -1723,7 +1780,8 @@ function render() {
     const bounceProgress = 1 - flashFrac; // 0 (just hit) -> 1 (flash fully decayed)
     const bounceScaleMul = alien.hitFlashMs > 0 ? 1 + ALIEN_HIT_BOUNCE_SCALE * Math.sin(bounceProgress * Math.PI) : 1;
     const radius = baseRadius * bounceScaleMul;
-    const color = flashFrac > 0 ? lerpRgbToString(ALIEN_COLOR_RGB, ALIEN_HIT_FLASH_COLOR, flashFrac) : ALIEN_COLOR;
+    const alienBaseColor = alien.color || ALIEN_COLOR;
+    const color = flashFrac > 0 ? lerpRgbToString(hexToRgb(alienBaseColor), ALIEN_HIT_FLASH_COLOR, flashFrac) : alienBaseColor;
     const facing = alien.vx >= 0 ? 1 : -1;
     // Nearest fish, for the cyclops eye's pupil to track — a plain O(n)
     // scan over entities is cheap enough here (at most ALIEN_MAX_ALIVE
@@ -1813,7 +1871,12 @@ function render() {
     ctx.arc(pos.x, pos.y, ringRadius, 0, Math.PI * 2);
     ctx.stroke();
     const particleDist = ALIEN_RADIUS * state.camera.zoom * (0.4 + t * 1.8);
-    ctx.fillStyle = 'rgba(90, 45, 107, 0.9)'; // ALIEN_COLOR, flat — the burst reads as the alien itself scattering
+    // Dynamic Alien Archetypes: the burst now uses the actual alien's own
+    // tier color (stored on the effect at push time — Entities.js's
+    // updateAlien death branch) instead of a hardcoded flat ALIEN_COLOR
+    // rgba, falling back to it for any effect somehow missing one.
+    const effectColor = hexToRgb(effect.color || ALIEN_COLOR);
+    ctx.fillStyle = `rgba(${effectColor.r}, ${effectColor.g}, ${effectColor.b}, 0.9)`;
     for (let i = 0; i < 6; i++) {
       const angle = (i / 6) * Math.PI * 2;
       const px = pos.x + Math.cos(angle) * particleDist;

@@ -22,10 +22,8 @@ import {
   ALIEN_WAVE_COUNT_EARLY_MAX,
   ALIEN_WAVE_COUNT_LATE_MIN,
   ALIEN_WAVE_COUNT_LATE_MAX,
-  ALIEN_HP_EARLY_MIN,
-  ALIEN_HP_EARLY_MAX,
-  ALIEN_HP_LATE_MIN,
-  ALIEN_HP_LATE_MAX,
+  ALIEN_ARCHETYPES,
+  ALIEN_TIER_MIX_KEYFRAMES,
   ALIEN_WARNING_MS_1,
   ALIEN_WARNING_MS_2,
   ALIEN_WARNING_MESSAGE_1,
@@ -191,9 +189,47 @@ function randomWaveIntervalMs() {
 // Linear interpolation from the "early" range up to the "late" range across
 // ALIEN_WAVE_DIFFICULTY_RAMP_WAVES waves, then plateaus — wavesSpawned is
 // state.level.alienWavesSpawned BEFORE this wave counts, so wave 1 starts at
-// t=0 (purely early) and wave 11+ sits at t=1 (purely late).
+// t=0 (purely early) and wave 11+ sits at t=1 (purely late). Drives BOTH the
+// wave-size ramp below and the alien-tier weighted mix (see
+// alienTierWeightsAt) — reusing this single progress axis for both rather
+// than adding a second, separately-tuned "how many waves until end game
+// tier mix" knob.
 function alienDifficultyT(wavesSpawned) {
   return Math.min(1, wavesSpawned / ALIEN_WAVE_DIFFICULTY_RAMP_WAVES);
+}
+
+// Dynamic Alien Archetypes (Architectural Update) — linearly interpolates
+// between the two ALIEN_TIER_MIX_KEYFRAMES bracketing t, returning a
+// 5-element weight array (index 0 = Tier 1 ... index 4 = Tier 5) that always
+// sums to 1 (both keyframes it interpolates between always do, and a linear
+// blend of two vectors that each sum to 1 always sums to 1 itself).
+function alienTierWeightsAt(t) {
+  const kf = ALIEN_TIER_MIX_KEYFRAMES;
+  if (t <= kf[0].t) return kf[0].weights;
+  if (t >= kf[kf.length - 1].t) return kf[kf.length - 1].weights;
+  for (let i = 0; i < kf.length - 1; i++) {
+    const a = kf[i];
+    const b = kf[i + 1];
+    if (t >= a.t && t <= b.t) {
+      const localT = (t - a.t) / (b.t - a.t);
+      return a.weights.map((w, idx) => w + (b.weights[idx] - w) * localT);
+    }
+  }
+  return kf[kf.length - 1].weights;
+}
+
+// A single weighted random draw against the interpolated mix — one call per
+// alien spawned (not once per whole wave), so a single wave can genuinely
+// contain a mix of tiers rather than every alien in it sharing one roll.
+function rollAlienArchetype(t) {
+  const weights = alienTierWeightsAt(t);
+  const total = weights.reduce((sum, w) => sum + w, 0);
+  let roll = Math.random() * total;
+  for (let i = 0; i < weights.length; i++) {
+    roll -= weights[i];
+    if (roll <= 0) return ALIEN_ARCHETYPES[i];
+  }
+  return ALIEN_ARCHETYPES[ALIEN_ARCHETYPES.length - 1];
 }
 
 // Pushes ALIEN_PORTAL_STAGGER_MS-staggered portal records into
@@ -206,8 +242,6 @@ function spawnAlienWave(state) {
   const countMin = Math.round(ALIEN_WAVE_COUNT_EARLY_MIN + (ALIEN_WAVE_COUNT_LATE_MIN - ALIEN_WAVE_COUNT_EARLY_MIN) * t);
   const countMax = Math.round(ALIEN_WAVE_COUNT_EARLY_MAX + (ALIEN_WAVE_COUNT_LATE_MAX - ALIEN_WAVE_COUNT_EARLY_MAX) * t);
   const rolledCount = countMin + Math.floor(Math.random() * (countMax - countMin + 1));
-  const hpMin = Math.round(ALIEN_HP_EARLY_MIN + (ALIEN_HP_LATE_MIN - ALIEN_HP_EARLY_MIN) * t);
-  const hpMax = Math.round(ALIEN_HP_EARLY_MAX + (ALIEN_HP_LATE_MAX - ALIEN_HP_EARLY_MAX) * t);
 
   // ALIEN_MAX_ALIVE is a hard ceiling on simultaneously-alive aliens, not a
   // per-wave size limit — a neglected tank that already has a screenful of
@@ -222,19 +256,23 @@ function spawnAlienWave(state) {
   // request ("for the first wave of the aliens, have literally just one
   // alien show up") — this is what main.js's cinematic first-alien intro
   // (paused, spotlighted, click-to-damage) is built around; every wave
-  // after the first uses the normal ramped roll.
+  // after the first uses the normal ramped roll. It naturally comes out
+  // Tier 1 anyway (t=0 -> 100% Tier 1 weight), so no special-casing of the
+  // archetype roll itself is needed here, only the count.
   const count = state.level.alienWavesSpawned === 0
     ? 1
     : Math.max(0, Math.min(rolledCount, ALIEN_MAX_ALIVE - aliveCount));
 
   for (let i = 0; i < count; i++) {
+    const archetype = rollAlienArchetype(t);
     state.level.alienPortals.push({
       x: FISH_MIN_X + Math.random() * (FISH_MAX_X - FISH_MIN_X),
       // Biased toward the upper-mid water column (not down near the seabed
       // line) so a fresh portal reads as "emerging from open water," not
       // spawning right on top of the player's factory.
       y: FISH_MIN_Y + Math.random() * (SEABED_FLOOR_Y * 0.7 - FISH_MIN_Y),
-      hp: hpMin + Math.floor(Math.random() * (hpMax - hpMin + 1)),
+      hp: archetype.hpMin + Math.floor(Math.random() * (archetype.hpMax - archetype.hpMin + 1)),
+      archetypeId: archetype.id,
       openAtMs: state.level.elapsed + i * ALIEN_PORTAL_STAGGER_MS,
       spawned: false,
       spawnedAtMs: 0,

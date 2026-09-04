@@ -108,6 +108,19 @@ export const TILE_TURRET_WASTE = 'turret_waste'; // solid — free from the star
 export const TILE_TURRET_ELECTRIC = 'turret_electric'; // solid — Science Lab purchase (requires the Eel), unlimited ammo, draws power per shot
 export const TILE_TURRET_ADVANCED = 'turret_advanced'; // solid — Science Lab purchase (requires the Electric Turret), strongest tier
 
+// ---- Bio-Building production chain (Alien DNA -> Biomass -> Mutagen Paste / Science) ----
+// Four new buildings, each a single standalone tier (no family stacking).
+// Granted two different ways: the Refinery via the real Tier 1->2 Mound
+// crack (TIER_UNLOCKS[2]) — it's the foundational recycler the rest of the
+// chain builds on, and its own two recipes (Waste->Food, a straight
+// alternative to the Auto-Feeder; Alien DNA->Biomass) are both usable well
+// before the Science Lab exists, so there's no reason to gate it behind the
+// Lab too. The other three are Science Lab nodes — see SCIENCE_LAB_UPGRADES.
+export const TILE_REFINERY = 'refinery'; // solid — single input, 2 possible recipes (Waste->Food, Alien DNA->Biomass); see Grid.js's updateBuildings
+export const TILE_BIO_FEEDER = 'bio_feeder'; // solid — Science Lab purchase (requires the Electric Auto-Feeder); 2-ingredient recipe, Food+Biomass->Mutagen Paste
+export const TILE_BIO_COMBUSTER = 'bio_combuster'; // solid — Science Lab purchase (requires the Electric Processor); 2-ingredient recipe, locks onto a recipe from its first-absorbed ingredient
+export const TILE_BIO_REACTOR = 'bio_reactor'; // solid — Science Lab purchase (requires the Green Science tech); consumes Green Science or Biomass for a large power dump into the grid, not an item router at all
+
 // Fish stay clear of the outer edges of the water column when spawning —
 // both the random spawn position on a shop purchase in UI.js, and (for
 // left/right/top only) the movement clamp in Entities.js, use these bounds.
@@ -300,13 +313,57 @@ export const COLLECTOR_INTAKE_RADIUS = TILE_SIZE * 0.65;
 //
 // Mass drives how much an item moves when it collides with another —
 // ITEM_MASS_BY_TYPE below, not item.radius (a coin's radius is about value
-// tier/visibility, not weight). Food is much lighter than a coin on purpose:
-// a coin barely notices bumping into a food pellet, while a food pellet
-// gets shoved completely out of the way by a coin.
-// science: a new physical item type (see "Science as a physical resource"
-// below) — 3x a coin's mass per direct request, so it needs real Fan muscle
-// to route, same spirit as the existing coin/food/waste hierarchy.
-export const ITEM_MASS_BY_TYPE = { food: 0.3, coin: 3, waste: 1, science: 9 };
+// tier/visibility, not weight) — AND how strongly a Fan's force actually
+// accelerates it (a_fan = F/mass, see Grid.js's integrateItemForces). Food
+// is much lighter than a coin on purpose: a coin barely notices bumping
+// into a food pellet, while a food pellet gets shoved completely out of the
+// way by a coin.
+//
+// ---- 5 Weight Classes (Architectural Update: Alien DNA/Biomass/5-Class
+// Physics), per direct spec — every item type sits in exactly one class,
+// strictly ordered by mass so each class's own described handling
+// ("readily caught by weak fans" vs "needs a T3 Electric Fan") actually
+// holds true relative to its neighbors:
+//   Class 1 Buoyant       (food, mutagen_paste)      — lightest, also gets
+//                                                       its own gentler
+//                                                       FOOD_GRAVITY/
+//                                                       FOOD_MAX_FALL_SPEED
+//                                                       profile (see below),
+//                                                       not just a low mass
+//   Class 2 Ultra-Light   (waste)                     — light enough that
+//                                                       even a free
+//                                                       Rudimentary Fan
+//                                                       clears it easily
+//   Class 3 Standard      (coin)                      — cut from 3 to 1.5,
+//                                                       per direct request
+//                                                       ("reduce coin mass
+//                                                       so it sits properly
+//                                                       in Class 3 below
+//                                                       Class 4 Science
+//                                                       drops") — sinks
+//                                                       predictably, routes
+//                                                       smoothly under a
+//                                                       standard Fan
+//   Class 4 Medium-Heavy  (science, science_green)    — denser than coins,
+//                                                       needs sustained Fan
+//                                                       coverage
+//   Class 5 Heavy         (alien_dna, biomass)         — heaviest; needs a
+//                                                       T3 Electric Fan (or
+//                                                       stronger) to move
+//                                                       any real horizontal
+//                                                       distance without a
+//                                                       Ramp
+// Classes 2-5 all share the same GRAVITY/MAX_FALL_SPEED fall profile
+// (gravity is mass-independent, same as real gravity — only Fan
+// responsiveness differs by mass) — only Class 1 deviates, with its own
+// slower, wavering fall.
+export const ITEM_MASS_BY_TYPE = {
+  food: 0.3, mutagen_paste: 0.3, // Class 1 — Buoyant
+  waste: 0.5, // Class 2 — Ultra-Light (was 1)
+  coin: 1.5, // Class 3 — Standard (was 3, halved per direct request)
+  science: 4, science_green: 4, // Class 4 — Medium-Heavy (was 9 for science — cut so Class 5 below can sit clearly above it while science stays clearly above Class 3's coin)
+  alien_dna: 7, biomass: 7, // Class 5 — Heavy
+};
 // vx decays by this factor every tick — without damping, a single bump
 // would leave an item drifting sideways forever instead of a jostled pile
 // settling back down, the way real friction would.
@@ -488,6 +545,59 @@ export const SCIENCE_ITEM_COLOR_B = '#5fc9ff'; // blue — matches the existing 
 // the physical bubble itself is later collected) — per direct request, so a
 // full-minute-plus wait doesn't read as "nothing is happening."
 export const SCIENCE_PROGRESS_TICKS = 10;
+
+// ---- Green Science (Bio-Combuster's upgraded output) ----
+// Physically identical in every way to a blue Science Bubble — same
+// click-bank-or-Collector-routing rule ("Must be routed into a Collector to
+// be added to active science reserves," per direct spec — click-banking is
+// also supported for consistency with blue Science, since nothing in the
+// spec forbids it and every other physical resource in this game supports
+// both) — just its own separate state.level.scienceGreen reserve and a
+// visually distinct green-toned bubble instead of purple/blue, so the two
+// resources read apart at a glance. Weight Class 4, same mass as blue
+// Science — see ITEM_MASS_BY_TYPE.
+export const SCIENCE_GREEN_ITEM_RADIUS = SCIENCE_ITEM_RADIUS;
+export const SCIENCE_GREEN_COLOR_A = '#8bffa0'; // light green
+export const SCIENCE_GREEN_COLOR_B = '#3fd66f'; // deeper green
+export const SCIENCE_GREEN_COLOR = '#3fd66f'; // HUD/floating-text accent, mirrors SCIENCE_COLOR's role for blue
+
+// ---- Bio-Building production chain: physical item types ----
+// alien_dna: dropped by a defeated alien (Entities.js's updateAlien), yield
+// scaling with the alien's own tier — see ALIEN_ARCHETYPES' dnaYield below.
+// biomass: the Refinery's Alien-DNA-recipe output, and the shared 2nd
+// ingredient every Bio-Feeder/Bio-Combuster recipe needs. mutagen_paste:
+// the Bio-Feeder's output, Food+Biomass. All three fall/route through the
+// exact same seabed physics every other item already uses (see Grid.js's
+// stepItemOnGrid) — only their mass (ITEM_MASS_BY_TYPE), radius, and color
+// are unique to each.
+export const ALIEN_DNA_RADIUS = 7.5;
+export const ALIEN_DNA_COLOR = '#7cff5a'; // acid green — reads as "alien," distinct from every other item's color family
+export const BIOMASS_RADIUS = 9;
+export const BIOMASS_COLOR = '#c98a4b'; // organic brown-orange — "refined biological matter"
+export const MUTAGEN_PASTE_RADIUS = FOOD_RADIUS; // Class 1, same size class as Food
+export const MUTAGEN_PASTE_COLOR = '#e64de0'; // vivid magenta/pink — unmistakably not plain Food, matches its "high-value" framing
+// Same "hard, silent safety cap" precedent as WASTE_MAX_ON_SCREEN above —
+// alien_dna in particular can arrive in bursts (several aliens dying in a
+// short window each dropping a multi-item yield), so it gets the identical
+// protection against runaway item counts / collapsing framerate.
+export const ALIEN_DNA_MAX_ON_SCREEN = 80;
+export const BIOMASS_MAX_ON_SCREEN = 80;
+// Fish prioritize Mutagen Paste over standard Food when hungry, per direct
+// spec — Entities.js's findNearestFoodOrMutagen checks for ANY Mutagen
+// Paste in the tank first (not just a nearby one) and only falls back to
+// the nearest plain Food if none exists at all.
+//
+// A flat, generous hunger relief — deliberately not tied to the Food
+// Quality Tank Upgrade tree (same reasoning as WASTE_HUNGER_RELIEF: that
+// tree is themed around player-BOUGHT Food specifically), and generous
+// enough to actually read as "high-value" against FOOD_HUNGER_RELIEF_BY_LEVEL's
+// own unupgraded 55.
+export const MUTAGEN_PASTE_HUNGER_RELIEF = 90;
+// Non-Adult fish that eat Mutagen Paste instantly advance ONE growth stage
+// instead of the usual gradual feeds-required climb; an Adult instead gets
+// a temporary coin-drop multiplier with a glowing visual — both per direct
+// spec, see Entities.js's updateFish eat branch.
+export const MUTAGEN_PASTE_COIN_MULTIPLIER = 2;
 
 // ---- Cleanliness (Phase 3) ----
 // state.level.cleanliness (0-100, clamped) is a real, live value now instead
@@ -1112,6 +1222,26 @@ export const BUILDING_TYPES = {
     description: 'The strongest turret — fastest, hardest-hitting.',
     color: '#c9a8ff', unlockedByDefault: false,
   },
+  [TILE_REFINERY]: {
+    id: TILE_REFINERY, name: 'Refinery', icon: '⚗️', cost: 80,
+    description: 'Waste -> Food, or Alien DNA -> Biomass (DNA takes priority if both touch at once). One item at a time.',
+    color: '#b8a888', unlockedByDefault: false,
+  },
+  [TILE_BIO_FEEDER]: {
+    id: TILE_BIO_FEEDER, name: 'Bio-Feeder', icon: '🧪', cost: 220,
+    description: 'Food + Biomass -> Mutagen Paste. Fish prioritize it over plain Food, and it advances hungry non-adults a whole growth stage.',
+    color: '#e690e0', unlockedByDefault: false,
+  },
+  [TILE_BIO_COMBUSTER]: {
+    id: TILE_BIO_COMBUSTER, name: 'Bio-Combuster', icon: '🔥', cost: 260,
+    description: 'Biomass + Waste -> Blue Science (or, once researched, Biomass + Blue Science -> Green Science). Locks onto whichever recipe its first ingredient matches.',
+    color: '#ff9f5a', unlockedByDefault: false,
+  },
+  [TILE_BIO_REACTOR]: {
+    id: TILE_BIO_REACTOR, name: 'Bio-Reactor', icon: '☢️', cost: 400,
+    description: 'Consumes Green Science or Biomass for a massive one-time dump of grid power.',
+    color: '#6fff8a', unlockedByDefault: false,
+  },
 };
 export const BUILDING_LIST = Object.values(BUILDING_TYPES);
 // Buildings that share one shop slot instead of each getting their own icon
@@ -1240,6 +1370,48 @@ export const TURRET_PROJECTILE_HIT_RADIUS = 14; // px — "arrived" tolerance, a
 export const TURRET_PROJECTILE_RADIUS = 4; // px, visual size of the bolt itself
 export const TURRET_PROJECTILE_COLOR = '#ffe066'; // a bright, easy-to-track yellow — distinct from every alien/fish/item color already in use
 
+// ---- Bio-Building stats ----
+// Each table is keyed by tile id, same shape convention as PROCESSOR_STATS/
+// AUTO_FEEDER_STATS/TURRET_STATS above, even though none of these 4
+// buildings has more than one tier — keeps Grid.js's per-building-type
+// lookups (and computeCurrentPowerDemand's own loop) uniform with no
+// special-casing needed for "this one has no tiers." All 4 use the same
+// AUTO_FEEDER_PORT_OFFSET_FRACTION-based fixed top-center output point
+// every Auto-Feeder tile already ejects from — see Grid.js's updateBuildings.
+//
+// Refinery: unpowered (granted early via the Mound, well before the
+// Science Lab/power grid matter) — a flat processMs regardless of which of
+// its 2 recipes locked in.
+export const REFINERY_STATS = {
+  [TILE_REFINERY]: { processMs: 5000, powerCostPerSec: 0 },
+};
+// Bio-Feeder: Science Lab purchase requiring the Electric Auto-Feeder, so
+// it's implicitly an "Electric"-tier building — draws power only while
+// actively holding both ingredients and counting down to its output.
+export const BIO_FEEDER_STATS = {
+  [TILE_BIO_FEEDER]: { processMs: 9000, powerCostPerSec: 10 },
+};
+// Bio-Combuster: Science Lab purchase requiring the Electric Processor —
+// same "draws power only while actively processing" rule. processMs is the
+// same for either of its 2 recipes (base or upgraded).
+export const BIO_COMBUSTER_STATS = {
+  [TILE_BIO_COMBUSTER]: { processMs: 11000, powerCostPerSec: 14 },
+};
+// Bio-Reactor: a GENERATOR, not a consumer — never appears in
+// computeCurrentPowerDemand at all (same as the Electric Eel fish doesn't).
+// powerOutputMw is credited as one lump sum into state.level.powerGenAccumMw
+// (the same non-battery, per-second accumulator every Eel already feeds —
+// see Grid.js's updateBuildings) the instant a fuel item finishes
+// processing, not spread out over the process itself — "generates massive
+// grid power," a periodic big dump rather than a smooth trickle, per spec.
+export const BIO_REACTOR_STATS = {
+  [TILE_BIO_REACTOR]: { processMs: 7000, powerOutputMw: 150 },
+};
+// Shared touch-intake radius for all 4 Bio-Buildings' absorb scans — same
+// value as COLLECTOR_INTAKE_RADIUS, reusing Grid.js's existing
+// isNearBuildingCenter helper.
+export const BIO_BUILDING_INTAKE_RADIUS = TILE_SIZE * 0.65;
+
 // ---- Tier Progression & The Mound (Phase 2) ----
 // See CLAUDE.md's "Tier Progression & The Mound" section for the full
 // design. The very first "throw money" attempt (at MOUND_TEASE_COST) is a
@@ -1296,7 +1468,14 @@ export const MOUND_HEIGHT_PX = 62; // how far it mounds up above the seabed surf
 export const TIER_UNLOCKS = {
   2: {
     species: ['octopus'], // per direct request — Octopus moved off the Science Lab (it's the one utility species that doesn't gate anything ELSE in the Lab's tree) onto the Mound itself, so the Lab's tree starts truly empty and every one of its 8 nodes is a real choice
-    buildings: [TILE_COLLECTOR], // Auto-Feeder is its own separate "Tier 2.5" paid step, not part of this crack — see AUTO_FEEDER_UNLOCK_COST above
+    // Auto-Feeder is its own separate "Tier 2.5" paid step, not part of this
+    // crack — see AUTO_FEEDER_UNLOCK_COST above. The Refinery is granted
+    // here rather than through the Science Lab (unlike the rest of the Bio
+    // chain) — it's the foundational recycler the whole chain is built on,
+    // and both its recipes (Waste->Food, an early alternative to the
+    // Auto-Feeder; Alien DNA->Biomass) are usable well before the Lab
+    // exists, so gating it behind Lab research would just waste it.
+    buildings: [TILE_COLLECTOR, TILE_REFINERY],
   },
   // Tier 3 has no entry here at all — the real Tier 2->3 crack's only
   // effect is shattering the Mound (state.level.tier >= MOUND_MAX_TIER),
@@ -1376,6 +1555,38 @@ export const SCIENCE_LAB_UPGRADES = {
   advanced_turret: {
     id: 'advanced_turret', name: 'Advanced Turret', icon: '🔫', scienceCost: 120, goldCost: 18000,
     requires: ['electric_turret'], grants: { buildings: [TILE_TURRET_ADVANCED] },
+  },
+
+  // ---- Bio-Building production chain ----
+  // Per direct spec's "Science Lab Tech Tree Nodes" section. Bio-Combuster
+  // requires the Electric Processor (it's built on the same power-grid
+  // tier); Bio-Feeder requires the Electric Auto-Feeder. Green Science Tech
+  // grants nothing by itself (`grants: {}`) — a pure recipe-unlock flag,
+  // same "presence in state.meta.labUpgradesPurchased IS the unlock, not a
+  // species/building grant" pattern gene_splicing already established
+  // below; Grid.js's Bio-Combuster logic checks
+  // state.meta.labUpgradesPurchased.includes(GREEN_SCIENCE_LAB_ID) directly
+  // to decide whether it may lock onto the upgraded recipe. The Bio-Reactor
+  // is the one node in this entire tree costing GREEN Science instead of
+  // blue (`scienceGreenCost` in place of the usual `scienceCost`) — per
+  // spec ("Requires: Green Science Upgrade + Green Science + Money"); see
+  // UI.js's buyLabUpgrade/openLabPurchaseModal/refreshLabPurchaseButton for
+  // the one small branch needed to charge the right resource.
+  bio_combuster: {
+    id: 'bio_combuster', name: 'Bio-Combuster', icon: '🔥', scienceCost: 40, goldCost: 6000,
+    requires: ['electric_collector'], grants: { buildings: [TILE_BIO_COMBUSTER] },
+  },
+  green_science_tech: {
+    id: 'green_science_tech', name: 'Green Science Tech', icon: '🧬', scienceCost: 60, goldCost: 8000,
+    requires: ['bio_combuster'], grants: {},
+  },
+  bio_feeder: {
+    id: 'bio_feeder', name: 'Bio-Feeder', icon: '🧪', scienceCost: 45, goldCost: 7000,
+    requires: ['electric_auto_feeder'], grants: { buildings: [TILE_BIO_FEEDER] },
+  },
+  bio_reactor: {
+    id: 'bio_reactor', name: 'Bio-Reactor', icon: '☢️', scienceGreenCost: 30, goldCost: 20000,
+    requires: ['green_science_tech'], grants: { buildings: [TILE_BIO_REACTOR] },
   },
 
   // ---- Gene-Splicing hybrid tree ----
@@ -1540,6 +1751,12 @@ export const POWER_HISTORY_MAX = 60;
 // Replaces the old GENE_SPLICING_TECH_ID/state.meta.techUnlocked flag now
 // that splicing is a Science Lab purchase, not a standalone Tank Upgrade.
 export const GENE_SPLICING_LAB_ID = 'gene_splicing';
+// Same "presence in state.meta.labUpgradesPurchased IS the unlock" pattern
+// as GENE_SPLICING_LAB_ID above — Grid.js's Bio-Combuster logic checks this
+// directly to decide whether a Blue Science item touching an idle tile may
+// lock in the upgraded (Biomass+BlueScience->Green Science) recipe, instead
+// of only ever the base one.
+export const GREEN_SCIENCE_LAB_ID = 'green_science_tech';
 
 export const SCIENCE_COLOR = '#5fc9ff';
 export const POWER_COLOR = '#ffd23f';
@@ -1652,10 +1869,13 @@ export const POST_ALIEN_TUTORIAL_MESSAGE = "Now that's I'm talking about. A litt
 // once, after which the timer restarts for the next one. Difficulty scales
 // with how many waves have already spawned THIS level
 // (state.level.alienWavesSpawned, level-scoped like Tier/money — resets on
-// restart): count and HP both ramp linearly from their EARLY values up to
-// their LATE ones across ALIEN_WAVE_DIFFICULTY_RAMP_WAVES waves, then hold
-// steady — per direct request ("start with 20-30 health with only a couple
-// spawning, and eventually have 10-15 spawn with 60-100 health").
+// restart): wave SIZE ramps linearly from its EARLY values up to its LATE
+// ones across ALIEN_WAVE_DIFFICULTY_RAMP_WAVES waves, then holds steady —
+// per direct request ("start with... only a couple spawning, and eventually
+// have 10-15 spawn"). HP is no longer a single scaled number at all — see
+// "Dynamic Alien Archetypes" below, which replaces it with 5 distinct
+// alien tiers, each with its own fixed stat profile, rolled via a weighted
+// mix that shifts across this exact same wave-progress axis.
 export const ALIEN_WAVE_INTERVAL_MIN_MS = 180000; // 3 minutes
 export const ALIEN_WAVE_INTERVAL_MAX_MS = 300000; // 5 minutes
 export const ALIEN_WAVE_DIFFICULTY_RAMP_WAVES = 10;
@@ -1663,10 +1883,47 @@ export const ALIEN_WAVE_COUNT_EARLY_MIN = 2;
 export const ALIEN_WAVE_COUNT_EARLY_MAX = 3;
 export const ALIEN_WAVE_COUNT_LATE_MIN = 10;
 export const ALIEN_WAVE_COUNT_LATE_MAX = 15;
-export const ALIEN_HP_EARLY_MIN = 20;
-export const ALIEN_HP_EARLY_MAX = 30;
-export const ALIEN_HP_LATE_MIN = 60;
-export const ALIEN_HP_LATE_MAX = 100;
+
+// ---- Dynamic Alien Archetypes (Architectural Update) ----
+// Replaces the old single generic alien (one HP range scaled by wave
+// progress) with 5 distinct tiers, each a real archetype with its own
+// health, speed, DNA yield, size, and color — per direct spec ("higher tier
+// aliens have higher health, faster movement... and drop significantly
+// more alien_dna"). hpMin/hpMax still give each tier a little natural
+// per-instance variance (Systems.js's spawnAlienWave rolls within it), same
+// as the old flat range did; every other field is fixed per tier. Colors
+// step from the existing dark ALIEN_COLOR up through progressively
+// brighter/more saturated purples/magentas so a screenful of a wave's mix
+// reads as visibly more dangerous at a glance, not just on the health bar.
+// Placeholder balance, like every other economy/combat number in this file
+// — tune once real playtesting exists.
+export const ALIEN_ARCHETYPES = [
+  { id: 'alien_t1', tier: 1, name: 'Alien Scout', hpMin: 20, hpMax: 30, speed: 40, dnaYield: 1, radius: 16, color: '#5a2d6b' },
+  { id: 'alien_t2', tier: 2, name: 'Alien Brute', hpMin: 40, hpMax: 55, speed: 46, dnaYield: 2, radius: 18, color: '#6b2f7a' },
+  { id: 'alien_t3', tier: 3, name: 'Alien Stalker', hpMin: 65, hpMax: 85, speed: 54, dnaYield: 4, radius: 20, color: '#83318f' },
+  { id: 'alien_t4', tier: 4, name: 'Alien Behemoth', hpMin: 95, hpMax: 130, speed: 62, dnaYield: 7, radius: 23, color: '#a13db8' },
+  { id: 'alien_t5', tier: 5, name: 'Alien Leviathan', hpMin: 150, hpMax: 220, speed: 70, dnaYield: 12, radius: 27, color: '#d94ed4' },
+];
+// The rolling wave-mix weight curve — per direct spec's 5-phase description
+// (Early 100% T1 -> Mid-Early T1/T2 -> Mid T1/T2/T3 -> Late phases out T1,
+// mostly T3/T4 with occasional T2/rare T5 -> End Game heavy T4/T5 with a
+// few residual T3). Each keyframe's weights array is one entry per
+// ALIEN_ARCHETYPES tier (index 0 = tier 1 ... index 4 = tier 5) and always
+// sums to 1 — Systems.js's alienTierWeightsAt linearly interpolates between
+// the two keyframes bracketing the current wave-progress t (the exact same
+// 0..1 progress alienDifficultyT already computes from
+// state.level.alienWavesSpawned / ALIEN_WAVE_DIFFICULTY_RAMP_WAVES, reused
+// here rather than adding a second, separately-tuned ramp), then
+// rollAlienArchetype picks one tier via a weighted random draw against that
+// interpolated curve — so the mix drifts smoothly through every phase
+// instead of ever hard-swapping from one tier straight to the next.
+export const ALIEN_TIER_MIX_KEYFRAMES = [
+  { t: 0, weights: [1, 0, 0, 0, 0] }, // Early Game — 100% Tier 1
+  { t: 0.25, weights: [0.6, 0.4, 0, 0, 0] }, // Mid-Early — Tier 1/2 mix
+  { t: 0.5, weights: [0.34, 0.33, 0.33, 0, 0] }, // Mid Game — Tier 1/2/3 mix
+  { t: 0.75, weights: [0, 0.15, 0.35, 0.45, 0.05] }, // Late Game — Tier 1 phased out, mostly Tier 3/4, occasional Tier 2, rare Tier 5
+  { t: 1, weights: [0, 0, 0.15, 0.45, 0.4] }, // End Game — heavy Tier 4/5, a few residual Tier 3s
+];
 // Hard ceiling on simultaneously-alive aliens (plus any not-yet-opened
 // portal, so a burst can't sneak past it) — nothing about "waves ramp up to
 // 10-15 aliens" was ever meant to mean aliens stack UNBOUNDED across
@@ -1712,7 +1969,7 @@ export const ALIEN_FIRST_WAVE_TIP_MESSAGE = "Aliens incoming! Click 'em for 1 da
 export const ALIEN_CHASE_CHANCE = 0.85;
 export const ALIEN_FLEE_CHANCE = 0.65;
 export const ALIEN_AWARENESS_RADIUS = 420; // px — how close a fish/alien has to be to the other before either reacts to it at all
-export const ALIEN_SPEED = 40; // px/sec, base wander/chase speed
+export const ALIEN_SPEED = 40; // px/sec — fallback only now (Entities.js's createAlien copies each archetype's own `speed` onto the alien instance; this is just what an unrecognized/missing archetypeId falls back to)
 export const ALIEN_WANDER_INTERVAL_MIN_S = 0.6;
 export const ALIEN_WANDER_INTERVAL_MAX_S = 1.5;
 
@@ -1720,13 +1977,14 @@ export const ALIEN_CLICK_DAMAGE = 1; // per direct request — "clicking on them
 // Same "hit-test radius bigger than the drawn radius" pattern as
 // COIN_CLICK_RADIUS_MULTIPLIER — per direct request ("the clickable area
 // for the aliens is 50% larger than the actual visual radius... so they are
-// easier to click"). Purely a hit-test change; ALIEN_RADIUS (the drawn/
-// collision size) is untouched.
+// easier to click"). Purely a hit-test multiplier, applied to each alien's
+// own instance radius (alien.radius, from its archetype) now rather than a
+// flat ALIEN_RADIUS.
 export const ALIEN_CLICK_RADIUS_MULTIPLIER = 1.5;
 export const ALIEN_POOP_INTERVAL_MS = 4000; // was 2000 — doubled again per direct request, further softening the population cap's own worst-case waste-production rate (see ALIEN_MAX_ALIVE's comment)
 export const ALIEN_INCOME_BLOCK_RADIUS = 90; // px — a fish this close to a LIVING alien produces no coin on its drop timer at all, see Entities.js's updateFish
-export const ALIEN_RADIUS = 16; // px, base visual/hit-test size
-export const ALIEN_COLOR = '#5a2d6b'; // dark purple, visually distinct from every fish color
+export const ALIEN_RADIUS = 16; // px — fallback only now, same role as ALIEN_SPEED above; every real alien's own radius/color come from its archetype (ALIEN_ARCHETYPES), copied onto the instance by Entities.js's createAlien
+export const ALIEN_COLOR = '#5a2d6b'; // dark purple — fallback only, matches ALIEN_ARCHETYPES[0]'s own color (Tier 1)
 export const ALIEN_HEALTH_BAR_WIDTH = 30;
 export const ALIEN_HEALTH_BAR_HEIGHT = 4;
 

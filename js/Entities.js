@@ -78,7 +78,6 @@ import {
   ALIEN_AWARENESS_RADIUS,
   ALIEN_CHASE_CHANCE,
   ALIEN_FLEE_CHANCE,
-  ALIEN_SPEED,
   ALIEN_WANDER_INTERVAL_MIN_S,
   ALIEN_WANDER_INTERVAL_MAX_S,
   ALIEN_POOP_INTERVAL_MS,
@@ -95,6 +94,19 @@ import {
   ALIEN_RADIUS,
   ALIEN_CLICK_RADIUS_MULTIPLIER,
   ALIEN_FOOD_BLOCK_DURATION_MS,
+  ALIEN_ARCHETYPES,
+  ALIEN_DNA_RADIUS,
+  ALIEN_DNA_COLOR,
+  ALIEN_DNA_MAX_ON_SCREEN,
+  BIOMASS_RADIUS,
+  BIOMASS_COLOR,
+  BIOMASS_MAX_ON_SCREEN,
+  MUTAGEN_PASTE_RADIUS,
+  MUTAGEN_PASTE_COLOR,
+  MUTAGEN_PASTE_COIN_MULTIPLIER,
+  MUTAGEN_PASTE_HUNGER_RELIEF,
+  SCIENCE_GREEN_ITEM_RADIUS,
+  SCIENCE_GREEN_COLOR,
 } from './Config.js';
 import { stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemForces, updateBuildings } from './Grid.js';
 // Sound is a fire-and-forget side effect at the moment something already
@@ -215,20 +227,67 @@ export function createScience(x, y) {
   return { id: nextId(), type: 'science', x, y, vx: 0, vy: 0, radius: SCIENCE_ITEM_RADIUS, mass: ITEM_MASS_BY_TYPE.science, resting: false };
 }
 
+// A green Science Bubble — the Bio-Combuster's upgraded output. Physically
+// and mechanically identical to a blue one (see createScience above): falls
+// exactly like a coin, click-bankable or Collector-routed, always worth 1
+// when banked (bankScienceGreen below) — only its own separate reserve
+// (state.level.scienceGreen) and its color differ.
+export function createScienceGreen(x, y) {
+  return { id: nextId(), type: 'science_green', x, y, vx: 0, vy: 0, radius: SCIENCE_GREEN_ITEM_RADIUS, mass: ITEM_MASS_BY_TYPE.science_green, resting: false };
+}
+
+// Dropped by a defeated alien (Weight Class 5 — Heavy) — see
+// createAlien/updateAlien's death branch for the yield-scaled multi-drop.
+// The Refinery's "Alien DNA -> Biomass" recipe is the only thing that ever
+// consumes it (Grid.js's updateBuildings).
+export function createAlienDna(x, y) {
+  return { id: nextId(), type: 'alien_dna', x, y, vx: 0, vy: 0, radius: ALIEN_DNA_RADIUS, mass: ITEM_MASS_BY_TYPE.alien_dna, resting: false };
+}
+
+// The Refinery's Alien-DNA-recipe output, and the shared 2nd ingredient
+// every Bio-Feeder/Bio-Combuster recipe needs (Weight Class 5 — Heavy, same
+// as Alien DNA — it's refined FROM alien_dna, so it stays in that class).
+export function createBiomass(x, y) {
+  return { id: nextId(), type: 'biomass', x, y, vx: 0, vy: 0, radius: BIOMASS_RADIUS, mass: ITEM_MASS_BY_TYPE.biomass, resting: false };
+}
+
+// The Bio-Feeder's output (Food + Biomass) — Weight Class 1, Buoyant, same
+// physics profile as plain Food (see updateMutagenPaste's own sway/gravity,
+// mirroring updateFood exactly). Fish prioritize this over standard Food
+// when hungry, and its eat effect differs by growth stage — see
+// updateFish's eat branch for the full mechanic.
+export function createMutagenPaste(x, y) {
+  return {
+    id: nextId(), type: 'mutagen_paste', x, y, vx: 0, vy: 0, radius: MUTAGEN_PASTE_RADIUS, mass: ITEM_MASS_BY_TYPE.mutagen_paste, resting: false,
+    fallTime: 0, swayPhase: Math.random() * Math.PI * 2,
+  };
+}
+
 export function createPickupText(x, y, text, color) {
   return { id: nextId(), type: 'pickupText', x, y, text, color, age: 0 };
 }
 
 // Alien Invasion — see Config.js's ALIEN_* constants and CLAUDE.md-pending
 // notes. Systems.js's updateAlienWaves owns wave TIMING/scheduling and
-// pushes { x, y, hp, openAtMs, spawned, spawnedAtMs } records into
-// state.level.alienPortals; this file owns the actual entity (creation, AI,
-// poop, removal) per Entities.js's own "Fish, Alien, Food, Item" scope.
+// pushes { x, y, hp, archetypeId, openAtMs, spawned, spawnedAtMs } records
+// into state.level.alienPortals; this file owns the actual entity (creation,
+// AI, poop, removal) per Entities.js's own "Fish, Alien, Food, Item" scope.
 // updateEntities below is what actually turns a due portal into a real
 // alien — kept here rather than in Systems.js so no circular import is
 // needed (Systems.js writing plain portal data into state needs no import
 // of this file at all).
-export function createAlien(x, y, hp) {
+//
+// Dynamic Alien Archetypes (Architectural Update): archetypeId looks up the
+// tier's full stat profile in ALIEN_ARCHETYPES and copies its speed/radius/
+// color/dnaYield onto the instance as plain fields — every other module
+// (updateAlien's own movement below, main.js's click hit-test/rendering,
+// Grid.js's turret targeting) reads these straight off the alien entity
+// rather than re-looking-up the archetype table itself, keeping the "plain
+// serializable instance data" contract intact. Falls back to the lowest
+// tier if archetypeId is missing/unrecognized, same defensive-fallback
+// precedent as every other lookup-by-id in this codebase.
+export function createAlien(x, y, hp, archetypeId) {
+  const archetype = ALIEN_ARCHETYPES.find((a) => a.id === archetypeId) || ALIEN_ARCHETYPES[0];
   return {
     id: nextId(),
     type: 'alien',
@@ -237,6 +296,11 @@ export function createAlien(x, y, hp) {
     vy: 0,
     hp,
     maxHp: hp,
+    archetypeId: archetype.id,
+    speed: archetype.speed,
+    radius: archetype.radius,
+    color: archetype.color,
+    dnaYield: archetype.dnaYield,
     wanderTimer: 0, // 0 so the very first tick immediately picks a heading, same as fish's own wanderTimer
     poopTimer: 0,
     hitFlashMs: 0, // counts down from ALIEN_HIT_FLASH_MS whenever damage is applied (Grid.js's Turret branch, main.js's click handler) — drives the red-flash/bounce read by main.js's render
@@ -286,8 +350,23 @@ function updateAlien(alien, state, dtMs) {
     // just vanishing — a short expanding/fading burst, fully decoupled from
     // the alien entity itself (which is removed right here), same
     // independent-particle pattern state.level.floatingTexts already uses.
-    state.level.alienDeathEffects.push({ x: alien.x, y: alien.y, age: 0 });
+    state.level.alienDeathEffects.push({ x: alien.x, y: alien.y, age: 0, color: alien.color });
     playAlienDeath();
+    // Dynamic Alien Archetypes: drops alien.dnaYield separate, discrete
+    // alien_dna items (a Tier 5's "bulk/dense" yield reads as a genuine
+    // shower of items, not one item carrying a hidden value field) — same
+    // "loop and push N physical items" pattern the Science Octopus's own
+    // multi-bubble brew already uses, each nudged a few px apart so they
+    // don't all spawn on the exact same point. Capped by
+    // canSpawnMoreAlienDna (see Config.js's ALIEN_DNA_MAX_ON_SCREEN) the
+    // same "silent performance safety valve" way canSpawnMoreWaste already
+    // protects against a neglected-tank item pile-up.
+    for (let i = 0; i < alien.dnaYield; i++) {
+      if (!canSpawnMoreAlienDna(state)) break;
+      const jitterX = alien.x + (Math.random() - 0.5) * alien.radius * 1.5;
+      const jitterY = alien.y + (Math.random() - 0.5) * alien.radius * 1.5;
+      state.level.items.push(createAlienDna(jitterX, jitterY));
+    }
     // The very first alien ever killed starts the countdown to the
     // post-alien "arm up" guided tutorial (Systems.js's updateStoryTriggers
     // checks state.level.elapsed against this ALIEN_TUTORIAL_DELAY_MS later).
@@ -320,8 +399,8 @@ function updateAlien(alien, state, dtMs) {
     const angle = targetFish
       ? Math.atan2(targetFish.y - alien.y, targetFish.x - alien.x) + (Math.random() - 0.5) * (Math.PI * 0.4)
       : Math.random() * Math.PI * 2;
-    alien.vx = Math.cos(angle) * ALIEN_SPEED;
-    alien.vy = Math.sin(angle) * ALIEN_SPEED * FISH_VERTICAL_DAMPING;
+    alien.vx = Math.cos(angle) * alien.speed;
+    alien.vy = Math.sin(angle) * alien.speed * FISH_VERTICAL_DAMPING;
   }
 
   alien.x += alien.vx * dt;
@@ -389,6 +468,7 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
     hungerCriticalSfxPlayed: false, // plays playHunger() once per crossing into HUNGER_CRITICAL_THRESHOLD, reset once hunger drops back below it (e.g. after eating) — see updateFish
     alienNearby: false, // recomputed every tick in updateFish — true while a living alien is within ALIEN_INCOME_BLOCK_RADIUS, driving both the coin-production block and the continuous gray tint (main.js's render)
     capBlockedTintRemainingMs: 0, // counts down from FISH_BLOCKED_TINT_MS whenever a coin drop is blocked by the Coin Cap — the OTHER (timed) source of the gray tint, see triggerProductionBlocked
+    mutagenBuffActive: false, // Adult-only Mutagen Paste buff (2x coin drop + a glow) — see updateFish's eat branch; cleared the moment hunger crosses back into HUNGER_SEEK_THRESHOLD
     wanderTimer: 0,
     tailPhase: 0, // only rendered once fully grown; advances faster the faster the fish is currently moving
     // Economy Fish Combining (Tier 2) — see CLAUDE.md's "Economy Fish
@@ -441,6 +521,17 @@ export function countTankItemsByType(state, type) {
 // Grid.js's O(n²) resolveItemCollisions) bounded, not as a mechanic.
 function canSpawnMoreWaste(state) {
   return countTankItemsByType(state, 'waste') < WASTE_MAX_ON_SCREEN;
+}
+
+// Same silent safety-cap precedent as canSpawnMoreWaste above, for the two
+// Weight-Class-5 Bio-chain items — alien_dna in particular can arrive in
+// bursts (several aliens dying in a short window, each dropping a
+// multi-item yield), so it gets the identical protection.
+function canSpawnMoreAlienDna(state) {
+  return countTankItemsByType(state, 'alien_dna') < ALIEN_DNA_MAX_ON_SCREEN;
+}
+function canSpawnMoreBiomass(state) {
+  return countTankItemsByType(state, 'biomass') < BIOMASS_MAX_ON_SCREEN;
 }
 
 // Coin Cap Tank Upgrade — state.level.upgrades.coinCapLevel indexes straight
@@ -590,6 +681,14 @@ function bankScience(state, amount) {
   state.level.science += amount;
 }
 
+// Green Science's own separate reserve (state.level.scienceGreen) — mirrors
+// bankScience exactly, just a distinct pool so the Bio-Reactor's own
+// scienceGreenCost purchases and the Bio-Combuster's upgraded recipe don't
+// touch the blue Science total at all.
+function bankScienceGreen(state, amount) {
+  state.level.scienceGreen += amount;
+}
+
 export function tryBankScienceAt(state, worldX, worldY) {
   const items = state.level.items;
   for (let i = items.length - 1; i >= 0; i--) {
@@ -601,6 +700,30 @@ export function tryBankScienceAt(state, worldX, worldY) {
     if (dx * dx + dy * dy <= clickRadius * clickRadius) {
       bankScience(state, 1);
       state.level.floatingTexts.push(createPickupText(item.x, item.y, '+1 🔬', SCIENCE_COLOR));
+      items.splice(i, 1);
+      return true;
+    }
+  }
+  return false;
+}
+
+// Mirrors tryBankScienceAt exactly, for a green Science Bubble — per spec,
+// green Science "must be routed into a Collector to increment green
+// science storage," but nothing prohibits a plain click either, and every
+// other physical resource in this game supports both, so this stays
+// consistent with tryBankScienceAt rather than special-casing green Science
+// as click-only-blocked.
+export function tryBankScienceGreenAt(state, worldX, worldY) {
+  const items = state.level.items;
+  for (let i = items.length - 1; i >= 0; i--) {
+    const item = items[i];
+    if (item.type !== 'science_green') continue;
+    const dx = item.x - worldX;
+    const dy = item.y - worldY;
+    const clickRadius = item.radius * COIN_CLICK_RADIUS_MULTIPLIER;
+    if (dx * dx + dy * dy <= clickRadius * clickRadius) {
+      bankScienceGreen(state, 1);
+      state.level.floatingTexts.push(createPickupText(item.x, item.y, '+1 🔬', SCIENCE_GREEN_COLOR));
       items.splice(i, 1);
       return true;
     }
@@ -1123,6 +1246,100 @@ function updateWaste(item, state, dtMs) {
   return true;
 }
 
+// alien_dna and biomass — Weight Class 5 (Heavy), same straight-gravity fall
+// as a coin (no sway — a Class 5 item is dense/heavy, not a light drifting
+// flavor item like Food/Waste). Neither is ever click-bankable and neither
+// is a valid Collector intake (Grid.js's Collector scan only ever looks for
+// coin/science/science_green) — the ONLY way either is ever removed from
+// state.level.items is Grid.js's Refinery/Bio-Feeder/Bio-Combuster/
+// Bio-Reactor intake scans directly splicing it out (same pattern the
+// Auto-Feeder/Turret-ammo intakes already use), so the 'consumed' check
+// below is purely defensive, matching updateWaste's own identical guard.
+function updateAlienDna(item, state, dtMs) {
+  const dt = dtMs / 1000;
+  const physics = { gravity: GRAVITY, maxFallSpeed: MAX_FALL_SPEED };
+  if (item.y < SEABED_FLOOR_Y) {
+    const fanForce = computeFanForce(state, item);
+    integrateItemForces(item, dt, physics, fanForce);
+    item.y += item.vy * dt;
+    item.x += item.vx * dt;
+    clampItemToWorldWalls(item);
+    return true;
+  }
+  const status = stepItemOnGrid(item, state, dt, physics);
+  if (status === 'consumed') return false;
+  item.resting = status === 'resting';
+  return true;
+}
+
+function updateBiomass(item, state, dtMs) {
+  const dt = dtMs / 1000;
+  const physics = { gravity: GRAVITY, maxFallSpeed: MAX_FALL_SPEED };
+  if (item.y < SEABED_FLOOR_Y) {
+    const fanForce = computeFanForce(state, item);
+    integrateItemForces(item, dt, physics, fanForce);
+    item.y += item.vy * dt;
+    item.x += item.vx * dt;
+    clampItemToWorldWalls(item);
+    return true;
+  }
+  const status = stepItemOnGrid(item, state, dt, physics);
+  if (status === 'consumed') return false;
+  item.resting = status === 'resting';
+  return true;
+}
+
+// Weight Class 1 (Buoyant) — same slower gravity + gentle sway as Food (see
+// updateFood above), just without Food's own stationary-to-Waste timer
+// (that's a Food-specific balance mechanic, not something Mutagen Paste
+// needs — its own consumption path is entirely fish-eating, handled in
+// updateFish's eat branch, which splices it out of state.level.items
+// directly the same way findNearestFood's own target already gets eaten).
+function updateMutagenPaste(item, state, dtMs) {
+  const dt = dtMs / 1000;
+  const physics = { gravity: FOOD_GRAVITY, maxFallSpeed: FOOD_MAX_FALL_SPEED };
+  if (item.y < SEABED_FLOOR_Y) {
+    const fanForce = computeFanForce(state, item);
+    integrateItemForces(item, dt, physics, fanForce);
+    item.fallTime += dt;
+    const swayVx = currentSwayVx(item, FOOD_SWAY_AMPLITUDE, FOOD_SWAY_FREQUENCY, FOOD_SWAY_ENVELOPE_FREQUENCY);
+    item.x += (item.vx + swayVx) * dt;
+    item.y += item.vy * dt;
+    clampItemToWorldWalls(item);
+    return true;
+  }
+  const status = stepItemOnGrid(item, state, dt, physics);
+  if (status === 'consumed') return false;
+  item.resting = status === 'resting';
+  return true;
+}
+
+// Mirrors updateScience exactly (see that function's own comment) — the
+// only differences are the separate scienceGreen reserve it banks into and
+// its own SCIENCE_GREEN_COLOR floating text.
+function updateScienceGreen(item, state, dtMs) {
+  const dt = dtMs / 1000;
+  const physics = { gravity: GRAVITY, maxFallSpeed: MAX_FALL_SPEED };
+  if (item.y < SEABED_FLOOR_Y) {
+    const fanForce = computeFanForce(state, item);
+    integrateItemForces(item, dt, physics, fanForce);
+    item.y += item.vy * dt;
+    item.x += item.vx * dt;
+    clampItemToWorldWalls(item);
+    return true;
+  }
+  const status = stepItemOnGrid(item, state, dt, physics);
+  if (status === 'consumed') {
+    bankScienceGreen(state, 1);
+    state.level.floatingTexts.push(createPickupText(item.x, item.y, '+1 🔬', SCIENCE_GREEN_COLOR));
+    state.level.gridStats.itemsRoutedTotal += 1;
+    playDispense();
+    return false;
+  }
+  item.resting = status === 'resting';
+  return true;
+}
+
 function findNearestFood(items, x, y) {
   let best = null;
   let bestDist = Infinity;
@@ -1137,6 +1354,31 @@ function findNearestFood(items, x, y) {
     }
   }
   return best;
+}
+
+// Mirrors findNearestFood exactly, targeting Mutagen Paste instead.
+function findNearestMutagenPaste(items, x, y) {
+  let best = null;
+  let bestDist = Infinity;
+  for (const item of items) {
+    if (item.type !== 'mutagen_paste') continue;
+    const dx = item.x - x;
+    const dy = item.y - y;
+    const d = dx * dx + dy * dy;
+    if (d < bestDist) {
+      bestDist = d;
+      best = item;
+    }
+  }
+  return best;
+}
+
+// Per direct spec ("Fish prioritize mutagen_paste over standard food items
+// when hungry") — any Mutagen Paste anywhere in the tank wins over even a
+// CLOSER plain Food pellet, not just a nearest-of-both-pools comparison;
+// only falls back to findNearestFood once no Mutagen Paste exists at all.
+function findNearestFoodOrMutagen(items, x, y) {
+  return findNearestMutagenPaste(items, x, y) || findNearestFood(items, x, y);
 }
 
 // Same search, targeting Waste instead — a Scavenger species (Suckerfish;
@@ -1261,6 +1503,13 @@ function updateFish(fish, state, dtMs) {
     fish.hungerCriticalSfxPlayed = false;
   }
 
+  // Mutagen Paste's Adult buff (2x coin drop + a glow, see the eat branch
+  // below) clears "as soon as the fish transitions back to the hungry
+  // state," per direct spec — checked here, every tick, rather than only at
+  // the moment hunger crosses the threshold, so it can't linger a tick
+  // stale.
+  if (fish.mutagenBuffActive && fish.hunger >= HUNGER_SEEK_THRESHOLD) fish.mutagenBuffActive = false;
+
   // Alien Invasion reactions, per direct request: a fish near a living alien
   // usually (not always — see wander's own ALIEN_FLEE_CHANCE bias) tries to
   // move away from it, and can't produce a coin at all while this close
@@ -1290,7 +1539,7 @@ function updateFish(fish, state, dtMs) {
   if (fish.hunger >= HUNGER_SEEK_THRESHOLD) {
     const target = isScavenger
       ? findNearestWaste(state.level.items, fish.x, fish.y)
-      : findNearestFood(state.level.items, fish.x, fish.y);
+      : findNearestFoodOrMutagen(state.level.items, fish.x, fish.y);
     if (target) {
       const dx = target.x - fish.x;
       const dy = target.y - fish.y;
@@ -1307,6 +1556,12 @@ function updateFish(fish, state, dtMs) {
         const idx = state.level.items.indexOf(target);
         if (idx !== -1) state.level.items.splice(idx, 1);
         playEat();
+        const isMutagenPaste = target.type === 'mutagen_paste';
+        // Mutagen Paste's growth effect is a full replacement for the
+        // standard incremental feeds-required climb below, not an addition
+        // to it — handled entirely in this branch, then skips the shared
+        // totalFeeds/stageIndexForFeeds tail via skipStandardGrowth.
+        let skipStandardGrowth = false;
         if (isScavenger) {
           // Flat relief, deliberately not tied to the Food Quality Tank
           // Upgrade tree — that tree is themed around player-bought Food
@@ -1325,6 +1580,27 @@ function updateFish(fish, state, dtMs) {
             const stage = def.growthStages[fish.stage];
             fish.eatCooldownRemainingMs = stage.eatCooldownMs ?? stage.dropInterval;
           }
+        } else if (isMutagenPaste) {
+          // Per direct spec: a Non-Adult fish instantly advances ONE growth
+          // stage (not straight to adult); an Adult instead gets a
+          // temporary 2x coin-drop buff with a glowing visual
+          // (mutagenBuffActive, read by main.js's render and the coin-drop
+          // branch further below) — cleared the moment the fish transitions
+          // back to the hungry state (checked at the top of this function).
+          fish.hunger -= MUTAGEN_PASTE_HUNGER_RELIEF;
+          skipStandardGrowth = true;
+          const wasAdultAlready = fish.stage === def.growthStages.length - 1;
+          if (!wasAdultAlready) {
+            fish.stage = Math.min(fish.stage + 1, def.growthStages.length - 1);
+            // Keeps totalFeeds consistent with the stage this just jumped
+            // to, so a later ordinary Food feed's own stageIndexForFeeds
+            // recompute can't accidentally walk the stage back down.
+            fish.totalFeeds = Math.max(fish.totalFeeds, def.growthStages[fish.stage].feedsRequired);
+            fish.shimmerStartedAt = state.level.elapsed; // a real stage advance, same "shimmers when it grows" rule every other growth path follows
+            if (fish.stage === def.growthStages.length - 1) awardTankPoint(state, fish);
+          } else {
+            fish.mutagenBuffActive = true;
+          }
         } else {
           // Food Quality Tank Upgrade: relief is a flat lookup by purchased
           // level, no longer clamped to the fish's current hunger — a
@@ -1333,22 +1609,24 @@ function updateFish(fish, state, dtMs) {
           const relief = FOOD_HUNGER_RELIEF_BY_LEVEL[state.level.upgrades.foodQuality];
           fish.hunger -= relief;
         }
-        // Eating fills the coin-drop timer too, so feeding feels like it's
-        // what produces the coins — a 20s cycle fed halfway through jumps
-        // straight to a drop and restarts the cycle. Not meaningful for a
-        // Scavenger (it doesn't use dropTimer at all — see the eat-cooldown
-        // branch above), so skipped for it.
-        if (!isScavenger) fish.dropTimer += def.growthStages[fish.stage].dropInterval * COIN_TIMER_FEED_BONUS_FRACTION;
-        fish.totalFeeds += 1;
-        const wasAdult = fish.stage === def.growthStages.length - 1;
-        const prevStage = fish.stage;
-        fish.stage = stageIndexForFeeds(def, fish.totalFeeds);
-        // Per direct request, a fish shimmers whenever it "grows in size" —
-        // a real stage advance (hatchling->juvenile->adult), not just any
-        // feed (most feeds don't cross a stage boundary).
-        if (fish.stage > prevStage) fish.shimmerStartedAt = state.level.elapsed;
-        if (!wasAdult && fish.stage === def.growthStages.length - 1) {
-          awardTankPoint(state, fish);
+        if (!skipStandardGrowth) {
+          // Eating fills the coin-drop timer too, so feeding feels like it's
+          // what produces the coins — a 20s cycle fed halfway through jumps
+          // straight to a drop and restarts the cycle. Not meaningful for a
+          // Scavenger (it doesn't use dropTimer at all — see the eat-cooldown
+          // branch above), so skipped for it.
+          if (!isScavenger) fish.dropTimer += def.growthStages[fish.stage].dropInterval * COIN_TIMER_FEED_BONUS_FRACTION;
+          fish.totalFeeds += 1;
+          const wasAdult = fish.stage === def.growthStages.length - 1;
+          const prevStage = fish.stage;
+          fish.stage = stageIndexForFeeds(def, fish.totalFeeds);
+          // Per direct request, a fish shimmers whenever it "grows in size" —
+          // a real stage advance (hatchling->juvenile->adult), not just any
+          // feed (most feeds don't cross a stage boundary).
+          if (fish.stage > prevStage) fish.shimmerStartedAt = state.level.elapsed;
+          if (!wasAdult && fish.stage === def.growthStages.length - 1) {
+            awardTankPoint(state, fish);
+          }
         }
       }
     } else {
@@ -1476,9 +1754,15 @@ function updateFish(fish, state, dtMs) {
       // a whole dollar (e.g. a Tier-3 fish's 5 * 1.8^2 = 16.2) — round up
       // to the next whole coin value rather than handing out a fractional
       // amount, per direct request.
-      const dropValue = fish.dropValueOverride != null
+      // Mutagen Paste's Adult buff (fish.mutagenBuffActive — see the eat
+      // branch above) multiplies the final coin value on top of everything
+      // else, star tier included — applied last, after Math.ceil, so it
+      // always lands on a whole number regardless of the base value's own
+      // rounding.
+      const mutagenMultiplier = fish.mutagenBuffActive ? MUTAGEN_PASTE_COIN_MULTIPLIER : 1;
+      const dropValue = (fish.dropValueOverride != null
         ? fish.dropValueOverride
-        : Math.ceil(stageDef.dropValue * Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, (fish.starTier || 1) - 1));
+        : Math.ceil(stageDef.dropValue * Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, (fish.starTier || 1) - 1))) * mutagenMultiplier;
       // Skip entirely for a $0 drop (any not-yet-behavior-wired species) — a
       // worthless coin still lands on a Processor like any other, which is
       // actively counterproductive busywork for no payout. A genuine drop is
@@ -1540,7 +1824,7 @@ function updateAlienPortals(state) {
     if (!portal.spawned && elapsed >= portal.openAtMs + ALIEN_PORTAL_OPEN_MS) {
       portal.spawned = true;
       portal.spawnedAtMs = elapsed;
-      const alien = createAlien(portal.x, portal.y, portal.hp);
+      const alien = createAlien(portal.x, portal.y, portal.hp, portal.archetypeId);
       state.level.entities.push(alien);
       // Cinematic first-alien intro — per direct request, the very first
       // alien to ever spawn (wave 1 is forced to exactly one, see
@@ -1633,7 +1917,11 @@ export function updateEntities(state, dtMs) {
     if (item.type === 'food') return updateFood(item, state, dtMs);
     if (item.type === 'coin') return updateCoin(item, state, dtMs);
     if (item.type === 'science') return updateScience(item, state, dtMs);
+    if (item.type === 'science_green') return updateScienceGreen(item, state, dtMs);
     if (item.type === 'waste') return updateWaste(item, state, dtMs);
+    if (item.type === 'alien_dna') return updateAlienDna(item, state, dtMs);
+    if (item.type === 'biomass') return updateBiomass(item, state, dtMs);
+    if (item.type === 'mutagen_paste') return updateMutagenPaste(item, state, dtMs);
     return true;
   });
 
@@ -1641,16 +1929,28 @@ export function updateEntities(state, dtMs) {
   // per-tick step above reports 'consumed'); also now produces Waste on a
   // continuously-running background clock. Auto-Feeder: absorbs nearby
   // Waste, dispenses Food from its output port once its tier's required
-  // number of loads have processed. See Grid.js's updateBuildings — it
-  // returns spawn points rather than constructing the items itself, to
-  // avoid a circular import (createFood/createWaste live here).
-  const { foodSpawnPoints, wasteSpawnPoints, turretShots } = updateBuildings(state, dtMs);
+  // number of loads have processed. Refinery/Bio-Feeder/Bio-Combuster: the
+  // new Bio-Building chain, see Grid.js's updateBuildings — bioSpawnPoints
+  // carries an itemType alongside each { x, y } since these buildings can
+  // eject more than one kind of output depending on which recipe locked in.
+  // Bio-Reactor produces no item at all (it's a power generator, not a
+  // router) so it needs no spawn-point handling here. All of this returns
+  // spawn points rather than constructing the items itself, to avoid a
+  // circular import (createFood/createWaste/etc. live here).
+  const { foodSpawnPoints, wasteSpawnPoints, turretShots, bioSpawnPoints } = updateBuildings(state, dtMs);
   for (const point of foodSpawnPoints) state.level.items.push(createFood(point.x, point.y));
   // canSpawnMoreWaste checked per-item (not once before the loop) so a
   // batch of several at once still respects the cap precisely — see
   // Config.js's WASTE_MAX_ON_SCREEN.
   for (const point of wasteSpawnPoints) { if (canSpawnMoreWaste(state)) state.level.items.push(createWaste(point.x, point.y)); }
   for (const point of pendingFoodToWasteSpawns) { if (canSpawnMoreWaste(state)) state.level.items.push(createWaste(point.x, point.y)); }
+  for (const point of bioSpawnPoints) {
+    if (point.itemType === 'food') state.level.items.push(createFood(point.x, point.y));
+    else if (point.itemType === 'biomass') { if (canSpawnMoreBiomass(state)) state.level.items.push(createBiomass(point.x, point.y)); }
+    else if (point.itemType === 'mutagen_paste') state.level.items.push(createMutagenPaste(point.x, point.y));
+    else if (point.itemType === 'science') state.level.items.push(createScience(point.x, point.y));
+    else if (point.itemType === 'science_green') state.level.items.push(createScienceGreen(point.x, point.y));
+  }
   for (const shot of turretShots) state.level.turretProjectiles.push(createTurretProjectile(shot));
   // Runs before the entities filter loop below, same as the old direct-
   // mutation turret code did, so a lethal hit lands and gets cleaned up in
