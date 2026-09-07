@@ -39,6 +39,12 @@ import {
   ALIEN_DNA_COLOR,
   BIOMASS_COLOR,
   MUTAGEN_PASTE_COLOR,
+  BIO_PELLETS_COLOR,
+  FOOD_STALE_FRACTION,
+  FOOD_STALE_COLOR,
+  FOOD_STATIONARY_TO_WASTE_MS,
+  DIAMOND_GEM_COLOR_CORE,
+  DIAMOND_GEM_COLOR_EDGE,
   POWER_HISTORY_MAX,
   SCIENCE_CAP_BY_LEVEL,
   MOUND_MAX_TIER,
@@ -83,6 +89,7 @@ import {
   tryBankScienceGreenAt,
   spawnFishCheat,
   getCoinColor,
+  getCoinTier,
   getFishPurchaseCost,
   findFishAt,
   isCombinableFish,
@@ -106,6 +113,7 @@ import {
   computeCurrentPowerDemand,
   computePowerEfficiency,
   findNearestWasteTurretAndWaste,
+  getRecipeBuildingKeyAt,
 } from './Grid.js';
 import { isPointOnMound, crackMound, renderMound, centerCameraOnMound, isPointOnScienceLab, renderScienceLab } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
@@ -126,6 +134,9 @@ import {
   isLabMenuOpen,
   closeLabPurchaseModal,
   isLabPurchaseModalOpen,
+  openRecipeMenu,
+  closeRecipeMenu,
+  isRecipeMenuOpen,
   flashMoneyInsufficient,
   selectTool,
   initStartScreen,
@@ -150,6 +161,7 @@ const ITEM_FLAT_COLOR_BY_TYPE = {
   alien_dna: ALIEN_DNA_COLOR,
   biomass: BIOMASS_COLOR,
   mutagen_paste: MUTAGEN_PASTE_COLOR,
+  bio_pellets: BIO_PELLETS_COLOR,
 };
 
 // Browsers refuse to let an AudioContext make sound until a real user
@@ -437,7 +449,7 @@ let itemDragPositionHistory = [];
 // same "every object can be clicked and dragged around" consistency the
 // original 4 types already established — nothing about the new items makes
 // them an exception.
-const DRAGGABLE_ITEM_TYPES = ['coin', 'food', 'waste', 'science', 'science_green', 'alien_dna', 'biomass', 'mutagen_paste'];
+const DRAGGABLE_ITEM_TYPES = ['coin', 'food', 'waste', 'science', 'science_green', 'alien_dna', 'biomass', 'mutagen_paste', 'bio_pellets'];
 
 input.mouseDownHandlers.push((sx, sy) => {
   // A guided tutorial normally blocks starting an item drag like every
@@ -683,6 +695,13 @@ input.clickHandlers.push((sx, sy) => {
   if (tryBankScienceGreenAt(state, world.x, world.y)) return; // same for a Green Science Bubble
   if (isPointOnMound(state, world.x, world.y)) { openMoundMenu(state); return; } // opens the "Throw money at it" popup — see UI.js
   if (isPointOnScienceLab(state, world.x, world.y)) { openLabMenu(state); return; } // Phase 4 — the Mound's replacement once it's fully shattered
+  // A placed Manufacturer/Power Plant opens its recipe pop-up menu on click
+  // — per direct spec, works regardless of the currently selected tool
+  // (same as the Mound/Lab above), except Demolish (already returned above)
+  // and a genuine drag gesture (already returned at the top of this
+  // handler).
+  const recipeBuildingKey = getRecipeBuildingKeyAt(state, world.x, world.y);
+  if (recipeBuildingKey) { openRecipeMenu(state, recipeBuildingKey); return; }
   if (effectiveTool === 'food') {
     const reason = trySpawnFood(state, world.x, world.y);
     if (reason === 'no_money') flashMoneyInsufficient(state);
@@ -784,6 +803,7 @@ input.keydownHandlers.push((e) => {
     // merge tool back to Food. A no-op beyond that if none of those apply
     // (Food or a fish selection stay armed).
     if (isMoundMenuOpen()) { closeMoundMenu(); return; }
+    if (isRecipeMenuOpen()) { closeRecipeMenu(); return; }
     if (isLabPurchaseModalOpen()) { closeLabPurchaseModal(); return; }
     if (isLabMenuOpen()) { closeLabMenu(); return; }
     if (isFanAimingActive()) {
@@ -853,22 +873,23 @@ input.keydownHandlers.push((e) => {
       break;
     }
     case 'KeyN': { // force-crack the Mound to the next real tier, free
-      // Previously pre-set moundTeased/fanUnlockPurchased/autoFeederUnlockPurchased
-      // to true and called crackMound() once — but crackMound's own grant
-      // branches are each gated on the matching flag still being FALSE
+      // Previously pre-set moundTeased/fanUnlockPurchased to true and called
+      // crackMound() once — but crackMound's own grant branches are each
+      // gated on the matching flag still being FALSE
       // (`!state.level.fanUnlockPurchased`, etc.), so forcing them true
       // first made every one of those branches skip itself, and crackMound
       // fell straight through to a bare tier increment with nothing
-      // granted. That silently ate the Rudimentary Fan/Auto-Feeder grants
-      // every time this cheat was used — a real bug, not just a testing
-      // quirk, since it made the debug cheat lie about what a real
-      // playthrough actually unlocks. Fixed by calling the REAL
-      // crackMound() repeatedly (topping up money before each call so
-      // affordability is never the blocker) until the tier genuinely
-      // advances — this walks through the tease/Fan-grant/Auto-Feeder-grant
+      // granted. That silently ate the Rudimentary Fan grant every time this
+      // cheat was used — a real bug, not just a testing quirk, since it made
+      // the debug cheat lie about what a real playthrough actually unlocks.
+      // Fixed by calling the REAL crackMound() repeatedly (topping up money
+      // before each call so affordability is never the blocker) until the
+      // tier genuinely advances — this walks through the tease/Fan-grant
       // sub-steps for real, exactly like a player clicking the Mound
       // several times would, with zero duplicated knowledge of what each
-      // step grants.
+      // step grants. (The old "Tier 2.5" Auto-Feeder-unlock sub-step this
+      // comment used to also mention is gone entirely, along with the
+      // Auto-Feeder — see Mound.js's getMoundNextCost/crackMound.)
       const startTier = state.level.tier;
       let guard = 0;
       while (state.level.tier === startTier && state.level.tier < MOUND_MAX_TIER && guard < 10) {
@@ -1571,7 +1592,55 @@ function render() {
       continue;
     }
 
-    const itemColor = ITEM_FLAT_COLOR_BY_TYPE[item.type] || getCoinColor(item.value);
+    if (item.type === 'coin' && getCoinTier(item.value).maxValue === Infinity) {
+      // Diamond tier — a faceted radial-gradient gem plus cut-angle facet
+      // lines and a bright sparkle highlight, per direct request ("make the
+      // diamond colored coins... look more like a circular gem than a
+      // coin") instead of the flat single-color fill every other coin tier
+      // gets below.
+      const gemGradient = ctx.createRadialGradient(
+        pos.x - item.radius * 0.3, pos.y - item.radius * 0.3, item.radius * 0.1,
+        pos.x, pos.y, item.radius
+      );
+      gemGradient.addColorStop(0, DIAMOND_GEM_COLOR_CORE);
+      gemGradient.addColorStop(1, DIAMOND_GEM_COLOR_EDGE);
+      ctx.beginPath();
+      ctx.fillStyle = gemGradient;
+      ctx.arc(pos.x, pos.y, item.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < 3; i++) {
+        const angle = (i / 3) * Math.PI + Math.PI / 6;
+        ctx.beginPath();
+        ctx.moveTo(pos.x + Math.cos(angle) * item.radius, pos.y + Math.sin(angle) * item.radius);
+        ctx.lineTo(pos.x - Math.cos(angle) * item.radius, pos.y - Math.sin(angle) * item.radius);
+        ctx.stroke();
+      }
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
+      ctx.lineWidth = 1.2;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, item.radius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+      ctx.beginPath();
+      ctx.arc(pos.x - item.radius * 0.32, pos.y - item.radius * 0.32, item.radius * 0.24, 0, Math.PI * 2);
+      ctx.fill();
+      continue;
+    }
+
+    let itemColor = ITEM_FLAT_COLOR_BY_TYPE[item.type] || getCoinColor(item.value);
+    // A "stale" gray phase, per direct spec — once a Food pellet's own
+    // stationary timer crosses FOOD_STALE_FRACTION (75%) of the way to
+    // turning into Waste, tint it toward FOOD_STALE_COLOR. Reading straight
+    // off the live timer (which Entities.js's updateFood already resets to 0
+    // the instant the pellet genuinely moves) means "the color resets" the
+    // moment it's dragged/nudged falls out for free, with no extra state.
+    if (item.type === 'food') {
+      const rawFrac = (item.stationaryTimer || 0) / FOOD_STATIONARY_TO_WASTE_MS;
+      const staleT = Math.max(0, Math.min(1, (rawFrac - FOOD_STALE_FRACTION) / (1 - FOOD_STALE_FRACTION)));
+      if (staleT > 0) itemColor = lerpRgbToString(hexToRgb(FOOD_COLOR), hexToRgb(FOOD_STALE_COLOR), staleT);
+    }
     ctx.beginPath();
     ctx.fillStyle = itemColor;
     ctx.arc(pos.x, pos.y, item.radius, 0, Math.PI * 2);

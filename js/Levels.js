@@ -55,25 +55,24 @@ export function loadLevel(state, levelId) {
     scienceGreen: 0, // Green Science's own separate reserve — the Bio-Combuster's upgraded output, banked via Entities.js's bankScienceGreen (click or Collector-routed, same as blue Science). Never mixed with `science` above — the Bio-Reactor's scienceGreenCost purchases and the Bio-Combuster's upgraded recipe both read/spend this one specifically.
 
     cleanliness: 100, // 0-100, clamped — real now (Phase 3): Entities.js/Grid.js adjust it whenever Waste spawns or gets cleaned up, see Config.js's CLEANLINESS_* comment. No gameplay effect from a low value yet (fish stress/toxicity is still unbuilt) — this is the live-tracked value + HUD feedback half of the system
-    // Power is NOT a battery — Eels (and now the Bio-Reactor building, a
+    // Power is NOT a battery — Eels (and now the Power Plant building, a
     // much bigger lump-sum source) generate MW that has to be used the
     // instant it's generated or it's gone forever, recalculated fresh every
     // real second rather than accumulating in a growing pool. See
     // CLAUDE.md's electricity section and main.js's once-per-second power
     // sampling block for the full mechanism.
-    powerGenAccumMw: 0, // MW generated so far THIS in-progress real second — see Entities.js's updateFish GENERATOR branch and Grid.js's updateBuildings Bio-Reactor branch. Read and reset to 0 once per real second by main.js's update()
-    powerEfficiency: 1, // 0-1 fraction, recomputed once per real second from that second's generated-vs-consumed MW (Grid.js's computePowerEfficiency) — applied as a live throughput multiplier to every power-costing building (Fan force, Processor/Auto-Feeder progress, Turret fire rate). 0 supply against real demand drives this to 0, genuinely halting those buildings — see Grid.js's applyPowerEfficiency
+    powerGenAccumMw: 0, // MW generated so far THIS in-progress real second — see Entities.js's updateFish GENERATOR branch and Grid.js's updateBuildings Power Plant branch. Read and reset to 0 once per real second by main.js's update()
+    powerEfficiency: 1, // 0-1 fraction, recomputed once per real second from that second's generated-vs-consumed MW (Grid.js's computePowerEfficiency) — applied as a live throughput multiplier to every power-costing building (Fan force, Processor/Refinery/Manufacturer progress, Turret fire rate). 0 supply against real demand drives this to 0, genuinely halting those buildings — see Grid.js's applyPowerEfficiency
     powerHistory: [], // rolling { demand, supply } samples, one per real sim-second, capped at POWER_HISTORY_MAX — see main.js's update(). supply is now that second's actual generated MW, not a running total, so this can (and should) go up AND down frame to frame, not just up — the HUD/graph both read this array unchanged
     entities: [],
     items: [],
     floatingTexts: [], // transient "+$N" pickup readouts — not physics items, never touched by Grid.js routing
     grid: createGrid(), // 2D tile array, all TILE_EMPTY — see Grid.js
-    buildingData: {}, // sparse "row,col" -> { type, angle, ... } map for buildings that need per-instance data the grid's bare type-id strings can't hold (Fans' aim angle, Auto-Feeder's absorb/process state) — see Grid.js's placeTile/removeTile
+    buildingData: {}, // sparse "row,col" -> { type, angle, ... } map for buildings that need per-instance data the grid's bare type-id strings can't hold (Fans' aim angle, Refinery/Manufacturer/Power Plant's absorb/process/recipe state) — see Grid.js's placeTile/removeTile
     gridStats: { itemsRoutedTotal: 0 }, // lifetime count of items consumed by a Collector tile, for the debug overlay's throughput readout
     tier: 1, // 1-5, Mound-driven progression — see Mound.js and CLAUDE.md's "Tier Progression & The Mound"; level-scoped like everything else here, even though the meta-unlocks a previous crack granted stay permanent
     moundTeased: false, // has the Mound's first "throw money" attempt already happened this level? — see Mound.js's crackMound/getMoundNextCost. A pure no-op joke again — the Rudimentary Fan moved to its own paid "Tier 1.75" step below, per direct request
     fanUnlockPurchased: false, // "Tier 1.75" — the $500 step (after the tease, before the real Tier 1->2 crack) that grants ONLY the Rudimentary Fan — see Mound.js's crackMound/getMoundNextCost and Config.js's FAN_UNLOCK_COST
-    autoFeederUnlockPurchased: false, // "Tier 2.5" — the $2500 step (after the real Tier 1->2 crack, before the real Tier 2->3 crack) that grants ONLY the Auto-Feeder — see Config.js's AUTO_FEEDER_UNLOCK_COST
     notifications: [{ id: 1, text: WELCOME_MESSAGE, elapsed: 0 }], // rolling log for UI.js's ticker — { id, text, elapsed }, capped at NOTIFICATION_LOG_MAX. Seeded with the welcome message as a real entry (not a UI fallback) so it survives in the scrollback log
     tankPoints: { total: 0, available: 0 }, // earned by Entities.js on fish adult-growth transitions, spent in UI.js's Tank Upgrades panel — see CLAUDE.md's "Tank Points & Tank Upgrades"
     upgrades: { foodQuality: 0, fishMovement: 0, coinCapLevel: 0, scienceCapLevel: 0 }, // purchased Tank Upgrade levels, 0 = not yet bought; read live by Entities.js, not baked into fish/food at creation time. Fish Merging is no longer gated by a Tank Upgrade at all — see Entities.js's isCombinableFish. coinCapLevel is a Tank Upgrade (COIN_CAP_UPGRADE_COSTS); scienceCapLevel is bought in the Science Lab instead (SCIENCE_CAP_UPGRADE_SCIENCE_COSTS/_GOLD_COSTS) but lives here alongside it since both index the same way into their own *_CAP_BY_LEVEL table. foodCapacity retired entirely — see Config.js's FOOD_STATIONARY_TO_WASTE_MS

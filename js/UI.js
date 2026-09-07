@@ -25,11 +25,16 @@ import {
   CLEANLINESS_COLOR_CLEAN,
   CLEANLINESS_COLOR_DIRTY,
   PROCESSOR_STATS,
-  AUTO_FEEDER_STATS,
   REFINERY_STATS,
-  BIO_FEEDER_STATS,
-  BIO_COMBUSTER_STATS,
-  BIO_REACTOR_STATS,
+  ALIEN_DNA_REFINERY_TIME_MULTIPLIER,
+  MANUFACTURER_RECIPES,
+  MANUFACTURER_RECIPE_LIST,
+  MANUFACTURER_ITEM_PROCESS_MS,
+  MANUFACTURER_STATS,
+  POWER_PLANT_RECIPES,
+  POWER_PLANT_RECIPE_LIST,
+  TILE_MANUFACTURER,
+  TILE_POWER_PLANT,
   POWER_HISTORY_MAX,
   SCIENCE_LAB_UPGRADES,
   SCIENCE_LAB_UPGRADE_LIST,
@@ -55,7 +60,7 @@ import {
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings, loadLevel } from './Levels.js';
 import { getFishPurchaseCost, effectiveCoinCapacity, effectiveScienceCapacity, countTankItemsByType, hasAnyMergeOpportunity, resolveMergeTutorialPair } from './Entities.js';
-import { getTile, worldToTile, getBuildingCost, FAN_STATS, hasAnyBuildingPlaced, findNearestWasteTurretAndWaste } from './Grid.js';
+import { getTile, worldToTile, getBuildingCost, FAN_STATS, hasAnyBuildingPlaced, findNearestWasteTurretAndWaste, getRecipeBuildingKeyAt } from './Grid.js';
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
@@ -86,6 +91,10 @@ let notificationReminderTimer = null;
 let moundMenuOpen = false;
 let moundMenuClosing = false; // true while the shrink-back transition is still playing, before it's actually hidden
 let moundMenuCloseTimer = null;
+let recipeMenuOpen = false;
+let recipeMenuClosing = false;
+let recipeMenuCloseTimer = null;
+let recipeMenuTileKey = null; // "row,col" key of the Manufacturer/Power Plant tile this popup is currently open for
 let labMenuOpen = false;
 let labMenuClosing = false;
 let labMenuCloseTimer = null;
@@ -237,6 +246,11 @@ export function initUI(state) {
     moundMenu: document.getElementById('mound-menu'),
     moundThrowBtn: document.getElementById('mound-throw-btn'),
     moundCancelBtn: document.getElementById('mound-cancel-btn'),
+    recipeOverlay: document.getElementById('recipe-overlay'),
+    recipeMenuAnchor: document.getElementById('recipe-menu-anchor'),
+    recipeMenu: document.getElementById('recipe-menu'),
+    recipeMenuTitle: document.getElementById('recipe-menu-title'),
+    recipeMenuOptions: document.getElementById('recipe-menu-options'),
     labOverlay: document.getElementById('lab-overlay'),
     labModal: document.getElementById('lab-modal'),
     labScienceReadout: document.getElementById('lab-science-readout'),
@@ -275,6 +289,9 @@ export function initUI(state) {
   els.moundCancelBtn.addEventListener('click', () => closeMoundMenu());
   els.moundOverlay.addEventListener('click', (e) => {
     if (e.target === els.moundOverlay) closeMoundMenu(); // clicked the backdrop, not the card
+  });
+  els.recipeOverlay.addEventListener('click', (e) => {
+    if (e.target === els.recipeOverlay) closeRecipeMenu(); // clicked the backdrop, not the card — per direct spec ("clicking anywhere else will close the pop-up")
   });
 
   // Gene-Splicing moved to the Tank Upgrades panel (see buildTankPanel) — no
@@ -540,6 +557,124 @@ export function closeMoundMenu() {
 // than opening the pause menu on top of it.
 export function isMoundMenuOpen() {
   return moundMenuOpen;
+}
+
+// ---- Manufacturer/Power Plant recipe pop-up ----
+// Per direct spec: clicking a placed Manufacturer or Power Plant tile
+// "quickly fl[ies] out a small pop-up menu that looks like a miniature
+// shop," one icon per recipe with a small caption underneath, toggle-able,
+// closing on any click elsewhere. Opened by main.js's click handler via
+// Grid.js's getRecipeBuildingKeyAt; `tileKey` is the "row,col" buildingData
+// key of the clicked tile. Doesn't freeze the sim — same lightweight,
+// non-blocking popup precedent the Mound's own menu already set. Reuses
+// that exact fly-out-of-its-anchor mechanic (see openMoundMenu above).
+const RECIPE_MENU_TRANSITION_MS = 220; // must match #recipe-menu's CSS transition duration
+
+export function openRecipeMenu(state, tileKey) {
+  recipeMenuOpen = true;
+  recipeMenuClosing = false;
+  recipeMenuTileKey = tileKey;
+  if (recipeMenuCloseTimer !== null) { clearTimeout(recipeMenuCloseTimer); recipeMenuCloseTimer = null; }
+  closeSidePanels(state); // keep the Shop/Tank Upgrades panel from sitting open behind this, same as the Lab
+  els.recipeOverlay.classList.remove('hidden');
+  refreshRecipeMenu(state);
+  updateRecipeMenuPosition(state); // position it correctly before the reveal so it doesn't flash at (0,0) first
+
+  els.recipeMenu.classList.add('recipe-menu-closed');
+  void els.recipeMenu.offsetWidth; // forced reflow — same retrigger trick every other one-shot transition in this file uses
+  els.recipeMenu.classList.remove('recipe-menu-closed');
+  playPanelOpen();
+}
+
+export function closeRecipeMenu() {
+  if (!recipeMenuOpen) return;
+  recipeMenuOpen = false;
+  recipeMenuClosing = true;
+  recipeMenuTileKey = null;
+  els.recipeMenu.classList.add('recipe-menu-closed');
+  recipeMenuCloseTimer = setTimeout(() => {
+    els.recipeOverlay.classList.add('hidden');
+    recipeMenuClosing = false;
+    recipeMenuCloseTimer = null;
+  }, RECIPE_MENU_TRANSITION_MS);
+  playPanelClose();
+}
+
+// Read by main.js's Escape handler, same reason isMoundMenuOpen is.
+export function isRecipeMenuOpen() {
+  return recipeMenuOpen;
+}
+
+// Tracks the clicked tile's live on-screen position so the popup stays
+// glued to it even if the player pans the camera while it's open.
+function updateRecipeMenuPosition(state) {
+  if (!recipeMenuTileKey) return;
+  const [row, col] = recipeMenuTileKey.split(',').map(Number);
+  const worldX = col * TILE_SIZE + TILE_SIZE / 2;
+  const worldY = row * TILE_SIZE;
+  const screen = worldToScreen(worldX, worldY, state.camera);
+  els.recipeMenuAnchor.style.left = `${screen.x}px`;
+  els.recipeMenuAnchor.style.top = `${screen.y - MOUND_MENU_GAP_PX}px`;
+}
+
+// Rebuilds the icon row for whichever building (Manufacturer or Power
+// Plant) sits at recipeMenuTileKey — called on open, and every frame it's
+// open (from updateHUD) so a live recipe change/lock-state (a Lab purchase
+// mid-decision) reflects immediately. Closes the popup outright if the
+// underlying tile is gone (demolished mid-decision).
+function refreshRecipeMenu(state) {
+  if (!recipeMenuTileKey) return;
+  const data = state.level.buildingData[recipeMenuTileKey];
+  if (!data) { closeRecipeMenu(); return; }
+  const isManufacturer = data.type === TILE_MANUFACTURER;
+  const recipeList = isManufacturer ? MANUFACTURER_RECIPE_LIST : POWER_PLANT_RECIPE_LIST;
+  els.recipeMenuTitle.textContent = isManufacturer ? 'Manufacturer Recipe' : 'Power Plant Fuel';
+  els.recipeMenuOptions.innerHTML = '';
+  for (const recipe of recipeList) {
+    const unlocked = recipe.labNodeId === null || state.meta.labUpgradesPurchased.includes(recipe.labNodeId);
+    const optionEl = document.createElement('div');
+    optionEl.className = 'recipe-option' + (data.recipeId === recipe.id ? ' selected' : '') + (unlocked ? '' : ' locked');
+    optionEl.style.setProperty('--recipe-color', recipe.color);
+    const icon = document.createElement('div');
+    icon.className = 'recipe-option-icon';
+    icon.textContent = recipe.icon;
+    const name = document.createElement('div');
+    name.className = 'recipe-option-name';
+    name.textContent = unlocked ? recipe.name : `🔒 ${recipe.name}`;
+    const desc = document.createElement('div');
+    desc.className = 'recipe-option-desc';
+    desc.textContent = recipe.description;
+    optionEl.appendChild(icon);
+    optionEl.appendChild(name);
+    optionEl.appendChild(desc);
+    if (unlocked) {
+      optionEl.addEventListener('click', () => toggleBuildingRecipe(state, recipeMenuTileKey, recipe.id));
+    }
+    els.recipeMenuOptions.appendChild(optionEl);
+  }
+}
+
+// Clicking an already-selected recipe icon clears it back to "nothing," per
+// direct spec ("toggle-able... could be set back to nothing, but never
+// multiple recipes"). A fresh pick (or a clear) always resets whatever was
+// already absorbed/mid-process — ingredients only make sense in the
+// context of the recipe that wanted them.
+function toggleBuildingRecipe(state, tileKey, recipeId) {
+  const data = state.level.buildingData[tileKey];
+  if (!data) return;
+  const next = data.recipeId === recipeId ? null : recipeId;
+  data.recipeId = next;
+  if (data.type === TILE_MANUFACTURER) {
+    data.pendingInputs = next ? [...MANUFACTURER_RECIPES[next].inputs] : [];
+    data.processing = false;
+    data.currentItemType = null;
+    data.progressMs = 0;
+    data.firstItemDone = false;
+  } else {
+    data.fueled = false;
+    data.progressMs = 0;
+  }
+  refreshRecipeMenu(state);
 }
 
 // Tracks the Mound's live on-screen position so the popup stays glued to it
@@ -1352,12 +1487,19 @@ function buildFamilyButton(state, familyId, memberIds) {
     // which tier this slot happened to be cycled to — force it back to the
     // family's lowest (first-unlocked) tier rather than whatever the click
     // above just landed on.
-    if (familyId === 'turret' && state.level.tutorialFlow?.id === 'postalien' && state.level.tutorialFlow.step === 'turret') {
+    const isPostAlienTurretStep = familyId === 'turret' && state.level.tutorialFlow?.id === 'postalien' && state.level.tutorialFlow.step === 'turret';
+    if (isPostAlienTurretStep) {
       familySelectedTier[familyId] = memberIds[0];
     }
     refreshFamilyButton(state, familyId); // sync dataset.tool to the (possibly just-cycled) tier before selecting it
     selectBuildingForPreview(state, BUILDING_TYPES[familySelectedTier[familyId]]);
     if (familyId === 'turret') advanceTutorialFlow(state, 'postalien', 'turret');
+    // Per direct request ("when you select the turret just in the turret
+    // tutorial, it automatically closes the shop first") — the shop no
+    // longer needs to stay open for this tutorial's placement spot now that
+    // it's moved to the middle of the city (see POST_ALIEN_TURRET_SPOT),
+    // where it would otherwise sit right behind the fly-out panel.
+    if (isPostAlienTurretStep) closeSidePanels(state);
   });
 
   refreshFamilyButton(state, familyId);
@@ -1691,13 +1833,6 @@ function buildingStatsHtml(buildingId) {
       `<div class="building-stat">💩 Waste <b>${p.wasteEveryMs / 1000}s</b> · ⚡ <b>${p.powerCostPerSec}</b> mw/s</div>`
     );
   }
-  const a = AUTO_FEEDER_STATS[buildingId];
-  if (a) {
-    return (
-      `<div class="building-stat">⏱️ <b>${a.wasteProcessMs / 1000}s</b>/load · 💩 <b>${a.wasteRequired}</b>/Food</div>` +
-      `<div class="building-stat">⚡ <b>${a.powerCostPerSec}</b> mw/sec</div>`
-    );
-  }
   const f = FAN_STATS[buildingId];
   if (f) {
     return `<div class="building-stat">📏 <b>${f.maxRange}px</b> · ⚡ <b>${f.powerCost}</b> mw/sec</div>`;
@@ -1723,25 +1858,24 @@ function buildingStatsHtml(buildingId) {
   }
   const r = REFINERY_STATS[buildingId];
   if (r) {
-    return `<div class="building-stat">⚗️ <b>${r.processMs / 1000}s</b>/item · 🗑️➜🍖 or 🧬➜🟤</div>`;
-  }
-  const bf = BIO_FEEDER_STATS[buildingId];
-  if (bf) {
+    const dnaS = (r.foodProcessMs * ALIEN_DNA_REFINERY_TIME_MULTIPLIER) / 1000;
     return (
-      `<div class="building-stat">🍖+🟤 ➜ 🩷 · ⏱️ <b>${bf.processMs / 1000}s</b></div>` +
-      `<div class="building-stat">⚡ <b>${bf.powerCostPerSec}</b> mw/sec</div>`
+      `<div class="building-stat">🗑️➜🍖 <b>${r.foodProcessMs / 1000}s</b> · 🧬➜🟤 <b>${dnaS}s</b></div>` +
+      `<div class="building-stat">⚡ <b>${r.powerCostPerSec}</b> mw/sec</div>`
     );
   }
-  const bc = BIO_COMBUSTER_STATS[buildingId];
-  if (bc) {
+  const m = MANUFACTURER_STATS[buildingId];
+  if (m) {
     return (
-      `<div class="building-stat">🟤+🗑️➜🔬 or 🟤+🔬➜🟢 · ⏱️ <b>${bc.processMs / 1000}s</b></div>` +
-      `<div class="building-stat">⚡ <b>${bc.powerCostPerSec}</b> mw/sec</div>`
+      `<div class="building-stat">🗑️ 2s · 🍖 4s · 🟤 8s per item</div>` +
+      `<div class="building-stat">Pick a recipe once placed · ⚡ <b>${m.powerCostPerSec}</b> mw/sec</div>`
     );
   }
-  const br = BIO_REACTOR_STATS[buildingId];
-  if (br) {
-    return `<div class="building-stat">🟢 or 🟤 ➜ ⚡ <b>${br.powerOutputMw}</b> mw · ⏱️ <b>${br.processMs / 1000}s</b></div>`;
+  if (buildingId === TILE_POWER_PLANT) {
+    return (
+      `<div class="building-stat">🍖➜20mw/15s · 🟤➜40mw/20s · 🔬➜100mw/30s</div>` +
+      `<div class="building-stat">Pick a fuel recipe once placed</div>`
+    );
   }
   return '';
 }
@@ -2106,6 +2240,16 @@ export function updateHUD(state) {
   if (!state.ui.shopCollapsed) refreshShopPrices(state);
   if (moundMenuOpen) refreshMoundThrowButton(state);
   if (moundMenuOpen || moundMenuClosing) updateMoundMenuPosition(state); // keeps tracking through the shrink-back so it doesn't jump right as it starts closing
+  // The option list's DOM is deliberately NOT rebuilt every frame like the
+  // Mound's own throw-button refresh — refreshRecipeMenu tears down and
+  // rebuilds the whole thing (innerHTML = ''), and doing that every single
+  // frame while open made a real click's target element get detached
+  // mid-click. It's rebuilt once on open and once per toggle click instead
+  // (see openRecipeMenu/toggleBuildingRecipe) — those are the only two
+  // moments its content can actually change. This lighter check just closes
+  // the popup if the underlying tile gets demolished out from under it.
+  if (recipeMenuOpen && !state.level.buildingData[recipeMenuTileKey]) closeRecipeMenu();
+  if (recipeMenuOpen || recipeMenuClosing) updateRecipeMenuPosition(state);
   if (labMenuOpen) refreshLabTree(state); // no position-tracking needed any more — it's a centered modal now, not anchored to the Mound's screen position
   if (!state.ui.tankPanelCollapsed) refreshTankPanel(state);
 
@@ -2271,23 +2415,15 @@ function tutorialCircleForDom(el, padding = 12) {
 function startTutorialFishSpotWorld(state) {
   return { x: WORLD_W / 2, y: Math.min(state.camera.y + 100, SEABED_FLOOR_Y - 50) };
 }
-// World point near (but not AT) the left edge of the world's absolute
-// bottom row — any empty city tile is a legal Turret placement now (see
-// Grid.js's canPlaceTile — buildings no longer need to anchor to a Platform
-// or the seabed floor at all), this particular spot is just a fine, always-
-// empty-at-this-point-in-the-tutorial one — "the bottom of the tank, just
-// left of and above the shop icon" per direct request. 0.12 * WORLD_W (not a
-// small fixed px offset)
-// deliberately stays clear of two things: the camera's own horizontal
-// centering offset (camera.x = (WORLD_W - viewW) / 2 is often 100+ world px,
-// since the world is usually a little wider than the viewport — see
-// CLAUDE.md's world-shrink note — so a spot within that offset would render
-// OFF-SCREEN to the left entirely), and — since the Shop panel is meant to
-// stay open through this step ("visible with the shop open") — the panel's
-// own fly-out box, which grows upward from its (horizontally-centered-ish)
-// toggle button and can cover a real chunk of the lower-middle screen; a
-// point safely toward the left edge stays clear of it regardless.
-const POST_ALIEN_TURRET_SPOT = { x: WORLD_W * 0.12, y: WORLD_H - TILE_SIZE / 2 };
+// Dead center of the city, per direct request ("the placement spot for the
+// turret in the turret tutorial should be in the middle of the city"). This
+// used to sit off toward the left edge specifically to stay clear of the
+// Shop panel's own fly-out box, back when the Shop was meant to stay open
+// through this step — now that selecting the Waste Turret during this exact
+// tutorial step auto-closes the Shop (see the turret family button's click
+// handler above), there's nothing left to stay clear of, so the spot can be
+// the genuinely obvious, centered one.
+const POST_ALIEN_TURRET_SPOT = { x: WORLD_W / 2, y: WORLD_H - TILE_SIZE / 2 };
 
 // Shared by the post-alien flow's final step AND the standalone 'wastedrag'
 // flow below (used when a Waste Turret already existed before the tutorial

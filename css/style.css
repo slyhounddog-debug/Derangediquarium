@@ -1176,6 +1176,58 @@ html, body {
 }
 #mound-menu .pause-btn { padding: 9px; font-size: 12px; margin-bottom: 0; }
 
+/* Manufacturer/Power Plant recipe pop-up — a small "miniature shop" menu,
+   per direct request, opened by clicking either building on the canvas.
+   Same fly-out-of-its-anchor mechanic as #mound-overlay/#mound-menu above
+   (no dimming backdrop, a transparent full-viewport click-catcher so a click
+   outside the card closes it), just wider to fit up to 3 recipe icons in a
+   row side by side. UI.js's updateRecipeMenuPosition tracks the clicked
+   tile's live screen position every frame it's open. */
+#recipe-overlay {
+  position: fixed; inset: 0;
+  z-index: 190;
+}
+#recipe-overlay.hidden { display: none; }
+
+#recipe-menu-anchor {
+  position: fixed;
+  transform: translate(-50%, -100%);
+}
+
+#recipe-menu {
+  width: 300px;
+  background: #fff8f0;
+  color: #6b4c6b;
+  border-radius: 21px;
+  padding: 18px 16px;
+  box-shadow: 0 14px 36px rgba(107, 76, 107, 0.4);
+  text-align: center;
+  transform-origin: 50% 100%;
+  transform: scale(1);
+  opacity: 1;
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.18s ease;
+}
+#recipe-menu.recipe-menu-closed {
+  transform: scale(0.05);
+  opacity: 0;
+}
+#recipe-menu-title { font-size: 15px; font-weight: 800; color: #c25f8f; margin-bottom: 12px; }
+#recipe-menu-options { display: flex; gap: 10px; justify-content: center; }
+.recipe-option {
+  flex: 1;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  background: #f3e9dd; border: 2px solid transparent; border-radius: 14px;
+  padding: 10px 6px;
+  cursor: pointer;
+  transition: transform 0.1s ease, border-color 0.1s ease, background 0.1s ease;
+}
+.recipe-option:hover { transform: scale(1.04); }
+.recipe-option.selected { border-color: var(--recipe-color, #8fe0b8); background: #eafaf1; }
+.recipe-option.locked { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
+.recipe-option-icon { font-size: 26px; }
+.recipe-option-name { font-size: 11px; font-weight: 800; }
+.recipe-option-desc { font-size: 9.5px; color: #8a7a8a; line-height: 1.25; }
+
 /* Science Lab: a real branching tech tree now, per direct request — a
    centered dimmed-backdrop modal (same pattern #pause-overlay already
    uses) instead of the small Mound-anchored flyout every other popup here

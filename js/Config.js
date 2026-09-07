@@ -89,9 +89,10 @@ export const TILE_COLLECTOR_ADVANCED = 'collector_advanced'; // solid — Advanc
 export const TILE_FAN_T2 = 'fan_t2'; // solid — Rudimentary Fan (unlocked at the Mound's Tier 1.75, free, short reach/low force)
 export const TILE_FAN_T3 = 'fan_t3'; // solid — Electric Fan (Tier 3, draws power, medium reach/force)
 export const TILE_FAN_T4 = 'fan_t4'; // solid — Turbo Fan (Tier 4, draws power, long reach/extreme force)
-export const TILE_AUTO_FEEDER = 'auto_feeder'; // solid — absorbs Waste pushed into its intake side, dispenses Food from the opposite side
-export const TILE_AUTO_FEEDER_ELECTRIC = 'auto_feeder_electric'; // solid — Electric Auto-Feeder — see AUTO_FEEDER_STATS
-export const TILE_AUTO_FEEDER_ADVANCED = 'auto_feeder_advanced'; // solid — Advanced Auto-Feeder, bought in the Science Lab — see AUTO_FEEDER_STATS
+// Auto-Feeder — REMOVED, per direct request ("have the refinery completely
+// replace the auto-feeder"). The Refinery's own 4-tier family (below) now
+// fills the exact "Waste -> Food" role the Auto-Feeder used to, at every
+// tier the Auto-Feeder used to have plus a new top Bio-Refinery tier.
 // ---- Turrets (Alien Invasion) ----
 // Placed exactly like a Collector or Auto-Feeder (same simple single-click
 // flow, same placement rule — see canPlaceTile, nothing turret-specific
@@ -116,10 +117,30 @@ export const TILE_TURRET_ADVANCED = 'turret_advanced'; // solid — Science Lab 
 // alternative to the Auto-Feeder; Alien DNA->Biomass) are both usable well
 // before the Science Lab exists, so there's no reason to gate it behind the
 // Lab too. The other three are Science Lab nodes — see SCIENCE_LAB_UPGRADES.
-export const TILE_REFINERY = 'refinery'; // solid — single input, 2 possible recipes (Waste->Food, Alien DNA->Biomass); see Grid.js's updateBuildings
-export const TILE_BIO_FEEDER = 'bio_feeder'; // solid — Science Lab purchase (requires the Electric Auto-Feeder); 2-ingredient recipe, Food+Biomass->Mutagen Paste
-export const TILE_BIO_COMBUSTER = 'bio_combuster'; // solid — Science Lab purchase (requires the Electric Processor); 2-ingredient recipe, locks onto a recipe from its first-absorbed ingredient
-export const TILE_BIO_REACTOR = 'bio_reactor'; // solid — Science Lab purchase (requires the Green Science tech); consumes Green Science or Biomass for a large power dump into the grid, not an item router at all
+// Refinery family — 4 tiers now (base/Electric/Advanced/Bio), per direct
+// request replacing the Auto-Feeder entirely. Every tier: single input, 2
+// possible recipes (Waste->Food, Alien DNA->Biomass, DNA taking
+// ALIEN_DNA_REFINERY_TIME_MULTIPLIER longer than the Waste recipe) — see
+// Grid.js's updateBuildings and REFINERY_STATS below. The base tier is
+// granted at the real Tier 1->2 Mound crack (unchanged); Electric/Advanced/
+// Bio are Science Lab purchases (see SCIENCE_LAB_UPGRADES).
+export const TILE_REFINERY = 'refinery';
+export const TILE_REFINERY_ELECTRIC = 'refinery_electric';
+export const TILE_REFINERY_ADVANCED = 'refinery_advanced';
+export const TILE_REFINERY_BIO = 'refinery_bio';
+// Manufacturer — replaces the old single-purpose Bio-Feeder/Bio-Combuster
+// buildings with ONE building whose behavior is chosen after placement via a
+// recipe pop-up menu (see UI.js's openRecipeMenu) — per direct request,
+// "combine the bio-feeder and the bio-combustor into the same building...
+// in the form of recipes." Does nothing and draws no power until a recipe is
+// picked. See MANUFACTURER_RECIPES/MANUFACTURER_ITEM_PROCESS_MS below.
+export const TILE_MANUFACTURER = 'manufacturer';
+// Power Plant — renamed from Bio-Reactor, per direct request, and given the
+// same recipe-pop-up makeover as the Manufacturer. Consumes one fuel item
+// (Food/Biomass/Blue Science, whichever recipe is selected) for a flat power
+// dump into the grid — not an item router at all. See POWER_PLANT_RECIPES
+// below.
+export const TILE_POWER_PLANT = 'power_plant';
 
 // Fish stay clear of the outer edges of the water column when spawning —
 // both the random spawn position on a shop purchase in UI.js, and (for
@@ -246,21 +267,14 @@ export const FAN_T4_MAX_FORCE = 440; // Turbo Fan — see the hover-math comment
 export const FAN_T4_MAX_RANGE = 640; // px — 20 tiles, unchanged per direct request ("the same range, but less powerful")
 export const FAN_T4_POWER_COST = 6; // doubled from 3 per direct request ("make all the buildings take twice as much electricity as they do right now")
 
-// ---- Auto-Feeder ----
-// No longer aimed at all, per direct request ("let's remove the arrows and
-// the need for a specific input side") — Grid.js's updateBuildings absorbs
-// any Waste item within AUTO_FEEDER_INTAKE_RADIUS of the tile's own CENTER,
-// from any side, as long as it isn't already mid-hold on something else (see
-// isNearBuildingCenter, which replaced the old angle-gated isOnIntakeSide
-// entirely). After however many completed AUTO_FEEDER_STATS[type].wasteProcessMs
-// holds that tier's wasteRequired calls for, it dispenses one Food item at a
-// fixed point above the tile's top edge (AUTO_FEEDER_PORT_OFFSET_FRACTION of
-// a tile out from center, now always straight up rather than angle-derived —
-// "make it so the collectors and auto-feeders output on top, by default")
-// with zero velocity — a Fan can then pick it back up and launch it into the
-// water column, same as any other item.
-export const AUTO_FEEDER_INTAKE_RADIUS = TILE_SIZE * 0.6;
-export const AUTO_FEEDER_PORT_OFFSET_FRACTION = 0.5; // fraction of TILE_SIZE — how far above the tile's center the fixed output point sits
+// ---- Shared building output point ----
+// Every non-Fan, non-Turret building that ejects a physical item (Refinery,
+// Manufacturer, and — historically — the now-removed Auto-Feeder) uses the
+// exact same fixed point: straight up from the tile's own center, this
+// fraction of a tile out — "make it so the collectors and auto-feeders
+// output on top, by default." Renamed from AUTO_FEEDER_PORT_OFFSET_FRACTION
+// now that the Auto-Feeder itself is gone (replaced by the Refinery family).
+export const BUILDING_OUTPUT_PORT_OFFSET_FRACTION = 0.5; // fraction of TILE_SIZE — how far above the tile's center the fixed output point sits
 
 // A Collector doesn't bank an item the instant it lands any more — it visibly
 // draws it in toward the tile's center and holds it there for that tile's
@@ -362,7 +376,7 @@ export const ITEM_MASS_BY_TYPE = {
   waste: 0.5, // Class 2 — Ultra-Light (was 1)
   coin: 1.5, // Class 3 — Standard (was 3, halved per direct request)
   science: 4, science_green: 4, // Class 4 — Medium-Heavy (was 9 for science — cut so Class 5 below can sit clearly above it while science stays clearly above Class 3's coin)
-  alien_dna: 7, biomass: 7, // Class 5 — Heavy
+  alien_dna: 7, biomass: 7, bio_pellets: 7, // Class 5 — Heavy
 };
 // vx decays by this factor every tick — without damping, a single bump
 // would leave an item drifting sideways forever instead of a jostled pile
@@ -456,8 +470,19 @@ export const FOOD_COLOR = '#ffb238'; // orange — was a green (#8bc34a) close e
 // window it restarts the countdown" falls out of the tolerance check
 // directly (a Fan visibly wobbling a held pellet keeps resetting it, the
 // same as if the player nudged it themselves).
-export const FOOD_STATIONARY_TO_WASTE_MS = 20000; // doubled from 10000 per direct request ("make food take twice as long to turn to waste")
+export const FOOD_STATIONARY_TO_WASTE_MS = 30000; // 50% longer again (was 20000) per direct request ("make food take 50% longer to turn into waste")
 export const FOOD_STATIONARY_MOVE_TOLERANCE_PX = 4; // small enough to still catch real movement, large enough to ignore sub-pixel collision-resolution jitter on something genuinely resting
+// A "stale" visual phase, per direct request — once a pellet's own
+// stationaryTimer crosses this fraction of FOOD_STATIONARY_TO_WASTE_MS
+// (75%, so 22.5s into the 30s countdown), main.js's render tints it toward
+// FOOD_STALE_COLOR instead of its normal FOOD_COLOR, reading as "starting to
+// look stale." Needs no extra state of its own — stationaryTimer already
+// resets to 0 the instant the pellet moves more than
+// FOOD_STATIONARY_MOVE_TOLERANCE_PX (a Fan nudge, or the player dragging it),
+// so the gray tint reading straight off that same timer means "the color
+// resets" the moment it's moved falls out for free, per direct spec.
+export const FOOD_STALE_FRACTION = 0.75;
+export const FOOD_STALE_COLOR = '#9a9a90';
 export const COIN_RADIUS = 11; // px, base visual radius (bronze size) — 10% bigger again (was 10) per direct request ("increase the size of all the objects by 10%")
 export const COIN_CLICK_RADIUS_MULTIPLIER = 1.9; // click hit-test radius is each coin's own (tier-scaled) radius times this — 90% bigger than the coin itself (was 60%, bumped again per direct request), so a click doesn't have to be pixel-perfect (and doesn't get misread as a food-placement click on a miss). Purely a hit-test radius — the coin's actual drawn/collision size (COIN_RADIUS) is untouched. tryBankCoinAt still only ever banks the first match it finds per click and returns immediately, so an overlapping pair of these bigger radii still can't bank two coins on one click.
 export const CHEAT_GRANT_AMOUNT = 10000; // $ granted by the M debug key
@@ -473,6 +498,15 @@ export const COIN_TIERS = [
   { maxValue: 30, color: '#ffd700', sizeMultiplier: 1.10 }, // gold, 13-30, 10% bigger
   { maxValue: Infinity, color: '#b9f2ff', sizeMultiplier: 1.15 }, // diamond, 31+, 15% bigger
 ];
+// Per direct request ("make the diamond colored coins more visually unique...
+// look more like a circular gem than a coin") — main.js's item render loop
+// special-cases the diamond tier (getCoinTier(item.value).maxValue ===
+// Infinity) with a faceted radial-gradient gem render instead of the flat
+// single-color fill every other coin tier gets. Two gradient stops plus a
+// bright sparkle highlight, not a flat fill — reads as a cut gem rather than
+// a coin-shaped disc.
+export const DIAMOND_GEM_COLOR_CORE = '#eafcff';
+export const DIAMOND_GEM_COLOR_EDGE = '#7fd0e8';
 
 // ---- Waste (Phase 3 — two sources) ----
 // A third item type alongside food/coin. Spawned two ways: (1) a basic
@@ -582,6 +616,11 @@ export const MUTAGEN_PASTE_COLOR = '#e64de0'; // vivid magenta/pink — unmistak
 // protection against runaway item counts / collapsing framerate.
 export const ALIEN_DNA_MAX_ON_SCREEN = 80;
 export const BIOMASS_MAX_ON_SCREEN = 80;
+// Bio-Pellets — the Manufacturer's Bio-Pellets recipe output (Food+Waste),
+// per direct spec. Class 5 Heavy, same physics profile as Biomass/Alien DNA.
+export const BIO_PELLETS_RADIUS = 8.5;
+export const BIO_PELLETS_COLOR = '#8fff6a'; // acid-green pellet — visually distinct from Biomass' brown and Alien DNA's own green
+export const BIO_PELLETS_MAX_ON_SCREEN = 80;
 // Fish prioritize Mutagen Paste over standard Food when hungry, per direct
 // spec — Entities.js's findNearestFoodOrMutagen checks for ANY Mutagen
 // Paste in the tank first (not just a nearby one) and only falls back to
@@ -654,6 +693,22 @@ export const CLEANLINESS_WARNING_MESSAGE =
 // UI.js's cleanlinessColor(pct) does the actual RGB lerp every frame.
 export const CLEANLINESS_COLOR_CLEAN = '#4fc3f7';
 export const CLEANLINESS_COLOR_DIRTY = '#6b8e4e';
+
+// Real gameplay detriments of a dirty tank, per direct request ("if the
+// detriments of tank cleanliness haven't been implemented, make sure they
+// are") — this is what CLEANLINESS_WARNING_MESSAGE above was always
+// foreshadowing ("the dirtier your tank is, the less often your fish produce
+// money"). Below CLEANLINESS_STRESS_THRESHOLD, every fish gets hungrier
+// faster AND takes longer between coin drops — both scale linearly with how
+// far below the threshold cleanliness has fallen, maxing out at 0%
+// cleanliness. Entities.js's cleanlinessStressFactor(state) returns that 0-1
+// scale; updateFish applies it to both the hunger accumulation rate and the
+// coin-drop interval (not the payout amount — a dirty tank makes fish
+// produce money less OFTEN, per the warning's own wording, not less money
+// per drop).
+export const CLEANLINESS_STRESS_THRESHOLD = 50;
+export const CLEANLINESS_STRESS_MAX_HUNGER_MULTIPLIER = 1.5; // at 0% cleanliness, hunger accumulates 50% faster
+export const CLEANLINESS_STRESS_MAX_INTERVAL_MULTIPLIER = 2; // at 0% cleanliness, a coin-drop cycle takes 2x as long
 
 // ---- Floating pickup text ----
 export const PICKUP_TEXT_LIFETIME_MS = 900; // how long a "+$N" pickup readout stays on screen after a coin is banked
@@ -1192,21 +1247,6 @@ export const BUILDING_TYPES = {
     description: `Longest reach (${FAN_T4_MAX_RANGE}px), gentle enough to suspend a coin mid-air. Draws power.`,
     color: '#2f7fd6', unlockedByDefault: false,
   },
-  [TILE_AUTO_FEEDER]: {
-    id: TILE_AUTO_FEEDER, name: 'Auto-Feeder', icon: '♻️', cost: 35,
-    description: 'Absorbs Waste on one side, dispenses Food on the other. Aim it like a Fan.',
-    color: '#c9e88f', unlockedByDefault: false,
-  },
-  [TILE_AUTO_FEEDER_ELECTRIC]: {
-    id: TILE_AUTO_FEEDER_ELECTRIC, name: 'Electric Auto-Feeder', icon: '♻️', cost: 90,
-    description: 'Processes Waste faster than the base Auto-Feeder. Draws power while working.',
-    color: '#4fd6e0', unlockedByDefault: false, // was #7fd6a8 — too close to the base Processor's own #8fe0b8 (both light minty greens), per direct report; this is a distinct cyan/teal instead
-  },
-  [TILE_AUTO_FEEDER_ADVANCED]: {
-    id: TILE_AUTO_FEEDER_ADVANCED, name: 'Advanced Auto-Feeder', icon: '♻️', cost: 200,
-    description: 'The fastest Auto-Feeder — least Waste per Food.',
-    color: '#ffd76f', unlockedByDefault: false,
-  },
   [TILE_TURRET_WASTE]: {
     id: TILE_TURRET_WASTE, name: 'Waste Turret', icon: '🔫', cost: 25,
     description: 'Auto-fires on the nearest alien. Feeds itself from any Waste touching it.',
@@ -1224,22 +1264,32 @@ export const BUILDING_TYPES = {
   },
   [TILE_REFINERY]: {
     id: TILE_REFINERY, name: 'Refinery', icon: '⚗️', cost: 80,
-    description: 'Waste -> Food, or Alien DNA -> Biomass (DNA takes priority if both touch at once). One item at a time.',
+    description: 'Waste -> Food, or Alien DNA -> Biomass (DNA takes priority if both touch at once, and takes 50% longer). One item at a time.',
     color: '#b8a888', unlockedByDefault: false,
   },
-  [TILE_BIO_FEEDER]: {
-    id: TILE_BIO_FEEDER, name: 'Bio-Feeder', icon: '🧪', cost: 220,
-    description: 'Food + Biomass -> Mutagen Paste. Fish prioritize it over plain Food, and it advances hungry non-adults a whole growth stage.',
+  [TILE_REFINERY_ELECTRIC]: {
+    id: TILE_REFINERY_ELECTRIC, name: 'Electric Refinery', icon: '⚗️', cost: 140,
+    description: 'Processes Waste (and Alien DNA) faster than the base Refinery. Draws power while working.',
+    color: '#4fd6e0', unlockedByDefault: false,
+  },
+  [TILE_REFINERY_ADVANCED]: {
+    id: TILE_REFINERY_ADVANCED, name: 'Advanced Refinery', icon: '⚗️', cost: 260,
+    description: 'The fastest Refinery short of the Bio-Refinery.',
+    color: '#ffd76f', unlockedByDefault: false,
+  },
+  [TILE_REFINERY_BIO]: {
+    id: TILE_REFINERY_BIO, name: 'Bio-Refinery', icon: '🧬', cost: 400,
+    description: 'The fastest Refinery — requires Green Science.',
+    color: '#8fff9a', unlockedByDefault: false,
+  },
+  [TILE_MANUFACTURER]: {
+    id: TILE_MANUFACTURER, name: 'Manufacturer', icon: '🏭', cost: 300,
+    description: 'Pick a recipe by clicking it once placed: Bio-Feeder (Food+Biomass->Mutagen Paste), Bio-Combustor (Waste+Biomass->Blue Science), or Bio-Pellets (Food+Waste->Bio-Pellets). Does nothing until a recipe is chosen.',
     color: '#e690e0', unlockedByDefault: false,
   },
-  [TILE_BIO_COMBUSTER]: {
-    id: TILE_BIO_COMBUSTER, name: 'Bio-Combuster', icon: '🔥', cost: 260,
-    description: 'Biomass + Waste -> Blue Science (or, once researched, Biomass + Blue Science -> Green Science). Locks onto whichever recipe its first ingredient matches.',
-    color: '#ff9f5a', unlockedByDefault: false,
-  },
-  [TILE_BIO_REACTOR]: {
-    id: TILE_BIO_REACTOR, name: 'Bio-Reactor', icon: '☢️', cost: 400,
-    description: 'Consumes Green Science or Biomass for a massive one-time dump of grid power.',
+  [TILE_POWER_PLANT]: {
+    id: TILE_POWER_PLANT, name: 'Power Plant', icon: '☢️', cost: 350,
+    description: 'Pick a fuel recipe by clicking it once placed: Food (20mw/15s), Biomass (40mw/20s), or Blue Science (100mw/30s). Does nothing until a recipe is chosen.',
     color: '#6fff8a', unlockedByDefault: false,
   },
 };
@@ -1256,7 +1306,7 @@ export const BUILDING_LIST = Object.values(BUILDING_TYPES);
 export const BUILDING_FAMILIES = {
   fan: [TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4],
   collector: [TILE_COLLECTOR, TILE_COLLECTOR_ELECTRIC, TILE_COLLECTOR_ADVANCED],
-  auto_feeder: [TILE_AUTO_FEEDER, TILE_AUTO_FEEDER_ELECTRIC, TILE_AUTO_FEEDER_ADVANCED],
+  refinery: [TILE_REFINERY, TILE_REFINERY_ELECTRIC, TILE_REFINERY_ADVANCED, TILE_REFINERY_BIO],
   turret: [TILE_TURRET_WASTE, TILE_TURRET_ELECTRIC, TILE_TURRET_ADVANCED],
 };
 
@@ -1283,21 +1333,6 @@ export const PROCESSOR_STATS = {
   [TILE_COLLECTOR]: { coinMs: 6000, scienceMs: 20000, wasteEveryMs: 10000, powerCostPerSec: 0 },
   [TILE_COLLECTOR_ELECTRIC]: { coinMs: 4000, scienceMs: 15000, wasteEveryMs: 12000, powerCostPerSec: 20 },
   [TILE_COLLECTOR_ADVANCED]: { coinMs: 3000, scienceMs: 9000, wasteEveryMs: 15000, powerCostPerSec: 40 },
-};
-// wasteProcessMs is how long ONE absorbed Waste item takes to finish
-// processing before the next can be absorbed; wasteRequired is how many
-// completed absorptions are needed before a Food item is finally dispensed —
-// Grid.js's updateBuildings lights one of `wasteRequired` dots (per direct
-// request) each time a load finishes, resetting once Food dispenses.
-// powerCostPerSec is drawn only while actively processing an absorbed load,
-// not while idle waiting for the next one.
-// powerCostPerSec doubled across every nonzero tier per direct request
-// ("make all the buildings take twice as much electricity as they do right
-// now") — 5->10, 10->20.
-export const AUTO_FEEDER_STATS = {
-  [TILE_AUTO_FEEDER]: { wasteProcessMs: 20000, wasteRequired: 3, powerCostPerSec: 0 },
-  [TILE_AUTO_FEEDER_ELECTRIC]: { wasteProcessMs: 12000, wasteRequired: 3, powerCostPerSec: 10 },
-  [TILE_AUTO_FEEDER_ADVANCED]: { wasteProcessMs: 10000, wasteRequired: 2, powerCostPerSec: 20 },
 };
 
 // ---- Turrets (Alien Invasion) ----
@@ -1328,10 +1363,18 @@ export const AUTO_FEEDER_STATS = {
 // to show power "per shot, instead of per second") — powerCostPerSec is
 // still kept alongside it, purely derived (powerCostPerShot * shotsPerSec),
 // for computeCurrentPowerDemand's own rate-based math.
+// powerCostPerShot bumped again per direct request ("make the waste turret
+// take 6MW per shot and the advanced turret take 15MW per shot") — read as
+// the Electric Waste Turret (the base Waste Turret stays free/ammo-only, per
+// its own long-standing "runs on ammo instead" design; "waste turret" here
+// most plausibly means its Electric tier, the only other turret with "waste"
+// in its current name) going 4->6, and the Advanced Turret 6->15.
+// powerCostPerSec is still the derived rate (powerCostPerShot * shotsPerSec)
+// computeCurrentPowerDemand needs — 6*2=12, 15*3=45.
 export const TURRET_STATS = {
   [TILE_TURRET_WASTE]: { shotsPerSec: 1.5, damage: 4, powerCostPerShot: 0, powerCostPerSec: 0 },
-  [TILE_TURRET_ELECTRIC]: { shotsPerSec: 2, damage: 6, powerCostPerShot: 4, powerCostPerSec: 8 },
-  [TILE_TURRET_ADVANCED]: { shotsPerSec: 3, damage: 8, powerCostPerShot: 6, powerCostPerSec: 18 },
+  [TILE_TURRET_ELECTRIC]: { shotsPerSec: 2, damage: 6, powerCostPerShot: 6, powerCostPerSec: 12 },
+  [TILE_TURRET_ADVANCED]: { shotsPerSec: 3, damage: 8, powerCostPerShot: 15, powerCostPerSec: 45 },
 };
 // Which turret tiers consume Waste as ammo (gating whether they can fire at
 // all, alongside the fire-rate cooldown) — per direct request, the Electric
@@ -1370,47 +1413,111 @@ export const TURRET_PROJECTILE_HIT_RADIUS = 14; // px — "arrived" tolerance, a
 export const TURRET_PROJECTILE_RADIUS = 4; // px, visual size of the bolt itself
 export const TURRET_PROJECTILE_COLOR = '#ffe066'; // a bright, easy-to-track yellow — distinct from every alien/fish/item color already in use
 
-// ---- Bio-Building stats ----
-// Each table is keyed by tile id, same shape convention as PROCESSOR_STATS/
-// AUTO_FEEDER_STATS/TURRET_STATS above, even though none of these 4
-// buildings has more than one tier — keeps Grid.js's per-building-type
-// lookups (and computeCurrentPowerDemand's own loop) uniform with no
-// special-casing needed for "this one has no tiers." All 4 use the same
-// AUTO_FEEDER_PORT_OFFSET_FRACTION-based fixed top-center output point
-// every Auto-Feeder tile already ejects from — see Grid.js's updateBuildings.
-//
-// Refinery: unpowered (granted early via the Mound, well before the
-// Science Lab/power grid matter) — a flat processMs regardless of which of
-// its 2 recipes locked in.
+// ---- Refinery family (replaces the Auto-Feeder) ----
+// foodProcessMs is how long the Waste->Food recipe takes on that tier, per
+// direct spec (20 -> 14 -> 9 -> 5 seconds across the 4 tiers); the Alien
+// DNA->Biomass recipe takes ALIEN_DNA_REFINERY_TIME_MULTIPLIER times as long
+// on the SAME tile (Grid.js's updateBuildings computes this at runtime
+// rather than storing a second constant per tier, since it's always a flat
+// 50% multiple of the food time). The base tier is unpowered (granted early
+// via the Mound); Electric/Advanced/Bio all draw power only while actively
+// processing an absorbed item.
+export const ALIEN_DNA_REFINERY_TIME_MULTIPLIER = 1.5;
 export const REFINERY_STATS = {
-  [TILE_REFINERY]: { processMs: 5000, powerCostPerSec: 0 },
+  [TILE_REFINERY]: { foodProcessMs: 20000, powerCostPerSec: 0 },
+  [TILE_REFINERY_ELECTRIC]: { foodProcessMs: 14000, powerCostPerSec: 10 },
+  [TILE_REFINERY_ADVANCED]: { foodProcessMs: 9000, powerCostPerSec: 20 },
+  [TILE_REFINERY_BIO]: { foodProcessMs: 5000, powerCostPerSec: 30 },
 };
-// Bio-Feeder: Science Lab purchase requiring the Electric Auto-Feeder, so
-// it's implicitly an "Electric"-tier building — draws power only while
-// actively holding both ingredients and counting down to its output.
-export const BIO_FEEDER_STATS = {
-  [TILE_BIO_FEEDER]: { processMs: 9000, powerCostPerSec: 10 },
+
+// ---- Manufacturer recipes ----
+// Per direct spec: the Manufacturer does nothing (and draws no power) until
+// one of these 3 recipes is picked via its click-to-open pop-up menu
+// (UI.js's openRecipeMenu) — `inputs` lists the 2 ingredient item types it
+// needs (order doesn't matter, whichever touches first gets absorbed and
+// processed first), `output` is the item type it ejects once both have been
+// absorbed AND processed. `labNodeId` is the SCIENCE_LAB_UPGRADES node that
+// must be purchased before this recipe can even be selected — Grid.js's
+// updateBuildings/UI.js's recipe menu both check
+// state.meta.labUpgradesPurchased.includes(recipe.labNodeId).
+export const MANUFACTURER_RECIPES = {
+  bio_feeder: {
+    id: 'bio_feeder', name: 'Bio-Feeder', icon: '🩷', color: '#e690e0',
+    inputs: ['food', 'biomass'], output: 'mutagen_paste', labNodeId: 'recipe_bio_feeder',
+    description: 'Food + Biomass -> Mutagen Paste',
+  },
+  bio_combustor: {
+    id: 'bio_combustor', name: 'Bio-Combustor', icon: '🔥', color: '#ff9f5a',
+    inputs: ['waste', 'biomass'], output: 'science', labNodeId: 'recipe_bio_combustor',
+    description: 'Waste + Biomass -> Blue Science',
+  },
+  bio_pellets: {
+    id: 'bio_pellets', name: 'Bio-Pellets', icon: '🟢', color: '#8fff6a',
+    inputs: ['food', 'waste'], output: 'bio_pellets', labNodeId: 'recipe_bio_pellets',
+    description: 'Food + Waste -> Bio-Pellets',
+  },
 };
-// Bio-Combuster: Science Lab purchase requiring the Electric Processor —
-// same "draws power only while actively processing" rule. processMs is the
-// same for either of its 2 recipes (base or upgraded).
-export const BIO_COMBUSTER_STATS = {
-  [TILE_BIO_COMBUSTER]: { processMs: 11000, powerCostPerSec: 14 },
+export const MANUFACTURER_RECIPE_LIST = Object.values(MANUFACTURER_RECIPES);
+// Per direct spec: "at base, manufacturers will take time to process each
+// type of item depending on what it's processing" — a flat per-ITEM-TYPE
+// duration, not a per-recipe one; a recipe's total cycle time is just the
+// sum of its 2 ingredients' own durations (e.g. Bio-Pellets: food 4s + waste
+// 2s = 6s total), since the two are processed one at a time in sequence
+// (see updateBuildings — only one item may be absorbed/mid-process at once).
+export const MANUFACTURER_ITEM_PROCESS_MS = { waste: 2000, food: 4000, biomass: 8000 };
+export const MANUFACTURER_STATS = {
+  [TILE_MANUFACTURER]: { powerCostPerSec: 15 }, // drawn only while actively processing an absorbed ingredient, same as every other "only while working" Electric building
 };
-// Bio-Reactor: a GENERATOR, not a consumer — never appears in
-// computeCurrentPowerDemand at all (same as the Electric Eel fish doesn't).
-// powerOutputMw is credited as one lump sum into state.level.powerGenAccumMw
-// (the same non-battery, per-second accumulator every Eel already feeds —
-// see Grid.js's updateBuildings) the instant a fuel item finishes
-// processing, not spread out over the process itself — "generates massive
-// grid power," a periodic big dump rather than a smooth trickle, per spec.
-export const BIO_REACTOR_STATS = {
-  [TILE_BIO_REACTOR]: { processMs: 7000, powerOutputMw: 150 },
+
+// ---- Power Plant recipes (renamed from Bio-Reactor) ----
+// A single-fuel-item recipe now, not a router — absorbs exactly one item of
+// `inputs[0]`'s type, then after `durationMs` credits `powerOutputMw` as one
+// lump sum into state.level.powerGenAccumMw (same non-battery accumulator
+// every Electric Eel feeds). `labNodeId: null` means "always available the
+// moment the building itself is unlocked" (the Food recipe, granted by the
+// same Lab node that grants the building) — Biomass/Blue Science each need
+// their OWN separate Lab node purchased first, per spec.
+export const POWER_PLANT_RECIPES = {
+  food: {
+    id: 'food', name: 'Food', icon: '🍖', color: '#ffb238',
+    inputs: ['food'], powerOutputMw: 20, durationMs: 15000, labNodeId: null,
+    description: 'Food -> 20mw for 15s',
+  },
+  biomass: {
+    id: 'biomass', name: 'Biomass', icon: '🟤', color: '#c98a4b',
+    inputs: ['biomass'], powerOutputMw: 40, durationMs: 20000, labNodeId: 'power_plant_biomass',
+    description: 'Biomass -> 40mw for 20s',
+  },
+  science: {
+    id: 'science', name: 'Blue Science', icon: '🔬', color: '#5fb8ff',
+    inputs: ['science'], powerOutputMw: 100, durationMs: 30000, labNodeId: 'power_plant_science',
+    description: 'Blue Science -> 100mw for 30s',
+  },
 };
-// Shared touch-intake radius for all 4 Bio-Buildings' absorb scans — same
-// value as COLLECTOR_INTAKE_RADIUS, reusing Grid.js's existing
-// isNearBuildingCenter helper.
+export const POWER_PLANT_RECIPE_LIST = Object.values(POWER_PLANT_RECIPES);
+// A GENERATOR, not a consumer — never appears in computeCurrentPowerDemand
+// at all (same as the Electric Eel fish doesn't), so there's no
+// powerCostPerSec field here; kept as an object purely so Grid.js's
+// getBuildingPowerCost can uniformly check `POWER_PLANT_STATS[type]` without
+// a special case.
+export const POWER_PLANT_STATS = {
+  [TILE_POWER_PLANT]: {},
+};
+
+// Shared touch-intake radius for the Refinery/Manufacturer/Power Plant's
+// absorb scans — same value as COLLECTOR_INTAKE_RADIUS, reusing Grid.js's
+// existing isNearBuildingCenter helper.
 export const BIO_BUILDING_INTAKE_RADIUS = TILE_SIZE * 0.65;
+
+// ---- Vertical processing-progress dots (Processors, Manufacturer, Refineries, Power Plant) ----
+// Per direct request: a small column of 4 dots on the tile's left edge,
+// visualizing how far along the CURRENT item/fuel is through processing.
+// Processors/Manufacturer/Refineries light up bottom-to-top as progress
+// climbs (bottom dot at 20%, ..., top dot at 80%+); the Power Plant instead
+// starts fully lit the instant fuel is absorbed and turns off top-to-bottom
+// as that fuel is consumed (top dot off at 20% used, ..., bottom dot off at
+// 80%+ used) — see Grid.js's renderProcessDots.
+export const PROCESS_DOTS_COUNT = 4;
 
 // ---- Tier Progression & The Mound (Phase 2) ----
 // See CLAUDE.md's "Tier Progression & The Mound" section for the full
@@ -1446,13 +1553,11 @@ export const MOUND_TEASE_COST = 150; // unchanged — the tease is still a Tier 
 // checked the same way moundTeased already is — see Mound.js's
 // getMoundNextCost/crackMound.
 export const FAN_UNLOCK_COST = 500;
-// "Tier 2.5" — the same kind of paid sub-step, but sitting between the real
-// Tier 1->2 and Tier 2->3 cracks instead: $2500 (was $5000 in an earlier
-// pass, cut per direct request), grants ONLY the Auto-Feeder, still without
-// advancing state.level.tier past 2. Tracked by
-// state.level.autoFeederUnlockPurchased (Levels.js).
-export const AUTO_FEEDER_UNLOCK_COST = 2500;
-export const MOUND_CRACK_COST = { 1: 1000, 2: 5000 }; // 1: Tier 1->2 (Processor + Octopus); 2: Tier 2->3 (shatters into the Science Lab, grants nothing directly)
+// "Tier 2.5" (a paid sub-step that used to sit here, granting only the
+// Auto-Feeder) is gone — removed along with the Auto-Feeder itself, per
+// direct request. The Mound's own paid steps are back down to just the
+// tease and the Tier 1.75 Fan unlock before each real tier crack.
+export const MOUND_CRACK_COST = { 1: 1000, 2: 5000 }; // 1: Tier 1->2 (Processor + Refinery + Octopus); 2: Tier 2->3 (shatters into the Science Lab, grants nothing directly)
 export const MOUND_WIDTH_TILES = 4.4; // how many seabed tiles wide its clickable footprint is — 10% bigger than the original 4
 export const MOUND_HEIGHT_PX = 62; // how far it mounds up above the seabed surface — 10% bigger than the original 56
 // Platform itself is NOT tier-gated at all — see BUILDING_TYPES'
@@ -1461,20 +1566,15 @@ export const MOUND_HEIGHT_PX = 62; // how far it mounds up above the seabed surf
 // else needs to anchor to it — see canPlaceTile's own comment). The
 // Rudimentary Fan isn't granted by a
 // TIER_UNLOCKS entry at all — it's granted by the Mound's paid "Tier 1.75"
-// step (FAN_UNLOCK_COST, $500); the Auto-Feeder likewise isn't granted here
-// — it's the paid "Tier 2.5" step (AUTO_FEEDER_UNLOCK_COST, $2500). Both
-// are separate steps after their respective real crack, still without
-// advancing state.level.tier — see Mound.js's getMoundNextCost/crackMound.
+// step (FAN_UNLOCK_COST, $500) — see Mound.js's getMoundNextCost/crackMound.
 export const TIER_UNLOCKS = {
   2: {
     species: ['octopus'], // per direct request — Octopus moved off the Science Lab (it's the one utility species that doesn't gate anything ELSE in the Lab's tree) onto the Mound itself, so the Lab's tree starts truly empty and every one of its 8 nodes is a real choice
-    // Auto-Feeder is its own separate "Tier 2.5" paid step, not part of this
-    // crack — see AUTO_FEEDER_UNLOCK_COST above. The Refinery is granted
-    // here rather than through the Science Lab (unlike the rest of the Bio
-    // chain) — it's the foundational recycler the whole chain is built on,
-    // and both its recipes (Waste->Food, an early alternative to the
-    // Auto-Feeder; Alien DNA->Biomass) are usable well before the Lab
-    // exists, so gating it behind Lab research would just waste it.
+    // The base Refinery is granted here rather than through the Science Lab
+    // (unlike its Electric/Advanced/Bio tiers) — it's the foundational
+    // recycler the whole chain is built on, and both its recipes (Waste->
+    // Food; Alien DNA->Biomass) are usable well before the Lab exists, so
+    // gating it behind Lab research would just waste it.
     buildings: [TILE_COLLECTOR, TILE_REFINERY],
   },
   // Tier 3 has no entry here at all — the real Tier 2->3 crack's only
@@ -1530,9 +1630,13 @@ export const SCIENCE_LAB_UPGRADES = {
     id: 'electric_collector', name: 'Electric Processor', icon: '🧲', scienceCost: 50, goldCost: 5000,
     requires: ['eel'], grants: { buildings: [TILE_COLLECTOR_ELECTRIC] },
   },
-  electric_auto_feeder: {
-    id: 'electric_auto_feeder', name: 'Electric Auto-Feeder', icon: '♻️', scienceCost: 30, goldCost: 5000,
-    requires: ['eel', 'suckerfish'], grants: { buildings: [TILE_AUTO_FEEDER_ELECTRIC] },
+  // Per direct request ("make the requirement for the electric auto-feeder
+  // be the requirements for the electric refinery") — same requires/costs
+  // the old electric_auto_feeder node had, just granting the Refinery's
+  // Electric tier instead now that the Auto-Feeder itself is gone.
+  electric_refinery: {
+    id: 'electric_refinery', name: 'Electric Refinery', icon: '⚗️', scienceCost: 30, goldCost: 5000,
+    requires: ['eel', 'suckerfish'], grants: { buildings: [TILE_REFINERY_ELECTRIC] },
   },
   advanced_fan: {
     id: 'advanced_fan', name: 'Advanced Fan', icon: '🌪️', scienceCost: 100, goldCost: 15000,
@@ -1542,9 +1646,9 @@ export const SCIENCE_LAB_UPGRADES = {
     id: 'advanced_collector', name: 'Advanced Processor', icon: '🧲', scienceCost: 250, goldCost: 25000,
     requires: ['electric_collector'], grants: { buildings: [TILE_COLLECTOR_ADVANCED] },
   },
-  advanced_auto_feeder: {
-    id: 'advanced_auto_feeder', name: 'Advanced Auto-Feeder', icon: '♻️', scienceCost: 150, goldCost: 15000,
-    requires: ['electric_auto_feeder'], grants: { buildings: [TILE_AUTO_FEEDER_ADVANCED] },
+  advanced_refinery: {
+    id: 'advanced_refinery', name: 'Advanced Refinery', icon: '⚗️', scienceCost: 150, goldCost: 15000,
+    requires: ['electric_refinery'], grants: { buildings: [TILE_REFINERY_ADVANCED] },
   },
   // The Waste Turret needs no node at all — it's unlockedByDefault: true,
   // same as Platform (see BUILDING_TYPES), free from the very start.
@@ -1557,36 +1661,73 @@ export const SCIENCE_LAB_UPGRADES = {
     requires: ['electric_turret'], grants: { buildings: [TILE_TURRET_ADVANCED] },
   },
 
-  // ---- Bio-Building production chain ----
-  // Per direct spec's "Science Lab Tech Tree Nodes" section. Bio-Combuster
-  // requires the Electric Processor (it's built on the same power-grid
-  // tier); Bio-Feeder requires the Electric Auto-Feeder. Green Science Tech
-  // grants nothing by itself (`grants: {}`) — a pure recipe-unlock flag,
-  // same "presence in state.meta.labUpgradesPurchased IS the unlock, not a
-  // species/building grant" pattern gene_splicing already established
-  // below; Grid.js's Bio-Combuster logic checks
-  // state.meta.labUpgradesPurchased.includes(GREEN_SCIENCE_LAB_ID) directly
-  // to decide whether it may lock onto the upgraded recipe. The Bio-Reactor
-  // is the one node in this entire tree costing GREEN Science instead of
-  // blue (`scienceGreenCost` in place of the usual `scienceCost`) — per
-  // spec ("Requires: Green Science Upgrade + Green Science + Money"); see
-  // UI.js's buyLabUpgrade/openLabPurchaseModal/refreshLabPurchaseButton for
-  // the one small branch needed to charge the right resource.
-  bio_combuster: {
-    id: 'bio_combuster', name: 'Bio-Combuster', icon: '🔥', scienceCost: 40, goldCost: 6000,
-    requires: ['electric_collector'], grants: { buildings: [TILE_BIO_COMBUSTER] },
+  // ---- Manufacturer & Power Plant production chain ----
+  // Per direct request, the old standalone Bio-Feeder/Bio-Combuster
+  // buildings are gone, replaced by the Manufacturer (one building, 3
+  // selectable recipes) and the renamed Power Plant (one building, 3
+  // selectable fuel recipes). Both buildings themselves sit right after the
+  // Eel — "add the manufacturer building into the science lab as an unlock
+  // after the electric eel," "have the power plant building unlocked
+  // sooner in the science lab, right after the eel." Each RECIPE is then
+  // its own separate node gating MANUFACTURER_RECIPES/POWER_PLANT_RECIPES'
+  // own `labNodeId` field (UI.js's recipe pop-up menu and Grid.js's
+  // updateBuildings both check state.meta.labUpgradesPurchased for it).
+  manufacturer: {
+    id: 'manufacturer', name: 'Manufacturer', icon: '🏭', scienceCost: 35, goldCost: 5000,
+    requires: ['eel'], grants: { buildings: [TILE_MANUFACTURER] },
   },
+  power_plant: {
+    id: 'power_plant', name: 'Power Plant', icon: '☢️', scienceCost: 35, goldCost: 5000,
+    // Grants the building AND (implicitly — POWER_PLANT_RECIPES.food.labNodeId
+    // is null) its Food recipe at once, per spec ("unlocked... right after
+    // the eel, which unlocks the new recipe that accepts food as a power
+    // source").
+    requires: ['eel'], grants: { buildings: [TILE_POWER_PLANT] },
+  },
+  // Per direct request ("instead of having the electric processor be the
+  // requirement... for the bio-feeder and bio-combustor recipes, make the
+  // requirements be the manufacturer building and the Power Plant
+  // buildings") — both now require BOTH buildings rather than either old
+  // Electric-tier building. Same costs their old building-unlock nodes had.
+  recipe_bio_feeder: {
+    id: 'recipe_bio_feeder', name: 'Bio-Feeder Recipe', icon: '🩷', scienceCost: 45, goldCost: 7000,
+    requires: ['manufacturer', 'power_plant'], grants: {},
+  },
+  recipe_bio_combustor: {
+    id: 'recipe_bio_combustor', name: 'Bio-Combustor Recipe', icon: '🔥', scienceCost: 40, goldCost: 6000,
+    requires: ['manufacturer', 'power_plant'], grants: {},
+  },
+  // Green Science Tech grants nothing by itself (`grants: {}`) — a pure
+  // recipe-unlock flag, same "presence in state.meta.labUpgradesPurchased
+  // IS the unlock" pattern gene_splicing already established below. Now
+  // sits behind the Bio-Combustor recipe (its closest analogue to the old
+  // bio_combuster building node it used to require).
   green_science_tech: {
     id: 'green_science_tech', name: 'Green Science Tech', icon: '🧬', scienceCost: 60, goldCost: 8000,
-    requires: ['bio_combuster'], grants: {},
+    requires: ['recipe_bio_combustor'], grants: {},
   },
-  bio_feeder: {
-    id: 'bio_feeder', name: 'Bio-Feeder', icon: '🧪', scienceCost: 45, goldCost: 7000,
-    requires: ['electric_auto_feeder'], grants: { buildings: [TILE_BIO_FEEDER] },
+  // Per direct request, "add in unlock for the bio-pellets in the science
+  // lab behind the manufacturer" — just the building, no Power Plant needed.
+  recipe_bio_pellets: {
+    id: 'recipe_bio_pellets', name: 'Bio-Pellets Recipe', icon: '🟢', scienceCost: 50, goldCost: 9000,
+    requires: ['manufacturer'], grants: {},
   },
-  bio_reactor: {
-    id: 'bio_reactor', name: 'Bio-Reactor', icon: '☢️', scienceGreenCost: 30, goldCost: 20000,
-    requires: ['green_science_tech'], grants: { buildings: [TILE_BIO_REACTOR] },
+  // The Power Plant's Biomass recipe is locked behind the Manufacturer's
+  // Bio-Pellets recipe, per direct spec; its Blue Science recipe is locked
+  // behind Green Science Tech.
+  power_plant_biomass: {
+    id: 'power_plant_biomass', name: 'Power Plant: Biomass', icon: '🟤', scienceCost: 50, goldCost: 10000,
+    requires: ['power_plant', 'recipe_bio_pellets'], grants: {},
+  },
+  power_plant_science: {
+    id: 'power_plant_science', name: 'Power Plant: Blue Science', icon: '🔬', scienceCost: 70, goldCost: 15000,
+    requires: ['power_plant', 'green_science_tech'], grants: {},
+  },
+  // Bio-Refinery — the top Refinery tier, per direct request ("make it so
+  // the bio-refinery requires green science unlocked in the science lab").
+  bio_refinery: {
+    id: 'bio_refinery', name: 'Bio-Refinery', icon: '🧬', scienceCost: 100, goldCost: 20000,
+    requires: ['green_science_tech'], grants: { buildings: [TILE_REFINERY_BIO] },
   },
 
   // ---- Gene-Splicing hybrid tree ----
@@ -1631,9 +1772,11 @@ export const SCIENCE_LAB_UPGRADES = {
   // Eel/Suckerfish (science_cap_1) and Gene-Splicing (science_cap_2, see
   // above) require a Bubble Cap purchase; Science Hybrids just needs
   // Gene-Splicing itself, same as its Suckerfish/Electric sibling tracks.
+  // Per direct request ("make green science a requirement for science
+  // hybrids") — stacks on top of the existing gene_splicing requirement.
   science_hybrids: {
     id: 'science_hybrids', name: 'Science Hybrids', icon: '🎓', scienceCost: 10, goldCost: 1000,
-    requires: ['gene_splicing'], grants: {},
+    requires: ['gene_splicing', 'green_science_tech'], grants: {},
   },
   scrub_guppy: {
     id: 'scrub_guppy', name: 'Scrub Guppy', icon: '🧹', scienceCost: 25, goldCost: 5000,
@@ -1983,6 +2126,15 @@ export const ALIEN_CLICK_DAMAGE = 1; // per direct request — "clicking on them
 export const ALIEN_CLICK_RADIUS_MULTIPLIER = 1.5;
 export const ALIEN_POOP_INTERVAL_MS = 4000; // was 2000 — doubled again per direct request, further softening the population cap's own worst-case waste-production rate (see ALIEN_MAX_ALIVE's comment)
 export const ALIEN_INCOME_BLOCK_RADIUS = 90; // px — a fish this close to a LIVING alien produces no coin on its drop timer at all, see Entities.js's updateFish
+// Per direct request ("make it so aliens will go towards food only if it's
+// close to them and eat the food") — a much tighter radius than
+// ALIEN_AWARENESS_RADIUS (which governs fish-chasing), so an alien only
+// notices/eats Food that's genuinely nearby, checked fresh every tick
+// (unlike the fish-chase bias, which only re-rolls on a wander cycle) so it
+// can react the instant Food drifts close. ALIEN_FOOD_EAT_RADIUS isn't a
+// flat constant — Entities.js's updateAlien computes it as the alien's own
+// instance radius plus FOOD_RADIUS, since alien size varies by archetype.
+export const ALIEN_FOOD_AWARENESS_RADIUS = 90;
 export const ALIEN_RADIUS = 16; // px — fallback only now, same role as ALIEN_SPEED above; every real alien's own radius/color come from its archetype (ALIEN_ARCHETYPES), copied onto the instance by Entities.js's createAlien
 export const ALIEN_COLOR = '#5a2d6b'; // dark purple — fallback only, matches ALIEN_ARCHETYPES[0]'s own color (Tier 1)
 export const ALIEN_HEALTH_BAR_WIDTH = 30;

@@ -76,6 +76,7 @@ import {
   SCIENCE_CAP_BY_LEVEL,
   PRODUCTION_BLOCKED_COLOR,
   ALIEN_AWARENESS_RADIUS,
+  ALIEN_FOOD_AWARENESS_RADIUS,
   ALIEN_CHASE_CHANCE,
   ALIEN_FLEE_CHANCE,
   ALIEN_WANDER_INTERVAL_MIN_S,
@@ -107,6 +108,12 @@ import {
   MUTAGEN_PASTE_HUNGER_RELIEF,
   SCIENCE_GREEN_ITEM_RADIUS,
   SCIENCE_GREEN_COLOR,
+  BIO_PELLETS_RADIUS,
+  BIO_PELLETS_COLOR,
+  BIO_PELLETS_MAX_ON_SCREEN,
+  CLEANLINESS_STRESS_THRESHOLD,
+  CLEANLINESS_STRESS_MAX_HUNGER_MULTIPLIER,
+  CLEANLINESS_STRESS_MAX_INTERVAL_MULTIPLIER,
 } from './Config.js';
 import { stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemForces, updateBuildings } from './Grid.js';
 // Sound is a fire-and-forget side effect at the moment something already
@@ -147,6 +154,17 @@ function adjustCleanliness(state, delta) {
     state.level.tutorialFlags.cleanlinessWarningShown = true;
     pushStoryNotification(state, CLEANLINESS_WARNING_MESSAGE);
   }
+}
+
+// Real gameplay detriment of a dirty tank, per direct request — see
+// Config.js's CLEANLINESS_STRESS_* constants for the full rationale. Returns
+// 0 (no stress) at or above CLEANLINESS_STRESS_THRESHOLD, scaling linearly
+// up to 1 (maximum stress) at 0% cleanliness. Used by updateFish to slow
+// coin production and speed up hunger.
+function cleanlinessStressFactor(state) {
+  const cleanliness = state.level.cleanliness;
+  if (cleanliness >= CLEANLINESS_STRESS_THRESHOLD) return 0;
+  return (CLEANLINESS_STRESS_THRESHOLD - cleanliness) / CLEANLINESS_STRESS_THRESHOLD;
 }
 
 // A sine wobble on horizontal velocity — same underlying idea Ambience.js's
@@ -261,6 +279,12 @@ export function createMutagenPaste(x, y) {
     id: nextId(), type: 'mutagen_paste', x, y, vx: 0, vy: 0, radius: MUTAGEN_PASTE_RADIUS, mass: ITEM_MASS_BY_TYPE.mutagen_paste, resting: false,
     fallTime: 0, swayPhase: Math.random() * Math.PI * 2,
   };
+}
+
+// The Manufacturer's Bio-Pellets recipe output (Food + Waste) — Weight
+// Class 5, Heavy, same physics profile as Biomass/Alien DNA.
+export function createBioPellets(x, y) {
+  return { id: nextId(), type: 'bio_pellets', x, y, vx: 0, vy: 0, radius: BIO_PELLETS_RADIUS, mass: ITEM_MASS_BY_TYPE.bio_pellets, resting: false };
 }
 
 export function createPickupText(x, y, text, color) {
@@ -403,6 +427,27 @@ function updateAlien(alien, state, dtMs) {
     alien.vy = Math.sin(angle) * alien.speed * FISH_VERTICAL_DAMPING;
   }
 
+  // Per direct request ("make it so aliens will go towards food only if
+  // it's close to them and eat the food") — a much tighter radius than
+  // ALIEN_AWARENESS_RADIUS (which governs fish-chasing), checked fresh every
+  // tick (not just on a wander re-roll) so an alien can react the instant
+  // Food drifts genuinely close. Overrides whatever heading wander just
+  // picked above — an opportunistic snack takes priority over wandering,
+  // but only ever when Food is actually nearby.
+  const nearbyFood = findNearestFood(state.level.items, alien.x, alien.y);
+  if (nearbyFood && Math.hypot(nearbyFood.x - alien.x, nearbyFood.y - alien.y) <= ALIEN_FOOD_AWARENESS_RADIUS) {
+    const dx = nearbyFood.x - alien.x;
+    const dy = nearbyFood.y - alien.y;
+    const dist = Math.hypot(dx, dy) || 1;
+    if (dist <= alien.radius + FOOD_RADIUS) {
+      const idx = state.level.items.indexOf(nearbyFood);
+      if (idx !== -1) state.level.items.splice(idx, 1);
+    } else {
+      alien.vx = (dx / dist) * alien.speed;
+      alien.vy = (dy / dist) * alien.speed * FISH_VERTICAL_DAMPING;
+    }
+  }
+
   alien.x += alien.vx * dt;
   alien.y += alien.vy * dt;
 
@@ -532,6 +577,9 @@ function canSpawnMoreAlienDna(state) {
 }
 function canSpawnMoreBiomass(state) {
   return countTankItemsByType(state, 'biomass') < BIOMASS_MAX_ON_SCREEN;
+}
+function canSpawnMoreBioPellets(state) {
+  return countTankItemsByType(state, 'bio_pellets') < BIO_PELLETS_MAX_ON_SCREEN;
 }
 
 // Coin Cap Tank Upgrade — state.level.upgrades.coinCapLevel indexes straight
@@ -1289,6 +1337,28 @@ function updateBiomass(item, state, dtMs) {
   return true;
 }
 
+// bio_pellets — Weight Class 5 (Heavy), same straight-gravity fall as
+// alien_dna/biomass above. The Manufacturer's own Bio-Pellets recipe is the
+// only thing that ever removes it from state.level.items (directly
+// splicing it, same intake pattern every other recipe-building ingredient
+// scan already uses) — the 'consumed' check below is purely defensive.
+function updateBioPellets(item, state, dtMs) {
+  const dt = dtMs / 1000;
+  const physics = { gravity: GRAVITY, maxFallSpeed: MAX_FALL_SPEED };
+  if (item.y < SEABED_FLOOR_Y) {
+    const fanForce = computeFanForce(state, item);
+    integrateItemForces(item, dt, physics, fanForce);
+    item.y += item.vy * dt;
+    item.x += item.vx * dt;
+    clampItemToWorldWalls(item);
+    return true;
+  }
+  const status = stepItemOnGrid(item, state, dt, physics);
+  if (status === 'consumed') return false;
+  item.resting = status === 'resting';
+  return true;
+}
+
 // Weight Class 1 (Buoyant) — same slower gravity + gentle sway as Food (see
 // updateFood above), just without Food's own stationary-to-Waste timer
 // (that's a Food-specific balance mechanic, not something Mutagen Paste
@@ -1340,11 +1410,17 @@ function updateScienceGreen(item, state, dtMs) {
   return true;
 }
 
+// Per direct request ("make it so the fish not follow food once the food is
+// in the city") — excludes any Food resting at/past SEABED_FLOOR_Y. A fish
+// can never physically swim down there anyway (see updateFish's own
+// unconditional Y clamp), so without this filter a fish could "lock onto" a
+// pellet that fell into the city and just hover uselessly at the seabed
+// line forever instead of picking a reachable target (or wandering).
 function findNearestFood(items, x, y) {
   let best = null;
   let bestDist = Infinity;
   for (const item of items) {
-    if (item.type !== 'food') continue;
+    if (item.type !== 'food' || item.y >= SEABED_FLOOR_Y) continue;
     const dx = item.x - x;
     const dy = item.y - y;
     const d = dx * dx + dy * dy;
@@ -1356,12 +1432,13 @@ function findNearestFood(items, x, y) {
   return best;
 }
 
-// Mirrors findNearestFood exactly, targeting Mutagen Paste instead.
+// Mirrors findNearestFood exactly, targeting Mutagen Paste instead — same
+// city-exclusion filter and reasoning.
 function findNearestMutagenPaste(items, x, y) {
   let best = null;
   let bestDist = Infinity;
   for (const item of items) {
-    if (item.type !== 'mutagen_paste') continue;
+    if (item.type !== 'mutagen_paste' || item.y >= SEABED_FLOOR_Y) continue;
     const dx = item.x - x;
     const dy = item.y - y;
     const d = dx * dx + dy * dy;
@@ -1476,7 +1553,13 @@ function updateFish(fish, state, dtMs) {
   // reduction, same ^(starTier-1) pattern as the coin-value multiplier below.
   // starTier defaults to 1 (a no-op ^0 = 1x) for every fish that's never been
   // combined, same as everywhere else star tier is read.
-  const hungerRate = def.hungerRate * Math.pow(FISH_STAR_TIER_HUNGER_MULTIPLIER, (fish.starTier || 1) - 1);
+  // A dirty tank stresses fish — see Config.js's CLEANLINESS_STRESS_*
+  // constants and cleanlinessStressFactor above. A no-op (factor 0) at or
+  // above the threshold, same as every other not-yet-relevant multiplier in
+  // this codebase's formulas.
+  const stress = cleanlinessStressFactor(state);
+  const hungerRate = def.hungerRate * Math.pow(FISH_STAR_TIER_HUNGER_MULTIPLIER, (fish.starTier || 1) - 1)
+    * (1 + stress * (CLEANLINESS_STRESS_MAX_HUNGER_MULTIPLIER - 1));
   fish.hunger = Math.min(HUNGER_MAX, fish.hunger + hungerRate * dt);
   if (fish.hunger >= HUNGER_MAX) {
     playFishDeath();
@@ -1739,9 +1822,15 @@ function updateFish(fish, state, dtMs) {
     // (fish.alienNearby, set above) is the only feedback for this case. The
     // cycle still resets rather than holding at the threshold, so the fish
     // doesn't instantly drop a coin the moment the alien wanders off.
-    if (fish.dropTimer >= stageDef.dropInterval && fish.alienNearby) {
+    // A dirty tank makes a fish produce money less OFTEN, not less money per
+    // drop — per the cleanliness warning's own wording ("the less often your
+    // fish produce money"), stretching the interval rather than shrinking
+    // the payout. stress is 0 (no-op) above CLEANLINESS_STRESS_THRESHOLD.
+    const dirtyIntervalMultiplier = 1 + stress * (CLEANLINESS_STRESS_MAX_INTERVAL_MULTIPLIER - 1);
+    const effectiveDropInterval = stageDef.dropInterval * dirtyIntervalMultiplier;
+    if (fish.dropTimer >= effectiveDropInterval && fish.alienNearby) {
       fish.dropTimer = 0;
-    } else if (fish.dropTimer >= stageDef.dropInterval) {
+    } else if (fish.dropTimer >= effectiveDropInterval) {
       fish.dropTimer = 0;
       // A hybrid's dropValueOverride (T5 value carry-over pipeline) already
       // reflects its economy parent's tier-scaled value in full — using it
@@ -1921,6 +2010,7 @@ export function updateEntities(state, dtMs) {
     if (item.type === 'waste') return updateWaste(item, state, dtMs);
     if (item.type === 'alien_dna') return updateAlienDna(item, state, dtMs);
     if (item.type === 'biomass') return updateBiomass(item, state, dtMs);
+    if (item.type === 'bio_pellets') return updateBioPellets(item, state, dtMs);
     if (item.type === 'mutagen_paste') return updateMutagenPaste(item, state, dtMs);
     return true;
   });
@@ -1947,6 +2037,7 @@ export function updateEntities(state, dtMs) {
   for (const point of bioSpawnPoints) {
     if (point.itemType === 'food') state.level.items.push(createFood(point.x, point.y));
     else if (point.itemType === 'biomass') { if (canSpawnMoreBiomass(state)) state.level.items.push(createBiomass(point.x, point.y)); }
+    else if (point.itemType === 'bio_pellets') { if (canSpawnMoreBioPellets(state)) state.level.items.push(createBioPellets(point.x, point.y)); }
     else if (point.itemType === 'mutagen_paste') state.level.items.push(createMutagenPaste(point.x, point.y));
     else if (point.itemType === 'science') state.level.items.push(createScience(point.x, point.y));
     else if (point.itemType === 'science_green') state.level.items.push(createScienceGreen(point.x, point.y));
