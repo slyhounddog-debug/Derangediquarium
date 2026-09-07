@@ -75,6 +75,9 @@ import {
   ITEM_DRAG_CLICK_RADIUS_MULTIPLIER,
   ITEM_DRAG_MOVE_THRESHOLD_PX,
   BUILDING_FAMILIES,
+  ALIEN_EGG_COLOR,
+  ALIEN_EGG_RING_COLOR,
+  ALIEN_EGG_HATCH_MS,
 } from './Config.js';
 import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop } from './Engine.js';
 import { loadLevel, LEVELS } from './Levels.js';
@@ -164,6 +167,9 @@ const ITEM_FLAT_COLOR_BY_TYPE = {
   biomass: BIOMASS_COLOR,
   mutagen_paste: MUTAGEN_PASTE_COLOR,
   bio_pellets: BIO_PELLETS_COLOR,
+  // alien_egg deliberately NOT listed here — it gets its own dedicated
+  // render branch below (a countdown-to-hatch ring on top of the shell
+  // fill), not the generic flat-fill-plus-highlight path.
 };
 
 // Browsers refuse to let an AudioContext make sound until a real user
@@ -457,7 +463,7 @@ let itemDragPositionHistory = [];
 // same "every object can be clicked and dragged around" consistency the
 // original 4 types already established — nothing about the new items makes
 // them an exception.
-const DRAGGABLE_ITEM_TYPES = ['coin', 'food', 'waste', 'science', 'science_green', 'alien_dna', 'biomass', 'mutagen_paste', 'bio_pellets'];
+const DRAGGABLE_ITEM_TYPES = ['coin', 'food', 'waste', 'science', 'science_green', 'alien_dna', 'biomass', 'mutagen_paste', 'bio_pellets', 'alien_egg'];
 
 input.mouseDownHandlers.push((sx, sy) => {
   // A guided tutorial normally blocks starting an item drag like every
@@ -630,7 +636,11 @@ input.clickHandlers.push((sx, sy) => {
   // Checked first so it can't be shadowed by a build/demolish tool's own
   // early-return branches.
   for (const entity of state.level.entities) {
+    // spawnProtectionUntilMs: a freshly Alien-Egg-hatched alien is
+    // invulnerable to clicks too during its grace period — see
+    // Entities.js's updateAlienEgg/createAlien.
     if (entity.type !== 'alien' || entity.hp <= 0) continue;
+    if (entity.spawnProtectionUntilMs > state.level.elapsed) continue;
     if (Math.hypot(entity.x - world.x, entity.y - world.y) <= (entity.radius ?? ALIEN_RADIUS) * ALIEN_CLICK_RADIUS_MULTIPLIER) {
       entity.hp -= ALIEN_CLICK_DAMAGE;
       entity.hitFlashMs = ALIEN_HIT_FLASH_MS; // per direct request — a hit flashes red and "bounces," read back by the render loop below
@@ -656,6 +666,20 @@ input.clickHandlers.push((sx, sy) => {
   const clickedFish = findFishAt(state, world.x, world.y);
   if (clickedFish && clickedFish.speciesId === 'buffer_fish') {
     clickedFish.magnetOn = !clickedFish.magnetOn;
+    return;
+  }
+
+  // Zap Sucker: click toggles its automatic Food dispenser on/off, per
+  // direct spec — same click-to-toggle precedent as the Buffer Fish's own
+  // magnet above.
+  if (clickedFish && clickedFish.speciesId === 'zap_sucker') {
+    clickedFish.autoFoodOn = !clickedFish.autoFoodOn;
+    return;
+  }
+
+  // Xeno Octopus: click toggles Alien DNA mode on/off, per direct spec.
+  if (clickedFish && clickedFish.speciesId === 'xeno_octopus') {
+    clickedFish.alienDnaModeOn = !clickedFish.alienDnaModeOn;
     return;
   }
 
@@ -915,7 +939,7 @@ input.keydownHandlers.push((e) => {
     case 'Digit3': // Merge
       selectTool(state, 'merge');
       break;
-    case 'KeyS': // toggle-collapse the shop panel
+    case 'KeyQ': // toggle-collapse the shop panel — moved off KeyS per direct request, freeing S up to pan the camera down (see Engine.js's updateCamera)
       toggleShopCollapse(state);
       break;
     case 'KeyP': // toggle-collapse the Tank Upgrades panel
@@ -1708,6 +1732,29 @@ function render() {
       continue;
     }
 
+    if (item.type === 'alien_egg') {
+      // A shrinking countdown ring on top of the flat shell fill, so the
+      // player can see roughly how long until it hatches.
+      ctx.beginPath();
+      ctx.fillStyle = ALIEN_EGG_COLOR;
+      ctx.arc(pos.x, pos.y, item.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.22)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      const hatchFrac = Math.min(1, (item.hatchTimer || 0) / ALIEN_EGG_HATCH_MS);
+      ctx.strokeStyle = ALIEN_EGG_RING_COLOR;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, item.radius + 3, -Math.PI / 2, -Math.PI / 2 + hatchFrac * Math.PI * 2);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.beginPath();
+      ctx.arc(pos.x - item.radius * 0.32, pos.y - item.radius * 0.32, item.radius * 0.28, 0, Math.PI * 2);
+      ctx.fill();
+      continue;
+    }
+
     let itemColor = ITEM_FLAT_COLOR_BY_TYPE[item.type] || getCoinColor(item.value);
     // A "stale" gray phase, per direct spec — once a Food pellet's own
     // stationary timer crosses FOOD_STALE_FRACTION (75%) of the way to
@@ -1840,6 +1887,33 @@ function render() {
       const ringRadius = size * state.camera.zoom * (1.15 + 0.1 * Math.sin(performance.now() / 220));
       ctx.save();
       ctx.strokeStyle = 'rgba(95, 200, 255, 0.75)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, ringRadius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Zap Sucker's auto-food dispenser — a pulsing orange ring while toggled
+    // on, per direct spec ("with a visual for when on"), same pulsing-ring
+    // treatment the Buffer Fish's own magnet already gets.
+    if (fish.speciesId === 'zap_sucker' && fish.autoFoodOn) {
+      const ringRadius = size * state.camera.zoom * (1.15 + 0.1 * Math.sin(performance.now() / 220));
+      ctx.save();
+      ctx.strokeStyle = 'rgba(255, 178, 56, 0.8)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, ringRadius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Xeno Octopus's Alien DNA mode — a pulsing acid-green ring while toggled
+    // on, matching Alien DNA's own item color.
+    if (fish.speciesId === 'xeno_octopus' && fish.alienDnaModeOn) {
+      const ringRadius = size * state.camera.zoom * (1.15 + 0.1 * Math.sin(performance.now() / 220));
+      ctx.save();
+      ctx.strokeStyle = 'rgba(124, 255, 90, 0.8)';
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.arc(pos.x, pos.y, ringRadius, 0, Math.PI * 2);
@@ -1986,6 +2060,18 @@ function render() {
     }
     const gazeAngle = nearestFish ? Math.atan2(nearestFish.y - alien.y, nearestFish.x - alien.x) : (facing > 0 ? 0 : Math.PI);
     drawAlienBody(ctx, pos.x, pos.y, radius, facing, color, gazeAngle);
+
+    // Alien-Egg hatch grace period — a soft pulsing shield ring, so a click
+    // or turret shot doing nothing to it doesn't read as broken.
+    if (alien.spawnProtectionUntilMs > state.level.elapsed) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(140, 220, 255, 0.7)';
+      ctx.lineWidth = Math.max(1, 2 * state.camera.zoom);
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, baseRadius + 6 * state.camera.zoom, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
 
     const barW = ALIEN_HEALTH_BAR_WIDTH * state.camera.zoom;
     const barH = ALIEN_HEALTH_BAR_HEIGHT * state.camera.zoom;

@@ -108,10 +108,11 @@ export function updateCamera(camera, input, canvas, dtMs) {
   const dt = dtMs / 1000;
   let dy = 0;
 
-  // KeyS is deliberately not bound here — it's the shop collapse/expand
-  // hotkey (see main.js). ArrowDown remains the way to pan down by keyboard.
+  // KeyS used to be deliberately unbound here (it was the shop collapse/
+  // expand hotkey) — that hotkey moved to Q per direct request, freeing S up
+  // to do what W already did for the opposite direction: pan down.
   if (input.keysDown.has('KeyW') || input.keysDown.has('ArrowUp')) dy -= 1;
-  if (input.keysDown.has('ArrowDown')) dy += 1;
+  if (input.keysDown.has('KeyS') || input.keysDown.has('ArrowDown')) dy += 1;
 
   camera.y += dy * CAMERA_PAN_SPEED * dt;
 

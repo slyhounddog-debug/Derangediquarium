@@ -306,10 +306,7 @@ export function placeTile(state, col, row, buildingId, angle = 0) {
   if (FAN_TILES.has(buildingId)) {
     state.level.buildingData[buildingKey(col, row)] = { type: buildingId, angle };
   } else if (COLLECTOR_TILES.has(buildingId)) {
-    // wasteAccumMs is a continuously-running background clock (only advances
-    // while this tile is actively holding an item) — see updateBuildings'
-    // Collector branch and PROCESSOR_STATS' wasteEveryMs.
-    state.level.buildingData[buildingKey(col, row)] = { type: buildingId, angle, wasteAccumMs: 0 };
+    state.level.buildingData[buildingKey(col, row)] = { type: buildingId, angle };
   } else if (TURRET_TILES.has(buildingId)) {
     // No `angle` at all — a turret auto-targets, it doesn't have a
     // player-chosen aim. `ammo` matters for any tile in TURRET_AMMO_TILES
@@ -403,7 +400,7 @@ export function cycleTileCheat(state, worldX, worldY) {
   if (FAN_TILES.has(next)) {
     state.level.buildingData[buildingKey(col, row)] = { type: next, angle: CHEAT_DEFAULT_ANGLE };
   } else if (COLLECTOR_TILES.has(next)) {
-    state.level.buildingData[buildingKey(col, row)] = { type: next, angle: CHEAT_DEFAULT_ANGLE, wasteAccumMs: 0 };
+    state.level.buildingData[buildingKey(col, row)] = { type: next, angle: CHEAT_DEFAULT_ANGLE };
   } else if (TURRET_TILES.has(next)) {
     // Cheat-cycled turrets start pre-loaded with max ammo (any ammo-consuming
     // tier — see TURRET_AMMO_TILES) so testing combat doesn't require
@@ -766,20 +763,10 @@ export function updateBuildings(state, dtMs) {
           }
         }
       }
-      // A continuously-running background byproduct clock — per direct
-      // request ("produce 1 waste every N seconds it's processing"), not
-      // one waste per individual item consumed any more. Only advances
-      // while genuinely active this tick; a idle Processor with nothing to
-      // process never accumulates toward it.
-      if (anyProcessing) {
-        const stats = PROCESSOR_STATS[data.type];
-        data.wasteAccumMs += dtMs;
-        if (data.wasteAccumMs >= stats.wasteEveryMs) {
-          data.wasteAccumMs -= stats.wasteEveryMs;
-          wasteSpawnPoints.push({ x: centerX, y: centerY });
-          state.level.cleanliness = Math.max(0, state.level.cleanliness - CLEANLINESS_PER_WASTE_EVENT);
-        }
-      }
+      // The Collector no longer produces any Waste byproduct at all, on any
+      // tier — per direct request, it's now a pure banking convenience with
+      // no dirty-automation downside (the old wasteAccumMs background clock
+      // is removed entirely, not just zeroed).
       continue;
     }
 
@@ -852,7 +839,12 @@ export function updateBuildings(state, dtMs) {
         let nearestAlien = null;
         let nearestDist = Infinity;
         for (const entity of state.level.entities) {
+          // spawnProtectionUntilMs: a freshly Alien-Egg-hatched alien is
+          // invulnerable for its first ALIEN_EGG_HATCH_INVULN_MS (see
+          // Entities.js's updateAlienEgg/createAlien) — turrets don't waste
+          // shots targeting something they can't hurt.
           if (entity.type !== 'alien' || entity.hp <= 0) continue;
+          if (entity.spawnProtectionUntilMs > state.level.elapsed) continue;
           const d = Math.hypot(entity.x - centerX, entity.y - centerY);
           if (d <= nearestDist) {
             nearestAlien = entity;
@@ -1056,8 +1048,14 @@ export function computeCurrentPowerDemand(state) {
       if (data.lockedRecipe !== null) demand += REFINERY_STATS[data.type].powerCostPerSec;
     } else if (MANUFACTURER_TILES.has(data.type)) {
       // Only draws while actively processing an absorbed ingredient — no
-      // draw at all while idle/no-recipe/waiting for the next item.
-      if (data.processing) demand += MANUFACTURER_STATS[data.type].powerCostPerSec;
+      // draw at all while idle/no-recipe/waiting for the next item. The
+      // Alien Egg recipe specifically draws double, per direct spec — see
+      // MANUFACTURER_RECIPES.alien_egg's own powerCostMultiplier field.
+      if (data.processing) {
+        const recipe = MANUFACTURER_RECIPES[data.recipeId];
+        const multiplier = (recipe && recipe.powerCostMultiplier) || 1;
+        demand += MANUFACTURER_STATS[data.type].powerCostPerSec * multiplier;
+      }
     }
     // Power Plant is a GENERATOR, not a consumer — never appears in demand,
     // same as the Electric Eel fish — intentionally has no branch here.

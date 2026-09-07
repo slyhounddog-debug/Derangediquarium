@@ -627,10 +627,13 @@ function updateRecipeMenuPosition(state) {
 }
 
 // Rebuilds the icon row for whichever building (Manufacturer or Power
-// Plant) sits at recipeMenuTileKey — called on open, and every frame it's
-// open (from updateHUD) so a live recipe change/lock-state (a Lab purchase
-// mid-decision) reflects immediately. Closes the popup outright if the
-// underlying tile is gone (demolished mid-decision).
+// Plant) sits at recipeMenuTileKey — called only on open and on a toggle
+// click (see openRecipeMenu/toggleBuildingRecipe), NOT every frame (a real
+// bug once had this rebuilding every frame the popup was open, which could
+// detach a real click's target element mid-click — see CLAUDE.md's own
+// changelog entry). The much lighter per-frame check elsewhere just closes
+// the popup outright if the underlying tile is gone (demolished
+// mid-decision), without touching this option DOM at all.
 function refreshRecipeMenu(state) {
   if (!recipeMenuTileKey) return;
   const data = state.level.buildingData[recipeMenuTileKey];
@@ -797,6 +800,12 @@ function labNodeDepth(id, memo) {
 
 let labNodeDepthMemo = {};
 let labNodeButtons = {}; // id -> { btn, costEl }, rebuilt by buildLabTree, read by refreshLabTree/drawLabTreeConnectors
+// Per direct request ("when you hover over a node... highlight all the
+// lines going to the required nodes for that node") — set/cleared by a plain
+// mouseenter/mouseleave pair on each node button (see buildLabTree), read by
+// drawLabTreeConnectors every frame it's open (refreshLabTree already reruns
+// that every frame via updateHUD, so no extra redraw call is needed here).
+let labHoveredNodeId = null;
 
 // Minimum pointer movement (px) before a mousedown-on-the-wrap counts as a
 // drag rather than the start of a plain click on whatever's underneath it —
@@ -929,6 +938,7 @@ function buildLabTree(state) {
   els.labTreeColumns.innerHTML = '';
   labNodeButtons = {};
   labNodeDepthMemo = {};
+  labHoveredNodeId = null;
   const depths = SCIENCE_LAB_UPGRADE_LIST.map((n) => labNodeDepth(n.id, labNodeDepthMemo));
   const maxDepth = Math.max(...depths);
   const columns = [];
@@ -954,6 +964,11 @@ function buildLabTree(state) {
     // (locked or already purchased) never dispatches a click at all, so this
     // never opens for something that couldn't actually be bought.
     btn.addEventListener('click', () => openLabPurchaseModal(state, node.id));
+    // Per direct request — hovering a node highlights the connector lines
+    // running from it to its OWN prerequisites, so the "what does this need"
+    // relationship reads at a glance without opening the purchase modal.
+    btn.addEventListener('mouseenter', () => { labHoveredNodeId = node.id; });
+    btn.addEventListener('mouseleave', () => { labHoveredNodeId = null; });
     labNodeButtons[node.id] = { btn, costEl };
     columns[labNodeDepthMemo[node.id]].appendChild(btn);
   }
@@ -1052,11 +1067,22 @@ function openLabPurchaseModal(state, id) {
     statChips.push(`<div class="building-stat">🔬 Bubble cap: <b>${from} → ${to}</b></div>`);
   }
   if (!descLines.length) {
-    // A pure prerequisite node (e.g. green_science_tech) — grants nothing
-    // by itself, so describe what it opens up instead.
-    descLines.push('Doesn\'t unlock anything by itself — it\'s a prerequisite for what comes next.');
-    const unlocksHtml = labNodeUnlocksHtml(id);
-    if (unlocksHtml) statChips.push(unlocksHtml);
+    // Per direct request ("change the wording... so it says what recipe
+    // (with the ingredients) that it unlocks instead of just saying it's a
+    // prerequisite") — a Manufacturer/Power Plant recipe node is matched by
+    // its own labNodeId and described by its real ingredients/output;
+    // everything else that grants nothing by itself (e.g. green_science_tech,
+    // a pure tech flag with no recipe of its own) keeps the old generic
+    // "prerequisite" text plus a list of what it unlocks.
+    const recipe = MANUFACTURER_RECIPE_LIST.find((r) => r.labNodeId === id) || POWER_PLANT_RECIPE_LIST.find((r) => r.labNodeId === id);
+    if (recipe) {
+      descLines.push(`Unlocks the <b>${recipe.name}</b> recipe: ${recipe.description}.`);
+      statChips.push(`<div class="building-stat">${recipe.icon} <b>${recipe.description}</b></div>`);
+    } else {
+      descLines.push('Doesn\'t unlock anything by itself — it\'s a prerequisite for what comes next.');
+      const unlocksHtml = labNodeUnlocksHtml(id);
+      if (unlocksHtml) statChips.push(unlocksHtml);
+    }
   }
   els.labPurchaseDesc.innerHTML = descLines.map((t) => `<div>${t}</div>`).join('');
   els.labPurchaseStats.innerHTML = statChips.join('');
@@ -1260,9 +1286,19 @@ function drawLabTreeConnectors(state) {
       const fromX = fromRect.right - wrapRect.left + wrap.scrollLeft;
       const fromY = fromRect.top - wrapRect.top + wrap.scrollTop + fromRect.height / 2;
       const reqPurchased = state.meta.labUpgradesPurchased.includes(reqId);
-      ctx.strokeStyle = reqPurchased ? 'rgba(122, 212, 168, 0.85)' : 'rgba(107, 76, 107, 0.3)';
-      ctx.lineWidth = reqPurchased ? 3 : 2;
-      ctx.setLineDash(reqPurchased ? [] : [5, 4]);
+      // Hovering `node` highlights every edge running FROM it to one of ITS
+      // OWN prerequisites — a bright gold overlay wins over the normal
+      // purchased/locked styling regardless of which state that edge was
+      // already in.
+      if (labHoveredNodeId === node.id) {
+        ctx.strokeStyle = 'rgba(255, 209, 102, 0.95)';
+        ctx.lineWidth = 4;
+        ctx.setLineDash([]);
+      } else {
+        ctx.strokeStyle = reqPurchased ? 'rgba(122, 212, 168, 0.85)' : 'rgba(107, 76, 107, 0.3)';
+        ctx.lineWidth = reqPurchased ? 3 : 2;
+        ctx.setLineDash(reqPurchased ? [] : [5, 4]);
+      }
       const midX = (fromX + toX) / 2;
       ctx.beginPath();
       ctx.moveTo(fromX, fromY);
@@ -1867,9 +1903,11 @@ function selectBuildingForPreview(state, building) {
 function buildingStatsHtml(buildingId) {
   const p = PROCESSOR_STATS[buildingId];
   if (p) {
+    // The Waste-per-N-seconds stat is gone entirely, per direct request —
+    // the Collector no longer produces any Waste byproduct on any tier.
     return (
       `<div class="building-stat">⏱️ Coin <b>${p.coinMs / 1000}s</b> · 🔬 Sci <b>${p.scienceMs / 1000}s</b></div>` +
-      `<div class="building-stat">💩 Waste <b>${p.wasteEveryMs / 1000}s</b> · ⚡ <b>${p.powerCostPerSec}</b> mw/s</div>`
+      `<div class="building-stat">⚡ <b>${p.powerCostPerSec}</b> mw/s</div>`
     );
   }
   const f = FAN_STATS[buildingId];

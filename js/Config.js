@@ -374,7 +374,7 @@ export const COLLECTOR_INTAKE_RADIUS = TILE_SIZE * 0.65;
 export const ITEM_MASS_BY_TYPE = {
   food: 0.3, mutagen_paste: 0.3, // Class 1 — Buoyant
   waste: 0.5, // Class 2 — Ultra-Light (was 1)
-  coin: 1.5, // Class 3 — Standard (was 3, halved per direct request)
+  coin: 1.5, alien_egg: 1.5, // Class 3 — Standard (coin was 3, halved per direct request) — the Alien Egg "weighs as much as a coin," per direct spec
   science: 4, science_green: 4, // Class 4 — Medium-Heavy (was 9 for science — cut so Class 5 below can sit clearly above it while science stays clearly above Class 3's coin)
   alien_dna: 7, biomass: 7, bio_pellets: 7, // Class 5 — Heavy
 };
@@ -621,6 +621,40 @@ export const BIOMASS_MAX_ON_SCREEN = 80;
 export const BIO_PELLETS_RADIUS = 8.5;
 export const BIO_PELLETS_COLOR = '#8fff6a'; // acid-green pellet — visually distinct from Biomass' brown and Alien DNA's own green
 export const BIO_PELLETS_MAX_ON_SCREEN = 80;
+
+// Alien Egg — the Manufacturer's new Alien Egg recipe output (Blue Science +
+// Food), per direct spec. Weighs exactly as much as a coin (Class 3, see
+// ITEM_MASS_BY_TYPE above), so it needs the same real Fan muscle a coin does
+// to route around — but still falls/routes through the ordinary
+// GRAVITY/MAX_FALL_SPEED profile every non-Buoyant item shares (it's a solid
+// heavy object, not a Food-style floater). Fully draggable like every other
+// item (see main.js's DRAGGABLE_ITEM_TYPES).
+export const ALIEN_EGG_RADIUS = 9.5;
+export const ALIEN_EGG_COLOR = '#c9a86b'; // a mottled tan/olive shell color, distinct from every other item's color family
+export const ALIEN_EGG_RING_COLOR = '#7cff5a'; // the countdown-to-hatch progress ring, matching Alien DNA's own acid-green "alien" accent
+// How long the egg sits inert before hatching, per direct spec ("it will
+// stay as an egg for 30 seconds"). Entities.js's updateAlienEgg counts this
+// up itself (item.hatchTimer) rather than routing through any of the
+// existing canSpawnMore* item-count safety caps — an egg is a single object
+// with a bounded lifetime, not a source of runaway item-count growth the way
+// alien_dna/waste bursts are.
+export const ALIEN_EGG_HATCH_MS = 30000;
+// The hatched alien's own grace period, per direct spec ("an invulnerability
+// buffer for 20 seconds... and 20 seconds of it not generating waste") —
+// both halves share this one duration (Entities.js's createAlien sets
+// alien.spawnProtectionUntilMs = elapsed + this, checked by every damage
+// site — main.js's click handler, Grid.js's turret targeting,
+// updateTurretProjectiles' impact — and by updateAlien's own poop timer).
+export const ALIEN_EGG_HATCH_INVULN_MS = 20000;
+// A hatched egg that started inside the seabed city (the Manufacturer that
+// laid it is a city building) can't just teleport into open water — aliens
+// are otherwise hard-clamped out of the city entirely (see updateAlien's own
+// SEABED_FLOOR_Y clamp). Per direct spec ("have it slowly swim up... when it
+// first spawns"), a freshly-hatched alien instead rises at this flat speed
+// (px/sec, deliberately slow/gentle) until it clears the seabed line, fully
+// overriding its normal wander/chase AI for that short window — see
+// updateAlien's own alien.risingToSurface branch.
+export const ALIEN_EGG_RISE_SPEED = 40;
 // Fish prioritize Mutagen Paste over standard Food when hungry, per direct
 // spec — Entities.js's findNearestFoodOrMutagen checks for ANY Mutagen
 // Paste in the tank first (not just a nearby one) and only falls back to
@@ -1108,6 +1142,38 @@ export const SPECIES = {
     growthStages: [{ feedsRequired: 0, scale: 1.0, dropValue: 0 }],
     unlockedByDefault: false,
   },
+  // Two more bespoke hybrids, per direct spec. Both keep the SCAVENGER/
+  // RESEARCHER tag their real-production parent already carries — the
+  // click-toggle mechanic is a bonus layered on top, not a full behavior
+  // replacement, same "Buffer Fish keeps eating Waste, just also makes Food"
+  // precedent the original 3 hybrids already established.
+  zap_sucker: {
+    id: 'zap_sucker', name: 'Zap Sucker', tier: 4, unlockPhase: 4, cost: 90,
+    description: 'Electric Eel × Suckerfish — click it to toggle an automatic Food dispenser on/off. While on, it spits out one Food item every 6 seconds with no feeding required to trigger it. Still eats Waste and generates power like its parents.',
+    behavior: ['SCAVENGER', 'GENERATOR'], dropType: 'auto_food', parents: ['electric_eel', 'suckerfish'],
+    swimSpeed: 30, lifespan: 300000, hungerRate: 0.9,
+    // pixelsPerMW (Generator half) and dropInterval (Scavenger eat-cooldown
+    // half) both reuse the exact fields the two parent mechanics already
+    // read — see updateFish's isPureGenerator/isPureScavenger branches.
+    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 20000, dropValue: 0, pixelsPerMW: 1 }],
+    unlockedByDefault: false,
+  },
+  // No `parents` field — there's no real "Alien" fish to splice from, so
+  // (like the 3 base utility species) this is unlocked straight into
+  // state.meta.speciesUnlocked by its Lab node and bought directly in the
+  // shop, not obtained via the drag-a-utility-fish splice interaction.
+  xeno_octopus: {
+    id: 'xeno_octopus', name: 'Xeno Octopus', tier: 4, unlockPhase: 4, cost: 100,
+    description: 'A Science Octopus that got too close to an Alien Egg. Click it to toggle Alien DNA mode — while on, it brews and spits out Alien DNA every 8 seconds instead of Science Bubbles. Still needs to be fed like any other fish.',
+    behavior: ['RESEARCHER'], dropType: 'science_blue',
+    swimSpeed: 25, lifespan: 300000, hungerRate: 0.468,
+    growthStages: [
+      { feedsRequired: 0, scale: 0.5, dropInterval: 70000, dropValue: 1 },
+      { feedsRequired: 3, scale: 0.75, dropInterval: 70000, dropValue: 1 },
+      { feedsRequired: 6, scale: 1.0, dropInterval: 50000, dropValue: 1 },
+    ],
+    unlockedByDefault: false,
+  },
 };
 
 export const SPECIES_LIST = Object.values(SPECIES);
@@ -1156,12 +1222,12 @@ export const BUILDING_TYPES = {
   },
   [TILE_COLLECTOR]: {
     id: TILE_COLLECTOR, name: 'Collector', icon: '🧲', cost: 12,
-    description: 'Auto-banks coins and Science touching it. Unpowered — leaves Waste behind.',
+    description: 'Auto-banks coins and Science touching it. Unpowered.',
     color: '#8fe0b8', unlockedByDefault: false,
   },
   [TILE_COLLECTOR_ELECTRIC]: {
     id: TILE_COLLECTOR_ELECTRIC, name: 'Electric Collector', icon: '🧲', cost: 60,
-    description: 'Faster than the base Collector, less Waste. Draws power while holding an item.',
+    description: 'Faster than the base Collector. Draws power while holding an item.',
     color: '#5fb8ff', unlockedByDefault: false,
   },
   [TILE_COLLECTOR_ADVANCED]: {
@@ -1221,7 +1287,7 @@ export const BUILDING_TYPES = {
   },
   [TILE_MANUFACTURER]: {
     id: TILE_MANUFACTURER, name: 'Manufacturer', icon: '🏭', cost: 300,
-    description: 'Pick a recipe by clicking it once placed: Bio-Feeder (Food+Biomass->Mutagen Paste), Bio-Combustor (Waste+Biomass->Blue Science), or Bio-Pellets (Food+Waste->Bio-Pellets). Does nothing until a recipe is chosen.',
+    description: 'Pick a recipe by clicking it once placed: Bio-Feeder (Food+Biomass->Mutagen Paste), Bio-Combustor (Waste+Biomass->Blue Science), Bio-Pellets (Food+Waste->Bio-Pellets), or Alien Egg (Blue Science+Food->Alien Egg, double power draw). Does nothing until a recipe is chosen.',
     color: '#e690e0', unlockedByDefault: false,
   },
   [TILE_POWER_PLANT]: {
@@ -1247,29 +1313,22 @@ export const BUILDING_FAMILIES = {
   turret: [TILE_TURRET_WASTE, TILE_TURRET_ELECTRIC, TILE_TURRET_ADVANCED],
 };
 
-// ---- Processor (Collector) tiers & Auto-Feeder tiers ----
-// Per direct request, both buildings now have 3 tiers with real distinct
-// timing/power numbers instead of one flat behavior — Grid.js's
-// updateBuildings/beginCollectorProcessing read these by the placed tile's
-// own type. coinMs/scienceMs are how long a single held coin/Science item
-// takes to fully process (replaces the old flat COLLECTOR_PROCESS_DURATION_MS
-// — a coin and a Science bubble now take different amounts of time on the
-// same tile). wasteEveryMs is a separate, continuously-running background
-// clock: every wasteEveryMs of TOTAL time this tile has spent actively
-// holding an item (any item, running the whole time it's non-idle, not reset
-// between individual items), it spawns one Waste at the tile's center — see
-// Grid.js's updateBuildings. powerCostPerSec is drawn only while the tile is
-// actively processing something (Collector) or actively processing an
-// absorbed Waste load (Auto-Feeder) — not while idle/empty, and not gated on
-// actual power availability, same not-yet-power-gated precedent every other
-// Electric building in this codebase already follows.
-// powerCostPerSec doubled across every nonzero tier per direct request
-// ("make all the buildings take twice as much electricity as they do right
-// now") — 10->20, 20->40.
+// ---- Processor (Collector) tiers ----
+// coinMs/scienceMs are how long a single held coin/Science item takes to
+// fully process — Grid.js's updateBuildings/beginCollectorProcessing read
+// these by the placed tile's own type. powerCostPerSec is drawn only while
+// the tile is actively processing something, not while idle/empty, and not
+// gated on actual power availability, same not-yet-power-gated precedent
+// every other Electric building in this codebase already follows.
+// The Collector no longer produces Waste at all, on any tier — per direct
+// request, it's now a pure banking convenience with no dirty-automation
+// downside; the old wasteEveryMs background clock (and its
+// state.level.buildingData wasteAccumMs field) is removed entirely, not just
+// zeroed. coinMs set to the exact requested 9/6/4 seconds across the 3 tiers.
 export const PROCESSOR_STATS = {
-  [TILE_COLLECTOR]: { coinMs: 6000, scienceMs: 20000, wasteEveryMs: 10000, powerCostPerSec: 0 },
-  [TILE_COLLECTOR_ELECTRIC]: { coinMs: 4000, scienceMs: 15000, wasteEveryMs: 12000, powerCostPerSec: 20 },
-  [TILE_COLLECTOR_ADVANCED]: { coinMs: 3000, scienceMs: 9000, wasteEveryMs: 15000, powerCostPerSec: 40 },
+  [TILE_COLLECTOR]: { coinMs: 9000, scienceMs: 20000, powerCostPerSec: 0 },
+  [TILE_COLLECTOR_ELECTRIC]: { coinMs: 6000, scienceMs: 15000, powerCostPerSec: 20 },
+  [TILE_COLLECTOR_ADVANCED]: { coinMs: 4000, scienceMs: 9000, powerCostPerSec: 40 },
 };
 
 // ---- Turrets (Alien Invasion) ----
@@ -1369,7 +1428,7 @@ export const REFINERY_STATS = {
 
 // ---- Manufacturer recipes ----
 // Per direct spec: the Manufacturer does nothing (and draws no power) until
-// one of these 3 recipes is picked via its click-to-open pop-up menu
+// one of these recipes is picked via its click-to-open pop-up menu
 // (UI.js's openRecipeMenu) — `inputs` lists the 2 ingredient item types it
 // needs (order doesn't matter, whichever touches first gets absorbed and
 // processed first), `output` is the item type it ejects once both have been
@@ -1377,6 +1436,11 @@ export const REFINERY_STATS = {
 // must be purchased before this recipe can even be selected — Grid.js's
 // updateBuildings/UI.js's recipe menu both check
 // state.meta.labUpgradesPurchased.includes(recipe.labNodeId).
+// `powerCostMultiplier`, when present, scales MANUFACTURER_STATS' own flat
+// powerCostPerSec while THIS specific recipe is actively processing — per
+// direct spec, the Alien Egg recipe "takes twice as much electricity while
+// running." Every other recipe implicitly uses 1x (Grid.js's
+// computeCurrentPowerDemand falls back to 1 when the field is absent).
 export const MANUFACTURER_RECIPES = {
   bio_feeder: {
     id: 'bio_feeder', name: 'Bio-Feeder', icon: '🩷', color: '#e690e0',
@@ -1393,6 +1457,12 @@ export const MANUFACTURER_RECIPES = {
     inputs: ['food', 'waste'], output: 'bio_pellets', labNodeId: 'recipe_bio_pellets',
     description: 'Food + Waste -> Bio-Pellets',
   },
+  alien_egg: {
+    id: 'alien_egg', name: 'Alien Egg', icon: '🥚', color: '#c9a86b',
+    inputs: ['science', 'food'], output: 'alien_egg', labNodeId: 'recipe_alien_egg',
+    description: 'Blue Science + Food -> Alien Egg (2x power draw)',
+    powerCostMultiplier: 2,
+  },
 };
 export const MANUFACTURER_RECIPE_LIST = Object.values(MANUFACTURER_RECIPES);
 // Per direct spec: "at base, manufacturers will take time to process each
@@ -1401,7 +1471,9 @@ export const MANUFACTURER_RECIPE_LIST = Object.values(MANUFACTURER_RECIPES);
 // sum of its 2 ingredients' own durations (e.g. Bio-Pellets: food 4s + waste
 // 2s = 6s total), since the two are processed one at a time in sequence
 // (see updateBuildings — only one item may be absorbed/mid-process at once).
-export const MANUFACTURER_ITEM_PROCESS_MS = { waste: 2000, food: 4000, biomass: 8000 };
+// `science` added alongside the Alien Egg recipe, its one ingredient type
+// that didn't already have a duration here.
+export const MANUFACTURER_ITEM_PROCESS_MS = { waste: 2000, food: 4000, biomass: 8000, science: 6000 };
 export const MANUFACTURER_STATS = {
   [TILE_MANUFACTURER]: { powerCostPerSec: 15 }, // drawn only while actively processing an absorbed ingredient, same as every other "only while working" Electric building
 };
@@ -1609,9 +1681,11 @@ export const SCIENCE_LAB_UPGRADES = {
   // its own separate node gating MANUFACTURER_RECIPES/POWER_PLANT_RECIPES'
   // own `labNodeId` field (UI.js's recipe pop-up menu and Grid.js's
   // updateBuildings both check state.meta.labUpgradesPurchased for it).
+  // Per direct request ("make the suckerfish a requirement for the
+  // manufacturer") — requires both utility species now, not just the Eel.
   manufacturer: {
     id: 'manufacturer', name: 'Manufacturer', icon: '🏭', scienceCost: 35, goldCost: 5000,
-    requires: ['eel'], grants: { buildings: [TILE_MANUFACTURER] },
+    requires: ['eel', 'suckerfish'], grants: { buildings: [TILE_MANUFACTURER] },
   },
   power_plant: {
     id: 'power_plant', name: 'Power Plant', icon: '☢️', scienceCost: 35, goldCost: 5000,
@@ -1630,22 +1704,26 @@ export const SCIENCE_LAB_UPGRADES = {
     id: 'recipe_bio_feeder', name: 'Bio-Feeder Recipe', icon: '🩷', scienceCost: 45, goldCost: 7000,
     requires: ['manufacturer', 'power_plant'], grants: {},
   },
+  // Per direct request ("add a alien egg recipe to the manufacturer...
+  // with this recipe as a requirement for the bio-combustor recipe") — the
+  // Bio-Combustor recipe now also needs the Alien Egg recipe unlocked first.
   recipe_bio_combustor: {
     id: 'recipe_bio_combustor', name: 'Bio-Combustor Recipe', icon: '🔥', scienceCost: 40, goldCost: 6000,
-    requires: ['manufacturer', 'power_plant'], grants: {},
+    requires: ['manufacturer', 'power_plant', 'recipe_alien_egg'], grants: {},
   },
   // Green Science Tech grants nothing by itself (`grants: {}`) — a pure
   // recipe-unlock flag, same "presence in state.meta.labUpgradesPurchased
   // IS the unlock" pattern this tree already used for its old gene_splicing
   // root. Now sits behind the Bio-Combustor recipe (its closest analogue to
-  // the old bio_combuster building node it used to require). Icon changed
-  // back to a plain green orb, per direct request — '🧬' (DNA helix) is now
-  // used elsewhere (Bio-Refinery) and read as a mismatch for "Green Science"
-  // specifically, which every other green-science surface (the currency
-  // icon, the physical item) already represents with a plain green circle.
+  // the old bio_combuster building node it used to require) AND Bubble Cap
+  // 30, per direct request. Icon changed back to a plain green orb, per
+  // direct request — '🧬' (DNA helix) is now used elsewhere (Bio-Refinery)
+  // and read as a mismatch for "Green Science" specifically, which every
+  // other green-science surface (the currency icon, the physical item)
+  // already represents with a plain green circle.
   green_science_tech: {
     id: 'green_science_tech', name: 'Green Science Tech', icon: '🟢', scienceCost: 60, goldCost: 8000,
-    requires: ['recipe_bio_combustor'], grants: {},
+    requires: ['recipe_bio_combustor', 'science_cap_3'], grants: {},
   },
   // Per direct request, "add in unlock for the bio-pellets in the science
   // lab behind the manufacturer" — just the building, no Power Plant needed.
@@ -1653,6 +1731,15 @@ export const SCIENCE_LAB_UPGRADES = {
   // pellet/capsule glyph instead, per direct request to fix the collision.
   recipe_bio_pellets: {
     id: 'recipe_bio_pellets', name: 'Bio-Pellets Recipe', icon: '💊', scienceCost: 50, goldCost: 9000,
+    requires: ['manufacturer'], grants: {},
+  },
+  // New Manufacturer recipe, per direct spec — Blue Science + Food -> a
+  // physical, draggable Alien Egg that hatches into a live Tier-1 alien
+  // after ALIEN_EGG_HATCH_MS (see MANUFACTURER_RECIPES.alien_egg and
+  // Entities.js's updateAlienEgg). Gated behind the Manufacturer alone, same
+  // as Bio-Pellets — it doesn't need the Power Plant.
+  recipe_alien_egg: {
+    id: 'recipe_alien_egg', name: 'Alien Egg Recipe', icon: '🥚', scienceCost: 55, goldCost: 10000,
     requires: ['manufacturer'], grants: {},
   },
   // The Power Plant's Biomass recipe is locked behind the Manufacturer's
@@ -1690,9 +1777,11 @@ export const SCIENCE_LAB_UPGRADES = {
   // `state.meta.speciesUnlocked.includes(hybridId)` per specific pair, so a
   // combination with no matching hybrid (or a locked one) simply never
   // resolves — no separate "splicing enabled" flag needed anywhere.
+  // Per direct request ("make the suckerfish a requirement for the buffer
+  // fish") — on top of its existing Bubble Cap 20 gate.
   hybrid_buffer_fish: {
     id: 'hybrid_buffer_fish', name: 'Buffer Fish', icon: '🧲', scienceCost: 20, goldCost: 4000,
-    requires: ['science_cap_2'], grants: { species: ['buffer_fish'] },
+    requires: ['science_cap_2', 'suckerfish'], grants: { species: ['buffer_fish'] },
   },
   hybrid_eel_blimp: {
     id: 'hybrid_eel_blimp', name: 'Eel-Blimp', icon: '🔋', scienceCost: 30, goldCost: 8000,
@@ -1707,6 +1796,21 @@ export const SCIENCE_LAB_UPGRADES = {
   hybrid_catalyst_fish: {
     id: 'hybrid_catalyst_fish', name: 'Catalyst Fish', icon: '🎯', scienceCost: 40, scienceGreenCost: 20, goldCost: 15000,
     requires: ['science_cap_4', 'green_science_tech'], grants: { species: ['catalyst_fish'] },
+  },
+  // Two more hybrids, per direct request — each gated behind a Manufacturer
+  // recipe instead of a Bubble Cap tier, since both are thematically tied to
+  // that production chain rather than raw research depth. Zap Sucker
+  // (Electric Eel × Suckerfish) really is spliced like the 3 above (both
+  // parents are real fish); Xeno Octopus has no real "Alien" fish to splice
+  // from, so it's a directly-purchasable species instead (no `parents`
+  // field) — the same pattern the 3 base utility species already use.
+  hybrid_zap_sucker: {
+    id: 'hybrid_zap_sucker', name: 'Zap Sucker', icon: '🔌', scienceCost: 35, goldCost: 9000,
+    requires: ['recipe_bio_pellets'], grants: { species: ['zap_sucker'] },
+  },
+  hybrid_xeno_octopus: {
+    id: 'hybrid_xeno_octopus', name: 'Xeno Octopus', icon: '👽', scienceCost: 45, goldCost: 12000,
+    requires: ['recipe_alien_egg'], grants: { species: ['xeno_octopus'] },
   },
 
   // ---- Bubble (Science) Capacity chain ----
@@ -1816,6 +1920,18 @@ export const CATALYST_BUFF_MULTIPLIER_MUTAGEN = 1.75;
 // fish and its (new or existing) linked building, per spec ("both the fish
 // and the building will flash").
 export const CATALYST_FLASH_DURATION_MS = 700;
+
+// Zap Sucker: click it to toggle an automatic Food dispenser (fish.autoFoodOn,
+// toggled by main.js's click handler) — while on, it spits out one real Food
+// item every ELECTRIC_SUCKER_FOOD_INTERVAL_MS with no feeding required to
+// trigger it (see updateFish's fish.autoFoodOn branch and fish.autoFoodTimerMs).
+export const ELECTRIC_SUCKER_FOOD_INTERVAL_MS = 6000;
+// Xeno Octopus: click it to toggle Alien DNA mode (fish.alienDnaModeOn) —
+// while on, its normal long Science brew cycle is replaced entirely by a
+// fixed SCIENCE_ALIEN_DNA_INTERVAL_MS timer that spits out one Alien DNA
+// item instead of a Science Bubble, per spec ("every 8 seconds instead of
+// science"). See updateFish's isPureResearcher branch.
+export const SCIENCE_ALIEN_DNA_INTERVAL_MS = 8000;
 
 export const SCIENCE_COLOR = '#5fc9ff';
 export const POWER_COLOR = '#ffd23f';

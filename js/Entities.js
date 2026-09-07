@@ -118,6 +118,12 @@ import {
   CLEANLINESS_STRESS_THRESHOLD,
   CLEANLINESS_STRESS_MAX_HUNGER_MULTIPLIER,
   CLEANLINESS_STRESS_MAX_INTERVAL_MULTIPLIER,
+  ELECTRIC_SUCKER_FOOD_INTERVAL_MS,
+  SCIENCE_ALIEN_DNA_INTERVAL_MS,
+  ALIEN_EGG_RADIUS,
+  ALIEN_EGG_HATCH_MS,
+  ALIEN_EGG_HATCH_INVULN_MS,
+  ALIEN_EGG_RISE_SPEED,
 } from './Config.js';
 import { stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemForces, updateBuildings } from './Grid.js';
 // Sound is a fire-and-forget side effect at the moment something already
@@ -291,6 +297,14 @@ export function createBioPellets(x, y) {
   return { id: nextId(), type: 'bio_pellets', x, y, vx: 0, vy: 0, radius: BIO_PELLETS_RADIUS, mass: ITEM_MASS_BY_TYPE.bio_pellets, resting: false };
 }
 
+// The Manufacturer's Alien Egg recipe output (Blue Science + Food) — Weight
+// Class 3, same mass as a coin per direct spec. hatchTimer counts up toward
+// ALIEN_EGG_HATCH_MS (see updateAlienEgg below); nothing else about it is
+// unique — it falls/routes/drags exactly like every other item its class.
+export function createAlienEgg(x, y) {
+  return { id: nextId(), type: 'alien_egg', x, y, vx: 0, vy: 0, radius: ALIEN_EGG_RADIUS, mass: ITEM_MASS_BY_TYPE.alien_egg, resting: false, hatchTimer: 0 };
+}
+
 export function createPickupText(x, y, text, color) {
   return { id: nextId(), type: 'pickupText', x, y, text, color, age: 0 };
 }
@@ -332,6 +346,8 @@ export function createAlien(x, y, hp, archetypeId) {
     wanderTimer: 0, // 0 so the very first tick immediately picks a heading, same as fish's own wanderTimer
     poopTimer: 0,
     hitFlashMs: 0, // counts down from ALIEN_HIT_FLASH_MS whenever damage is applied (Grid.js's Turret branch, main.js's click handler) — drives the red-flash/bounce read by main.js's render
+    spawnProtectionUntilMs: 0, // Alien-Egg-hatched aliens only — see updateAlienEgg; a normal wave-spawned alien never has this set past 0, so every damage-site check below is a no-op for it
+    risingToSurface: false, // Alien-Egg-hatched aliens only, and only when the egg hatched inside the seabed city — overrides all normal AI/movement in updateAlien until it clears SEABED_FLOOR_Y
   };
 }
 
@@ -414,6 +430,26 @@ function updateAlien(alien, state, dtMs) {
 
   if (alien.hitFlashMs > 0) alien.hitFlashMs = Math.max(0, alien.hitFlashMs - dtMs);
 
+  // Alien-Egg hatch: a freshly-hatched alien that started inside the seabed
+  // city rises straight up at a slow, fixed speed until it clears the
+  // surface, per direct spec ("have it slowly swim up... when it first
+  // spawns") — completely overrides wander/chase/eat/poop for as long as
+  // this is true, since the normal SEABED_FLOOR_Y clamp further down would
+  // otherwise snap it up to the boundary INSTANTLY the very first tick
+  // (fine for a wave-spawned alien, which is never placed below that line in
+  // the first place, but would defeat the whole point of a visible slow
+  // ascent here).
+  if (alien.risingToSurface) {
+    alien.vx = 0;
+    alien.vy = -ALIEN_EGG_RISE_SPEED;
+    alien.y += alien.vy * dt;
+    if (alien.y <= SEABED_FLOOR_Y) {
+      alien.y = SEABED_FLOOR_Y;
+      alien.risingToSurface = false;
+    }
+    return true;
+  }
+
   alien.wanderTimer -= dt;
   if (alien.wanderTimer <= 0) {
     alien.wanderTimer = ALIEN_WANDER_INTERVAL_MIN_S + Math.random() * (ALIEN_WANDER_INTERVAL_MAX_S - ALIEN_WANDER_INTERVAL_MIN_S);
@@ -460,8 +496,13 @@ function updateAlien(alien, state, dtMs) {
   if (alien.y < FISH_MIN_Y) { alien.y = FISH_MIN_Y; alien.vy = Math.abs(alien.vy); }
   if (alien.y > SEABED_FLOOR_Y) { alien.y = SEABED_FLOOR_Y; alien.vy = -Math.abs(alien.vy); } // aliens can't swim into the seabed city either, same rule as fish
 
+  // Alien-Egg hatch grace period — per direct spec, a freshly-hatched alien
+  // doesn't produce Waste for its first ALIEN_EGG_HATCH_INVULN_MS. Its
+  // poopTimer still accumulates underneath (not reset/paused), so it doesn't
+  // immediately spawn a burst of Waste the instant protection lapses.
+  const stillProtected = alien.spawnProtectionUntilMs > state.level.elapsed;
   alien.poopTimer += dtMs;
-  if (alien.poopTimer >= ALIEN_POOP_INTERVAL_MS) {
+  if (!stillProtected && alien.poopTimer >= ALIEN_POOP_INTERVAL_MS) {
     alien.poopTimer = 0;
     // canSpawnMoreWaste: see Config.js's WASTE_MAX_ON_SCREEN — this is the
     // single biggest source of runaway item counts (up to ALIEN_MAX_ALIVE
@@ -520,6 +561,9 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
     mutagenBuffActive: false, // Adult-only Mutagen Paste buff — see updateFish's eat branch; cleared once hunger crosses back into HUNGER_CRITICAL_THRESHOLD
     magnetOn: false, // Buffer Fish only — toggled by clicking the fish (main.js's click handler); pulls nearby Waste toward it while true, see computeBufferFishMagnetForce
     linkedBuildingKey: null, // Catalyst Fish only — the "row,col" buildingData key it's currently linked to, or null; set by main.js's catalyst link-click flow, read by Grid.js's getCatalystSpeedMultiplier
+    autoFoodOn: false, // Zap Sucker only — toggled by clicking the fish; while true, dispenses a real Food item every ELECTRIC_SUCKER_FOOD_INTERVAL_MS with no feeding required — see updateFish's own dedicated timer block
+    autoFoodTimerMs: 0, // Zap Sucker only — counts up toward ELECTRIC_SUCKER_FOOD_INTERVAL_MS, only while autoFoodOn is true
+    alienDnaModeOn: false, // Xeno Octopus only — toggled by clicking the fish; while true, replaces the normal Science brew cycle with a fixed SCIENCE_ALIEN_DNA_INTERVAL_MS timer producing Alien DNA instead — see updateFish's isPureResearcher branch
     wanderTimer: 0,
     tailPhase: 0, // only rendered once fully grown; advances faster the faster the fish is currently moving
     // Economy Fish Combining (Tier 2) — see CLAUDE.md's "Economy Fish
@@ -616,6 +660,14 @@ export function effectiveCoinCapacity(state) {
 // UI.js's Lab modal), but reads the exact same way.
 export function effectiveScienceCapacity(state) {
   return SCIENCE_CAP_BY_LEVEL[state.level.upgrades.scienceCapLevel];
+}
+
+// Per direct request ("make sure green science counts towards the bubble
+// cap when on screen") — Green Science Bubbles now count against the exact
+// same cap Blue Science does, not a separate unbounded pool. Used wherever
+// "how much of the Bubble Cap is currently used" matters.
+export function countScienceCapacityUsed(state) {
+  return countTankItemsByType(state, 'science') + countTankItemsByType(state, 'science_green');
 }
 
 // Called the instant a fish's drop cycle completes but its resource is
@@ -1263,11 +1315,9 @@ function updateCoin(item, state, dtMs) {
     playCoinBank();
     state.level.floatingTexts.push(createPickupText(item.x, item.y, `+$${item.value}`, getCoinColor(item.value)));
     state.level.gridStats.itemsRoutedTotal += 1;
-    // Waste is no longer spawned per individual item consumed — a Processor
-    // now produces it on its own continuously-running background clock
-    // instead (Grid.js's updateBuildings, PROCESSOR_STATS' wasteEveryMs),
-    // per direct request ("produce 1 waste every N seconds it's
-    // processing," not "one waste per item").
+    // The Collector no longer produces any Waste byproduct at all, on any
+    // tier — per direct request, banking a coin here is now completely
+    // clean (see PROCESSOR_STATS' own comment in Config.js).
     return false;
   }
   item.resting = status === 'resting'; // informational only — re-evaluated fresh every tick, doesn't stop future physics
@@ -1413,6 +1463,45 @@ function updateBioPellets(item, state, dtMs) {
   const status = stepItemOnGrid(item, state, dt, physics);
   if (status === 'consumed') return false;
   item.resting = status === 'resting';
+  return true;
+}
+
+// The Manufacturer's Alien Egg recipe output — see createAlienEgg. Falls/
+// routes/drags exactly like a coin (Class 3), but also counts up its own
+// hatchTimer every tick regardless of resting state; once it crosses
+// ALIEN_EGG_HATCH_MS it hatches into a real, live Tier-1 alien at its
+// current position instead of continuing as an item — spliced out of
+// state.level.items (return false) the same tick the alien is pushed into
+// state.level.entities. See Config.js's ALIEN_EGG_HATCH_MS/
+// _HATCH_INVULN_MS/_RISE_SPEED for the exact numbers/rationale.
+function updateAlienEgg(item, state, dtMs) {
+  const dt = dtMs / 1000;
+  const physics = { gravity: GRAVITY, maxFallSpeed: MAX_FALL_SPEED };
+  if (item.y < SEABED_FLOOR_Y) {
+    const fanForce = computeFanForce(state, item);
+    integrateItemForces(item, dt, physics, fanForce);
+    item.y += item.vy * dt;
+    item.x += item.vx * dt;
+    clampItemToWorldWalls(item);
+  } else {
+    const status = stepItemOnGrid(item, state, dt, physics);
+    if (status === 'consumed') return false; // defensive — nothing currently consumes a raw egg via a building intake
+    item.resting = status === 'resting';
+  }
+  item.hatchTimer += dtMs;
+  if (item.hatchTimer >= ALIEN_EGG_HATCH_MS) {
+    const archetype = ALIEN_ARCHETYPES[0]; // always a Tier 1 alien, per direct spec
+    const hp = Math.round(archetype.hpMin + Math.random() * (archetype.hpMax - archetype.hpMin));
+    const alien = createAlien(item.x, item.y, hp, archetype.id);
+    alien.spawnProtectionUntilMs = state.level.elapsed + ALIEN_EGG_HATCH_INVULN_MS;
+    // Only needs to rise if it hatched while still inside the seabed city
+    // (the Manufacturer that laid the egg is a city building) — an egg
+    // dragged up into open water first just hatches there normally, no rise
+    // needed.
+    alien.risingToSurface = item.y > SEABED_FLOOR_Y;
+    state.level.entities.push(alien);
+    return false;
+  }
   return true;
 }
 
@@ -1655,6 +1744,20 @@ function updateFish(fish, state, dtMs) {
   // refreshes it exactly as before.
   if (fish.mutagenBuffActive && fish.hunger >= HUNGER_CRITICAL_THRESHOLD) fish.mutagenBuffActive = false;
 
+  // Zap Sucker's auto-food dispenser — a completely independent timer from
+  // every other production mechanic, per direct spec ("spits out food
+  // automatically... without needing to be fed"): it doesn't gate on
+  // hunger, eating, or any of the isPureX branches below, it just ticks
+  // whenever toggled on (fish.autoFoodOn, main.js's click handler) and
+  // spawns a real Food item once it crosses ELECTRIC_SUCKER_FOOD_INTERVAL_MS.
+  if (fish.speciesId === 'zap_sucker' && fish.autoFoodOn) {
+    fish.autoFoodTimerMs += dtMs;
+    if (fish.autoFoodTimerMs >= ELECTRIC_SUCKER_FOOD_INTERVAL_MS) {
+      fish.autoFoodTimerMs -= ELECTRIC_SUCKER_FOOD_INTERVAL_MS;
+      state.level.items.push(createFood(fish.x, fish.y));
+    }
+  }
+
   // Alien Invasion reactions, per direct request: a fish near a living alien
   // usually (not always — see wander's own ALIEN_FLEE_CHANCE bias) tries to
   // move away from it, and can't produce a coin at all while this close
@@ -1825,6 +1928,24 @@ function updateFish(fish, state, dtMs) {
   // only ever produces Science, never Power, "a deliberate one-resource-
   // per-fish simplification." Researcher must stay first for that to hold.
   if (isPureResearcher) {
+    // Xeno Octopus's Alien DNA mode, per direct spec ("spits out alien DNA
+    // every 8 seconds instead of science") — a full replacement of the
+    // normal long brew cycle below with a short fixed timer, while toggled
+    // on. Still needs to be fed like any other fish (nothing here changes
+    // hunger/starvation) — only what its dropTimer produces changes.
+    if (fish.speciesId === 'xeno_octopus' && fish.alienDnaModeOn) {
+      fish.dropTimer += dtMs;
+      if (fish.dropTimer >= SCIENCE_ALIEN_DNA_INTERVAL_MS) {
+        fish.dropTimer = 0;
+        if (canSpawnMoreAlienDna(state)) {
+          state.level.items.push(createAlienDna(fish.x, fish.y));
+        }
+      }
+      // Deliberately no `return` here — falls through past the rest of this
+      // if-block to the shared poop-timer logic below, same as every other
+      // pure Researcher/Generator branch already does; only what dropTimer
+      // produces is different in this mode, not the rest of the fish's tick.
+    } else {
     // A real long brew cycle now, per direct request ("a full minute at
     // base... every 70 seconds as a baby, every 50 as an adult") — dropTimer
     // still counts up toward stageDef.dropInterval exactly like a coin
@@ -1848,8 +1969,11 @@ function updateFish(fish, state, dtMs) {
       // nothing spawns, the fish gets the blocked feedback once. Otherwise
       // it spawns up to dropValue bubbles but stops early the instant the
       // cap fills mid-batch (a partial payout isn't itself a "blocked"
-      // event, so no extra feedback fires for that case).
-      const scienceRoom = effectiveScienceCapacity(state) - countTankItemsByType(state, 'science');
+      // event, so no extra feedback fires for that case). Green Science
+      // counts against this same cap now too, per direct request ("make sure
+      // green science counts towards the bubble cap when on screen") — see
+      // countScienceCapacityUsed.
+      const scienceRoom = effectiveScienceCapacity(state) - countScienceCapacityUsed(state);
       if (scienceRoom <= 0) {
         triggerProductionBlocked(state, fish, stageDef, 'science');
       } else {
@@ -1858,6 +1982,7 @@ function updateFish(fish, state, dtMs) {
           state.level.items.push(createScience(fish.x, fish.y));
         }
       }
+    }
     }
   } else if (isPureGenerator || fish.speciesId === 'eel_blimp') {
     // Distance-based, per direct request ("produces 1MW per 10 pixels swam
@@ -2034,6 +2159,11 @@ function updateTurretProjectiles(state, dtMs) {
   state.level.turretProjectiles = state.level.turretProjectiles.filter((shot) => {
     const target = state.level.entities.find((e) => e.id === shot.targetId && e.type === 'alien' && e.hp > 0);
     if (!target) return false; // target already gone — fizzle, no damage, no error
+    // Defensive — Grid.js's own targeting search already excludes an
+    // invulnerable (Alien-Egg-hatch grace period) alien, so a shot should
+    // never actually be aimed at one in practice; still fizzle harmlessly
+    // rather than apply damage if it somehow is.
+    if (target.spawnProtectionUntilMs > state.level.elapsed) return false;
     const dx = target.x - shot.x;
     const dy = target.y - shot.y;
     const dist = Math.hypot(dx, dy);
@@ -2088,6 +2218,7 @@ export function updateEntities(state, dtMs) {
     if (item.type === 'biomass') return updateBiomass(item, state, dtMs);
     if (item.type === 'bio_pellets') return updateBioPellets(item, state, dtMs);
     if (item.type === 'mutagen_paste') return updateMutagenPaste(item, state, dtMs);
+    if (item.type === 'alien_egg') return updateAlienEgg(item, state, dtMs);
     return true;
   });
 
@@ -2110,13 +2241,21 @@ export function updateEntities(state, dtMs) {
   // Config.js's WASTE_MAX_ON_SCREEN.
   for (const point of wasteSpawnPoints) { if (canSpawnMoreWaste(state)) state.level.items.push(createWaste(point.x, point.y)); }
   for (const point of pendingFoodToWasteSpawns) { if (canSpawnMoreWaste(state)) state.level.items.push(createWaste(point.x, point.y)); }
+  // Both science-type outputs (the Bio-Combustor's Blue or Green recipe) are
+  // gated by the Bubble Cap now too, per direct request — see
+  // countScienceCapacityUsed for why Green counts against the same cap Blue
+  // does, not a separate unbounded pool. A blocked brew here just silently
+  // doesn't eject (same "no player-facing feedback" precedent every other
+  // building-side cap check already follows, unlike a fish's own capped
+  // production which does show a blocked-effect).
   for (const point of bioSpawnPoints) {
     if (point.itemType === 'food') state.level.items.push(createFood(point.x, point.y));
     else if (point.itemType === 'biomass') { if (canSpawnMoreBiomass(state)) state.level.items.push(createBiomass(point.x, point.y)); }
     else if (point.itemType === 'bio_pellets') { if (canSpawnMoreBioPellets(state)) state.level.items.push(createBioPellets(point.x, point.y)); }
     else if (point.itemType === 'mutagen_paste') state.level.items.push(createMutagenPaste(point.x, point.y));
-    else if (point.itemType === 'science') state.level.items.push(createScience(point.x, point.y));
-    else if (point.itemType === 'science_green') state.level.items.push(createScienceGreen(point.x, point.y));
+    else if (point.itemType === 'science') { if (countScienceCapacityUsed(state) < effectiveScienceCapacity(state)) state.level.items.push(createScience(point.x, point.y)); }
+    else if (point.itemType === 'science_green') { if (countScienceCapacityUsed(state) < effectiveScienceCapacity(state)) state.level.items.push(createScienceGreen(point.x, point.y)); }
+    else if (point.itemType === 'alien_egg') state.level.items.push(createAlienEgg(point.x, point.y));
   }
   for (const shot of turretShots) state.level.turretProjectiles.push(createTurretProjectile(shot));
   // Runs before the entities filter loop below, same as the old direct-
