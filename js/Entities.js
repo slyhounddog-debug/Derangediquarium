@@ -69,7 +69,6 @@ import {
   SCIENCE_COLOR,
   POWER_COLOR,
   UTILITY_SPECIES_IDS,
-  GENE_SPLICING_LAB_ID,
   SCIENCE_ITEM_RADIUS,
   SCIENCE_PROGRESS_TICKS,
   COIN_CAP_BY_LEVEL,
@@ -108,6 +107,11 @@ import {
   MUTAGEN_PASTE_HUNGER_RELIEF,
   SCIENCE_GREEN_ITEM_RADIUS,
   SCIENCE_GREEN_COLOR,
+  EEL_BLIMP_BATTERY_CAPACITY_MW,
+  EEL_BLIMP_BATTERY_CAPACITY_MUTAGEN_MW,
+  EEL_BLIMP_MUTAGEN_PRODUCTION_MULTIPLIER,
+  BUFFER_FISH_MAGNET_RADIUS,
+  BUFFER_FISH_MAGNET_FORCE,
   BIO_PELLETS_RADIUS,
   BIO_PELLETS_COLOR,
   BIO_PELLETS_MAX_ON_SCREEN,
@@ -513,7 +517,9 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
     hungerCriticalSfxPlayed: false, // plays playHunger() once per crossing into HUNGER_CRITICAL_THRESHOLD, reset once hunger drops back below it (e.g. after eating) — see updateFish
     alienNearby: false, // recomputed every tick in updateFish — true while a living alien is within ALIEN_INCOME_BLOCK_RADIUS, driving both the coin-production block and the continuous gray tint (main.js's render)
     capBlockedTintRemainingMs: 0, // counts down from FISH_BLOCKED_TINT_MS whenever a coin drop is blocked by the Coin Cap — the OTHER (timed) source of the gray tint, see triggerProductionBlocked
-    mutagenBuffActive: false, // Adult-only Mutagen Paste buff (2x coin drop + a glow) — see updateFish's eat branch; cleared the moment hunger crosses back into HUNGER_SEEK_THRESHOLD
+    mutagenBuffActive: false, // Adult-only Mutagen Paste buff — see updateFish's eat branch; cleared once hunger crosses back into HUNGER_CRITICAL_THRESHOLD
+    magnetOn: false, // Buffer Fish only — toggled by clicking the fish (main.js's click handler); pulls nearby Waste toward it while true, see computeBufferFishMagnetForce
+    linkedBuildingKey: null, // Catalyst Fish only — the "row,col" buildingData key it's currently linked to, or null; set by main.js's catalyst link-click flow, read by Grid.js's getCatalystSpeedMultiplier
     wanderTimer: 0,
     tailPhase: 0, // only rendered once fully grown; advances faster the faster the fish is currently moving
     // Economy Fish Combining (Tier 2) — see CLAUDE.md's "Economy Fish
@@ -555,6 +561,22 @@ export function countTankItemsByType(state, type) {
     if (item.type === type) n++;
   }
   return n;
+}
+
+// Eel-Blimp's battery role — summed fresh each call (same "no separate
+// bookkeeping to keep in sync" pattern as getBuildingCost/
+// countLivingFishOfSpecies elsewhere) from every LIVING Eel-Blimp's own
+// current capacity, which is higher while its own mutagenBuffActive is true
+// ("a temporary battery boost to 2GW for the fish while it's fed" — per
+// spec, the boost is per-fish, not a tank-wide flag). Called once per real
+// second from main.js's power-sampling block.
+export function computeEelBlimpBatteryCapacityMw(state) {
+  let total = 0;
+  for (const entity of state.level.entities) {
+    if (entity.type !== 'fish' || entity.speciesId !== 'eel_blimp') continue;
+    total += entity.mutagenBuffActive ? EEL_BLIMP_BATTERY_CAPACITY_MUTAGEN_MW : EEL_BLIMP_BATTERY_CAPACITY_MW;
+  }
+  return total;
 }
 
 // A silent safety cap on total Waste in the world — see Config.js's
@@ -812,7 +834,7 @@ export function spawnFishCheat(state, speciesId, x, y, grown) {
 // counter, so a death/combine/purchase is reflected the instant it happens
 // with no separate bookkeeping to keep in sync. The exact-id match is also
 // what keeps a hybrid from ever counting toward its own parent species'
-// scarcity — a Scrub Guppy's speciesId is 'scrub_guppy', never 'guppy', so
+// scarcity — a Buffer Fish's speciesId is 'buffer_fish', never 'guppy', so
 // it simply never matches here, satisfying "hybrid fish do not count
 // towards the limit" with no extra filtering needed.
 export function countLivingFishOfSpecies(state, speciesId) {
@@ -983,12 +1005,19 @@ export function createHybridFish(state, economyFish, utilitySpeciesId) {
 // Gene-Splicing is a Science Lab purchase now, not a standalone Tank
 // Upgrade flag — GENE_SPLICING_LAB_ID is only the tree's ROOT node (grants
 // nothing by itself, see Config.js's SCIENCE_LAB_UPGRADES), so this is
-// deliberately just a coarse "has splicing been unlocked at all" pre-check.
-// The fine-grained "is THIS specific hybrid combination unlocked" check
-// can't happen here — there's no target yet — so it lives in canSpliceFish
-// below instead, once both fish are known.
+// deliberately just a coarse "is this even a valid splice source shape at
+// all" pre-check. The fine-grained "is THIS specific hybrid combination
+// unlocked" check can't happen here — there's no target yet — so it lives
+// in canSpliceFish below instead, once both fish are known.
+//
+// Per direct request, splicing is no longer gated behind a standalone
+// "unlock splicing" purchase at all (the old gene_splicing root node is
+// gone) — each of the 3 real hybrids now gates purely off its own flat
+// Bubble Cap requirement in SCIENCE_LAB_UPGRADES, checked by canSpliceFish's
+// own `speciesUnlocked.includes(hybridId)` line below. So a grown utility
+// fish can always be PICKED UP as a potential splice source; whether the
+// actual drop succeeds depends entirely on that per-pair check.
 export function isSpliceSource(state, fish) {
-  if (!state.meta.labUpgradesPurchased.includes(GENE_SPLICING_LAB_ID)) return false;
   if (!fish || fish.type !== 'fish') return false;
   if (!UTILITY_SPECIES_IDS.includes(fish.speciesId)) return false;
   const def = SPECIES[fish.speciesId];
@@ -1006,10 +1035,10 @@ export function canSpliceFish(state, utilityFish, targetFish) {
   if (targetFish.stage !== targetDef.growthStages.length - 1) return false;
   const hybridId = getHybridSpeciesId(targetFish.speciesId, utilityFish.speciesId);
   if (!hybridId) return false;
-  // Per direct request, each hybrid combination is its own individual
-  // Science Lab purchase now (see SCIENCE_LAB_UPGRADES' scrub_*/volt_*/
-  // scholar_* leaf nodes) — pushed into speciesUnlocked the exact same way
-  // eel/suckerfish/octopus already are, so this is the one place that
+  // Each of the 3 hybrids is its own individual Science Lab purchase (see
+  // SCIENCE_LAB_UPGRADES' hybrid_buffer_fish/hybrid_eel_blimp/
+  // hybrid_catalyst_fish nodes) — pushed into speciesUnlocked the exact same
+  // way eel/suckerfish/octopus already are, so this is the one place that
   // actually needs to check, rather than a blanket "splicing exists" flag.
   return state.meta.speciesUnlocked.includes(hybridId);
 }
@@ -1275,12 +1304,40 @@ function updateScience(item, state, dtMs) {
 // falls/routes like a coin and piles up wherever it lands. If it does reach
 // a Collector, it's silently removed with no money and no further waste
 // spawned (no waste-spawns-waste loop).
+// Buffer Fish's click-toggled magnet (fish.magnetOn) — sums an attraction
+// force from every living, magnet-ON Buffer Fish within
+// BUFFER_FISH_MAGNET_RADIUS, same linear-falloff-to-0-at-range shape a Fan's
+// own cone force already uses (see Grid.js's computeFanForce), just radial
+// (pulling straight toward the fish) rather than a fixed-direction cone.
+// Waste-only, and open-water-only — a Buffer Fish can never swim into the
+// seabed city any more than any other fish can, so Waste that's already
+// settled down there is just as unreachable to this as to a normal
+// Suckerfish eating it directly. Returns the same { fx, fy } shape
+// computeFanForce does so the two can be summed before integrateItemForces.
+function computeBufferFishMagnetForce(state, item) {
+  let fx = 0;
+  let fy = 0;
+  for (const entity of state.level.entities) {
+    if (entity.type !== 'fish' || entity.speciesId !== 'buffer_fish' || !entity.magnetOn) continue;
+    const dx = entity.x - item.x;
+    const dy = entity.y - item.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist <= 0 || dist > BUFFER_FISH_MAGNET_RADIUS) continue;
+    const magnitude = BUFFER_FISH_MAGNET_FORCE * (1 - dist / BUFFER_FISH_MAGNET_RADIUS);
+    fx += (dx / dist) * magnitude;
+    fy += (dy / dist) * magnitude;
+  }
+  return { fx, fy };
+}
+
 function updateWaste(item, state, dtMs) {
   const dt = dtMs / 1000;
   const physics = { gravity: WASTE_GRAVITY, maxFallSpeed: WASTE_MAX_FALL_SPEED };
   if (item.y < SEABED_FLOOR_Y) {
     const fanForce = computeFanForce(state, item);
-    integrateItemForces(item, dt, physics, fanForce);
+    const magnetForce = computeBufferFishMagnetForce(state, item);
+    const totalForce = { fx: fanForce.fx + magnetForce.fx, fy: fanForce.fy + magnetForce.fy };
+    integrateItemForces(item, dt, physics, totalForce);
     item.fallTime += dt;
     const swayVx = currentSwayVx(item, WASTE_SWAY_AMPLITUDE, WASTE_SWAY_FREQUENCY, FOOD_SWAY_ENVELOPE_FREQUENCY);
     item.y += item.vy * dt;
@@ -1591,7 +1648,12 @@ function updateFish(fish, state, dtMs) {
   // state," per direct spec — checked here, every tick, rather than only at
   // the moment hunger crosses the threshold, so it can't linger a tick
   // stale.
-  if (fish.mutagenBuffActive && fish.hunger >= HUNGER_SEEK_THRESHOLD) fish.mutagenBuffActive = false;
+  // Per direct request ("make mutagen paste last until fed again or the
+  // second stage of hunger, instead of the first") — clears at
+  // HUNGER_CRITICAL_THRESHOLD (the "!!" stage) now, not HUNGER_SEEK_THRESHOLD
+  // (the "!" stage); genuinely eating Mutagen Paste again before then still
+  // refreshes it exactly as before.
+  if (fish.mutagenBuffActive && fish.hunger >= HUNGER_CRITICAL_THRESHOLD) fish.mutagenBuffActive = false;
 
   // Alien Invasion reactions, per direct request: a fish near a living alien
   // usually (not always — see wander's own ALIEN_FLEE_CHANCE bias) tries to
@@ -1654,6 +1716,14 @@ function updateFish(fish, state, dtMs) {
           // per-Waste-spawn penalty above.
           fish.hunger -= WASTE_HUNGER_RELIEF;
           adjustCleanliness(state, CLEANLINESS_PER_WASTE_EVENT);
+          // Buffer Fish's own bespoke twist on ordinary Scavenger eating —
+          // per direct spec ("still eats waste like a normal suckerfish, but
+          // turns it into food instead") — a real Food item spawns at the
+          // fish's own position on top of the normal hunger relief above,
+          // not instead of it.
+          if (fish.speciesId === 'buffer_fish') {
+            state.level.items.push(createFood(fish.x, fish.y));
+          }
           // eatCooldownMs overrides dropInterval when present — needed for a
           // hybrid (Scrub-Topus) that's ALSO a pure Researcher/Generator and
           // so already reads dropInterval for its own unrelated production
@@ -1789,7 +1859,7 @@ function updateFish(fish, state, dtMs) {
         }
       }
     }
-  } else if (isPureGenerator) {
+  } else if (isPureGenerator || fish.speciesId === 'eel_blimp') {
     // Distance-based, per direct request ("produces 1MW per 10 pixels swam
     // as a baby, and 1MW per 5 pixels as an adult") — a literal
     // pixels-traveled meter instead of an indirect speed-vs-baseline ratio,
@@ -1797,10 +1867,16 @@ function updateFish(fish, state, dtMs) {
     // naturally generates faster with no separate multiplier needed. `speed`
     // (computed above for the tail-wag) already reflects all of that.
     // Accumulates every tick unconditionally, not gated behind any timer.
-    // A hybrid without its own pixelsPerMW field (Scrub-Eel, still
-    // single-stage) falls back to the eel's own adult rate.
+    // A hybrid without its own pixelsPerMW field falls back to the eel's own
+    // adult rate. Eel-Blimp shares this exact mechanism by speciesId
+    // (bypassing the normal "GENERATOR+FEEDER is impure, doesn't generate"
+    // rule every other hybrid follows — its whole point per direct spec is
+    // to generate power) — Mutagen Paste doubles its production by simply
+    // filling the distance meter EEL_BLIMP_MUTAGEN_PRODUCTION_MULTIPLIER
+    // times faster for the same real distance swum.
     const pixelsPerMW = stageDef.pixelsPerMW || 5;
-    fish.distanceAccumPx += speed * dt;
+    const productionMultiplier = (fish.speciesId === 'eel_blimp' && fish.mutagenBuffActive) ? EEL_BLIMP_MUTAGEN_PRODUCTION_MULTIPLIER : 1;
+    fish.distanceAccumPx += speed * dt * productionMultiplier;
     while (fish.distanceAccumPx >= pixelsPerMW) {
       fish.distanceAccumPx -= pixelsPerMW;
       // Power is not a battery — this only feeds the CURRENT in-progress

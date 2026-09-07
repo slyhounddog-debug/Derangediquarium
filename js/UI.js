@@ -98,7 +98,16 @@ let recipeMenuTileKey = null; // "row,col" key of the Manufacturer/Power Plant t
 let labMenuOpen = false;
 let labMenuClosing = false;
 let labMenuCloseTimer = null;
-let labZoom = 1; // current --lab-zoom scale factor, reset to 1 every time the Lab is opened — see openLabMenu/setLabZoom
+let labZoom = 1; // current --lab-zoom scale factor — see openLabMenu/setLabZoom
+// Per direct request, the Lab remembers exactly where you left it —
+// labTreeHasBeenOpened gates the one-time-only initial centering (see
+// openLabMenu), and the saved* trio is written by closeLabMenu and restored
+// by the next openLabMenu. Module-level, not part of `state`, same as every
+// other pure-UI transient in this file (moundMenuOpen, labZoom itself, etc).
+let labTreeHasBeenOpened = false;
+let savedLabScrollLeft = 0;
+let savedLabScrollTop = 0;
+let savedLabZoom = 1;
 const LAB_ZOOM_MIN = 0.6;
 const LAB_ZOOM_MAX = 1.6;
 const LAB_ZOOM_STEP = 0.15;
@@ -713,16 +722,27 @@ export function openLabMenu(state) {
   if (labMenuCloseTimer !== null) { clearTimeout(labMenuCloseTimer); labMenuCloseTimer = null; }
   closeSidePanels(state); // per direct request — the Shop/Tank Upgrades panel shouldn't sit open behind the Lab
   els.labOverlay.classList.remove('hidden');
-  // Reset zoom to the default every fresh open, then center the tree
-  // VERTICALLY (not pinned to its top edge) — per direct request. Has to
-  // happen after the overlay is actually unhidden (a display:none element
-  // has no layout box, so scrollHeight/clientHeight would both read 0), and
-  // before refreshLabTree so its own drawLabTreeConnectors call draws
-  // against the final scroll position rather than the stale one.
-  labZoom = 1;
-  els.labTreeColumns.style.setProperty('--lab-zoom', '1');
-  els.labTreeWrap.scrollLeft = 0;
-  els.labTreeWrap.scrollTop = Math.max(0, (els.labTreeWrap.scrollHeight - els.labTreeWrap.clientHeight) / 2);
+  // Per direct request ("when you re-open the science lab, it saves the
+  // last state/place you were in") — only the very FIRST open of a fresh
+  // level centers the tree and resets zoom; every open after that restores
+  // exactly where the player left off (see closeLabMenu, which saves these
+  // three the instant it closes). Has to happen after the overlay is
+  // actually unhidden (a display:none element has no layout box, so
+  // scrollHeight/clientHeight would both read 0), and before refreshLabTree
+  // so its own drawLabTreeConnectors call draws against the final scroll
+  // position rather than the stale one.
+  if (labTreeHasBeenOpened) {
+    labZoom = savedLabZoom;
+    els.labTreeColumns.style.setProperty('--lab-zoom', String(labZoom));
+    els.labTreeWrap.scrollLeft = savedLabScrollLeft;
+    els.labTreeWrap.scrollTop = savedLabScrollTop;
+  } else {
+    labTreeHasBeenOpened = true;
+    labZoom = 1;
+    els.labTreeColumns.style.setProperty('--lab-zoom', '1');
+    els.labTreeWrap.scrollLeft = 0;
+    els.labTreeWrap.scrollTop = Math.max(0, (els.labTreeWrap.scrollHeight - els.labTreeWrap.clientHeight) / 2);
+  }
   refreshLabTree(state);
   els.labModal.classList.add('lab-modal-closed');
   void els.labModal.offsetWidth; // forced reflow — same retrigger trick every other one-shot transition in this file uses
@@ -734,6 +754,11 @@ export function closeLabMenu() {
   if (!labMenuOpen) return;
   labMenuOpen = false;
   labMenuClosing = true;
+  // Save the exact pan/zoom position so the next openLabMenu can restore it
+  // — see that function's own comment.
+  savedLabScrollLeft = els.labTreeWrap.scrollLeft;
+  savedLabScrollTop = els.labTreeWrap.scrollTop;
+  savedLabZoom = labZoom;
   closeLabPurchaseModal(); // don't leave the confirmation modal stranded on top of a closed/closing tree
   els.labModal.classList.add('lab-modal-closed');
   labMenuCloseTimer = setTimeout(() => {
@@ -935,36 +960,39 @@ function buildLabTree(state) {
   refreshLabTree(state);
 }
 
-// The Bio-Reactor's node is the one exception in the whole Science Lab tree
-// that costs GREEN Science instead of blue (`scienceGreenCost` in place of
-// the usual `scienceCost`) — per spec ("Requires: Green Science Upgrade +
-// Green Science + Money"). These three helpers are the only places that
-// distinction needs handling; every other cost/affordability check below
-// just calls through them.
-function labNodeScienceAmount(node) {
-  return node.scienceGreenCost != null ? node.scienceGreenCost : node.scienceCost;
-}
+// A handful of nodes (everything gated behind Green Science being unlocked)
+// cost Green Science IN ADDITION TO Blue now, per direct request ("the
+// unlocks for everything that requires green science to be unlocked, should
+// also require green science as a resource... in addition to blue
+// science") — `scienceGreenCost`, when present, is now an ADDITIVE second
+// cost, not an exclusive alternative to `scienceCost` (every node still
+// always costs its own `scienceCost` in Blue Science). These two helpers are
+// the only places that needs handling; every other cost/affordability check
+// below just calls through them.
 function labNodeHasEnoughScience(state, node) {
-  const balance = node.scienceGreenCost != null ? state.level.scienceGreen : state.level.science;
-  return balance >= labNodeScienceAmount(node);
+  if (state.level.science < node.scienceCost) return false;
+  if (node.scienceGreenCost != null && state.level.scienceGreen < node.scienceGreenCost) return false;
+  return true;
 }
-function labNodeScienceIcon(node) {
-  return node.scienceGreenCost != null ? '🟢' : '🔬';
+function labNodeCostText(node) {
+  let text = `${node.scienceCost} 🔬`;
+  if (node.scienceGreenCost != null) text += ` · ${node.scienceGreenCost} 🟢`;
+  return `${text} · $${node.goldCost}`;
 }
 
-// Every Science Lab node spends BOTH Science (blue, or green for the one
-// exception above) and gold at once — a deliberate first in this game's
-// economy, per direct request, tying the whole tree to two resources so it
-// reads as the real end-goal sink. Only ever called from confirmLabPurchase
-// now (see the purchase modal below) — clicking a node itself just opens
-// that modal.
+// Every Science Lab node spends Science (Blue, plus Green for the handful of
+// nodes gated behind Green Science research) and gold at once — a
+// deliberate first in this game's economy, per direct request, tying the
+// whole tree to real resources so it reads as the real end-goal sink. Only
+// ever called from confirmLabPurchase now (see the purchase modal below) —
+// clicking a node itself just opens that modal.
 function buyLabUpgrade(state, id) {
   const node = SCIENCE_LAB_UPGRADES[id];
   if (state.meta.labUpgradesPurchased.includes(id)) return;
   if (!node.requires.every((r) => state.meta.labUpgradesPurchased.includes(r))) return;
   if (!labNodeHasEnoughScience(state, node) || state.level.money < node.goldCost) return;
+  state.level.science -= node.scienceCost;
   if (node.scienceGreenCost != null) state.level.scienceGreen -= node.scienceGreenCost;
-  else state.level.science -= node.scienceCost;
   state.level.money -= node.goldCost;
   state.meta.labUpgradesPurchased.push(id);
   if (node.grants.species) {
@@ -999,7 +1027,7 @@ function openLabPurchaseModal(state, id) {
   labPurchaseNodeId = id;
   els.labPurchaseIcon.textContent = node.icon;
   els.labPurchaseName.textContent = node.name;
-  els.labPurchaseCost.textContent = `${labNodeScienceAmount(node)} ${labNodeScienceIcon(node)} · $${node.goldCost}`;
+  els.labPurchaseCost.textContent = labNodeCostText(node);
   refreshLabPurchaseButton(state);
 
   const descLines = [];
@@ -1024,8 +1052,8 @@ function openLabPurchaseModal(state, id) {
     statChips.push(`<div class="building-stat">🔬 Bubble cap: <b>${from} → ${to}</b></div>`);
   }
   if (!descLines.length) {
-    // A pure prerequisite node (gene_splicing, the 3 hybrid "track" gates) —
-    // grants nothing by itself, so describe what it opens up instead.
+    // A pure prerequisite node (e.g. green_science_tech) — grants nothing
+    // by itself, so describe what it opens up instead.
     descLines.push('Doesn\'t unlock anything by itself — it\'s a prerequisite for what comes next.');
     const unlocksHtml = labNodeUnlocksHtml(id);
     if (unlocksHtml) statChips.push(unlocksHtml);
@@ -1050,19 +1078,35 @@ function confirmLabPurchase(state) {
   buyLabUpgrade(state, id);
 }
 
-// Per direct request ("let me click all unlocked items in the science lab,
-// even if I can't afford it, so I can read them... have the confirm grayed
-// out if they can't afford it") — a node button itself is only ever
-// disabled for being locked or already purchased (see refreshLabTree)
-// now, never for being unaffordable, so it can always be opened to read.
-// This is what actually enforces affordability: greys out Confirm instead.
-// Called once when the modal opens and every frame afterward (from
-// refreshLabTree, since Science/gold can keep changing while it's open —
-// e.g. waiting on an Octopus's brew).
+// Per direct request, a node button itself is NEVER disabled any more (see
+// refreshLabTree) — purchased, locked, and unaffordable nodes are all
+// clickable so their info can always be read. This is what actually
+// enforces the real purchase gate, in 3 states: already purchased shows a
+// grayed "Bought" (per direct request — "have it just show a grayed out
+// 'bought' instead of 'confirm'... if it's already been purchased"); prereqs
+// not met yet shows a grayed "Locked" (previewable, per direct request, but
+// obviously not actually purchasable); otherwise the normal "Confirm,"
+// greyed out only when genuinely unaffordable right now. Called once when
+// the modal opens and every frame afterward (from refreshLabTree, since
+// Science/gold/purchased-state can all keep changing while it's open — e.g.
+// waiting on an Octopus's brew, or buying a prerequisite in a second tab...
+// well, there's no second tab, but the pattern's the same one every other
+// "keep this live while a modal sits open" spot in this file already uses).
 function refreshLabPurchaseButton(state) {
   const node = SCIENCE_LAB_UPGRADES[labPurchaseNodeId];
-  const affordable = labNodeHasEnoughScience(state, node) && state.level.money >= node.goldCost;
-  els.labPurchaseConfirmBtn.disabled = !affordable;
+  const purchased = state.meta.labUpgradesPurchased.includes(labPurchaseNodeId);
+  const prereqsMet = node.requires.every((r) => state.meta.labUpgradesPurchased.includes(r));
+  if (purchased) {
+    els.labPurchaseConfirmBtn.textContent = 'Bought';
+    els.labPurchaseConfirmBtn.disabled = true;
+  } else if (!prereqsMet) {
+    els.labPurchaseConfirmBtn.textContent = 'Locked';
+    els.labPurchaseConfirmBtn.disabled = true;
+  } else {
+    const affordable = labNodeHasEnoughScience(state, node) && state.level.money >= node.goldCost;
+    els.labPurchaseConfirmBtn.textContent = 'Confirm';
+    els.labPurchaseConfirmBtn.disabled = !affordable;
+  }
 }
 
 // A fish's real stats, in the same compact chip format buildingStatsHtml
@@ -1161,8 +1205,8 @@ function labNodeUnlocksHtml(id) {
 // Re-checked every frame the popup is open (from updateHUD) — Science/money
 // and every node's prerequisite state can all change while it's open.
 function refreshLabTree(state) {
-  // Both Science reserves shown together now that one node (bio_reactor)
-  // spends green instead of blue — see labNodeHasEnoughScience's own comment.
+  // Both Science reserves shown together — several nodes now spend both at
+  // once, see labNodeHasEnoughScience's own comment.
   els.labScienceReadout.textContent = `🔬 ${state.level.science} · 🟢 ${state.level.scienceGreen} · 💰 $${Math.floor(state.level.money)}`;
   for (const node of SCIENCE_LAB_UPGRADE_LIST) {
     const { btn, costEl } = labNodeButtons[node.id];
@@ -1171,27 +1215,21 @@ function refreshLabTree(state) {
     const affordable = labNodeHasEnoughScience(state, node) && state.level.money >= node.goldCost;
     btn.classList.toggle('purchased', purchased);
     btn.classList.toggle('locked', !purchased && !prereqsMet);
-    // Per direct request, an unlocked-but-unaffordable node stays CLICKABLE
-    // ("let me click all unlocked items... so I can read them... any
-    // unlocked ones should be able to be clicked") — only `purchased` and
-    // `!prereqsMet` actually disable the button below; unaffordable just
-    // dims it a touch via this class, and it's the purchase modal's OWN
-    // Confirm button that's actually greyed out (see
-    // openLabPurchaseModal/refreshLabPurchaseButton).
     btn.classList.toggle('unaffordable', !purchased && prereqsMet && !affordable);
-    if (purchased) {
-      costEl.textContent = 'Unlocked ✓';
-      btn.disabled = true;
-    } else if (!prereqsMet) {
-      costEl.textContent = 'Locked';
-      btn.disabled = true;
-    } else {
-      costEl.textContent = `${labNodeScienceAmount(node)} ${labNodeScienceIcon(node)} · $${node.goldCost}`;
-      btn.disabled = false;
-    }
+    // Per direct request, EVERY node stays clickable now — purchased
+    // ("click on already purchased science lab unlocks, just to see what it
+    // did") and even still-locked ones ("locked nodes... can be clicked to
+    // see what they will do when you get to that point") all open the same
+    // purchase modal to read; only that modal's own Confirm button actually
+    // reflects whether a purchase can happen right now — see
+    // refreshLabPurchaseButton.
+    btn.disabled = false;
+    if (purchased) costEl.textContent = 'Unlocked ✓';
+    else if (!prereqsMet) costEl.textContent = 'Locked';
+    else costEl.textContent = labNodeCostText(node);
   }
   drawLabTreeConnectors(state);
-  if (labPurchaseNodeId !== null) refreshLabPurchaseButton(state); // Science/gold can keep changing while the confirmation modal sits open
+  if (labPurchaseNodeId !== null) refreshLabPurchaseButton(state); // Science/gold/purchased-state can keep changing while the confirmation modal sits open
 }
 
 // The "web" itself — one bezier connector per prerequisite edge, drawn on a
@@ -1306,6 +1344,7 @@ export function initStartScreen(state, onStart) {
 // Phase 5's campaign flow will use) — wipes items/entities/money, leaves
 // state.meta (persisted progress) untouched, per the meta/level split.
 function restartLevel(state) {
+  labTreeHasBeenOpened = false; // a fresh level re-centers the Lab tree again on its first open — see openLabMenu
   loadLevel(state, state.level.levelId);
   centerCameraOnMound(state.camera); // loadLevel resets camera.x to 0 — re-center on the Mound, same as the initial load
   refreshShopPanel(state);
@@ -1631,7 +1670,7 @@ function createUpgradeCard(name, icon) {
   return { card, levelEl, descEl, buyBtn };
 }
 
-let tankCards = null; // { foodQuality, fishMovement, coinCapacity, fishMerging } — each { card, levelEl, descEl, buyBtn }. Gene-Splicing moved out of this panel entirely — see Config.js's SCIENCE_LAB_UPGRADES' gene_splicing/hybrid tree. Food Capacity retired entirely — see Config.js's FOOD_STATIONARY_TO_WASTE_MS.
+let tankCards = null; // { foodQuality, fishMovement, coinCapacity, fishMerging } — each { card, levelEl, descEl, buyBtn }. Splicing itself was never a purchase here — see Config.js's SCIENCE_LAB_UPGRADES' 3 flat hybrid nodes. Food Capacity retired entirely — see Config.js's FOOD_STATIONARY_TO_WASTE_MS.
 
 function buildTankPanel(state) {
   els.tankUpgradeList.innerHTML = '';

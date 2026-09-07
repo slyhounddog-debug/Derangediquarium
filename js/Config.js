@@ -637,6 +637,12 @@ export const MUTAGEN_PASTE_HUNGER_RELIEF = 90;
 // a temporary coin-drop multiplier with a glowing visual — both per direct
 // spec, see Entities.js's updateFish eat branch.
 export const MUTAGEN_PASTE_COIN_MULTIPLIER = 2;
+// Per direct request ("make mutagen paste last until fed again or the
+// second stage of hunger, instead of the first hunger stage") —
+// fish.mutagenBuffActive now clears at HUNGER_CRITICAL_THRESHOLD (the "!!"
+// stage), not HUNGER_SEEK_THRESHOLD (the "!" stage) — see updateFish's own
+// buff-clear check, right at the top of the function. Genuinely re-eating
+// Mutagen Paste before then still refreshes the buff exactly as before.
 
 // ---- Cleanliness (Phase 3) ----
 // state.level.cleanliness (0-100, clamped) is a real, live value now instead
@@ -1055,120 +1061,51 @@ export const SPECIES = {
     unlockedByDefault: false,
   },
 
-  // ---- Gene-Splicing hybrids (Phase 4 scaffold, data only) ----
-  // Each hybrid is Suckerfish/Electric Eel/Science Octopus spliced onto
-  // another species — see CLAUDE.md for the 3x3 feeder-combo + C(3,2)
-  // utility-combo = 12 combinatorics. `parents: [id, id]` records the two
-  // source species for the Phase 4 splicing UI; nothing reads it before
-  // then. `behavior` is the union of both parents' tags. Stats below are
-  // simple averages of the two parents' stats — a placeholder scaffold to
-  // be re-tuned once Phase 3/4 actually implements scavenge/power/science
-  // behavior (today every fish, hybrid or not, just drops a plain coin on
-  // its dropInterval — dropType is documentation only until then).
-  scrub_guppy: {
-    id: 'scrub_guppy', name: 'Scrub Guppy', tier: 4, unlockPhase: 4, cost: 45,
-    description: 'Suckerfish-spliced Guppy — clears waste on its rounds, still drops coins.',
-    behavior: ['SCAVENGER', 'FEEDER'], dropType: 'waste_cleared', parents: ['suckerfish', 'guppy'],
-    swimSpeed: 33, lifespan: 300000, hungerRate: 0.864, // 25% slower again per direct request — was 1.152
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 15864, dropValue: 6 }], // 1.2x Guppy's adult dropValue (5) — see CLAUDE.md's Gene-Splicing note: a splice can only happen on an adult fish, and inherits 1.2x that fish's adult coin value. Money production 10% slower again per direct request — was 14278
+  // ---- Gene-Splicing hybrids — completely reworked, per direct request ----
+  // The old 12-hybrid roster (3 "tracks" × feeder/utility-utility
+  // combinatorics, each just a generic behavior-tag union with scaled stats)
+  // is gone entirely, replaced by exactly 3 hybrids, each a genuinely unique
+  // hand-built mechanic rather than a formula. `parents: [utilityId,
+  // economyId]` is unchanged — Entities.js's getHybridSpeciesId still
+  // reverse-looks-up a SPECIES row by this field, so the drag-a-utility-
+  // fish-onto-an-adult-economy-fish splice interaction itself needed no
+  // code changes at all, only new data here. `behavior` is deliberately NOT
+  // the union of both parents' tags any more for any of these three — each
+  // one's real mechanic is hand-implemented in Entities.js/Grid.js by
+  // checking `fish.speciesId` directly (see updateFish's dedicated branches
+  // and Grid.js's getCatalystSpeedMultiplier), so the generic FEEDER/
+  // SCAVENGER/GENERATOR/RESEARCHER production paths would only get in the
+  // way if left on. Buffer Fish is the one exception, keeping the
+  // SCAVENGER tag — its bespoke "eats Waste, produces Food" mechanic is
+  // layered ON TOP of the ordinary Suckerfish-style eat-cooldown/targeting
+  // that tag already provides, rather than replacing it.
+  eel_blimp: {
+    id: 'eel_blimp', name: 'Eel-Blimp', tier: 4, unlockPhase: 4, cost: 130,
+    description: 'Electric Eel × Blimpfish — a living 1GW battery for the power grid. Stores surplus generation and covers shortfalls before efficiency ever drops. Feed it Mutagen Paste for double production and a temporary 2GW capacity boost.',
+    behavior: [], dropType: 'battery', parents: ['electric_eel', 'blimpfish'],
+    swimSpeed: 19, lifespan: 300000, hungerRate: 1.068,
+    // pixelsPerMW drives its own bespoke power-generation mechanic (see
+    // updateFish's speciesId==='eel_blimp' branch) — same distance-traveled
+    // formula the Electric Eel itself uses, at its adult rate.
+    growthStages: [{ feedsRequired: 0, scale: 1.0, dropValue: 0, pixelsPerMW: 0.5 }],
     unlockedByDefault: false,
   },
-  scrub_dartfin: {
-    id: 'scrub_dartfin', name: 'Scrub Dartfin', tier: 4, unlockPhase: 4, cost: 37,
-    description: 'Suckerfish-spliced Dartfin — fast waste cleanup, frequent small coins.',
-    behavior: ['SCAVENGER', 'FEEDER'], dropType: 'waste_cleared', parents: ['suckerfish', 'dartfin'],
-    swimSpeed: 48, lifespan: 300000, hungerRate: 0.732, // 25% slower again per direct request — was 0.976
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 10864, dropValue: 4 }], // 1.2x Dartfin's adult dropValue (3) — see CLAUDE.md's Gene-Splicing note. Money production 10% slower again per direct request — was 9778
-    unlockedByDefault: false,
-  },
-  scrub_blimpfish: {
-    id: 'scrub_blimpfish', name: 'Scrub Blimpfish', tier: 4, unlockPhase: 4, cost: 85,
-    description: 'Suckerfish-spliced Blimpfish — slow but thorough, big coins and a clean tank.',
-    behavior: ['SCAVENGER', 'FEEDER'], dropType: 'waste_cleared', parents: ['suckerfish', 'blimpfish'],
-    swimSpeed: 24, lifespan: 300000, hungerRate: 1.032, // 25% slower again per direct request — was 1.376
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 20802, dropValue: 26 }], // 1.2x Blimpfish's adult dropValue (22) — see CLAUDE.md's Gene-Splicing note. Money production 10% slower again per direct request — was 18722
-    unlockedByDefault: false,
-  },
-  volt_guppy: {
-    id: 'volt_guppy', name: 'Volt Guppy', tier: 4, unlockPhase: 4, cost: 100,
-    description: 'Electric Eel-spliced Guppy — generates MW alongside its usual coin drops.',
-    behavior: ['GENERATOR', 'FEEDER'], dropType: 'power', parents: ['electric_eel', 'guppy'],
-    swimSpeed: 28, lifespan: 300000, hungerRate: 0.9, // 25% slower again per direct request — was 1.2
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 12778, dropValue: 6 }], // 1.2x Guppy's adult dropValue (5) — see CLAUDE.md's Gene-Splicing note. Money production 10% slower again per direct request — was 11500
-    unlockedByDefault: false,
-  },
-  volt_dartfin: {
-    id: 'volt_dartfin', name: 'Volt Dartfin', tier: 4, unlockPhase: 4, cost: 92,
-    description: 'Electric Eel-spliced Dartfin — a fast, low-cost trickle of power and coins.',
-    behavior: ['GENERATOR', 'FEEDER'], dropType: 'power', parents: ['electric_eel', 'dartfin'],
-    swimSpeed: 43, lifespan: 300000, hungerRate: 0.768, // 25% slower again per direct request — was 1.024
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 7778, dropValue: 4 }], // 1.2x Dartfin's adult dropValue (3) — see CLAUDE.md's Gene-Splicing note. Money production 10% slower again per direct request — was 7000
-    unlockedByDefault: false,
-  },
-  volt_blimpfish: {
-    id: 'volt_blimpfish', name: 'Volt Blimpfish', tier: 4, unlockPhase: 4, cost: 140,
-    description: 'Electric Eel-spliced Blimpfish — slow, heavy-feeding hybrid with big power output.',
-    behavior: ['GENERATOR', 'FEEDER'], dropType: 'power', parents: ['electric_eel', 'blimpfish'],
-    swimSpeed: 19, lifespan: 300000, hungerRate: 1.068, // 25% slower again per direct request — was 1.424
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 17716, dropValue: 26 }], // 1.2x Blimpfish's adult dropValue (22) — see CLAUDE.md's Gene-Splicing note. Money production 10% slower again per direct request — was 15944
-    unlockedByDefault: false,
-  },
-  scholar_guppy: {
-    id: 'scholar_guppy', name: 'Scholar Guppy', tier: 4, unlockPhase: 4, cost: 110,
-    description: 'Science Octopus-spliced Guppy — drops Blue Science alongside coins.',
-    behavior: ['RESEARCHER', 'FEEDER'], dropType: 'science_blue', parents: ['octopus', 'guppy'],
-    swimSpeed: 30, lifespan: 300000, hungerRate: 0.846, // 25% slower again per direct request — was 1.128
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 18951, dropValue: 6 }], // 1.2x Guppy's adult dropValue (5) — see CLAUDE.md's Gene-Splicing note. Money production 10% slower again per direct request — was 17056
-    unlockedByDefault: false,
-  },
-  scholar_dartfin: {
-    id: 'scholar_dartfin', name: 'Scholar Dartfin', tier: 4, unlockPhase: 4, cost: 102,
-    description: 'Science Octopus-spliced Dartfin — quick, cheap research on the move.',
-    behavior: ['RESEARCHER', 'FEEDER'], dropType: 'science_blue', parents: ['octopus', 'dartfin'],
-    swimSpeed: 45, lifespan: 300000, hungerRate: 0.708, // 25% slower again per direct request — was 0.944
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 13951, dropValue: 4 }], // 1.2x Dartfin's adult dropValue (3) — see CLAUDE.md's Gene-Splicing note. Money production 10% slower again per direct request — was 12556
-    unlockedByDefault: false,
-  },
-  scholar_blimpfish: {
-    id: 'scholar_blimpfish', name: 'Scholar Blimpfish', tier: 4, unlockPhase: 4, cost: 150,
-    description: 'Science Octopus-spliced Blimpfish — slow but valuable, big coins and big science.',
-    behavior: ['RESEARCHER', 'FEEDER'], dropType: 'science_blue', parents: ['octopus', 'blimpfish'],
-    swimSpeed: 21, lifespan: 300000, hungerRate: 1.014, // 25% slower again per direct request — was 1.352
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 23889, dropValue: 26 }], // 1.2x Blimpfish's adult dropValue (22) — see CLAUDE.md's Gene-Splicing note. Money production 10% slower again per direct request — was 21500
-    unlockedByDefault: false,
-  },
-  scrub_eel: {
-    id: 'scrub_eel', name: 'Scrub-Eel', tier: 4, unlockPhase: 4, cost: 105,
-    description: 'Suckerfish-Eel splice — keeps the tank clean while powering the grid.',
-    behavior: ['SCAVENGER', 'GENERATOR'], dropType: 'waste_cleared+power', parents: ['suckerfish', 'electric_eel'],
-    swimSpeed: 25, lifespan: 300000, hungerRate: 0.546, // 25% slower again per direct request — was 0.728
-    // dropInterval is this pure Scavenger's eat cooldown (see Suckerfish's own
-    // comment above) — capped the same "up to 3 times/min" way, 20000ms.
+  buffer_fish: {
+    id: 'buffer_fish', name: 'Buffer Fish', tier: 4, unlockPhase: 4, cost: 70,
+    description: 'Suckerfish × Guppy — click it to toggle a Waste-attracting magnet on/off. Still eats Waste like a Suckerfish, but converts what it eats into Food instead of just relieving its own hunger.',
+    behavior: ['SCAVENGER'], dropType: 'waste_to_food', parents: ['suckerfish', 'guppy'],
+    swimSpeed: 33, lifespan: 300000, hungerRate: 0.914,
+    // dropInterval is this pure Scavenger's eat cooldown, same "up to 3
+    // times/min" cap every other pure Scavenger shares.
     growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 20000, dropValue: 0 }],
     unlockedByDefault: false,
   },
-  scrub_topus: {
-    id: 'scrub_topus', name: 'Scrub-Topus', tier: 4, unlockPhase: 4, cost: 115,
-    description: 'Suckerfish-Octopus splice — clears waste while trickling Blue Science.',
-    behavior: ['SCAVENGER', 'RESEARCHER'], dropType: 'waste_cleared+science_blue', parents: ['suckerfish', 'octopus'],
-    swimSpeed: 28, lifespan: 300000, hungerRate: 0.492, // 25% slower again per direct request — was 0.656
-    // Scrub-Topus is BOTH a pure Scavenger (eat cooldown) AND a pure
-    // Researcher (Science brew cycle) — the only hybrid where those two
-    // mechanisms would otherwise fight over the same dropInterval field (see
-    // Entities.js's updateFish: the eat branch reads eatCooldownMs ??
-    // dropInterval, the RESEARCHER branch always reads dropInterval). Kept
-    // decoupled here: dropInterval stays its original 12500ms Science brew
-    // rate, untouched, while eatCooldownMs alone gets the "up to 3 times/min"
-    // cap every other pure Scavenger got.
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 12500, eatCooldownMs: 20000, dropValue: 1 }],
-    unlockedByDefault: false,
-  },
-  volt_topus: {
-    id: 'volt_topus', name: 'Volt-Topus', tier: 4, unlockPhase: 4, cost: 170,
-    description: 'Eel-Octopus splice — powers the grid and researches at the same time.',
-    behavior: ['GENERATOR', 'RESEARCHER'], dropType: 'power+science_blue', parents: ['electric_eel', 'octopus'],
-    swimSpeed: 23, lifespan: 300000, hungerRate: 0.528, // 25% slower again per direct request — was 0.704
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 10000, dropValue: 1 }],
+  catalyst_fish: {
+    id: 'catalyst_fish', name: 'Catalyst Fish', tier: 4, unlockPhase: 4, cost: 120,
+    description: 'Science Octopus × Dartfin — click it, then click a building to link them. While not hungry, the linked building runs 50% faster (75% while it\'s under a Mutagen Paste buff). Click the fish again to see (or change) its current link.',
+    behavior: [], dropType: 'catalyst', parents: ['octopus', 'dartfin'],
+    swimSpeed: 45, lifespan: 300000, hungerRate: 0.708,
+    growthStages: [{ feedsRequired: 0, scale: 1.0, dropValue: 0 }],
     unlockedByDefault: false,
   },
 };
@@ -1218,18 +1155,18 @@ export const BUILDING_TYPES = {
     color: '#dba36f', unlockedByDefault: true, // available from level start, unchanged — no longer load-bearing for whether anything ELSE can be placed, though (see canPlaceTile's own comment)
   },
   [TILE_COLLECTOR]: {
-    id: TILE_COLLECTOR, name: 'Processor', icon: '🧲', cost: 12,
-    description: 'Auto-banks coins and Science pulled into its intake. Unpowered — leaves Waste behind.',
+    id: TILE_COLLECTOR, name: 'Collector', icon: '🧲', cost: 12,
+    description: 'Auto-banks coins and Science touching it. Unpowered — leaves Waste behind.',
     color: '#8fe0b8', unlockedByDefault: false,
   },
   [TILE_COLLECTOR_ELECTRIC]: {
-    id: TILE_COLLECTOR_ELECTRIC, name: 'Electric Processor', icon: '🧲', cost: 60,
-    description: 'Faster than the base Processor, less Waste. Draws power while holding an item.',
+    id: TILE_COLLECTOR_ELECTRIC, name: 'Electric Collector', icon: '🧲', cost: 60,
+    description: 'Faster than the base Collector, less Waste. Draws power while holding an item.',
     color: '#5fb8ff', unlockedByDefault: false,
   },
   [TILE_COLLECTOR_ADVANCED]: {
-    id: TILE_COLLECTOR_ADVANCED, name: 'Advanced Processor', icon: '🧲', cost: 150,
-    description: 'The fastest Processor money can buy.',
+    id: TILE_COLLECTOR_ADVANCED, name: 'Advanced Collector', icon: '🧲', cost: 150,
+    description: 'The fastest Collector money can buy.',
     color: '#c9a8ff', unlockedByDefault: false,
   },
   [TILE_FAN_T2]: {
@@ -1627,7 +1564,7 @@ export const SCIENCE_LAB_UPGRADES = {
     requires: ['eel'], grants: { buildings: [TILE_FAN_T3] },
   },
   electric_collector: {
-    id: 'electric_collector', name: 'Electric Processor', icon: '🧲', scienceCost: 50, goldCost: 5000,
+    id: 'electric_collector', name: 'Electric Collector', icon: '🧲', scienceCost: 50, goldCost: 5000,
     requires: ['eel'], grants: { buildings: [TILE_COLLECTOR_ELECTRIC] },
   },
   // Per direct request ("make the requirement for the electric auto-feeder
@@ -1643,7 +1580,7 @@ export const SCIENCE_LAB_UPGRADES = {
     requires: ['electric_fan'], grants: { buildings: [TILE_FAN_T4] },
   },
   advanced_collector: {
-    id: 'advanced_collector', name: 'Advanced Processor', icon: '🧲', scienceCost: 250, goldCost: 25000,
+    id: 'advanced_collector', name: 'Advanced Collector', icon: '🧲', scienceCost: 250, goldCost: 25000,
     requires: ['electric_collector'], grants: { buildings: [TILE_COLLECTOR_ADVANCED] },
   },
   advanced_refinery: {
@@ -1699,17 +1636,23 @@ export const SCIENCE_LAB_UPGRADES = {
   },
   // Green Science Tech grants nothing by itself (`grants: {}`) — a pure
   // recipe-unlock flag, same "presence in state.meta.labUpgradesPurchased
-  // IS the unlock" pattern gene_splicing already established below. Now
-  // sits behind the Bio-Combustor recipe (its closest analogue to the old
-  // bio_combuster building node it used to require).
+  // IS the unlock" pattern this tree already used for its old gene_splicing
+  // root. Now sits behind the Bio-Combustor recipe (its closest analogue to
+  // the old bio_combuster building node it used to require). Icon changed
+  // back to a plain green orb, per direct request — '🧬' (DNA helix) is now
+  // used elsewhere (Bio-Refinery) and read as a mismatch for "Green Science"
+  // specifically, which every other green-science surface (the currency
+  // icon, the physical item) already represents with a plain green circle.
   green_science_tech: {
-    id: 'green_science_tech', name: 'Green Science Tech', icon: '🧬', scienceCost: 60, goldCost: 8000,
+    id: 'green_science_tech', name: 'Green Science Tech', icon: '🟢', scienceCost: 60, goldCost: 8000,
     requires: ['recipe_bio_combustor'], grants: {},
   },
   // Per direct request, "add in unlock for the bio-pellets in the science
   // lab behind the manufacturer" — just the building, no Power Plant needed.
+  // Icon changed off '🟢' (now reserved for Green Science, see above) to a
+  // pellet/capsule glyph instead, per direct request to fix the collision.
   recipe_bio_pellets: {
-    id: 'recipe_bio_pellets', name: 'Bio-Pellets Recipe', icon: '🟢', scienceCost: 50, goldCost: 9000,
+    id: 'recipe_bio_pellets', name: 'Bio-Pellets Recipe', icon: '💊', scienceCost: 50, goldCost: 9000,
     requires: ['manufacturer'], grants: {},
   },
   // The Power Plant's Biomass recipe is locked behind the Manufacturer's
@@ -1719,112 +1662,51 @@ export const SCIENCE_LAB_UPGRADES = {
     id: 'power_plant_biomass', name: 'Power Plant: Biomass', icon: '🟤', scienceCost: 50, goldCost: 10000,
     requires: ['power_plant', 'recipe_bio_pellets'], grants: {},
   },
+  // Requires Green Science Tech to be unlocked, so per direct request it
+  // ALSO costs Green Science itself now (in addition to Blue), at half the
+  // Blue amount — scienceGreenCost is additive, not exclusive, see
+  // labNodeHasEnoughScience's comment in UI.js.
   power_plant_science: {
-    id: 'power_plant_science', name: 'Power Plant: Blue Science', icon: '🔬', scienceCost: 70, goldCost: 15000,
+    id: 'power_plant_science', name: 'Power Plant: Blue Science', icon: '🔬', scienceCost: 70, scienceGreenCost: 35, goldCost: 15000,
     requires: ['power_plant', 'green_science_tech'], grants: {},
   },
   // Bio-Refinery — the top Refinery tier, per direct request ("make it so
   // the bio-refinery requires green science unlocked in the science lab").
+  // Also costs Green Science itself now, same additive-half-of-blue rule.
   bio_refinery: {
-    id: 'bio_refinery', name: 'Bio-Refinery', icon: '🧬', scienceCost: 100, goldCost: 20000,
+    id: 'bio_refinery', name: 'Bio-Refinery', icon: '🧬', scienceCost: 100, scienceGreenCost: 50, goldCost: 20000,
     requires: ['green_science_tech'], grants: { buildings: [TILE_REFINERY_BIO] },
   },
 
-  // ---- Gene-Splicing hybrid tree ----
-  // Splicing used to be a single flat Tank Upgrade purchase that unlocked
-  // every hybrid species at once (GENE_SPLICING_TANK_POINT_COST, now
-  // retired); per direct request it's this whole sub-tree instead.
-  // `gene_splicing` is the root — costs Science/gold like every other node
-  // but grants nothing on its own, purely a prerequisite gate ("the first
-  // upgrade is just a pre-requisite to unlocking each hybrid fish") —
-  // requires `eel` AND `suckerfish` already purchased, which transitively
-  // gates every hybrid purchase behind both utility species ("make the
-  // purchase of the suckerfish and eel as requirements for all the hybrid
-  // purchases") without repeating that pair on all 12 leaf nodes below: once
-  // gene_splicing is bought, eel/suckerfish are guaranteed already owned, so
-  // nothing further down the tree needs to re-check them. The 3 "track"
-  // nodes beneath it (one per hybrid combination type, grouped the same way
-  // their species ids already are — `scrub_*` = Suckerfish-parented,
-  // `volt_*` = Electric Eel-parented, `scholar_*` = Octopus-parented) also
-  // grant nothing by themselves, just gate access to their own individual
-  // hybrid nodes ("each locked behind an upgrade... that doesn't unlock
-  // anything by itself, just gives access to those hybrid tracks"). Every
-  // individual hybrid node costs a flat 25 Science / $5000 and grants
-  // exactly its one species into speciesUnlocked, mirroring `eel`/
-  // `suckerfish` above — Entities.js's canSpliceFish checks that array
-  // directly for the specific resulting hybrid id, not a blanket flag.
-  // Also requires Bubble Cap 20 (science_cap_2) now, per direct request —
-  // stacks on top of the existing eel/suckerfish requirement rather than
-  // replacing it.
-  gene_splicing: {
-    id: 'gene_splicing', name: 'Gene-Splicing', icon: '🧬', scienceCost: 10, goldCost: 1000,
-    requires: ['eel', 'suckerfish', 'science_cap_2'], grants: {},
+  // ---- Gene-Splicing hybrids — completely reworked, per direct request ----
+  // The old gene_splicing root + 3 "track" gates (suckerfish_hybrids/
+  // electric_hybrids/science_hybrids) + 12 leaf nodes are gone entirely.
+  // Splicing itself is no longer a purchasable unlock at all — dragging a
+  // grown utility fish onto a compatible grown economy fish always at least
+  // ATTEMPTS a splice now (Entities.js's isSpliceSource dropped its old
+  // GENE_SPLICING_LAB_ID gate); what actually gates each of the 3 real
+  // hybrids is just its own flat Bubble Cap requirement below, exactly like
+  // any other node. `canSpliceFish` still checks
+  // `state.meta.speciesUnlocked.includes(hybridId)` per specific pair, so a
+  // combination with no matching hybrid (or a locked one) simply never
+  // resolves — no separate "splicing enabled" flag needed anywhere.
+  hybrid_buffer_fish: {
+    id: 'hybrid_buffer_fish', name: 'Buffer Fish', icon: '🧲', scienceCost: 20, goldCost: 4000,
+    requires: ['science_cap_2'], grants: { species: ['buffer_fish'] },
   },
-  suckerfish_hybrids: {
-    id: 'suckerfish_hybrids', name: 'Suckerfish Hybrids', icon: '🧹', scienceCost: 10, goldCost: 1000,
-    requires: ['gene_splicing'], grants: {},
+  hybrid_eel_blimp: {
+    id: 'hybrid_eel_blimp', name: 'Eel-Blimp', icon: '🔋', scienceCost: 30, goldCost: 8000,
+    requires: ['science_cap_3'], grants: { species: ['eel_blimp'] },
   },
-  electric_hybrids: {
-    id: 'electric_hybrids', name: 'Electric Hybrids', icon: '🔌', scienceCost: 10, goldCost: 1000,
-    requires: ['gene_splicing'], grants: {},
-  },
-  // No longer gated behind Bubble Capacity — per direct request, only
-  // Eel/Suckerfish (science_cap_1) and Gene-Splicing (science_cap_2, see
-  // above) require a Bubble Cap purchase; Science Hybrids just needs
-  // Gene-Splicing itself, same as its Suckerfish/Electric sibling tracks.
-  // Per direct request ("make green science a requirement for science
-  // hybrids") — stacks on top of the existing gene_splicing requirement.
-  science_hybrids: {
-    id: 'science_hybrids', name: 'Science Hybrids', icon: '🎓', scienceCost: 10, goldCost: 1000,
-    requires: ['gene_splicing', 'green_science_tech'], grants: {},
-  },
-  scrub_guppy: {
-    id: 'scrub_guppy', name: 'Scrub Guppy', icon: '🧹', scienceCost: 25, goldCost: 5000,
-    requires: ['suckerfish_hybrids'], grants: { species: ['scrub_guppy'] },
-  },
-  scrub_dartfin: {
-    id: 'scrub_dartfin', name: 'Scrub Dartfin', icon: '🧹', scienceCost: 25, goldCost: 5000,
-    requires: ['suckerfish_hybrids'], grants: { species: ['scrub_dartfin'] },
-  },
-  scrub_blimpfish: {
-    id: 'scrub_blimpfish', name: 'Scrub Blimpfish', icon: '🧹', scienceCost: 25, goldCost: 5000,
-    requires: ['suckerfish_hybrids'], grants: { species: ['scrub_blimpfish'] },
-  },
-  scrub_eel: {
-    id: 'scrub_eel', name: 'Scrub-Eel', icon: '🧹', scienceCost: 25, goldCost: 5000,
-    requires: ['suckerfish_hybrids'], grants: { species: ['scrub_eel'] },
-  },
-  scrub_topus: {
-    id: 'scrub_topus', name: 'Scrub-Topus', icon: '🧹', scienceCost: 25, goldCost: 5000,
-    requires: ['suckerfish_hybrids'], grants: { species: ['scrub_topus'] },
-  },
-  volt_guppy: {
-    id: 'volt_guppy', name: 'Volt Guppy', icon: '🔌', scienceCost: 25, goldCost: 5000,
-    requires: ['electric_hybrids'], grants: { species: ['volt_guppy'] },
-  },
-  volt_dartfin: {
-    id: 'volt_dartfin', name: 'Volt Dartfin', icon: '🔌', scienceCost: 25, goldCost: 5000,
-    requires: ['electric_hybrids'], grants: { species: ['volt_dartfin'] },
-  },
-  volt_blimpfish: {
-    id: 'volt_blimpfish', name: 'Volt Blimpfish', icon: '🔌', scienceCost: 25, goldCost: 5000,
-    requires: ['electric_hybrids'], grants: { species: ['volt_blimpfish'] },
-  },
-  volt_topus: {
-    id: 'volt_topus', name: 'Volt-Topus', icon: '🔌', scienceCost: 25, goldCost: 5000,
-    requires: ['electric_hybrids'], grants: { species: ['volt_topus'] },
-  },
-  scholar_guppy: {
-    id: 'scholar_guppy', name: 'Scholar Guppy', icon: '🎓', scienceCost: 25, goldCost: 5000,
-    requires: ['science_hybrids'], grants: { species: ['scholar_guppy'] },
-  },
-  scholar_dartfin: {
-    id: 'scholar_dartfin', name: 'Scholar Dartfin', icon: '🎓', scienceCost: 25, goldCost: 5000,
-    requires: ['science_hybrids'], grants: { species: ['scholar_dartfin'] },
-  },
-  scholar_blimpfish: {
-    id: 'scholar_blimpfish', name: 'Scholar Blimpfish', icon: '🎓', scienceCost: 25, goldCost: 5000,
-    requires: ['science_hybrids'], grants: { species: ['scholar_blimpfish'] },
+  // The one hybrid node requiring Green Science as well as Blue, per direct
+  // request ("everything that requires green science to be unlocked[...]
+  // should also require green science as a resource... at about half as
+  // much as blue science") — scienceGreenCost is ADDITIVE now, not an
+  // exclusive alternative to scienceCost (see labNodeHasEnoughScience's own
+  // comment in UI.js for the full mechanism).
+  hybrid_catalyst_fish: {
+    id: 'hybrid_catalyst_fish', name: 'Catalyst Fish', icon: '🎯', scienceCost: 40, scienceGreenCost: 20, goldCost: 15000,
+    requires: ['science_cap_4', 'green_science_tech'], grants: { species: ['catalyst_fish'] },
   },
 
   // ---- Bubble (Science) Capacity chain ----
@@ -1885,21 +1767,55 @@ export const SCIENCE_LAB_UPGRADE_LIST = Object.values(SCIENCE_LAB_UPGRADES);
 // popup UI.js shows when the HUD readout is clicked. See main.js's update().
 export const POWER_HISTORY_MAX = 60;
 
-// The root node of the Gene-Splicing hybrid tree (see SCIENCE_LAB_UPGRADES
-// above) — Entities.js's isSpliceSource checks
-// state.meta.labUpgradesPurchased.includes(GENE_SPLICING_LAB_ID) as its
-// coarse "has splicing been unlocked AT ALL" gate before a utility fish can
-// even be picked up for a drag; canSpliceFish then checks the SPECIFIC
-// resulting hybrid's own species-unlock status for the fine-grained gate.
-// Replaces the old GENE_SPLICING_TECH_ID/state.meta.techUnlocked flag now
-// that splicing is a Science Lab purchase, not a standalone Tank Upgrade.
-export const GENE_SPLICING_LAB_ID = 'gene_splicing';
-// Same "presence in state.meta.labUpgradesPurchased IS the unlock" pattern
-// as GENE_SPLICING_LAB_ID above — Grid.js's Bio-Combuster logic checks this
-// directly to decide whether a Blue Science item touching an idle tile may
-// lock in the upgraded (Biomass+BlueScience->Green Science) recipe, instead
-// of only ever the base one.
+// "Presence in state.meta.labUpgradesPurchased IS the unlock" flag id for
+// Green Science Tech — checked directly wherever something needs to know
+// whether Green Science research has happened at all (the Bio-Refinery/
+// Power Plant Blue Science Lab nodes' own `requires` arrays already handle
+// their own gating declaratively; this constant is for the couple of spots
+// that need the same check outside the tree itself).
 export const GREEN_SCIENCE_LAB_ID = 'green_science_tech';
+
+// ---- Hybrid Mechanics (Eel-Blimp, Buffer Fish, Catalyst Fish) ----
+// Each of the 3 reworked hybrids gets a genuinely unique, hand-built
+// mechanic (see the SPECIES table's own comment above) rather than a
+// generic behavior-tag formula — these are the tunable numbers each one
+// reads directly by speciesId.
+
+// Eel-Blimp: acts as a living battery for the whole power grid (see
+// main.js's once-per-second power-sampling block and Entities.js's
+// computeEelBlimpBatteryCapacityMw). Each living Eel-Blimp contributes this
+// much capacity normally, or the buffed amount while its own
+// mutagenBuffActive is true — capacities are summed across every living
+// Eel-Blimp, so 2 fish (1 fed, 1 not) contribute 1000+2000=3000 total.
+export const EEL_BLIMP_BATTERY_CAPACITY_MW = 1000; // 1GW
+export const EEL_BLIMP_BATTERY_CAPACITY_MUTAGEN_MW = 2000; // 2GW while fed
+// Mutagen Paste also doubles the fish's own power PRODUCTION (its bespoke
+// distance-traveled generation, same mechanic the Electric Eel itself
+// uses) — see updateFish's speciesId === 'eel_blimp' branch.
+export const EEL_BLIMP_MUTAGEN_PRODUCTION_MULTIPLIER = 2;
+
+// Buffer Fish: a Suckerfish-style Waste-eater that turns what it eats into
+// Food instead of just relieving its own hunger (see updateFish's
+// buffer_fish eat branch), plus a click-toggled magnet
+// (fish.magnetOn, toggled by main.js's canvas click handler) that
+// continuously pulls any Waste within this radius toward the fish, same
+// linear-falloff-to-0-at-range shape a Fan's own cone force already uses —
+// see Entities.js's computeBufferFishMagnetForce.
+export const BUFFER_FISH_MAGNET_RADIUS = 260; // px
+export const BUFFER_FISH_MAGNET_FORCE = 220; // force magnitude at the fish's own position, decaying linearly to 0 at MAGNET_RADIUS
+
+// Catalyst Fish: click it, then click a building to link them (main.js's
+// click handler, state.ui.catalystArmedFishId) — the linked building
+// processes faster while the fish isn't hungry (Grid.js's
+// getCatalystSpeedMultiplier), scaling every progress-advancing dtMs it
+// reads by this multiplier. Raised to the Mutagen-buffed multiplier while
+// the fish is under a Mutagen Paste buff, per spec ("75% faster").
+export const CATALYST_BUFF_MULTIPLIER = 1.5;
+export const CATALYST_BUFF_MULTIPLIER_MUTAGEN = 1.75;
+// How long the "you just linked/re-selected this" flash lasts on both the
+// fish and its (new or existing) linked building, per spec ("both the fish
+// and the building will flash").
+export const CATALYST_FLASH_DURATION_MS = 700;
 
 export const SCIENCE_COLOR = '#5fc9ff';
 export const POWER_COLOR = '#ffd23f';
@@ -1942,7 +1858,7 @@ export const ECONOMY_SPECIES_IDS = ['guppy', 'dartfin', 'blimpfish'];
 // 3 utility species ("make sure all the utility fish also get more
 // expensive with each fish on screen"). Deliberately NOT the hybrids —
 // Entities.js's countLivingFishOfSpecies already only ever matches a fish's
-// own EXACT speciesId, so a Scrub Guppy (id 'scrub_guppy') was never going
+// own EXACT speciesId, so a Buffer Fish (id 'buffer_fish') was never going
 // to count toward Guppy's own scarcity anyway; nothing extra needed to
 // enforce "hybrid fish do not count towards the limit."
 export const DYNAMIC_PRICED_SPECIES_IDS = [...ECONOMY_SPECIES_IDS, ...UTILITY_SPECIES_IDS];

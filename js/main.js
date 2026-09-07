@@ -40,6 +40,7 @@ import {
   BIOMASS_COLOR,
   MUTAGEN_PASTE_COLOR,
   BIO_PELLETS_COLOR,
+  CATALYST_FLASH_DURATION_MS,
   FOOD_STALE_FRACTION,
   FOOD_STALE_COLOR,
   FOOD_STATIONARY_TO_WASTE_MS,
@@ -92,6 +93,7 @@ import {
   getCoinTier,
   getFishPurchaseCost,
   findFishAt,
+  computeEelBlimpBatteryCapacityMw,
   isCombinableFish,
   canCombineFish,
   combineFish,
@@ -341,6 +343,12 @@ const input = createInput(canvas);
 // menu) at the release point.
 let draggedFishId = null;
 let fishDragArmed = false;
+
+// Catalyst Fish's click-to-arm-then-click-a-building-to-link flow — the id
+// of whichever Catalyst Fish was most recently clicked, waiting for its
+// linking building click; null the rest of the time. See the click
+// handler's own two dedicated branches below.
+let catalystArmedFishId = null;
 
 input.mouseDownHandlers.push((sx, sy) => {
   fishDragArmed = false;
@@ -637,6 +645,52 @@ input.clickHandlers.push((sx, sy) => {
       // the first place, so this same loop is what actually damages it; this
       // just also ends the flow once it does.
       advanceTutorialFlow(state, 'alienintro', 'click');
+      return;
+    }
+  }
+
+  // Buffer Fish: click toggles its Waste-attracting magnet on/off, per
+  // direct spec — always works regardless of the selected tool, same
+  // precedent alien-click-damage above already has. Reuses findFishAt's
+  // existing hit-radius rather than a bespoke check.
+  const clickedFish = findFishAt(state, world.x, world.y);
+  if (clickedFish && clickedFish.speciesId === 'buffer_fish') {
+    clickedFish.magnetOn = !clickedFish.magnetOn;
+    return;
+  }
+
+  // Catalyst Fish: click arms it for linking (and, if it's already linked
+  // to something, also flashes that building so its current link is
+  // visible) — per direct spec, "click the fish, then click a building to
+  // link them... click the fish again [to] have the linked building
+  // flash... but also click a different building to relink it instead."
+  if (clickedFish && clickedFish.speciesId === 'catalyst_fish') {
+    catalystArmedFishId = clickedFish.id;
+    clickedFish.catalystFlashUntilMs = state.level.elapsed + CATALYST_FLASH_DURATION_MS;
+    if (clickedFish.linkedBuildingKey) {
+      const linkedData = state.level.buildingData[clickedFish.linkedBuildingKey];
+      if (linkedData) linkedData.catalystFlashUntilMs = state.level.elapsed + CATALYST_FLASH_DURATION_MS;
+    }
+    return;
+  }
+
+  // Second half of the Catalyst Fish flow — a fish is currently armed
+  // (from the branch above, on a PREVIOUS click) and this click lands on a
+  // real building tile: link them (replacing any previous link this fish
+  // had, so it's "never locked to a building forever" per spec), flash
+  // both, and clear the armed state. Left armed (not cancelled) if this
+  // click doesn't land on a building, so a stray click elsewhere doesn't
+  // lose the in-progress gesture.
+  if (catalystArmedFishId !== null) {
+    const armedFish = state.level.entities.find((e) => e.id === catalystArmedFishId && e.type === 'fish');
+    const { col, row } = worldToTile(world.x, world.y);
+    const tile = getTile(state.level.grid, col, row);
+    if (armedFish && tile && tile !== TILE_EMPTY) {
+      const newKey = `${row},${col}`;
+      armedFish.linkedBuildingKey = newKey;
+      armedFish.catalystFlashUntilMs = state.level.elapsed + CATALYST_FLASH_DURATION_MS;
+      state.level.buildingData[newKey].catalystFlashUntilMs = state.level.elapsed + CATALYST_FLASH_DURATION_MS;
+      catalystArmedFishId = null;
       return;
     }
   }
@@ -1136,12 +1190,37 @@ function update(dtMs) {
   if (powerSampleAccumMs >= 1000) {
     powerSampleAccumMs -= 1000;
     const demand = computeCurrentPowerDemand(state);
-    const supply = state.level.powerGenAccumMw; // whatever Eels generated during the window that just closed — see Levels.js's powerGenAccumMw
+    const rawSupply = state.level.powerGenAccumMw; // whatever Eels/Eel-Blimps generated during the window that just closed — see Levels.js's powerGenAccumMw
+    // Eel-Blimp battery — per direct spec ("power will need to be
+    // calculated every second, and if there's excess, it can be stored...
+    // if power usage exceeds power production, the stored electricity can
+    // be used instead of reducing city efficiency"). Capacity is recomputed
+    // fresh every second from whichever Eel-Blimps are currently alive (and
+    // fed) rather than tracked separately, so a fish dying mid-level
+    // shrinks it immediately — clamping stored charge down to match rather
+    // than letting it silently exceed a capacity that no longer exists.
+    const batteryCapacity = computeEelBlimpBatteryCapacityMw(state);
+    state.level.batteryStoredMw = Math.min(state.level.batteryStoredMw, batteryCapacity);
+    let effectiveSupply = rawSupply;
+    if (rawSupply >= demand) {
+      // Genuine surplus this second — charge the battery with whatever's
+      // left over after demand is fully covered.
+      const excess = rawSupply - demand;
+      state.level.batteryStoredMw = Math.min(batteryCapacity, state.level.batteryStoredMw + excess);
+    } else {
+      // A shortfall — draw down the battery to cover as much of the gap as
+      // it can before efficiency ever has to drop.
+      const deficit = demand - rawSupply;
+      const drawn = Math.min(deficit, state.level.batteryStoredMw);
+      state.level.batteryStoredMw -= drawn;
+      effectiveSupply = rawSupply + drawn;
+    }
+    state.level.batteryCapacityMw = batteryCapacity;
     const history = state.level.powerHistory;
-    history.push({ demand, supply });
+    history.push({ demand, supply: effectiveSupply });
     if (history.length > POWER_HISTORY_MAX) history.shift();
-    state.level.powerEfficiency = computePowerEfficiency(supply, demand);
-    state.level.powerGenAccumMw = 0; // reset for the next window — generated MW that goes unused this second is gone, not carried forward
+    state.level.powerEfficiency = computePowerEfficiency(effectiveSupply, demand);
+    state.level.powerGenAccumMw = 0; // reset for the next window — generated MW that goes unused (and isn't stored) this second is gone, not carried forward
   }
 }
 
@@ -1753,6 +1832,48 @@ function render() {
       ctx.restore();
     }
     drawFish(ctx, pos.x, pos.y, fish.speciesId, fish.stage, facing, fish.tailPhase, eyeDirection, fish.starTier || 1, sickness, grayed);
+
+    // Buffer Fish's magnet — a pulsing cyan ring while toggled on, per
+    // direct spec, so it's obvious at a glance which fish are actively
+    // pulling Waste toward them.
+    if (fish.speciesId === 'buffer_fish' && fish.magnetOn) {
+      const ringRadius = size * state.camera.zoom * (1.15 + 0.1 * Math.sin(performance.now() / 220));
+      ctx.save();
+      ctx.strokeStyle = 'rgba(95, 200, 255, 0.75)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, ringRadius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Catalyst Fish — a steady gold ring while armed (waiting for the next
+    // building click) and a brief brighter flash on either a fresh link or
+    // a re-click revealing the current one, per direct spec ("both the fish
+    // and the building will flash").
+    if (fish.speciesId === 'catalyst_fish') {
+      if (catalystArmedFishId === fish.id) {
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255, 224, 102, 0.85)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([4, 3]);
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, size * state.camera.zoom * 1.2, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+      if (fish.catalystFlashUntilMs > state.level.elapsed) {
+        const flashT = (fish.catalystFlashUntilMs - state.level.elapsed) / CATALYST_FLASH_DURATION_MS;
+        ctx.save();
+        ctx.globalAlpha = Math.max(0, flashT);
+        ctx.strokeStyle = '#ffe066';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, size * state.camera.zoom * 1.35, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
 
     // Shimmer/gleam, per direct request — placed, grown a stage, or
     // merged/spliced (all three set fish.shimmerStartedAt, see Entities.js's

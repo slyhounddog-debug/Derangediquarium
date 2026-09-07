@@ -70,7 +70,7 @@ const MOUND_FAN_UNLOCK_MESSAGE = "You throw another $500 at the same lump of dir
 // Advanced building) lives from then on. See SCIENCE_LAB_UPGRADES in
 // Config.js.
 const TIER_CRACK_MESSAGES = {
-  2: 'Another crack spreads wider. A Processor and a Refinery tumble out, closely followed by a Science Octopus that looks personally offended by the mess.',
+  2: 'Another crack spreads wider. A Collector and a Refinery tumble out, closely followed by a Science Octopus that looks personally offended by the mess.',
   3: 'The mound stops cracking and just gives up, shattering completely. Underneath: a Science Lab that has apparently been there the whole time, humming with unfinished research. Everything from here on out is going to cost Science.',
 };
 

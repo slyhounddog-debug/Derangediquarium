@@ -346,7 +346,7 @@ export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDire
   // body shape — per direct request that the 3 utility species "look
   // visually distinct" from each other and from the standard fish shape.
   // Checked by exact speciesId, not a behavior tag, so every Gene-Splicing
-  // hybrid (a different id, e.g. 'volt_guppy') falls through to the
+  // hybrid (a different id, e.g. 'eel_blimp') falls through to the
   // standard shape automatically with no extra logic needed — see that
   // function's own comment. Per a later direct request, this unique shape
   // now only shows at the Adult stage — as a baby/mid (utility fish grow up
