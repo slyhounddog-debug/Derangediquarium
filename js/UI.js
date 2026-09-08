@@ -42,7 +42,6 @@ import {
   COIN_CAP_BY_LEVEL,
   COIN_CAP_UPGRADE_COSTS,
   COIN_CAP_UPGRADE_MAX_LEVEL,
-  SCIENCE_CAP_BY_LEVEL,
   WORLD_W,
   WORLD_H,
   TILE_SIZE,
@@ -1185,7 +1184,7 @@ function buyLabUpgrade(state, id) {
       if (!state.meta.buildingsUnlocked.includes(bid)) state.meta.buildingsUnlocked.push(bid);
     }
   }
-  // The Bubble Capacity chain (science_cap_1..5) grants this instead of a
+  // The Bubble Capacity chain (science_cap_2..5) grants this instead of a
   // species/building — see Config.js's SCIENCE_LAB_UPGRADES comment.
   if (node.grants.scienceCapLevel) {
     state.level.upgrades.scienceCapLevel += node.grants.scienceCapLevel;
@@ -1254,11 +1253,16 @@ function openLabPurchaseModal(state, id) {
     statChips.push(buildingStatsHtml(bid));
   }
   if (node.grants.scienceCapLevel) {
-    descLines.push('Raises the Science Bubble cap — how many can exist unbanked in the tank at once before an Octopus\'s brew is blocked.');
-    const level = state.level.upgrades.scienceCapLevel;
-    const from = SCIENCE_CAP_BY_LEVEL[level - 1] ?? SCIENCE_CAP_BY_LEVEL[0];
-    const to = SCIENCE_CAP_BY_LEVEL[level] ?? from;
-    statChips.push(`<div class="building-stat">🔬 Bubble cap: <b>${from} → ${to}</b></div>`);
+    // Per direct request, each Bubble Cap node's description is now its own
+    // fixed string (Config.js's SCIENCE_LAB_UPGRADES.science_cap_2..5, e.g.
+    // "Raises the Science Bubble cap from 20 to 30...") rather than computed
+    // live off state.level.upgrades.scienceCapLevel — it no longer changes
+    // depending on what the player has already unlocked. The stat chip's own
+    // target figure is parsed straight from the node's own name ("Bubble Cap
+    // 30" -> 30), itself static per-node data, not the player's live level.
+    descLines.push(node.description);
+    const capValue = parseInt(node.name.match(/\d+/)[0], 10);
+    statChips.push(`<div class="building-stat">🔬 Bubble cap: <b>${capValue}</b></div>`);
   }
   if (!descLines.length) {
     // Per direct request ("change the wording... so it says what recipe
@@ -1916,8 +1920,9 @@ function describeFishMovementLevel(level) {
 // (the requested progression isn't an even step), so this indexes straight
 // in rather than computing a cap like describeFoodCapacityLevel above does.
 // (Science's own cap has no equivalent leveled-card description any more —
-// it moved into the branching Lab tree as 5 individual nodes instead, see
-// SCIENCE_LAB_UPGRADES' science_cap_1..5.)
+// it moved into the branching Lab tree as individual nodes instead, each
+// with its own fixed `description` string, see SCIENCE_LAB_UPGRADES'
+// science_cap_2..5.)
 function describeCoinCapacityLevel(level) {
   const cap = COIN_CAP_BY_LEVEL[level];
   if (level >= COIN_CAP_UPGRADE_MAX_LEVEL) {

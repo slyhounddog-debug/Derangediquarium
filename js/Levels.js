@@ -151,7 +151,7 @@ export function loadLevel(state, levelId) {
     alienWarning2Shown: false,
     alienPortals: [], // { x, y, hp, openAtMs, spawned, spawnedAtMs } — see Systems.js's spawnAlienWave/Entities.js's updateEntities
     alienDeathEffects: [], // { x, y, age } — a short expanding/fading burst pushed by Entities.js's updateAlien the instant an alien's hp hits 0, aged out by updateAlienDeathEffects; purely decorative, rendered by main.js
-    coinBlockedEffects: [], // { x, y, age } — a "coin on fire, disintegrating" burst pushed by Entities.js's triggerProductionBlocked the instant a coin drop is blocked by the Coin Cap, aged out by updateCoinBlockedEffects; purely decorative, rendered by main.js
+    productionBlockedEffects: [], // { x, y, age, resource } — an "on fire, disintegrating" burst pushed by Entities.js's triggerProductionBlocked the instant a coin OR science drop is blocked by its cap, aged out by updateProductionBlockedEffects; purely decorative, rendered by main.js (resource picks which icon burns)
     turretProjectiles: [], // { id, x, y, targetId, damage } — a turret's homing shot, see Grid.js's updateBuildings (fires) / Entities.js's updateTurretProjectiles (homes + applies damage on impact) / main.js (renders)
     lifetimeMoneyEarned: 0, // real in-play income only (coins banked) — NOT the starting endowment or the bankruptcy bailout gift; see Entities.js's bankMoney and Config.js's MONEY_MILESTONE_1K
     // End-game stats-modal counters (main.js's showGameOverModal), per direct

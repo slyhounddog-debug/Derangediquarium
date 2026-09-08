@@ -931,14 +931,18 @@ export const CAP_WARNING_THRESHOLD_FRACTION = 0.8;
 // per direct request. Priced like every other Lab node (both Science AND
 // gold at once). Originally a single leveled card above the branching tree;
 // per a later direct request ("change the max science upgrades so each one
-// is a separate icon... instead of 5 times on the same icon") it's now 5
-// chained one-time nodes INSIDE the tree instead (`science_cap_1..5` below,
-// in SCIENCE_LAB_UPGRADES) — these two cost arrays are what those 5 nodes'
-// scienceCost/goldCost read from, one index each, so the progression itself
-// is unchanged, just its presentation.
-export const SCIENCE_CAP_BY_LEVEL = [5, 10, 20, 30, 40, 50]; // index 0 = unupgraded default
-export const SCIENCE_CAP_UPGRADE_SCIENCE_COSTS = [10, 20, 35, 60, 100]; // placeholder balance, tune once real playtesting exists
-export const SCIENCE_CAP_UPGRADE_GOLD_COSTS = [500, 1500, 3500, 7500, 15000];
+// is a separate icon... instead of 5 times on the same icon") it became 5
+// chained one-time nodes INSIDE the tree instead (`science_cap_1..5` in
+// SCIENCE_LAB_UPGRADES) — these two cost arrays are what those nodes'
+// scienceCost/goldCost read from, one index each. The `science_cap_1`
+// node ("Bubble Cap 10") was later removed entirely, per direct request —
+// the player now starts with 10 already allowed (index 0 below) — so
+// `SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[0]`/`_GOLD_COSTS[0]` (its own cost
+// pair) are unused now; left in place rather than reshuffling the array
+// and every remaining node's (`science_cap_2`..`_5`) own fixed index into it.
+export const SCIENCE_CAP_BY_LEVEL = [10, 20, 30, 40, 50]; // index 0 = unupgraded default — raised 5 -> 10 per direct request
+export const SCIENCE_CAP_UPGRADE_SCIENCE_COSTS = [10, 20, 35, 60, 100]; // placeholder balance, tune once real playtesting exists; index 0 unused, see comment above
+export const SCIENCE_CAP_UPGRADE_GOLD_COSTS = [500, 1500, 3500, 7500, 15000]; // index 0 unused, see comment above
 
 // Defensive Capabilities (click damage/offense vs invading aliens) has no
 // system to upgrade yet — Phase 5 aliens don't exist. The Tank Upgrades
@@ -1956,47 +1960,56 @@ export const SCIENCE_LAB_UPGRADES = {
   // Per direct request ("change the max science upgrades so each one is a
   // separate icon to upgrade along the science lab upgrade path, instead of
   // 5 times on the same icon") — replaces the old standalone leveled Bubble
-  // Capacity card with 5 chained one-time nodes, each requiring the previous
+  // Capacity card with chained one-time nodes, each requiring the previous
   // and raising state.level.upgrades.scienceCapLevel by 1 via this new
   // `grants.scienceCapLevel` field (UI.js's buyLabUpgrade applies it the
   // same way it already applies grants.species/grants.buildings). Costs
-  // read straight from SCIENCE_CAP_UPGRADE_SCIENCE_COSTS/_GOLD_COSTS above —
-  // the exact same 5-level progression, just expressed as 5 nodes instead of
-  // one button pressed 5 times.
-  // Bubble Cap 10 is one of the tree's 3 new gold-only roots, per direct
-  // request — a hardcoded 0 here (not SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[0],
-  // which every OTHER node in this chain still reads from) rather than
-  // reading from the shared cost array, since only this one tier is
-  // supposed to be science-free. Its goldCost already happened to land on
-  // the exact requested 500 from that array, so that half is untouched.
-  science_cap_1: {
-    id: 'science_cap_1', name: 'Bubble Cap 10', icon: '🫧',
-    scienceCost: 0, goldCost: SCIENCE_CAP_UPGRADE_GOLD_COSTS[0],
-    requires: [], grants: { scienceCapLevel: 1 },
-  },
-  // Per direct request, Bubble Cap 20 is the ONE thing gated behind all 3 of
-  // the tree's new roots together (Suckerfish, Science Octopus, Bubble Cap
-  // 10) — "once all of those have been unlocked, it leads to just the
-  // bubble cap 20 that can be unlocked."
+  // read straight from SCIENCE_CAP_UPGRADE_SCIENCE_COSTS/_GOLD_COSTS above.
+  //
+  // The old Bubble Cap 10 node (`science_cap_1`) is removed entirely, per
+  // direct request — the player now starts with 10 Science already allowed
+  // on screen (see SCIENCE_CAP_BY_LEVEL's own comment, index 0), so there's
+  // nothing left for a "raise it to 10" node to actually do. Every node
+  // below is unrenumbered from before (still `science_cap_2`..`_5`, "Bubble
+  // Cap 20"..."Bubble Cap 50") since those ids/names already matched the
+  // CAP VALUE they grant, not a purchase-order index — nothing needed to
+  // shift. `SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[0]`/`_GOLD_COSTS[0]` (the old
+  // Bubble Cap 10's own cost pair) are simply unused now, left in place
+  // rather than reshuffling the array and every other node's fixed index
+  // into it.
+  //
+  // Each node's `description` is now a fixed, hand-written string (not
+  // derived from `state.level.upgrades.scienceCapLevel` at all) — per
+  // direct request ("make each bubble cap node description... static...
+  // so it doesn't dynamically change depending on what I have unlocked").
+  // UI.js's openLabPurchaseModal reads this directly instead of computing a
+  // live "current -> next" figure off the player's own progress.
+  //
+  // Per direct request, Bubble Cap 20 is the thing gated behind the tree's
+  // remaining 2 roots together (Suckerfish, Science Octopus).
   science_cap_2: {
     id: 'science_cap_2', name: 'Bubble Cap 20', icon: '🫧',
+    description: 'Raises the Science Bubble cap from 10 to 20 — how many can exist unbanked in the tank at once before an Octopus\'s brew is blocked.',
     scienceCost: SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[1], goldCost: SCIENCE_CAP_UPGRADE_GOLD_COSTS[1],
-    requires: ['suckerfish', 'octopus', 'science_cap_1'], grants: { scienceCapLevel: 1 },
+    requires: ['suckerfish', 'octopus'], grants: { scienceCapLevel: 1 },
   },
   // Per direct request, "the 2 requirements for bubble cap 30 is the
   // manufacturer and the bubble cap 20."
   science_cap_3: {
     id: 'science_cap_3', name: 'Bubble Cap 30', icon: '🫧',
+    description: 'Raises the Science Bubble cap from 20 to 30 — how many can exist unbanked in the tank at once before an Octopus\'s brew is blocked.',
     scienceCost: SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[2], goldCost: SCIENCE_CAP_UPGRADE_GOLD_COSTS[2],
     requires: ['manufacturer', 'science_cap_2'], grants: { scienceCapLevel: 1 },
   },
   science_cap_4: {
     id: 'science_cap_4', name: 'Bubble Cap 40', icon: '🫧',
+    description: 'Raises the Science Bubble cap from 30 to 40 — how many can exist unbanked in the tank at once before an Octopus\'s brew is blocked.',
     scienceCost: SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[3], goldCost: SCIENCE_CAP_UPGRADE_GOLD_COSTS[3],
     requires: ['science_cap_3'], grants: { scienceCapLevel: 1 },
   },
   science_cap_5: {
     id: 'science_cap_5', name: 'Bubble Cap 50', icon: '🫧',
+    description: 'Raises the Science Bubble cap from 40 to 50 — how many can exist unbanked in the tank at once before an Octopus\'s brew is blocked.',
     scienceCost: SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[4], goldCost: SCIENCE_CAP_UPGRADE_GOLD_COSTS[4],
     requires: ['science_cap_4'], grants: { scienceCapLevel: 1 },
   },
@@ -2143,24 +2156,21 @@ export const MANUFACTURER_INPUT_COLOR_BY_TYPE = {
   biomass: BIOMASS_COLOR,
   science: SCIENCE_COLOR,
 };
-// A muted blue-grey "🫧" floating bubble-pop, planted above a fish's head the
-// instant a blocked-by-cap SCIENCE brew completes — per direct request, a
-// "full-belly" visual cue that production was blocked rather than the item
-// just silently not appearing. Deliberately desaturated/muted compared to
-// every other floating text color in this game (all of which signal a
-// genuine gain) so it reads as "nothing happened" at a glance, not another
-// reward. The equivalent blocked-COIN cue no longer uses this at all — see
-// COIN_BLOCKED_EFFECT_DURATION_MS below.
-export const PRODUCTION_BLOCKED_COLOR = '#9fb0c2';
-// A blocked COIN drop gets its own dedicated "coin on fire, disintegrating"
-// effect instead of the plain bubble above — per direct request ("instead
+// A blocked COIN (or, per a later direct request, SCIENCE) drop gets its own
+// dedicated "on fire, disintegrating" effect — per direct request ("instead
 // of the bubble icon that shows up when the fish can't spawn coins, make it
-// look like a coin on fire that disintegrates"). Entities.js's
-// triggerProductionBlocked pushes a { x, y, age } record into
-// state.level.coinBlockedEffects; this is how long it lives before aging
-// out, same "detached particle, independent of the fish" pattern
-// ALIEN_DEATH_EFFECT_DURATION_MS already established.
-export const COIN_BLOCKED_EFFECT_DURATION_MS = 800;
+// look like a coin on fire that disintegrates"), later extended to Science
+// too ("use a science icon and do that animation when the science bubble cap
+// is reached"). Entities.js's triggerProductionBlocked pushes a
+// { x, y, age, resource } record into state.level.productionBlockedEffects
+// (resource is 'coin' or 'science', read by main.js's render to decide which
+// icon burns in the middle of the shared flame/ember treatment); this is how
+// long it lives before aging out, same "detached particle, independent of
+// the fish" pattern ALIEN_DEATH_EFFECT_DURATION_MS already established. The
+// old muted "🫧" floating bubble-pop cue this replaced for Science (and the
+// PRODUCTION_BLOCKED_COLOR it was drawn in) is retired entirely — both
+// resources share this one effect now, nothing reads that color any more.
+export const PRODUCTION_BLOCKED_EFFECT_DURATION_MS = 800;
 // The 3 utility species — the only valid splice SOURCES (dragged onto an
 // eligible target, never the other way around, to keep the interaction
 // symmetric with Economy Fish Combining's own single-direction drag). Also

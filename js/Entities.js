@@ -75,7 +75,6 @@ import {
   SCIENCE_PROGRESS_TICKS,
   COIN_CAP_BY_LEVEL,
   SCIENCE_CAP_BY_LEVEL,
-  PRODUCTION_BLOCKED_COLOR,
   ALIEN_AWARENESS_RADIUS,
   ALIEN_FOOD_AWARENESS_RADIUS,
   ALIEN_CHASE_CHANCE,
@@ -91,7 +90,7 @@ import {
   ALIEN_HIT_FLASH_MS,
   TURRET_PROJECTILE_SPEED,
   TURRET_PROJECTILE_HIT_RADIUS,
-  COIN_BLOCKED_EFFECT_DURATION_MS,
+  PRODUCTION_BLOCKED_EFFECT_DURATION_MS,
   WASTE_MAX_ON_SCREEN,
   ALIEN_RADIUS,
   ALIEN_CLICK_RADIUS_MULTIPLIER,
@@ -805,24 +804,22 @@ export function countScienceCapacityUsed(state) {
 // so it's a plain state write, same as every other system-to-system signal
 // in this codebase that isn't a direct function call) — per direct request,
 // only the Coin HUD element shakes on a blocked coin, Science has no
-// equivalent HUD-shake ask. A blocked SCIENCE brew still uses the original
-// muted "🫧" floatingText bubble (the existing particle system every other
-// "something happened here" readout in this file already uses); a blocked
-// COIN gets its own dedicated effect instead — per direct request ("instead
-// of the bubble icon that shows up when the fish can't spawn coins, make it
-// look like a coin on fire that disintegrates") — pushed into
-// state.level.coinBlockedEffects and rendered/aged the same
-// "detached particle, independent of the fish" way alienDeathEffects
-// already is (see Config.js's COIN_BLOCKED_EFFECT_DURATION_MS,
-// updateCoinBlockedEffects below, and main.js's render).
+// equivalent HUD-shake ask. Both resources now share the same "on fire,
+// disintegrating" particle effect — per direct request ("instead of the
+// bubble icon that shows up when the fish can't spawn coins, make it look
+// like a coin on fire that disintegrates"), later extended to Science too
+// ("use a science icon and do that animation when the science bubble cap is
+// reached") — pushed into state.level.productionBlockedEffects (tagged with
+// `resource` so main.js's render knows which icon to burn) and rendered/aged
+// the same "detached particle, independent of the fish" way
+// alienDeathEffects already is (see Config.js's
+// PRODUCTION_BLOCKED_EFFECT_DURATION_MS, updateProductionBlockedEffects
+// below, and main.js's render). The old muted "🫧" floatingText bubble
+// Science used before this is gone entirely.
 function triggerProductionBlocked(state, fish, stageDef, resource) {
-  if (resource === 'coin') {
-    state.level.coinBlockedEffects.push({ x: fish.x, y: fish.y - FISH_BASE_SIZE * stageDef.scale * 0.6, age: 0 });
-  } else {
-    state.level.floatingTexts.push(
-      createPickupText(fish.x, fish.y - FISH_BASE_SIZE * stageDef.scale * 0.6, '🫧', PRODUCTION_BLOCKED_COLOR)
-    );
-  }
+  state.level.productionBlockedEffects.push({
+    x: fish.x, y: fish.y - FISH_BASE_SIZE * stageDef.scale * 0.6, age: 0, resource,
+  });
   playProductionBlocked();
   if (resource === 'coin') state.ui.coinCapFlashPending = true;
   // Per direct request, a fish also flashes gray for exactly
@@ -2403,20 +2400,21 @@ function updateAlienDeathEffects(state, dtMs) {
   });
 }
 
-// Same age-and-cull pattern, for the "coin on fire, disintegrating" effect
-// triggerProductionBlocked pushes when a coin drop is blocked by the Coin
-// Cap — see Config.js's COIN_BLOCKED_EFFECT_DURATION_MS and main.js's render.
-function updateCoinBlockedEffects(state, dtMs) {
-  state.level.coinBlockedEffects = state.level.coinBlockedEffects.filter((effect) => {
+// Same age-and-cull pattern, for the "on fire, disintegrating" effect
+// triggerProductionBlocked pushes when a coin OR science drop is blocked by
+// its cap — see Config.js's PRODUCTION_BLOCKED_EFFECT_DURATION_MS and
+// main.js's render.
+function updateProductionBlockedEffects(state, dtMs) {
+  state.level.productionBlockedEffects = state.level.productionBlockedEffects.filter((effect) => {
     effect.age += dtMs;
-    return effect.age < COIN_BLOCKED_EFFECT_DURATION_MS;
+    return effect.age < PRODUCTION_BLOCKED_EFFECT_DURATION_MS;
   });
 }
 
 export function updateEntities(state, dtMs) {
   updateAlienPortals(state);
   updateAlienDeathEffects(state, dtMs);
-  updateCoinBlockedEffects(state, dtMs);
+  updateProductionBlockedEffects(state, dtMs);
   pendingFoodToWasteSpawns.length = 0; // updateFood (below) fills this — see its own comment for why it can't push into state.level.items directly
   state.level.items = state.level.items.filter((item) => {
     if (item.type === 'food') return updateFood(item, state, dtMs);
