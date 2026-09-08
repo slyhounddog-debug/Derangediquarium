@@ -109,17 +109,17 @@ export const TILE_TURRET_WASTE = 'turret_waste'; // solid — free from the star
 export const TILE_TURRET_ELECTRIC = 'turret_electric'; // solid — Science Lab purchase (requires the Eel), unlimited ammo, draws power per shot
 export const TILE_TURRET_ADVANCED = 'turret_advanced'; // solid — Science Lab purchase (requires the Electric Turret), strongest tier
 
-// ---- Bio-Building production chain (Alien DNA -> Biomass -> Mutagen Paste / Science) ----
+// ---- Bio-Building production chain (Bio-Sludge -> Biomass -> Mutagen Paste / Blue Science) ----
 // Four new buildings, each a single standalone tier (no family stacking).
 // Granted two different ways: the Refinery via the real Tier 1->2 Mound
 // crack (TIER_UNLOCKS[2]) — it's the foundational recycler the rest of the
 // chain builds on, and its own two recipes (Waste->Food, a straight
-// alternative to the Auto-Feeder; Alien DNA->Biomass) are both usable well
+// alternative to the Auto-Feeder; Bio-Sludge->Biomass) are both usable well
 // before the Science Lab exists, so there's no reason to gate it behind the
 // Lab too. The other three are Science Lab nodes — see SCIENCE_LAB_UPGRADES.
 // Refinery family — 4 tiers now (base/Electric/Advanced/Bio), per direct
 // request replacing the Auto-Feeder entirely. Every tier: single input, 2
-// possible recipes (Waste->Food, Alien DNA->Biomass, DNA taking
+// possible recipes (Waste->Food, Bio-Sludge->Biomass, Bio-Sludge taking
 // ALIEN_DNA_REFINERY_TIME_MULTIPLIER longer than the Waste recipe) — see
 // Grid.js's updateBuildings and REFINERY_STATS below. The base tier is
 // granted at the real Tier 1->2 Mound crack (unchanged); Electric/Advanced/
@@ -376,7 +376,7 @@ export const ITEM_MASS_BY_TYPE = {
   waste: 0.5, // Class 2 — Ultra-Light (was 1)
   coin: 1.5, alien_egg: 1.5, // Class 3 — Standard (coin was 3, halved per direct request) — the Alien Egg "weighs as much as a coin," per direct spec
   science: 4, science_green: 4, // Class 4 — Medium-Heavy (was 9 for science — cut so Class 5 below can sit clearly above it while science stays clearly above Class 3's coin)
-  alien_dna: 7, biomass: 7, bio_pellets: 7, // Class 5 — Heavy
+  alien_dna: 7, biomass: 7, // Class 5 — Heavy
 };
 // vx decays by this factor every tick — without damping, a single bump
 // would leave an item drifting sideways forever instead of a jostled pile
@@ -596,31 +596,36 @@ export const SCIENCE_GREEN_COLOR_B = '#3fd66f'; // deeper green
 export const SCIENCE_GREEN_COLOR = '#3fd66f'; // HUD/floating-text accent, mirrors SCIENCE_COLOR's role for blue
 
 // ---- Bio-Building production chain: physical item types ----
-// alien_dna: dropped by a defeated alien (Entities.js's updateAlien), yield
-// scaling with the alien's own tier — see ALIEN_ARCHETYPES' dnaYield below.
-// biomass: the Refinery's Alien-DNA-recipe output, and the shared 2nd
-// ingredient every Bio-Feeder/Bio-Combuster recipe needs. mutagen_paste:
-// the Bio-Feeder's output, Food+Biomass. All three fall/route through the
-// exact same seabed physics every other item already uses (see Grid.js's
-// stepItemOnGrid) — only their mass (ITEM_MASS_BY_TYPE), radius, and color
-// are unique to each.
+// alien_dna: dropped by a defeated alien (Entities.js's updateAlien), OR
+// made at the Manufacturer via the Bio-Sludge recipe (Food+Waste) — both
+// paths produce this exact same item/type now, per direct request ("change
+// all other mentions of Alien DNA to Bio-Sludge... to make it clear it's a
+// pre-refined version of the Biomass"): displayed as "Bio-Sludge" wherever
+// it's named, but the internal type string stays `alien_dna` (unchanged, so
+// none of the physics/collision/drag code needed to change) — the old
+// standalone `bio_pellets` item type this recipe used to produce is retired
+// entirely, since it never had a use anywhere else in the game and Alien
+// DNA/Bio-Sludge already does (the Refinery's Bio-Sludge->Biomass recipe).
+// Yield from a kill still scales with the alien's own tier — see
+// ALIEN_ARCHETYPES' dnaYield below. biomass: the Refinery's Bio-Sludge-
+// recipe output, and the shared 2nd ingredient every Mutagen-Paste/Blue-
+// Science recipe needs. mutagen_paste: the Mutagen Paste recipe's own
+// output, Food+Biomass. All three fall/route through the exact same seabed
+// physics every other item already uses (see Grid.js's stepItemOnGrid) —
+// only their mass (ITEM_MASS_BY_TYPE), radius, and color are unique to each.
 export const ALIEN_DNA_RADIUS = 7.5;
-export const ALIEN_DNA_COLOR = '#7cff5a'; // acid green — reads as "alien," distinct from every other item's color family
+export const ALIEN_DNA_COLOR = '#7cff5a'; // acid green — reads as "alien"/organic, distinct from every other item's color family
 export const BIOMASS_RADIUS = 9;
 export const BIOMASS_COLOR = '#c98a4b'; // organic brown-orange — "refined biological matter"
 export const MUTAGEN_PASTE_RADIUS = FOOD_RADIUS; // Class 1, same size class as Food
 export const MUTAGEN_PASTE_COLOR = '#e64de0'; // vivid magenta/pink — unmistakably not plain Food, matches its "high-value" framing
 // Same "hard, silent safety cap" precedent as WASTE_MAX_ON_SCREEN above —
 // alien_dna in particular can arrive in bursts (several aliens dying in a
-// short window each dropping a multi-item yield), so it gets the identical
-// protection against runaway item counts / collapsing framerate.
+// short window each dropping a multi-item yield, or a burst of Bio-Sludge
+// recipes finishing back to back), so it gets the identical protection
+// against runaway item counts / collapsing framerate.
 export const ALIEN_DNA_MAX_ON_SCREEN = 80;
 export const BIOMASS_MAX_ON_SCREEN = 80;
-// Bio-Pellets — the Manufacturer's Bio-Pellets recipe output (Food+Waste),
-// per direct spec. Class 5 Heavy, same physics profile as Biomass/Alien DNA.
-export const BIO_PELLETS_RADIUS = 8.5;
-export const BIO_PELLETS_COLOR = '#8fff6a'; // acid-green pellet — visually distinct from Biomass' brown and Alien DNA's own green
-export const BIO_PELLETS_MAX_ON_SCREEN = 80;
 
 // Alien Egg — the Manufacturer's new Alien Egg recipe output (Blue Science +
 // Food), per direct spec. Weighs exactly as much as a coin (Class 3, see
@@ -1164,7 +1169,7 @@ export const SPECIES = {
   // shop, not obtained via the drag-a-utility-fish splice interaction.
   xeno_octopus: {
     id: 'xeno_octopus', name: 'Xeno Octopus', tier: 4, unlockPhase: 4, cost: 100,
-    description: 'A Science Octopus that got too close to an Alien Egg. Click it to toggle Alien DNA mode — while on, it brews and spits out Alien DNA every 8 seconds instead of Science Bubbles. Still needs to be fed like any other fish.',
+    description: 'A Science Octopus that got too close to an Alien Egg. Click it to toggle Bio-Sludge mode — while on, it brews and spits out Bio-Sludge every 8 seconds instead of Science Bubbles. Still needs to be fed like any other fish.',
     behavior: ['RESEARCHER'], dropType: 'science_blue',
     swimSpeed: 25, lifespan: 300000, hungerRate: 0.468,
     growthStages: [
@@ -1267,12 +1272,12 @@ export const BUILDING_TYPES = {
   },
   [TILE_REFINERY]: {
     id: TILE_REFINERY, name: 'Refinery', icon: '⚗️', cost: 80,
-    description: 'Waste -> Food, or Alien DNA -> Biomass (DNA takes priority if both touch at once, and takes 50% longer). One item at a time.',
+    description: 'Waste -> Food, or Bio-Sludge -> Biomass (Bio-Sludge takes priority if both touch at once, and takes 50% longer). One item at a time.',
     color: '#b8a888', unlockedByDefault: false,
   },
   [TILE_REFINERY_ELECTRIC]: {
     id: TILE_REFINERY_ELECTRIC, name: 'Electric Refinery', icon: '⚗️', cost: 140,
-    description: 'Processes Waste (and Alien DNA) faster than the base Refinery. Draws power while working.',
+    description: 'Processes Waste (and Bio-Sludge) faster than the base Refinery. Draws power while working.',
     color: '#4fd6e0', unlockedByDefault: false,
   },
   [TILE_REFINERY_ADVANCED]: {
@@ -1287,7 +1292,7 @@ export const BUILDING_TYPES = {
   },
   [TILE_MANUFACTURER]: {
     id: TILE_MANUFACTURER, name: 'Manufacturer', icon: '🏭', cost: 300,
-    description: 'Pick a recipe by clicking it once placed: Bio-Feeder (Food+Biomass->Mutagen Paste), Bio-Combustor (Waste+Biomass->Blue Science), Bio-Pellets (Food+Waste->Bio-Pellets), or Alien Egg (Blue Science+Food->Alien Egg, double power draw). Does nothing until a recipe is chosen.',
+    description: 'Pick a recipe by clicking it once placed: Mutagen Paste (Food+Biomass), Blue Science (Waste+Biomass), Bio-Sludge (Food+Waste), or Alien Egg (Blue Science+Food, double power draw). Does nothing until a recipe is chosen.',
     color: '#e690e0', unlockedByDefault: false,
   },
   [TILE_POWER_PLANT]: {
@@ -1441,21 +1446,38 @@ export const REFINERY_STATS = {
 // direct spec, the Alien Egg recipe "takes twice as much electricity while
 // running." Every other recipe implicitly uses 1x (Grid.js's
 // computeCurrentPowerDemand falls back to 1 when the field is absent).
+// Per direct request, all 3 of the original recipes are now named after
+// their own OUTPUT item (matching the pattern the Alien Egg recipe already
+// followed) — 'Bio-Feeder'/'Bio-Combustor'/'Bio-Pellets' were flavor names
+// for the OLD standalone buildings these recipes replaced, and no longer
+// describe what a player actually gets. The object keys themselves (used
+// internally as recipeId/labNodeId-adjacent identifiers) are left alone
+// except bio_pellets -> bio_sludge, which is a real merge, not just a
+// rename — see that entry's own comment below.
 export const MANUFACTURER_RECIPES = {
   bio_feeder: {
-    id: 'bio_feeder', name: 'Bio-Feeder', icon: '🩷', color: '#e690e0',
+    id: 'bio_feeder', name: 'Mutagen Paste', icon: '🩷', color: '#e690e0',
     inputs: ['food', 'biomass'], output: 'mutagen_paste', labNodeId: 'recipe_bio_feeder',
     description: 'Food + Biomass -> Mutagen Paste',
   },
   bio_combustor: {
-    id: 'bio_combustor', name: 'Bio-Combustor', icon: '🔥', color: '#ff9f5a',
+    id: 'bio_combustor', name: 'Blue Science', icon: '🔥', color: '#ff9f5a',
     inputs: ['waste', 'biomass'], output: 'science', labNodeId: 'recipe_bio_combustor',
     description: 'Waste + Biomass -> Blue Science',
   },
-  bio_pellets: {
-    id: 'bio_pellets', name: 'Bio-Pellets', icon: '🟢', color: '#8fff6a',
-    inputs: ['food', 'waste'], output: 'bio_pellets', labNodeId: 'recipe_bio_pellets',
-    description: 'Food + Waste -> Bio-Pellets',
+  // Per direct request ("change all other mentions of Alien DNA to
+  // Bio-Sludge... to make it clear it's a pre-refined version of the
+  // Biomass") — the old standalone `bio_pellets` item (which had no use
+  // anywhere else in the game) is retired entirely and this recipe's output
+  // is merged into the exact same item Alien DNA already is (type
+  // `alien_dna`, just displayed as "Bio-Sludge" everywhere now — see
+  // ALIEN_DNA_COLOR/_RADIUS's own comments). This also gives the recipe's
+  // output a real downstream use it never had before: the Refinery's
+  // existing Alien-DNA(Bio-Sludge)->Biomass recipe.
+  bio_sludge: {
+    id: 'bio_sludge', name: 'Bio-Sludge', icon: '🧫', color: ALIEN_DNA_COLOR,
+    inputs: ['food', 'waste'], output: 'alien_dna', labNodeId: 'recipe_bio_sludge',
+    description: 'Food + Waste -> Bio-Sludge',
   },
   alien_egg: {
     id: 'alien_egg', name: 'Alien Egg', icon: '🥚', color: '#c9a86b',
@@ -1468,7 +1490,7 @@ export const MANUFACTURER_RECIPE_LIST = Object.values(MANUFACTURER_RECIPES);
 // Per direct spec: "at base, manufacturers will take time to process each
 // type of item depending on what it's processing" — a flat per-ITEM-TYPE
 // duration, not a per-recipe one; a recipe's total cycle time is just the
-// sum of its 2 ingredients' own durations (e.g. Bio-Pellets: food 4s + waste
+// sum of its 2 ingredients' own durations (e.g. Bio-Sludge: food 4s + waste
 // 2s = 6s total), since the two are processed one at a time in sequence
 // (see updateBuildings — only one item may be absorbed/mid-process at once).
 // `science` added alongside the Alien Egg recipe, its one ingredient type
@@ -1582,7 +1604,7 @@ export const TIER_UNLOCKS = {
     // The base Refinery is granted here rather than through the Science Lab
     // (unlike its Electric/Advanced/Bio tiers) — it's the foundational
     // recycler the whole chain is built on, and both its recipes (Waste->
-    // Food; Alien DNA->Biomass) are usable well before the Lab exists, so
+    // Food; Bio-Sludge->Biomass) are usable well before the Lab exists, so
     // gating it behind Lab research would just waste it.
     buildings: [TILE_COLLECTOR, TILE_REFINERY],
   },
@@ -1700,15 +1722,22 @@ export const SCIENCE_LAB_UPGRADES = {
   // requirements be the manufacturer building and the Power Plant
   // buildings") — both now require BOTH buildings rather than either old
   // Electric-tier building. Same costs their old building-unlock nodes had.
+  // Names updated per direct request ("change the name of the bio-feeder
+  // recipe... to the mutagen paste recipe," "change the name of the
+  // bio-combustor recipe into blue science recipe") — matches each recipe's
+  // own MANUFACTURER_RECIPES.name now, not its old standalone-building flavor
+  // name. The object's own id/key is left as `recipe_bio_feeder` (an internal
+  // identifier other nodes' `requires` arrays reference, not a player-facing
+  // "mention").
   recipe_bio_feeder: {
-    id: 'recipe_bio_feeder', name: 'Bio-Feeder Recipe', icon: '🩷', scienceCost: 45, goldCost: 7000,
+    id: 'recipe_bio_feeder', name: 'Mutagen Paste Recipe', icon: '🩷', scienceCost: 45, goldCost: 7000,
     requires: ['manufacturer', 'power_plant'], grants: {},
   },
   // Per direct request ("add a alien egg recipe to the manufacturer...
   // with this recipe as a requirement for the bio-combustor recipe") — the
   // Bio-Combustor recipe now also needs the Alien Egg recipe unlocked first.
   recipe_bio_combustor: {
-    id: 'recipe_bio_combustor', name: 'Bio-Combustor Recipe', icon: '🔥', scienceCost: 40, goldCost: 6000,
+    id: 'recipe_bio_combustor', name: 'Blue Science Recipe', icon: '🔥', scienceCost: 40, goldCost: 6000,
     requires: ['manufacturer', 'power_plant', 'recipe_alien_egg'], grants: {},
   },
   // Green Science Tech grants nothing by itself (`grants: {}`) — a pure
@@ -1727,27 +1756,31 @@ export const SCIENCE_LAB_UPGRADES = {
   },
   // Per direct request, "add in unlock for the bio-pellets in the science
   // lab behind the manufacturer" — just the building, no Power Plant needed.
-  // Icon changed off '🟢' (now reserved for Green Science, see above) to a
-  // pellet/capsule glyph instead, per direct request to fix the collision.
-  recipe_bio_pellets: {
-    id: 'recipe_bio_pellets', name: 'Bio-Pellets Recipe', icon: '💊', scienceCost: 50, goldCost: 9000,
+  // Renamed id/name from recipe_bio_pellets/'Bio-Pellets Recipe' to
+  // recipe_bio_sludge/'Bio-Sludge Recipe', per a later direct request — the
+  // standalone `bio_pellets` item this used to produce is retired entirely
+  // and merged into Alien DNA (now displayed as "Bio-Sludge" everywhere —
+  // see MANUFACTURER_RECIPES.bio_sludge's own comment). Icon changed to a
+  // petri-dish glyph, matching the new "sludge" theme.
+  recipe_bio_sludge: {
+    id: 'recipe_bio_sludge', name: 'Bio-Sludge Recipe', icon: '🧫', scienceCost: 50, goldCost: 9000,
     requires: ['manufacturer'], grants: {},
   },
   // New Manufacturer recipe, per direct spec — Blue Science + Food -> a
   // physical, draggable Alien Egg that hatches into a live Tier-1 alien
   // after ALIEN_EGG_HATCH_MS (see MANUFACTURER_RECIPES.alien_egg and
   // Entities.js's updateAlienEgg). Gated behind the Manufacturer alone, same
-  // as Bio-Pellets — it doesn't need the Power Plant.
+  // as Bio-Sludge — it doesn't need the Power Plant.
   recipe_alien_egg: {
     id: 'recipe_alien_egg', name: 'Alien Egg Recipe', icon: '🥚', scienceCost: 55, goldCost: 10000,
     requires: ['manufacturer'], grants: {},
   },
   // The Power Plant's Biomass recipe is locked behind the Manufacturer's
-  // Bio-Pellets recipe, per direct spec; its Blue Science recipe is locked
+  // Bio-Sludge recipe, per direct spec; its Blue Science recipe is locked
   // behind Green Science Tech.
   power_plant_biomass: {
     id: 'power_plant_biomass', name: 'Power Plant: Biomass', icon: '🟤', scienceCost: 50, goldCost: 10000,
-    requires: ['power_plant', 'recipe_bio_pellets'], grants: {},
+    requires: ['power_plant', 'recipe_bio_sludge'], grants: {},
   },
   // Requires Green Science Tech to be unlocked, so per direct request it
   // ALSO costs Green Science itself now (in addition to Blue), at half the
@@ -1806,7 +1839,7 @@ export const SCIENCE_LAB_UPGRADES = {
   // field) — the same pattern the 3 base utility species already use.
   hybrid_zap_sucker: {
     id: 'hybrid_zap_sucker', name: 'Zap Sucker', icon: '🔌', scienceCost: 35, goldCost: 9000,
-    requires: ['recipe_bio_pellets'], grants: { species: ['zap_sucker'] },
+    requires: ['recipe_bio_sludge'], grants: { species: ['zap_sucker'] },
   },
   hybrid_xeno_octopus: {
     id: 'hybrid_xeno_octopus', name: 'Xeno Octopus', icon: '👽', scienceCost: 45, goldCost: 12000,
@@ -1926,11 +1959,11 @@ export const CATALYST_FLASH_DURATION_MS = 700;
 // item every ELECTRIC_SUCKER_FOOD_INTERVAL_MS with no feeding required to
 // trigger it (see updateFish's fish.autoFoodOn branch and fish.autoFoodTimerMs).
 export const ELECTRIC_SUCKER_FOOD_INTERVAL_MS = 6000;
-// Xeno Octopus: click it to toggle Alien DNA mode (fish.alienDnaModeOn) —
+// Xeno Octopus: click it to toggle Bio-Sludge mode (fish.alienDnaModeOn) —
 // while on, its normal long Science brew cycle is replaced entirely by a
-// fixed SCIENCE_ALIEN_DNA_INTERVAL_MS timer that spits out one Alien DNA
-// item instead of a Science Bubble, per spec ("every 8 seconds instead of
-// science"). See updateFish's isPureResearcher branch.
+// fixed SCIENCE_ALIEN_DNA_INTERVAL_MS timer that spits out one Bio-Sludge
+// (type `alien_dna`) item instead of a Science Bubble, per spec ("every 8
+// seconds instead of science"). See updateFish's isPureResearcher branch.
 export const SCIENCE_ALIEN_DNA_INTERVAL_MS = 8000;
 
 export const SCIENCE_COLOR = '#5fc9ff';

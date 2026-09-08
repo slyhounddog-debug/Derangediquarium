@@ -872,11 +872,11 @@ export function updateBuildings(state, dtMs) {
       const stats = REFINERY_STATS[data.type];
       if (data.lockedRecipe === null) {
         // Rejects incoming items while actively processing (satisfied by
-        // only ever scanning here, while idle) — and if both Alien DNA and
-        // Waste touch on the exact same tick, Alien DNA takes priority, per
-        // spec. Scanned as two separate single-pass searches (not one mixed
-        // loop) specifically so DNA can always be checked and claimed first
-        // regardless of array order.
+        // only ever scanning here, while idle) — and if both Bio-Sludge
+        // (type `alien_dna`) and Waste touch on the exact same tick,
+        // Bio-Sludge takes priority, per spec. Scanned as two separate
+        // single-pass searches (not one mixed loop) specifically so it can
+        // always be checked and claimed first regardless of array order.
         let dnaIdx = -1;
         for (let i = 0; i < items.length; i++) {
           if (items[i].type === 'alien_dna' && isNearBuildingCenter(centerX, centerY, items[i].x, items[i].y, BIO_BUILDING_INTAKE_RADIUS)) { dnaIdx = i; break; }
@@ -906,9 +906,9 @@ export function updateBuildings(state, dtMs) {
       } else {
         const efficiency = stats.powerCostPerSec > 0 ? state.level.powerEfficiency : 1;
         data.progressMs += dtMs * efficiency * getCatalystSpeedMultiplier(state, key);
-        // Alien DNA -> Biomass takes ALIEN_DNA_REFINERY_TIME_MULTIPLIER times
-        // as long as the same tile's own Waste -> Food recipe, per direct
-        // spec ("50% longer for alien DNA").
+        // Bio-Sludge -> Biomass takes ALIEN_DNA_REFINERY_TIME_MULTIPLIER
+        // times as long as the same tile's own Waste -> Food recipe, per
+        // direct spec ("50% longer for alien DNA").
         const isDna = data.lockedRecipe === 'dna_to_biomass';
         const targetMs = isDna ? stats.foodProcessMs * ALIEN_DNA_REFINERY_TIME_MULTIPLIER : stats.foodProcessMs;
         if (data.progressMs >= targetMs) {

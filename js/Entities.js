@@ -112,9 +112,6 @@ import {
   EEL_BLIMP_MUTAGEN_PRODUCTION_MULTIPLIER,
   BUFFER_FISH_MAGNET_RADIUS,
   BUFFER_FISH_MAGNET_FORCE,
-  BIO_PELLETS_RADIUS,
-  BIO_PELLETS_COLOR,
-  BIO_PELLETS_MAX_ON_SCREEN,
   CLEANLINESS_STRESS_THRESHOLD,
   CLEANLINESS_STRESS_MAX_HUNGER_MULTIPLIER,
   CLEANLINESS_STRESS_MAX_INTERVAL_MULTIPLIER,
@@ -264,22 +261,26 @@ export function createScienceGreen(x, y) {
   return { id: nextId(), type: 'science_green', x, y, vx: 0, vy: 0, radius: SCIENCE_GREEN_ITEM_RADIUS, mass: ITEM_MASS_BY_TYPE.science_green, resting: false };
 }
 
-// Dropped by a defeated alien (Weight Class 5 — Heavy) — see
-// createAlien/updateAlien's death branch for the yield-scaled multi-drop.
-// The Refinery's "Alien DNA -> Biomass" recipe is the only thing that ever
+// Dropped by a defeated alien (Weight Class 5 — Heavy), OR made at the
+// Manufacturer via the Bio-Sludge recipe (Food+Waste) — see
+// createAlien/updateAlien's death branch for the yield-scaled multi-drop,
+// and Grid.js's Manufacturer branch for the recipe path. Displayed as
+// "Bio-Sludge" everywhere now (the type string itself stays `alien_dna`,
+// unchanged, per direct request — see Config.js's own comment on this type).
+// The Refinery's "Bio-Sludge -> Biomass" recipe is the only thing that ever
 // consumes it (Grid.js's updateBuildings).
 export function createAlienDna(x, y) {
   return { id: nextId(), type: 'alien_dna', x, y, vx: 0, vy: 0, radius: ALIEN_DNA_RADIUS, mass: ITEM_MASS_BY_TYPE.alien_dna, resting: false };
 }
 
-// The Refinery's Alien-DNA-recipe output, and the shared 2nd ingredient
-// every Bio-Feeder/Bio-Combuster recipe needs (Weight Class 5 — Heavy, same
-// as Alien DNA — it's refined FROM alien_dna, so it stays in that class).
+// The Refinery's Bio-Sludge-recipe output, and the shared 2nd ingredient
+// every Mutagen-Paste/Blue-Science recipe needs (Weight Class 5 — Heavy,
+// same as Bio-Sludge — it's refined FROM it, so it stays in that class).
 export function createBiomass(x, y) {
   return { id: nextId(), type: 'biomass', x, y, vx: 0, vy: 0, radius: BIOMASS_RADIUS, mass: ITEM_MASS_BY_TYPE.biomass, resting: false };
 }
 
-// The Bio-Feeder's output (Food + Biomass) — Weight Class 1, Buoyant, same
+// The Mutagen Paste recipe's output (Food + Biomass) — Weight Class 1, Buoyant, same
 // physics profile as plain Food (see updateMutagenPaste's own sway/gravity,
 // mirroring updateFood exactly). Fish prioritize this over standard Food
 // when hungry, and its eat effect differs by growth stage — see
@@ -289,12 +290,6 @@ export function createMutagenPaste(x, y) {
     id: nextId(), type: 'mutagen_paste', x, y, vx: 0, vy: 0, radius: MUTAGEN_PASTE_RADIUS, mass: ITEM_MASS_BY_TYPE.mutagen_paste, resting: false,
     fallTime: 0, swayPhase: Math.random() * Math.PI * 2,
   };
-}
-
-// The Manufacturer's Bio-Pellets recipe output (Food + Waste) — Weight
-// Class 5, Heavy, same physics profile as Biomass/Alien DNA.
-export function createBioPellets(x, y) {
-  return { id: nextId(), type: 'bio_pellets', x, y, vx: 0, vy: 0, radius: BIO_PELLETS_RADIUS, mass: ITEM_MASS_BY_TYPE.bio_pellets, resting: false };
 }
 
 // The Manufacturer's Alien Egg recipe output (Blue Science + Food) — Weight
@@ -563,7 +558,7 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
     linkedBuildingKey: null, // Catalyst Fish only — the "row,col" buildingData key it's currently linked to, or null; set by main.js's catalyst link-click flow, read by Grid.js's getCatalystSpeedMultiplier
     autoFoodOn: false, // Zap Sucker only — toggled by clicking the fish; while true, dispenses a real Food item every ELECTRIC_SUCKER_FOOD_INTERVAL_MS with no feeding required — see updateFish's own dedicated timer block
     autoFoodTimerMs: 0, // Zap Sucker only — counts up toward ELECTRIC_SUCKER_FOOD_INTERVAL_MS, only while autoFoodOn is true
-    alienDnaModeOn: false, // Xeno Octopus only — toggled by clicking the fish; while true, replaces the normal Science brew cycle with a fixed SCIENCE_ALIEN_DNA_INTERVAL_MS timer producing Alien DNA instead — see updateFish's isPureResearcher branch
+    alienDnaModeOn: false, // Xeno Octopus only — toggled by clicking the fish; while true, replaces the normal Science brew cycle with a fixed SCIENCE_ALIEN_DNA_INTERVAL_MS timer producing Bio-Sludge instead — see updateFish's isPureResearcher branch
     wanderTimer: 0,
     tailPhase: 0, // only rendered once fully grown; advances faster the faster the fish is currently moving
     // Economy Fish Combining (Tier 2) — see CLAUDE.md's "Economy Fish
@@ -643,9 +638,6 @@ function canSpawnMoreAlienDna(state) {
 }
 function canSpawnMoreBiomass(state) {
   return countTankItemsByType(state, 'biomass') < BIOMASS_MAX_ON_SCREEN;
-}
-function canSpawnMoreBioPellets(state) {
-  return countTankItemsByType(state, 'bio_pellets') < BIO_PELLETS_MAX_ON_SCREEN;
 }
 
 // Coin Cap Tank Upgrade — state.level.upgrades.coinCapLevel indexes straight
@@ -1444,28 +1436,6 @@ function updateBiomass(item, state, dtMs) {
   return true;
 }
 
-// bio_pellets — Weight Class 5 (Heavy), same straight-gravity fall as
-// alien_dna/biomass above. The Manufacturer's own Bio-Pellets recipe is the
-// only thing that ever removes it from state.level.items (directly
-// splicing it, same intake pattern every other recipe-building ingredient
-// scan already uses) — the 'consumed' check below is purely defensive.
-function updateBioPellets(item, state, dtMs) {
-  const dt = dtMs / 1000;
-  const physics = { gravity: GRAVITY, maxFallSpeed: MAX_FALL_SPEED };
-  if (item.y < SEABED_FLOOR_Y) {
-    const fanForce = computeFanForce(state, item);
-    integrateItemForces(item, dt, physics, fanForce);
-    item.y += item.vy * dt;
-    item.x += item.vx * dt;
-    clampItemToWorldWalls(item);
-    return true;
-  }
-  const status = stepItemOnGrid(item, state, dt, physics);
-  if (status === 'consumed') return false;
-  item.resting = status === 'resting';
-  return true;
-}
-
 // The Manufacturer's Alien Egg recipe output — see createAlienEgg. Falls/
 // routes/drags exactly like a coin (Class 3), but also counts up its own
 // hatchTimer every tick regardless of resting state; once it crosses
@@ -1928,11 +1898,13 @@ function updateFish(fish, state, dtMs) {
   // only ever produces Science, never Power, "a deliberate one-resource-
   // per-fish simplification." Researcher must stay first for that to hold.
   if (isPureResearcher) {
-    // Xeno Octopus's Alien DNA mode, per direct spec ("spits out alien DNA
-    // every 8 seconds instead of science") — a full replacement of the
-    // normal long brew cycle below with a short fixed timer, while toggled
-    // on. Still needs to be fed like any other fish (nothing here changes
-    // hunger/starvation) — only what its dropTimer produces changes.
+    // Xeno Octopus's Bio-Sludge mode, per direct spec ("spits out alien DNA
+    // every 8 seconds instead of science" — Alien DNA is now displayed as
+    // Bio-Sludge everywhere, see Config.js's own comment on the alien_dna
+    // type) — a full replacement of the normal long brew cycle below with a
+    // short fixed timer, while toggled on. Still needs to be fed like any
+    // other fish (nothing here changes hunger/starvation) — only what its
+    // dropTimer produces changes.
     if (fish.speciesId === 'xeno_octopus' && fish.alienDnaModeOn) {
       fish.dropTimer += dtMs;
       if (fish.dropTimer >= SCIENCE_ALIEN_DNA_INTERVAL_MS) {
@@ -2216,7 +2188,6 @@ export function updateEntities(state, dtMs) {
     if (item.type === 'waste') return updateWaste(item, state, dtMs);
     if (item.type === 'alien_dna') return updateAlienDna(item, state, dtMs);
     if (item.type === 'biomass') return updateBiomass(item, state, dtMs);
-    if (item.type === 'bio_pellets') return updateBioPellets(item, state, dtMs);
     if (item.type === 'mutagen_paste') return updateMutagenPaste(item, state, dtMs);
     if (item.type === 'alien_egg') return updateAlienEgg(item, state, dtMs);
     return true;
@@ -2251,7 +2222,12 @@ export function updateEntities(state, dtMs) {
   for (const point of bioSpawnPoints) {
     if (point.itemType === 'food') state.level.items.push(createFood(point.x, point.y));
     else if (point.itemType === 'biomass') { if (canSpawnMoreBiomass(state)) state.level.items.push(createBiomass(point.x, point.y)); }
-    else if (point.itemType === 'bio_pellets') { if (canSpawnMoreBioPellets(state)) state.level.items.push(createBioPellets(point.x, point.y)); }
+    // The Manufacturer's Bio-Sludge recipe (Food+Waste) outputs 'alien_dna' —
+    // the same item type killing an alien drops, merged per direct request
+    // (see Config.js's MANUFACTURER_RECIPES.bio_sludge comment) — so it
+    // shares the exact same spawn-cap check every alien-drop Bio-Sludge
+    // already uses.
+    else if (point.itemType === 'alien_dna') { if (canSpawnMoreAlienDna(state)) state.level.items.push(createAlienDna(point.x, point.y)); }
     else if (point.itemType === 'mutagen_paste') state.level.items.push(createMutagenPaste(point.x, point.y));
     else if (point.itemType === 'science') { if (countScienceCapacityUsed(state) < effectiveScienceCapacity(state)) state.level.items.push(createScience(point.x, point.y)); }
     else if (point.itemType === 'science_green') { if (countScienceCapacityUsed(state) < effectiveScienceCapacity(state)) state.level.items.push(createScienceGreen(point.x, point.y)); }

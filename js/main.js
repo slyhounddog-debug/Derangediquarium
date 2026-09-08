@@ -39,7 +39,6 @@ import {
   ALIEN_DNA_COLOR,
   BIOMASS_COLOR,
   MUTAGEN_PASTE_COLOR,
-  BIO_PELLETS_COLOR,
   CATALYST_FLASH_DURATION_MS,
   FOOD_STALE_FRACTION,
   FOOD_STALE_COLOR,
@@ -166,7 +165,6 @@ const ITEM_FLAT_COLOR_BY_TYPE = {
   alien_dna: ALIEN_DNA_COLOR,
   biomass: BIOMASS_COLOR,
   mutagen_paste: MUTAGEN_PASTE_COLOR,
-  bio_pellets: BIO_PELLETS_COLOR,
   // alien_egg deliberately NOT listed here — it gets its own dedicated
   // render branch below (a countdown-to-hatch ring on top of the shell
   // fill), not the generic flat-fill-plus-highlight path.
@@ -463,7 +461,7 @@ let itemDragPositionHistory = [];
 // same "every object can be clicked and dragged around" consistency the
 // original 4 types already established — nothing about the new items makes
 // them an exception.
-const DRAGGABLE_ITEM_TYPES = ['coin', 'food', 'waste', 'science', 'science_green', 'alien_dna', 'biomass', 'mutagen_paste', 'bio_pellets', 'alien_egg'];
+const DRAGGABLE_ITEM_TYPES = ['coin', 'food', 'waste', 'science', 'science_green', 'alien_dna', 'biomass', 'mutagen_paste', 'alien_egg'];
 
 input.mouseDownHandlers.push((sx, sy) => {
   // A guided tutorial normally blocks starting an item drag like every
@@ -677,7 +675,7 @@ input.clickHandlers.push((sx, sy) => {
     return;
   }
 
-  // Xeno Octopus: click toggles Alien DNA mode on/off, per direct spec.
+  // Xeno Octopus: click toggles Bio-Sludge mode on/off, per direct spec.
   if (clickedFish && clickedFish.speciesId === 'xeno_octopus') {
     clickedFish.alienDnaModeOn = !clickedFish.alienDnaModeOn;
     return;
@@ -1908,8 +1906,8 @@ function render() {
       ctx.restore();
     }
 
-    // Xeno Octopus's Alien DNA mode — a pulsing acid-green ring while toggled
-    // on, matching Alien DNA's own item color.
+    // Xeno Octopus's Bio-Sludge mode — a pulsing acid-green ring while
+    // toggled on, matching Bio-Sludge's own item color.
     if (fish.speciesId === 'xeno_octopus' && fish.alienDnaModeOn) {
       const ringRadius = size * state.camera.zoom * (1.15 + 0.1 * Math.sin(performance.now() / 220));
       ctx.save();
