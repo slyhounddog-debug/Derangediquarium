@@ -1298,7 +1298,7 @@ export const BUILDING_TYPES = {
   },
   [TILE_MANUFACTURER]: {
     id: TILE_MANUFACTURER, name: 'Manufacturer', icon: '🏭', cost: 300,
-    description: 'Pick a recipe by clicking it once placed: Mutagen Paste (Food+Biomass), Blue Science (Waste+Biomass), Bio-Sludge (Food+Waste), or Alien Egg (Blue Science+Food, double power draw). Does nothing until a recipe is chosen.',
+    description: 'Pick a recipe by clicking it once placed: Mutagen Paste (Food+Biomass), Blue Science (Waste+Biomass), Bio-Sludge (Food+Waste), Alien Egg (Blue Science+Food, double power draw), or Green Science (Blue Science+Biomass). Does nothing until a recipe is chosen.',
     color: '#e690e0', unlockedByDefault: false,
   },
   [TILE_POWER_PLANT]: {
@@ -1490,6 +1490,22 @@ export const MANUFACTURER_RECIPES = {
     inputs: ['science', 'food'], output: 'alien_egg', labNodeId: 'recipe_alien_egg',
     description: 'Blue Science + Food -> Alien Egg (2x power draw)',
     powerCostMultiplier: 2,
+  },
+  // Real bug fix, found during a balance/logic audit pass: Green Science had
+  // NO way to be earned in actual gameplay at all — an earlier batch
+  // deliberately retired the Bio-Combustor's old "absorb Science instead of
+  // Waste and self-upgrade the output" branch (correctly, since a fixed
+  // icon-per-recipe model has no room for that any more), but nothing was
+  // ever added back in its place. This restores production as its own clean
+  // recipe, using the exact Blue-Science-+-Biomass ingredient pair the old
+  // upgraded branch already used, gated behind Green Science Tech itself
+  // (recipe_green_science) so it's only ever available once that's
+  // researched — matching every other green-science-adjacent node's own
+  // gating.
+  green_science: {
+    id: 'green_science', name: 'Green Science', icon: '🟢', color: SCIENCE_GREEN_COLOR,
+    inputs: ['science', 'biomass'], output: 'science_green', labNodeId: 'recipe_green_science',
+    description: 'Blue Science + Biomass -> Green Science',
   },
 };
 export const MANUFACTURER_RECIPE_LIST = Object.values(MANUFACTURER_RECIPES);
@@ -1759,6 +1775,16 @@ export const SCIENCE_LAB_UPGRADES = {
   green_science_tech: {
     id: 'green_science_tech', name: 'Green Science Tech', icon: '🟢', scienceCost: 60, goldCost: 8000,
     requires: ['recipe_bio_combustor', 'science_cap_3'], grants: {},
+  },
+  // Real bug fix (see MANUFACTURER_RECIPES.green_science's own comment) —
+  // Green Science's ONLY production path, gated behind Green Science Tech
+  // itself so it's never purchasable before that research exists. Costs
+  // only Blue Science + gold (no scienceGreenCost) — it would otherwise be
+  // a chicken-and-egg problem, since this node is what makes Green Science
+  // earnable in the first place.
+  recipe_green_science: {
+    id: 'recipe_green_science', name: 'Green Science Recipe', icon: '🟢', scienceCost: 55, goldCost: 10000,
+    requires: ['green_science_tech'], grants: {},
   },
   // Per direct request, "add in unlock for the bio-pellets in the science
   // lab behind the manufacturer" — just the building, no Power Plant needed.
