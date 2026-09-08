@@ -1212,19 +1212,24 @@ export const SPECIES_LIST = Object.values(SPECIES);
 // there's no risk of it being used as a free item-conveyor exploit the way
 // a partial-refund policy was originally hedging against.
 export const TILE_REFUND_FRACTION = 1.0;
-// Every building's shop cost is dynamic now, mirroring the Economy Fish
-// dynamic-pricing pattern but additive instead of multiplicative — per
-// direct request. Platform is a flat $3 regardless of how many are already
-// placed. Every other building's live cost is its base
-// BUILDING_TYPES cost plus BUILDING_COST_INCREMENT for each tile of that
-// exact type already placed on the grid (Grid.js's getBuildingCost, counted
-// live off state.level.grid every call, same "no separate counter to keep in
-// sync" approach the fish pricing already uses — demolishing one brings the
-// next one's cost back down). Tile *removal* still refunds off the tile's
-// original placed cost (stored implicitly by BUILDING_TYPES[type].cost at
-// demolish time — see Grid.js's removeTile), not today's live price.
+// Every building's shop cost is dynamic, mirroring the Economy Fish
+// dynamic-pricing pattern (compounding, not additive) — per direct request.
+// Platform is a flat $3 regardless of how many are already placed. Every
+// other building's live cost is `base * rate^N`, N = how many of that exact
+// type are already placed on the grid (Grid.js's getBuildingCost, counted
+// live off state.level.grid every call, same "no separate counter to keep
+// in sync" approach the fish pricing already uses — demolishing one brings
+// the next one's cost back down), rounded UP. `rate` itself is tiered off
+// the building's own BASE cost, per direct spec: 3% for a base cost of
+// $100 or less, 6% for $101-200, 9% above $200 — a $300 Manufacturer scales
+// noticeably faster than a $15 Rudimentary Fan. Tile *removal* still
+// refunds off this exact live formula (evaluated while the tile being
+// removed still counts toward its own N — see Grid.js's removeTile), not a
+// separately-tracked original cost.
 export const PLATFORM_FLAT_COST = 3;
-export const BUILDING_COST_INCREMENT = 1;
+export const BUILDING_COST_GROWTH_RATE_TIER1 = 1.03; // base cost <= $100
+export const BUILDING_COST_GROWTH_RATE_TIER2 = 1.06; // base cost $101-200
+export const BUILDING_COST_GROWTH_RATE_TIER3 = 1.09; // base cost > $200
 export const BUILDING_TYPES = {
   [TILE_PLATFORM]: {
     id: TILE_PLATFORM, name: 'Platform', icon: '🧱', cost: PLATFORM_FLAT_COST,
@@ -1297,8 +1302,8 @@ export const BUILDING_TYPES = {
     color: '#8fff9a', unlockedByDefault: false,
   },
   [TILE_MANUFACTURER]: {
-    id: TILE_MANUFACTURER, name: 'Manufacturer', icon: '🏭', cost: 300,
-    description: 'Pick a recipe by clicking it once placed: Mutagen Paste (Food+Biomass), Blue Science (Waste+Biomass), Bio-Sludge (Food+Waste), Alien Egg (Blue Science+Food, double power draw), or Green Science (Blue Science+Biomass). Does nothing until a recipe is chosen.',
+    id: TILE_MANUFACTURER, name: 'Manufacturer', icon: '🏭', cost: 125, // cut from 300 per direct request, to compensate for its own tier-2 (6%, base cost $101-200) compounding cost curve
+    description: 'Pick a recipe by clicking it once placed. Does nothing until a recipe is chosen.',
     color: '#e690e0', unlockedByDefault: false,
   },
   [TILE_POWER_PLANT]: {
@@ -1518,8 +1523,18 @@ export const MANUFACTURER_RECIPE_LIST = Object.values(MANUFACTURER_RECIPES);
 // `science` added alongside the Alien Egg recipe, its one ingredient type
 // that didn't already have a duration here.
 export const MANUFACTURER_ITEM_PROCESS_MS = { waste: 2000, food: 4000, biomass: 8000, science: 6000 };
+// Per direct request, the Manufacturer's power draw is no longer a flat
+// rate — it depends on WHICH ingredient it's currently processing (heavier
+// items cost more to crunch), drawn only while actively processing an
+// absorbed ingredient, same "only while working" rule every other Electric
+// building follows. The shop/Lab-preview's own stat shows this as a plain
+// min-max range (buildingStatsHtml); the recipe pop-up menu shows the full
+// per-item breakdown (UI.js's manufacturerPowerBreakdownHtml), since that's
+// the one place a player is actually choosing which recipe (and therefore
+// which ingredients) to run.
+export const MANUFACTURER_ITEM_POWER_COST_MW = { waste: 10, food: 15, biomass: 25, science: 35 };
 export const MANUFACTURER_STATS = {
-  [TILE_MANUFACTURER]: { powerCostPerSec: 15 }, // drawn only while actively processing an absorbed ingredient, same as every other "only while working" Electric building
+  [TILE_MANUFACTURER]: {},
 };
 
 // ---- Power Plant recipes (renamed from Bio-Reactor) ----
@@ -1556,11 +1571,6 @@ export const POWER_PLANT_RECIPE_LIST = Object.values(POWER_PLANT_RECIPES);
 export const POWER_PLANT_STATS = {
   [TILE_POWER_PLANT]: {},
 };
-
-// Shared touch-intake radius for the Refinery/Manufacturer/Power Plant's
-// absorb scans — same value as COLLECTOR_INTAKE_RADIUS, reusing Grid.js's
-// existing isNearBuildingCenter helper.
-export const BIO_BUILDING_INTAKE_RADIUS = TILE_SIZE * 0.65;
 
 // ---- Vertical processing-progress dots (Processors, Manufacturer, Refineries, Power Plant) ----
 // Per direct request: a small column of 4 dots on the tile's left edge,
@@ -1914,6 +1924,39 @@ export const SCIENCE_LAB_UPGRADES = {
     scienceCost: SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[4], goldCost: SCIENCE_CAP_UPGRADE_GOLD_COSTS[4],
     requires: ['science_cap_4'], grants: { scienceCapLevel: 1 },
   },
+  // Pure economy modifier, per direct request — grants nothing structural
+  // (no species/building/capacity level), just gates a permanent discount
+  // applied wherever dynamic fish pricing is computed (Entities.js's
+  // effectiveFishCostGrowthRate/getFishPurchaseCost), checked the same
+  // "presence in labUpgradesPurchased IS the unlock" way GREEN_SCIENCE_LAB_ID
+  // already is.
+  fish_scaling: {
+    id: 'fish_scaling', name: 'Fish Scaling', icon: '📉',
+    scienceCost: 150, scienceGreenCost: 75, goldCost: 25000,
+    requires: ['science_cap_5'],
+    grants: {},
+  },
+  // ---- The end-game secret: Mother Alien Fish ----
+  // Per direct spec, a genuine mystery node — `mystery: true` (read by
+  // UI.js's buildLabTree/refreshLabTree/openLabPurchaseModal) hides its own
+  // name/icon/cost/description behind a plain "???" for as long as its
+  // `requires` aren't all met, even though every OTHER node in this tree is
+  // fully previewable while still locked. `requires` is deliberately every
+  // node gated behind Green Science Tech (directly or transitively —
+  // recipe_green_science, power_plant_science, bio_refinery,
+  // hybrid_catalyst_fish all happen to be the same set either way) plus
+  // Bubble Cap 50, per spec ("everything that's locked behind the green
+  // science node purchased first, and the bubble cap 50"). Buying it doesn't
+  // grant a species/building/scienceCapLevel like every other node — its
+  // `grants.triggersBossFight` is a special one-off flag UI.js's
+  // buyLabUpgrade checks for and hands off to main.js's startBossSequence
+  // instead of the normal grant-application path.
+  mother_alien_fish: {
+    id: 'mother_alien_fish', name: 'Mother Alien Fish', icon: '👹', mystery: true,
+    scienceCost: 250, scienceGreenCost: 100, goldCost: 50000,
+    requires: ['green_science_tech', 'recipe_green_science', 'power_plant_science', 'bio_refinery', 'hybrid_catalyst_fish', 'science_cap_5'],
+    grants: { triggersBossFight: true },
+  },
 };
 export const SCIENCE_LAB_UPGRADE_LIST = Object.values(SCIENCE_LAB_UPGRADES);
 
@@ -1943,6 +1986,13 @@ export const POWER_HISTORY_MAX = 60;
 // their own gating declaratively; this constant is for the couple of spots
 // that need the same check outside the tree itself).
 export const GREEN_SCIENCE_LAB_ID = 'green_science_tech';
+
+// Same "presence in state.meta.labUpgradesPurchased IS the unlock" pattern
+// as GREEN_SCIENCE_LAB_ID above — per direct request, halves the dynamic
+// fish-pricing growth curve's own scaling (see Entities.js's
+// effectiveFishCostGrowthRate/getFishPurchaseCost) the instant it's bought,
+// applying immediately to every species' live shop price.
+export const FISH_SCALING_LAB_ID = 'fish_scaling';
 
 // ---- Hybrid Mechanics (Blimp-Battery, Buffer Fish, Catalyst Fish) ----
 // Each of the 3 reworked hybrids gets a genuinely unique, hand-built
@@ -2005,6 +2055,18 @@ export const SCIENCE_ALIEN_DNA_INTERVAL_MS = 8000;
 
 export const SCIENCE_COLOR = '#5fc9ff';
 export const POWER_COLOR = '#ffd23f';
+
+// Item-type -> flat color, keyed by every possible Manufacturer recipe
+// ingredient — used by Grid.js's ghost-icon flash (renderManufacturerGhostFlash)
+// to render a translucent preview of whichever ingredient is still needed,
+// reusing each item's own established color rather than a mismatched
+// generic swatch. See CLAUDE.md's Manufacturer section for the mechanic.
+export const MANUFACTURER_INPUT_COLOR_BY_TYPE = {
+  food: FOOD_COLOR,
+  waste: WASTE_COLOR,
+  biomass: BIOMASS_COLOR,
+  science: SCIENCE_COLOR,
+};
 // A muted blue-grey "🫧" floating bubble-pop, planted above a fish's head the
 // instant a blocked-by-cap SCIENCE brew completes — per direct request, a
 // "full-belly" visual cue that production was blocked rather than the item
@@ -2191,6 +2253,49 @@ export const ALIEN_COUNTDOWN_START_MS = 10000; // the visible on-screen "10... 9
 export const ALIEN_WARNING_MESSAGE_1 = "Something's stirring out past the reef... probably nothing.";
 export const ALIEN_WARNING_MESSAGE_2 = "Uh oh, I'm reading movement out there. Get your turrets ready.";
 export const ALIEN_FIRST_WAVE_TIP_MESSAGE = "Aliens incoming! Click 'em for 1 damage a pop, or let a turret handle it. While they're alive they'll poop waste and scare nearby fish off their coins, so don't dawdle.";
+
+// ---- Mother Alien Fish (end-game boss) ----
+// Per direct spec — a one-time purchase in the Science Lab (see
+// SCIENCE_LAB_UPGRADES.mother_alien_fish) triggers this whole sequence:
+// close the Lab, wait BOSS_INTRO_WAIT_MS, screen-shake + flash white, then
+// spawn the boss itself (Entities.js's createMotherAlienFish). See main.js's
+// startBossSequence/updateBossSequence for the actual state machine.
+export const BOSS_INTRO_WAIT_MS = 2000; // "wait 2 seconds before the screen shakes..."
+export const BOSS_SHAKE_DURATION_MS = 900;
+export const BOSS_SHAKE_MAGNITUDE_PX = 14;
+export const BOSS_FLASH_DURATION_MS = 500; // the screen "goes white" for this long, right as the boss actually spawns
+// "A big ole alien enemy that's 10x harder than a tier 5 alien" — applied to
+// the existing Tier 5 archetype's own hpMin/hpMax range (150-220 -> 1500-2200),
+// not a bespoke stat block, so the boss automatically stays "10x a Tier 5"
+// even if that base archetype is ever rebalanced later.
+export const BOSS_HP_MULTIPLIER = 10;
+export const BOSS_RADIUS = 90;
+export const BOSS_SPEED = 28; // slow and lumbering, "big ole" per spec
+export const BOSS_COLOR = '#3a0d42';
+// "spawns extra aliens out of its mouth every couple seconds" — minions are
+// plain Tier 1/2 aliens (ALIEN_ARCHETYPES[0]/[1]), still counted against
+// ALIEN_MAX_ALIVE like any other alien so the same anti-framerate-collapse
+// ceiling still holds even during the boss fight.
+export const BOSS_MINION_SPAWN_INTERVAL_MS = 4000;
+export const BOSS_MINION_SPAWN_COUNT = 2;
+// On death: "have the boss exploded and turn into a bunch of green and blue
+// science (ignore the bubble cap at this point so it will spawn a bunch of
+// science)" — see Entities.js's updateAlien death branch, isBoss case.
+export const BOSS_DEATH_SCIENCE_COUNT = 12; // blue Science bubbles
+export const BOSS_DEATH_SCIENCE_GREEN_COUNT = 12; // Green Science bubbles
+// "...and then slowly fade in a game over modal" — the delay between the
+// death-burst finishing and the stats modal starting its fade-in, plus the
+// fade's own duration (read by main.js/UI.js's showGameOverModal, and by
+// style.css's #game-over-overlay transition).
+export const BOSS_DEFEATED_MODAL_DELAY_MS = 2000;
+export const BOSS_DEFEATED_MODAL_FADE_MS = 2500;
+// "have a universal boss health bar at the top middle of the screen instead
+// of over the boss's head" — a DOM element (UI.js's updateBossHealthBar),
+// not drawn on the canvas like a normal alien's own health bar, so it can
+// sit fixed at a screen position regardless of where the boss actually is
+// in the world.
+export const BOSS_HEALTH_BAR_WIDTH = 420;
+export const BOSS_HEALTH_BAR_HEIGHT = 26;
 
 // AI — deliberately not a strict chase/flee, per direct request ("both the
 // aliens and the fish are gonna be kinda dumb at being predator/prey, so

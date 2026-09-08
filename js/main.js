@@ -77,6 +77,11 @@ import {
   ALIEN_EGG_COLOR,
   ALIEN_EGG_RING_COLOR,
   ALIEN_EGG_HATCH_MS,
+  BOSS_INTRO_WAIT_MS,
+  BOSS_SHAKE_DURATION_MS,
+  BOSS_SHAKE_MAGNITUDE_PX,
+  BOSS_FLASH_DURATION_MS,
+  BOSS_DEFEATED_MODAL_DELAY_MS,
 } from './Config.js';
 import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop } from './Engine.js';
 import { loadLevel, LEVELS } from './Levels.js';
@@ -95,6 +100,7 @@ import {
   getCoinTier,
   getFishPurchaseCost,
   findFishAt,
+  findFishForPipetteAt,
   computeEelBlimpBatteryCapacityMw,
   isCombinableFish,
   canCombineFish,
@@ -102,6 +108,7 @@ import {
   isSpliceSource,
   canSpliceFish,
   spliceFish,
+  createMotherAlienFish,
 } from './Entities.js';
 import {
   renderSeabedGrid,
@@ -118,6 +125,7 @@ import {
   computePowerEfficiency,
   findNearestWasteTurretAndWaste,
   getRecipeBuildingKeyAt,
+  getBuildingInfoKeyAt,
 } from './Grid.js';
 import { isPointOnMound, crackMound, renderMound, centerCameraOnMound, isPointOnScienceLab, renderScienceLab } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
@@ -141,6 +149,13 @@ import {
   openRecipeMenu,
   closeRecipeMenu,
   isRecipeMenuOpen,
+  openBuildingInfoMenu,
+  closeBuildingInfoMenu,
+  isBuildingInfoMenuOpen,
+  pipetteSelectSpecies,
+  pipetteSelectBuilding,
+  deselectShopSelection,
+  copyBuildingRecipe,
   flashMoneyInsufficient,
   selectTool,
   initStartScreen,
@@ -149,6 +164,8 @@ import {
   advanceTutorialFlow,
   closeSidePanels,
   tutorialScrollDirectionNeeded,
+  updateBossHealthBar,
+  showGameOverModal,
 } from './UI.js';
 
 const canvas = document.getElementById('game-canvas');
@@ -280,6 +297,12 @@ const state = {
     // updateHUD to advance the 'postalien'/'wastedrag' guided-tutorial
     // flows' "drag Waste into the Turret" step.
     wasteTurretAmmoGainedPending: false,
+    // Same cross-module-flag pattern — UI.js's buyLabUpgrade sets this the
+    // instant the Mother Alien Fish node is purchased (UI.js can't own the
+    // actual gameplay-state transition itself, per this file's own
+    // module-boundary rule); main.js's update() checks and clears it once
+    // per frame to kick off state.level.bossPhase = 'intro_wait'.
+    bossFightTriggerPending: false,
     // Small red reason text shown just above the cursor after a failed
     // building-placement attempt ("Can't afford") — see
     // showBuildError/handleBuildPlacementFailure and render()'s draw call.
@@ -586,6 +609,62 @@ function updateItemDrag() {
   dragged.resting = false;
 }
 
+// Manufacturer/Power Plant drag-to-copy-recipe — per direct request ("click
+// and dragged, and a ghost icon of the building will go on the cursor (the
+// actual building shouldn't move)... release the drag, copy the recipe from
+// the dragged building to the building the ghost was released on"). Mirrors
+// the item-drag gesture shape above (mousedown arms it, a per-tick update
+// tracks the live hover target, mouseup commits or cancels) but the SOURCE
+// tile itself never moves — only a ghost icon follows the cursor
+// (render()'s own draw call, below), and nothing happens at all unless the
+// release lands on a genuinely different tile of the exact same building
+// type (UI.js's copyBuildingRecipe already guards this, redundantly with
+// the hover check here). A plain click (no real drag) still opens the
+// normal recipe pop-up menu as before — recipeDragMoved is what the click
+// handler checks to tell the two gestures apart, same "move-distance
+// threshold" pattern itemDragMoved already established.
+let recipeDragSourceKey = null;
+let recipeDragType = null;
+let recipeDragStartSx = 0;
+let recipeDragStartSy = 0;
+let recipeDragMoved = false;
+let recipeDragHoverKey = null; // whichever same-type building the cursor is currently over — drives the ghost's green-hue tint
+
+input.mouseDownHandlers.push((sx, sy) => {
+  if (state.ui.paused) return;
+  const world = screenToWorld(sx, sy, state.camera);
+  if (effectiveToolAt(world.y) === 'demolish') return; // don't fight with Demolish's own drag-remove on the same press
+  const key = getRecipeBuildingKeyAt(state, world.x, world.y);
+  if (!key) return;
+  recipeDragSourceKey = key;
+  recipeDragType = state.level.buildingData[key].type;
+  recipeDragStartSx = sx;
+  recipeDragStartSy = sy;
+  recipeDragMoved = false;
+  recipeDragHoverKey = null;
+});
+
+input.mouseUpHandlers.push((sx, sy) => {
+  if (recipeDragSourceKey == null) return;
+  const movedPx = Math.hypot(sx - recipeDragStartSx, sy - recipeDragStartSy);
+  recipeDragMoved = movedPx >= ITEM_DRAG_MOVE_THRESHOLD_PX;
+  if (recipeDragMoved && recipeDragHoverKey) {
+    copyBuildingRecipe(state, recipeDragSourceKey, recipeDragHoverKey);
+  }
+  recipeDragSourceKey = null;
+  recipeDragType = null;
+  recipeDragHoverKey = null;
+});
+
+function updateRecipeDrag() {
+  if (recipeDragSourceKey == null) return;
+  if (!state.level.buildingData[recipeDragSourceKey]) { recipeDragSourceKey = null; recipeDragType = null; recipeDragHoverKey = null; return; } // demolished mid-drag
+  const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
+  const hoverKey = getRecipeBuildingKeyAt(state, world.x, world.y);
+  const hoverData = hoverKey ? state.level.buildingData[hoverKey] : null;
+  recipeDragHoverKey = hoverData && hoverData.type === recipeDragType && hoverKey !== recipeDragSourceKey ? hoverKey : null;
+}
+
 // Fan placement is a two-click flow, not a single click: click 1 arms
 // aiming at a valid cell (the tile isn't placed yet), then the ghost
 // rotates live with the cursor from that cell's fixed position until click
@@ -626,6 +705,7 @@ function effectiveToolAt(worldY) {
 input.clickHandlers.push((sx, sy) => {
   if (fishDragArmed) { fishDragArmed = false; return; } // this click followed a fish-combine drag gesture — don't also bank/feed/mound-click at the release point
   if (itemDragMoved) { itemDragMoved = false; return; } // this click followed a genuine item-drag gesture — don't also bank/feed/place at the release point. An unmoved press-release leaves itemDragMoved false, so a plain click on a Coin/Science item still banks it normally
+  if (recipeDragMoved) { recipeDragMoved = false; return; } // this click followed a genuine Manufacturer/Power Plant recipe-copy drag — don't also open the recipe pop-up at the release point
   const world = screenToWorld(sx, sy, state.camera);
 
   // Alien Invasion: clicking a living alien always does ALIEN_CLICK_DAMAGE,
@@ -779,6 +859,19 @@ input.clickHandlers.push((sx, sy) => {
   // handler).
   const recipeBuildingKey = getRecipeBuildingKeyAt(state, world.x, world.y);
   if (recipeBuildingKey) { openRecipeMenu(state, recipeBuildingKey); return; }
+  // Every OTHER placed building opens a generic read-only info pop-up
+  // instead — per direct request ("any building can be quickly clicked on
+  // to see what it is and what it does"). Deliberately gated on NOT
+  // currently holding a build tool (unlike the Manufacturer/Power Plant
+  // recipe pop-up above, which intentionally ignores the tool) — a build
+  // tool's own drag-placement (updateBuildDrag) already fires on mousedown,
+  // before this click even runs, so without this guard, single-clicking an
+  // EMPTY cell to place a fresh building would immediately pop this info-
+  // modal open right over top of what you just built.
+  if (!effectiveTool.startsWith('build:')) {
+    const buildingInfo = getBuildingInfoKeyAt(state, world.x, world.y);
+    if (buildingInfo) { openBuildingInfoMenu(state, buildingInfo.key); return; }
+  }
   if (effectiveTool === 'food') {
     const reason = trySpawnFood(state, world.x, world.y);
     if (reason === 'no_money') flashMoneyInsufficient(state);
@@ -881,6 +974,7 @@ input.keydownHandlers.push((e) => {
     // (Food or a fish selection stay armed).
     if (isMoundMenuOpen()) { closeMoundMenu(); return; }
     if (isRecipeMenuOpen()) { closeRecipeMenu(); return; }
+    if (isBuildingInfoMenuOpen()) { closeBuildingInfoMenu(); return; }
     if (isLabPurchaseModalOpen()) { closeLabPurchaseModal(); return; }
     if (isLabMenuOpen()) { closeLabMenu(); return; }
     if (isFanAimingActive()) {
@@ -938,9 +1032,33 @@ input.keydownHandlers.push((e) => {
     case 'Digit3': // Merge
       selectTool(state, 'merge');
       break;
-    case 'KeyQ': // toggle-collapse the shop panel — moved off KeyS per direct request, freeing S up to pan the camera down (see Engine.js's updateCamera)
+    case 'KeyE': // toggle-collapse the shop panel — moved off KeyQ per direct request, freeing Q up for the Pipette Tool below
       toggleShopCollapse(state);
       break;
+    case 'KeyQ': { // Pipette Tool ("Smart Copy") / Clear Cursor — per direct request
+      const rawTool = state.ui.selectedTool;
+      if (rawTool.startsWith('build:') || rawTool.startsWith('fish:')) {
+        // Clear Cursor: something's already armed — drop it back to Food,
+        // exactly like re-clicking an already-selected shop icon does.
+        deselectShopSelection(state);
+      } else {
+        // Pipette Tool: nothing's armed (Food/Demolish/Merge selected) —
+        // look at whatever's directly under the cursor and arm THAT instead.
+        // Fish checked first (their own hit radius, matching the shimmer
+        // effect's size, is usually the larger/more forgiving target); a
+        // building tile is checked only if no fish qualified.
+        const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
+        const fish = findFishForPipetteAt(state, world.x, world.y);
+        if (fish) {
+          pipetteSelectSpecies(state, fish.speciesId);
+        } else {
+          const { col, row } = worldToTile(world.x, world.y);
+          const tileType = getTile(state.level.grid, col, row);
+          if (tileType && tileType !== TILE_EMPTY) pipetteSelectBuilding(state, tileType);
+        }
+      }
+      break;
+    }
     case 'KeyP': // toggle-collapse the Tank Upgrades panel
       toggleTankPanel(state);
       break;
@@ -1111,6 +1229,53 @@ function isScrolledToBottom(state) {
   return state.camera.y >= maxY - 1;
 }
 
+// Mother Alien Fish end-game boss sequence, per direct spec — walks
+// state.level.bossPhase forward through 'intro_wait' -> 'fighting' ->
+// 'defeated' -> 'gameover', never backwards. Called every tick once
+// bossPhase is truthy (see update()'s own call site) — most of the phases
+// don't need per-tick work at all, this just watches for the moment to
+// advance to the next one.
+function updateBossSequence(state, dtMs) {
+  if (state.level.bossPhase === 'intro_wait') {
+    // "It will close the science lab, and wait 2 seconds before the screen
+    // shakes, goes white, and spawns the Mother Alien fish" — the Lab itself
+    // was already closed by UI.js's buyLabUpgrade the instant the purchase
+    // happened; this is purely the 2-second wait, then the shake+flash+spawn
+    // all trigger together as one beat.
+    state.level.bossIntroTimerMs += dtMs;
+    if (state.level.bossIntroTimerMs >= BOSS_INTRO_WAIT_MS) {
+      state.level.screenShakeUntilMs = state.level.elapsed + BOSS_SHAKE_DURATION_MS;
+      state.level.screenFlashUntilMs = state.level.elapsed + BOSS_FLASH_DURATION_MS;
+      // Spawns high in the water column, horizontally centered — "a big ole
+      // alien enemy" making its entrance where it's immediately visible
+      // regardless of where the camera/player happened to be panned.
+      const boss = createMotherAlienFish(WORLD_W / 2, SEABED_FLOOR_Y * 0.3);
+      state.level.entities.push(boss);
+      state.level.bossEntityId = boss.id;
+      state.level.bossPhase = 'fighting';
+    }
+    return;
+  }
+  if (state.level.bossPhase === 'fighting') {
+    // Entities.js's updateAlien sets this the instant the boss's own hp
+    // hits 0 (its death branch) — main.js is what actually owns advancing
+    // the boss-sequence phase, since Entities.js has no business knowing
+    // about UI-level modal timing.
+    if (state.level.bossDefeatedAtMs !== null) state.level.bossPhase = 'defeated';
+    return;
+  }
+  if (state.level.bossPhase === 'defeated') {
+    // Deliberately NOT frozen during this window — per direct spec, "slowly
+    // fade in a game over modal" implies the world keeps breathing for a
+    // beat after the boss's own death-burst before the stats modal appears,
+    // not an instant hard cut.
+    if (state.level.elapsed - state.level.bossDefeatedAtMs >= BOSS_DEFEATED_MODAL_DELAY_MS) {
+      state.level.bossPhase = 'gameover';
+      showGameOverModal(state);
+    }
+  }
+}
+
 function update(dtMs) {
   // Ambience (bubbles/seaweed) deliberately does NOT run before the game
   // has started — the start screen's #start-overlay blurs the tank behind
@@ -1125,8 +1290,26 @@ function update(dtMs) {
   // satisfying "the tank blurry behind it" — it's just not animating.
   if (state.ui.gameStarted) updateAmbience(dtMs);
   if (!state.ui.gameStarted) return; // frozen until the player clicks Start on the first-launch start screen — render() still runs (a static frame), same "frozen but visible" pattern the pause menu already uses
+  // Cross-module flag (UI.js's buyLabUpgrade sets it, same pattern
+  // state.ui.coinCapFlashPending already established) — the Mother Alien
+  // Fish purchase's own gameplay-state transition (starting the boss
+  // sequence) belongs here in main.js, not in UI.js, per this file's own
+  // module-boundary rule ("no gameplay logic" in UI.js).
+  if (state.ui.bossFightTriggerPending) {
+    state.ui.bossFightTriggerPending = false;
+    state.level.bossPhase = 'intro_wait';
+    state.level.bossIntroTimerMs = 0;
+  }
   if (state.ui.paused) return; // frozen behind the pause menu — render() still runs so the tank stays visible
   if (state.level.gameOver) return; // lost — frozen the same way, but via a separate flag so Escape still reaches the pause menu's Restart without also un-freezing a lost game (see Systems.js's updateBankruptcy)
+  // Mother Alien Fish end-game boss sequence — see updateBossSequence's own
+  // comment for the full state machine. Called every tick once triggered
+  // (not just while frozen) so it can also catch the 'fighting' -> 'defeated'
+  // -> 'gameover' transitions that happen during otherwise-normal gameplay;
+  // only 'intro_wait' (the 2s cinematic pause before the boss appears) and
+  // 'gameover' (the final stats modal) actually freeze everything below.
+  if (state.level.bossPhase) updateBossSequence(state, dtMs);
+  if (state.level.bossPhase === 'intro_wait' || state.level.bossPhase === 'gameover') return;
   // The cinematic first-alien intro ('alienintro' in UI.js's TUTORIAL_FLOWS)
   // is the one guided-tutorial flow that freezes EVERYTHING, camera panning
   // included — per direct request, "the whole game pauses" — unlike every
@@ -1192,6 +1375,7 @@ function update(dtMs) {
   updateEntities(state, dtMs);
   updateFishDrag();
   updateItemDrag();
+  updateRecipeDrag();
   updateStoryTriggers(state);
   state.level.elapsed += dtMs;
 
@@ -1565,6 +1749,19 @@ function render() {
 
   ctx.fillStyle = waterBackgroundGradient(ctx, canvas.height, state.level.cleanliness);
   ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Mother Alien Fish's entrance — "the screen shakes" — a small random
+  // jitter offset applied to the WHOLE scene below via ctx.translate, wound
+  // back by the matching ctx.restore() right before the HUD/debug-overlay
+  // calls at the end of this function (DOM elements, unaffected either way).
+  // Decays linearly to 0 as screenShakeUntilMs approaches, rather than
+  // cutting off abruptly.
+  ctx.save();
+  if (state.level.elapsed < state.level.screenShakeUntilMs) {
+    const remaining = (state.level.screenShakeUntilMs - state.level.elapsed) / BOSS_SHAKE_DURATION_MS;
+    const magnitude = BOSS_SHAKE_MAGNITUDE_PX * Math.max(0, Math.min(1, remaining));
+    ctx.translate((Math.random() - 0.5) * magnitude * 2, (Math.random() - 0.5) * magnitude * 2);
+  }
 
   // Ambience (bubbles/seaweed) renders immediately after the plain
   // background fill and before anything else — per direct request, it
@@ -2074,30 +2271,38 @@ function render() {
       ctx.restore();
     }
 
-    const barW = ALIEN_HEALTH_BAR_WIDTH * state.camera.zoom;
-    const barH = ALIEN_HEALTH_BAR_HEIGHT * state.camera.zoom;
-    const barX = pos.x - barW / 2;
-    const barY = pos.y - baseRadius - barH - 8;
-    const barRadius = barH / 2;
-    ctx.save();
-    ctx.beginPath();
-    ctx.roundRect(barX, barY, barW, barH, barRadius);
-    ctx.fillStyle = 'rgba(20, 8, 8, 0.65)';
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
-    ctx.lineWidth = Math.max(0.5, 0.6 * state.camera.zoom);
-    ctx.stroke();
-    const hpFrac = Math.max(0, alien.hp / alien.maxHp);
-    if (hpFrac > 0) {
+    // Per direct spec ("when mother alien fish is on screen, have a
+    // universal boss health bar at the top middle of the screen instead of
+    // over the boss's head") — the boss gets NO per-head bar at all;
+    // UI.js's updateBossHealthBar (called once per frame from render()'s
+    // own tail, alongside updateHUD) owns its dedicated top-middle DOM bar
+    // instead.
+    if (!alien.isBoss) {
+      const barW = ALIEN_HEALTH_BAR_WIDTH * state.camera.zoom;
+      const barH = ALIEN_HEALTH_BAR_HEIGHT * state.camera.zoom;
+      const barX = pos.x - barW / 2;
+      const barY = pos.y - baseRadius - barH - 8;
+      const barRadius = barH / 2;
+      ctx.save();
       ctx.beginPath();
-      ctx.roundRect(barX, barY, Math.max(barH, barW * hpFrac), barH, barRadius);
-      const barGradient = ctx.createLinearGradient(barX, barY, barX, barY + barH);
-      barGradient.addColorStop(0, '#ff9a8a');
-      barGradient.addColorStop(1, '#e0392b');
-      ctx.fillStyle = barGradient;
+      ctx.roundRect(barX, barY, barW, barH, barRadius);
+      ctx.fillStyle = 'rgba(20, 8, 8, 0.65)';
       ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.lineWidth = Math.max(0.5, 0.6 * state.camera.zoom);
+      ctx.stroke();
+      const hpFrac = Math.max(0, alien.hp / alien.maxHp);
+      if (hpFrac > 0) {
+        ctx.beginPath();
+        ctx.roundRect(barX, barY, Math.max(barH, barW * hpFrac), barH, barRadius);
+        const barGradient = ctx.createLinearGradient(barX, barY, barX, barY + barH);
+        barGradient.addColorStop(0, '#ff9a8a');
+        barGradient.addColorStop(1, '#e0392b');
+        ctx.fillStyle = barGradient;
+        ctx.fill();
+      }
+      ctx.restore();
     }
-    ctx.restore();
   }
 
   // Turret projectiles — a small bright bolt plus a short motion trail
@@ -2279,6 +2484,49 @@ function render() {
     }
   }
 
+  ctx.restore(); // matches the shake-offset ctx.save() near the top of this function
+
+  // Manufacturer/Power Plant drag-to-copy-recipe ghost — a translucent
+  // building icon that follows the raw cursor (screen space, drawn after
+  // the shake-offset restore above so it never jitters with it) while a
+  // drag is armed, per direct request ("a ghost icon of the building will
+  // go on the cursor"). Green-tinted while hovering a valid same-type
+  // target, a neutral white tint otherwise.
+  if (recipeDragSourceKey !== null) {
+    const def = BUILDING_TYPES[recipeDragType];
+    const gx = input.mouse.x;
+    const gy = input.mouse.y;
+    const gsize = TILE_SIZE * state.camera.zoom;
+    ctx.save();
+    ctx.globalAlpha = 0.8;
+    ctx.fillStyle = recipeDragHoverKey ? 'rgba(124, 255, 90, 0.55)' : 'rgba(255, 255, 255, 0.4)';
+    ctx.strokeStyle = recipeDragHoverKey ? '#7cff5a' : '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(gx - gsize / 2, gy - gsize / 2, gsize, gsize, 8);
+    ctx.fill();
+    ctx.stroke();
+    ctx.font = `${gsize * 0.55}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(def.icon, gx, gy + 1);
+    ctx.restore();
+  }
+
+  // Mother Alien Fish's entrance — "goes white" — a fading full-canvas white
+  // overlay, drawn in screen space (after the shake's own ctx.restore()
+  // above, so the flash itself doesn't jitter). Fades out linearly over its
+  // own duration rather than cutting off abruptly.
+  if (state.level.elapsed < state.level.screenFlashUntilMs) {
+    const remaining = (state.level.screenFlashUntilMs - state.level.elapsed) / BOSS_FLASH_DURATION_MS;
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, Math.min(1, remaining));
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.restore();
+  }
+
+  updateBossHealthBar(state);
   updateHUD(state);
   updateNotificationTicker(state);
   state.debug.cursorWorld = cursorWorld;

@@ -16,7 +16,8 @@
 
 <div id="start-overlay">
   <div id="start-modal">
-    <button id="start-play-btn" class="pause-btn sheen-target">▶️ Start</button>
+    <button id="start-new-game-btn" class="pause-btn sheen-target">▶️ New Game</button>
+    <button id="start-continue-btn" class="pause-btn sheen-target hidden">💾 Continue Game</button>
     <button id="start-settings-btn" class="pause-btn sheen-target">⚙️ Settings</button>
     <button id="start-help-btn" class="pause-btn sheen-target">❓ Help</button>
   </div>
@@ -82,7 +83,31 @@
 </div>
 <div id="tutorial-skip-legend" class="hidden">(Esc) to skip tutorial</div>
 
+<!-- Persistent, always-on hotkey reminder, bottom-left corner — per direct
+     request. Small white text, dynamically re-worded by UI.js's updateHUD
+     every frame: E flips between "Open Shop"/"Close Shop" (state.ui.
+     shopCollapsed), Q between "Pipette Tool"/"Clear Cursor" (whether a
+     build:/fish: tool is currently armed) — see main.js's KeyE/KeyQ
+     handlers for what each actually does. -->
+<div id="hotkey-legend">
+  <div id="hotkey-legend-e">E: Open Shop</div>
+  <div id="hotkey-legend-q">Q: Pipette Tool</div>
+</div>
+
 <div id="alien-countdown" class="hidden">👽 Wave <span id="alien-countdown-wave">1</span> incoming: <span id="alien-countdown-seconds">10</span>s</div>
+
+<div id="boss-health-bar-wrap" class="hidden">
+  <div id="boss-health-bar-name">👹 Mother Alien Fish</div>
+  <div id="boss-health-bar-track"><div id="boss-health-bar-fill"></div></div>
+</div>
+
+<div id="boss-victory-overlay" class="hidden">
+  <div id="boss-victory-modal">
+    <h2>🏆 Mother Alien Fish Defeated!</h2>
+    <div id="boss-victory-stats"></div>
+    <button id="boss-victory-restart-btn" class="pause-btn sheen-target">Restart</button>
+  </div>
+</div>
 
 <div id="scroll-hint" class="hidden">
   <div id="scroll-hint-text">Scroll down</div>
@@ -115,6 +140,20 @@
     <div id="recipe-menu">
       <div id="recipe-menu-title">Choose a Recipe</div>
       <div id="recipe-menu-options"></div>
+      <div id="recipe-menu-stats"></div>
+    </div>
+  </div>
+</div>
+
+<div id="building-info-overlay" class="hidden">
+  <div id="building-info-anchor">
+    <div id="building-info-menu">
+      <div id="building-info-header-row">
+        <div id="building-info-icon"></div>
+        <div id="building-info-name"></div>
+      </div>
+      <div id="building-info-desc"></div>
+      <div id="building-info-stats"></div>
     </div>
   </div>
 </div>
@@ -158,6 +197,7 @@
     <div id="pause-main">
       <div id="pause-title">Paused</div>
       <button id="pause-resume-btn" class="pause-btn sheen-target">▶️ Resume</button>
+      <button id="pause-save-btn" class="pause-btn sheen-target">💾 Save</button>
       <button id="pause-restart-btn" class="pause-btn sheen-target">🔄 Restart</button>
       <button id="pause-settings-btn" class="pause-btn sheen-target">⚙️ Settings</button>
     </div>
@@ -178,7 +218,7 @@
 
 <div id="bottom-bar-row">
   <div id="shop-anchor">
-    <button id="shop-collapse-btn" title="Shop (Q)">🛍️</button>
+    <button id="shop-collapse-btn" title="Shop (E)">🛍️</button>
     <div id="shop-panel">
       <div id="shop-panel-scroll">
         <div id="shop-sticky-header">

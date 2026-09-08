@@ -216,6 +216,28 @@ html, body {
 #build-legend { display: flex; gap: 14px; }
 #build-legend.hidden, #tutorial-skip-legend.hidden { display: none; }
 
+/* Persistent, always-on hotkey reminder — per direct request, small white
+   text in the literal bottom-left corner of the viewport (distinct from
+   #build-legend/#tutorial-skip-legend above, which sit further right,
+   tracking the Shop button's own position, and only ever show
+   conditionally). Text content itself is rewritten live by UI.js's
+   updateHUD every frame — see main.js's KeyE/KeyQ handlers for what each
+   line's hotkey actually does right now. */
+#hotkey-legend {
+  position: fixed;
+  left: 14px;
+  bottom: 14px;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 12px;
+  font-weight: 700;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.65);
+  pointer-events: none;
+}
+
 /* Guided tutorial spotlight — see UI.js's TUTORIAL_FLOWS/
    updateTutorialOverlay. #tutorial-overlay covers the whole viewport and
    darkens everything except the current step's target circle, punched out
@@ -279,6 +301,73 @@ html, body {
   0%, 100% { transform: translateX(-50%) scale(1); }
   50% { transform: translateX(-50%) scale(1.05); }
 }
+
+/* Mother Alien Fish's own top-middle health bar, per direct spec ("a
+   universal boss health bar at the top middle of the screen instead of over
+   the boss's head") — UI.js's updateBossHealthBar toggles .hidden and sets
+   #boss-health-bar-fill's width every frame the boss is alive. */
+#boss-health-bar-wrap {
+  position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+  z-index: 30;
+  display: flex; flex-direction: column; align-items: center; gap: 4px;
+  pointer-events: none;
+}
+#boss-health-bar-wrap.hidden { display: none; }
+#boss-health-bar-name {
+  font-weight: 800; font-size: 15px; color: #ffd6f5;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.7), 0 0 10px rgba(217, 78, 212, 0.6);
+}
+#boss-health-bar-track {
+  width: 420px; height: 26px;
+  background: rgba(20, 8, 8, 0.75);
+  border: 2px solid #ffffff;
+  border-radius: 13px;
+  overflow: hidden;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.4);
+}
+#boss-health-bar-fill {
+  height: 100%;
+  background: linear-gradient(180deg, #ff9a8a 0%, #e0392b 100%);
+  transition: width 0.2s linear;
+}
+
+/* The end-game stats modal, per direct spec ("slowly fade in a game over
+   modal, with stats about the game"). Opacity-only transition (no
+   display:none toggle mid-fade — that has no transition at all) driven by
+   UI.js's showGameOverModal: 'hidden' is removed immediately, then
+   '.visible' is added a frame later via a forced-reflow retrigger so the
+   browser genuinely animates from 0. */
+#boss-victory-overlay {
+  position: fixed; inset: 0; z-index: 900;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(10, 4, 16, 0.78);
+  opacity: 0;
+  transition: opacity 2.5s ease;
+  pointer-events: none;
+}
+#boss-victory-overlay.hidden { display: none; }
+#boss-victory-overlay.visible { opacity: 1; pointer-events: auto; }
+#boss-victory-modal {
+  width: 380px; max-width: 90vw;
+  padding: 28px;
+  background: linear-gradient(160deg, #fffdf8 0%, #ffe9f4 100%);
+  border: 2px solid #ffffff;
+  border-radius: 26px;
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), inset 0 2px 0 rgba(255, 255, 255, 0.9);
+  text-align: center;
+}
+#boss-victory-modal h2 {
+  margin: 0 0 18px; font-size: 20px; color: #6b4c6b;
+}
+#boss-victory-stats {
+  display: flex; flex-direction: column; gap: 8px;
+  margin-bottom: 20px; text-align: left;
+}
+.boss-victory-stat-row {
+  display: flex; justify-content: space-between; gap: 12px;
+  font-size: 14px; color: #6b4c6b;
+}
+.boss-victory-stat-row b { color: #4a2f4a; }
 
 /* Scroll-down hint — per direct request, shown from 10s after game start
    until the player has panned down at least once (UI.js's updateScrollHint,
@@ -1063,8 +1152,8 @@ html, body {
    the game's name is never shown here — the splash animation, once Start is
    clicked, is the only place it appears, so it still reads as a reveal
    rather than being shown twice/spoiled.) */
-#start-play-btn { background: linear-gradient(160deg, #a8f0cb 0%, #7ad4a8 100%); color: #1f4a34; box-shadow: 0 3px 8px rgba(53, 145, 97, 0.35), inset 0 2px 0 rgba(255, 255, 255, 0.5); }
-#start-play-btn:hover { background: linear-gradient(160deg, #97e8bd 0%, #68c896 100%); }
+#start-new-game-btn, #start-continue-btn { background: linear-gradient(160deg, #a8f0cb 0%, #7ad4a8 100%); color: #1f4a34; box-shadow: 0 3px 8px rgba(53, 145, 97, 0.35), inset 0 2px 0 rgba(255, 255, 255, 0.5); }
+#start-new-game-btn:hover, #start-continue-btn:hover { background: linear-gradient(160deg, #97e8bd 0%, #68c896 100%); }
 
 /* How-To-Play tutorial page — a scrollable list of icon+text rows, opened
    from the start screen's Help button. Same centered-modal language as
@@ -1227,6 +1316,40 @@ html, body {
 .recipe-option-icon { font-size: 26px; }
 .recipe-option-name { font-size: 11px; font-weight: 800; }
 .recipe-option-desc { font-size: 9.5px; color: #8a7a8a; line-height: 1.25; }
+/* The Manufacturer/Power Plant's own general stats (per-ingredient timing,
+   power draw) — per direct request ("add in just the stats from the
+   manufacturer into its recipe picker"), reusing buildingStatsHtml's exact
+   .building-stat chip output rather than a bespoke second copy of it. */
+#recipe-menu-stats { display: flex; flex-wrap: wrap; gap: 4px 8px; justify-content: center; margin-top: 12px; }
+
+/* Generic "what is this and what does it do" pop-up for any placed building
+   — per direct request ("every building has a pop out modal kinda like the
+   manufacturer's recipe picker, but with the info that would normally show
+   up in the shop window"). Same fly-out-of-its-anchor mechanic as
+   #recipe-menu (see that block's own comment), just showing a read-only
+   icon/name/description/stats block instead of clickable recipe options. */
+#building-info-overlay { position: fixed; inset: 0; z-index: 190; }
+#building-info-overlay.hidden { display: none; }
+#building-info-anchor { position: fixed; transform: translate(-50%, -100%); }
+#building-info-menu {
+  width: 260px;
+  background: #fff8f0;
+  color: #6b4c6b;
+  border-radius: 21px;
+  padding: 16px 18px;
+  box-shadow: 0 14px 36px rgba(107, 76, 107, 0.4);
+  text-align: left;
+  transform-origin: 50% 100%;
+  transform: scale(1);
+  opacity: 1;
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.18s ease;
+}
+#building-info-menu.building-info-menu-closed { transform: scale(0.05); opacity: 0; }
+#building-info-header-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+#building-info-icon { font-size: 24px; line-height: 1; }
+#building-info-name { font-size: 15px; font-weight: 800; color: #c25f8f; }
+#building-info-desc { font-size: 12px; line-height: 1.4; opacity: 0.85; margin-bottom: 8px; }
+#building-info-stats { display: flex; flex-wrap: wrap; gap: 4px 8px; }
 
 /* Science Lab: a real branching tech tree now, per direct request — a
    centered dimmed-backdrop modal (same pattern #pause-overlay already

@@ -109,8 +109,9 @@ export function updateCamera(camera, input, canvas, dtMs) {
   let dy = 0;
 
   // KeyS used to be deliberately unbound here (it was the shop collapse/
-  // expand hotkey) — that hotkey moved to Q per direct request, freeing S up
-  // to do what W already did for the opposite direction: pan down.
+  // expand hotkey) — that hotkey moved to Q, and later to E (freeing Q up
+  // for the Pipette Tool/Clear Cursor — see main.js's keydown handler), so S
+  // does what W already did for the opposite direction: pan down.
   if (input.keysDown.has('KeyW') || input.keysDown.has('ArrowUp')) dy -= 1;
   if (input.keysDown.has('KeyS') || input.keysDown.has('ArrowDown')) dy += 1;
 

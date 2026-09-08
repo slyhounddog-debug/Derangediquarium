@@ -34,10 +34,10 @@ import {
   ALIEN_DNA_REFINERY_TIME_MULTIPLIER,
   MANUFACTURER_RECIPES,
   MANUFACTURER_ITEM_PROCESS_MS,
-  MANUFACTURER_STATS,
+  MANUFACTURER_INPUT_COLOR_BY_TYPE,
+  MANUFACTURER_ITEM_POWER_COST_MW,
   POWER_PLANT_RECIPES,
   POWER_PLANT_STATS,
-  BIO_BUILDING_INTAKE_RADIUS,
   PROCESS_DOTS_COUNT,
   HUNGER_SEEK_THRESHOLD,
   CATALYST_BUFF_MULTIPLIER,
@@ -64,7 +64,9 @@ import {
   FAN_T4_MAX_FORCE, FAN_T4_MAX_RANGE, FAN_T4_POWER_COST,
   BUILDING_OUTPUT_PORT_OFFSET_FRACTION,
   PLATFORM_FLAT_COST,
-  BUILDING_COST_INCREMENT,
+  BUILDING_COST_GROWTH_RATE_TIER1,
+  BUILDING_COST_GROWTH_RATE_TIER2,
+  BUILDING_COST_GROWTH_RATE_TIER3,
   NOTIFICATION_LOG_MAX,
   CLEANLINESS_MAX,
   CLEANLINESS_PER_WASTE_EVENT,
@@ -167,12 +169,29 @@ export function getRecipeBuildingKeyAt(state, worldX, worldY) {
   return buildingKey(col, row);
 }
 
+// Returns { key, type } for ANY placed building tile at this world point
+// (Manufacturer/Power Plant included), or null — used by main.js's click
+// handler to open UI.js's generic building-info pop-up (openBuildingInfoMenu)
+// per direct request ("any building can be quickly clicked on to see what it
+// is and what it does"). Manufacturer/Power Plant are still checked and
+// handled FIRST by getRecipeBuildingKeyAt above (their own recipe pop-up
+// already shows this same shop-style info, see UI.js's openRecipeMenu) — a
+// caller should only fall back to this one once that check has already come
+// back null, so the two pop-ups never both fire for the same click.
+export function getBuildingInfoKeyAt(state, worldX, worldY) {
+  const { col, row } = worldToTile(worldX, worldY);
+  if (row < SEABED_ROW_START || row >= WORLD_TILES_H || col < 0 || col >= WORLD_TILES_W) return null;
+  const type = state.level.grid[row][col];
+  if (type === TILE_EMPTY) return null;
+  return { key: buildingKey(col, row), type };
+}
+
 // Live count of tiles of one exact type currently on the grid — what
 // getBuildingCost scales off of. Counted fresh every call rather than
 // tracked as a running counter, same "no separate bookkeeping to keep in
 // sync" approach the Economy Fish dynamic pricing already uses (a demolished
 // tile brings the next one's price back down automatically).
-function countPlacedOfType(grid, buildingId) {
+export function countPlacedOfType(grid, buildingId) {
   let n = 0;
   for (let r = SEABED_ROW_START; r < WORLD_TILES_H; r++) {
     for (let c = 0; c < WORLD_TILES_W; c++) {
@@ -265,15 +284,26 @@ export function findNearestWasteTurretAndWaste(state) {
   return { turret, waste };
 }
 
+// Which compounding rate a building's live cost climbs at, tiered off its
+// own BASE cost — see Config.js's comment above BUILDING_COST_GROWTH_RATE_TIER1
+// for the exact thresholds/rationale.
+function buildingCostGrowthRate(baseCost) {
+  if (baseCost > 200) return BUILDING_COST_GROWTH_RATE_TIER3;
+  if (baseCost > 100) return BUILDING_COST_GROWTH_RATE_TIER2;
+  return BUILDING_COST_GROWTH_RATE_TIER1;
+}
+
 // Every building's live shop cost — Platform is a flat PLATFORM_FLAT_COST
-// regardless of how many exist; every other building's cost climbs by
-// BUILDING_COST_INCREMENT for each tile of that exact type already placed —
-// see Config.js's comment above BUILDING_TYPES for the full rationale.
+// regardless of how many exist; every other building's cost compounds at
+// its own tiered rate for each tile of that exact type already placed,
+// rounded up — see Config.js's comment above PLATFORM_FLAT_COST for the
+// full rationale.
 export function getBuildingCost(state, buildingId) {
   const building = BUILDING_TYPES[buildingId];
   if (!building) return Infinity;
   if (buildingId === TILE_PLATFORM) return PLATFORM_FLAT_COST;
-  return building.cost + BUILDING_COST_INCREMENT * countPlacedOfType(state.level.grid, buildingId);
+  const n = countPlacedOfType(state.level.grid, buildingId);
+  return Math.ceil(building.cost * Math.pow(buildingCostGrowthRate(building.cost), n));
 }
 
 // Returns { ok, reason } rather than a bare bool so the build-mode UI can
@@ -329,11 +359,12 @@ export function placeTile(state, col, row, buildingId, angle = 0) {
     // array every time a recipe is picked/cleared, or a full cycle
     // completes) — only one item may be absorbed/mid-process at a time (see
     // updateBuildings), so `processing`/`currentItemType`/`progressMs`
-    // track that single in-flight item. `firstItemDone` lights the small
-    // "first ingredient processed" indicator once true, per direct spec.
+    // track that single in-flight item. `ghostFlashTimerMs` drives the
+    // periodic "still need this ingredient" ghost-icon flash — see
+    // renderManufacturerGhostFlash below.
     state.level.buildingData[buildingKey(col, row)] = {
       type: buildingId, recipeId: null, pendingInputs: [], processing: false,
-      currentItemType: null, progressMs: 0, firstItemDone: false,
+      currentItemType: null, progressMs: 0, ghostFlashTimerMs: 0,
     };
   } else if (POWER_PLANT_TILES.has(buildingId)) {
     // Same "does nothing until a recipe is picked" rule as the Manufacturer,
@@ -411,7 +442,7 @@ export function cycleTileCheat(state, worldX, worldY) {
   } else if (MANUFACTURER_TILES.has(next)) {
     state.level.buildingData[buildingKey(col, row)] = {
       type: next, recipeId: null, pendingInputs: [], processing: false,
-      currentItemType: null, progressMs: 0, firstItemDone: false,
+      currentItemType: null, progressMs: 0, ghostFlashTimerMs: 0,
     };
   } else if (POWER_PLANT_TILES.has(next)) {
     state.level.buildingData[buildingKey(col, row)] = { type: next, recipeId: null, fueled: false, progressMs: 0 };
@@ -643,30 +674,23 @@ export function stepItemOnGrid(item, state, dt, physics) {
   return 'falling';
 }
 
-// Whether an item at (itemX, itemY) is within `radius` of a building's own
-// tile center — per direct request ("let's remove the arrows and the need
-// for a specific input side. The auto-feeder, collector, and waste turret
-// will suck any appropriate item touching it"), this used to also require
-// approaching from a specific angle-derived "intake side" (a dot-product
-// check against the building's aim direction); that whole directional half
-// is gone now — any eligible item touching the tile from ANY side qualifies,
-// simple radius-only proximity, same as how a Fan's cone or a Turret's own
-// range check already work without caring about approach angle.
-function isNearBuildingCenter(centerX, centerY, itemX, itemY, radius) {
-  return Math.hypot(itemX - centerX, itemY - centerY) <= radius;
-}
-
-// A proper circle-vs-tile-square touch test — per direct report, a fixed
-// radius-from-center check (isNearBuildingCenter above) leaves the tile's
-// own corners under-covered: a waste item resting near a top corner sits
-// roughly TILE_SIZE*0.5*sqrt(2) (~22.6px) from center, which a same-sized
-// intake radius doesn't reach even though the item is visibly touching the
-// tile's top edge. This instead measures the distance from the item's
-// center to the CLOSEST point on the tile's own square footprint, so
-// anything genuinely touching the tile from any side (including a corner)
-// registers, regardless of where exactly it landed. Used by the Waste
-// Turret's intake specifically — per direct request ("waste touching any
-// side, including the top of a turret, should go in").
+// A proper circle-vs-tile-square touch test, used by every building's own
+// intake scan (Collector, Refinery, Manufacturer, Power Plant, Waste
+// Turret) — per direct report, an earlier fixed radius-from-center check
+// left the tile's own corners AND top edge under-covered: an item resting
+// near a corner sits roughly TILE_SIZE*0.5*sqrt(2) (~22.6px) from center,
+// farther than a same-sized intake radius reaches even though the item is
+// visibly touching the tile, and the same gap shows up for an item resting
+// flush on top (see CLAUDE.md's "buildings don't accept items from the
+// top" fix). This instead measures the distance from the item's center to
+// the CLOSEST point on the tile's own square footprint, so anything
+// genuinely touching the tile from any side — including a corner or
+// straight down from directly above — registers, regardless of where
+// exactly it landed. Also replaced the old approach-angle "intake side"
+// check entirely (a dot-product test against the building's aim
+// direction) — per an earlier direct request ("let's remove the arrows and
+// the need for a specific input side... will suck any appropriate item
+// touching it"), simple touch-proximity is all that's checked now.
 function isTouchingBuildingTile(centerX, centerY, itemX, itemY, itemRadius) {
   const half = TILE_SIZE / 2;
   const dx = Math.max(Math.abs(itemX - centerX) - half, 0);
@@ -879,7 +903,7 @@ export function updateBuildings(state, dtMs) {
         // always be checked and claimed first regardless of array order.
         let dnaIdx = -1;
         for (let i = 0; i < items.length; i++) {
-          if (items[i].type === 'alien_dna' && isNearBuildingCenter(centerX, centerY, items[i].x, items[i].y, BIO_BUILDING_INTAKE_RADIUS)) { dnaIdx = i; break; }
+          if (items[i].type === 'alien_dna' && isTouchingBuildingTile(centerX, centerY, items[i].x, items[i].y, items[i].radius)) { dnaIdx = i; break; }
         }
         if (dnaIdx !== -1) {
           items.splice(dnaIdx, 1);
@@ -889,7 +913,7 @@ export function updateBuildings(state, dtMs) {
         } else {
           let wasteIdx = -1;
           for (let i = 0; i < items.length; i++) {
-            if (items[i].type === 'waste' && isNearBuildingCenter(centerX, centerY, items[i].x, items[i].y, BIO_BUILDING_INTAKE_RADIUS)) { wasteIdx = i; break; }
+            if (items[i].type === 'waste' && isTouchingBuildingTile(centerX, centerY, items[i].x, items[i].y, items[i].radius)) { wasteIdx = i; break; }
           }
           if (wasteIdx !== -1) {
             items.splice(wasteIdx, 1);
@@ -932,22 +956,36 @@ export function updateBuildings(state, dtMs) {
         // list (whichever of the recipe's 2 ingredients haven't been
         // absorbed yet), touching the tile. Order doesn't matter — whichever
         // eligible type touches first gets absorbed first.
+        // Ghost-icon flash timer — ticks only while genuinely idle waiting on
+        // the recipe's SECOND ingredient (the first already fully absorbed
+        // and processed, pendingInputs down to just the other one), reset to
+        // 0 the instant that's no longer true — see
+        // renderManufacturerGhostFlash below for what actually reads this,
+        // per direct request ("the other item for the recipe flashes
+        // briefly as a ghost icon... to indicate which item is still
+        // needed").
+        data.ghostFlashTimerMs = data.pendingInputs.length === 1 ? data.ghostFlashTimerMs + dtMs : 0;
         for (let i = 0; i < items.length; i++) {
           const it = items[i];
           const pendingIdx = data.pendingInputs.indexOf(it.type);
           if (pendingIdx === -1) continue;
-          if (isNearBuildingCenter(centerX, centerY, it.x, it.y, BIO_BUILDING_INTAKE_RADIUS)) {
+          if (isTouchingBuildingTile(centerX, centerY, it.x, it.y, it.radius)) {
             items.splice(i, 1);
             data.pendingInputs.splice(pendingIdx, 1);
             data.processing = true;
             data.currentItemType = it.type;
             data.progressMs = 0;
+            data.ghostFlashTimerMs = 0; // the second ingredient just arrived — nothing left to remind the player about
             playIntake();
             break;
           }
         }
       } else {
-        const efficiency = MANUFACTURER_STATS[data.type].powerCostPerSec > 0 ? state.level.powerEfficiency : 1;
+        // Every ingredient type now costs SOME power to process (10-35mw,
+        // see MANUFACTURER_ITEM_POWER_COST_MW) — unlike before, there's no
+        // "unpowered" case left to special-case here, so this always
+        // applies the grid's live efficiency while actively processing.
+        const efficiency = state.level.powerEfficiency;
         data.progressMs += dtMs * efficiency * getCatalystSpeedMultiplier(state, key);
         // Per direct spec: a flat duration by ITEM TYPE, not by recipe —
         // waste 2s, food 4s, biomass 8s at base.
@@ -961,13 +999,10 @@ export function updateBuildings(state, dtMs) {
             bioSpawnPoints.push({ x: bioOutputX, y: bioOutputY, itemType: recipe.output });
             playDispense();
             data.pendingInputs = [...recipe.inputs];
-            data.firstItemDone = false;
-          } else {
-            // Lights the "first ingredient processed" indicator — per direct
-            // spec ("a light that lights up if the manufacturer has
-            // processed the first item in the recipe").
-            data.firstItemDone = true;
           }
+          // else: pendingInputs is down to 1 — the ghost-flash timer above
+          // starts counting again next tick, now that this ingredient is
+          // genuinely done (not just absorbed) and data.processing is false.
         }
       }
       continue;
@@ -984,7 +1019,7 @@ export function updateBuildings(state, dtMs) {
         for (let i = 0; i < items.length; i++) {
           const it = items[i];
           if (it.type !== recipe.inputs[0]) continue;
-          if (isNearBuildingCenter(centerX, centerY, it.x, it.y, BIO_BUILDING_INTAKE_RADIUS)) {
+          if (isTouchingBuildingTile(centerX, centerY, it.x, it.y, it.radius)) {
             items.splice(i, 1);
             data.fueled = true;
             data.progressMs = 0;
@@ -1054,7 +1089,7 @@ export function computeCurrentPowerDemand(state) {
       if (data.processing) {
         const recipe = MANUFACTURER_RECIPES[data.recipeId];
         const multiplier = (recipe && recipe.powerCostMultiplier) || 1;
-        demand += MANUFACTURER_STATS[data.type].powerCostPerSec * multiplier;
+        demand += (MANUFACTURER_ITEM_POWER_COST_MW[data.currentItemType] || 0) * multiplier;
       }
     }
     // Power Plant is a GENERATOR, not a consumer — never appears in demand,
@@ -1376,9 +1411,20 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
           renderTurretAmmoDots(ctx, screen.x, screen.y, size, data.ammo, camera.zoom);
         }
         if (data && MANUFACTURER_TILES.has(type) && data.recipeId !== null) {
-          renderManufacturerFirstItemLight(ctx, screen.x, screen.y, size, data.firstItemDone);
+          renderManufacturerIngredientLights(ctx, screen.x, screen.y, size, data);
+          renderManufacturerGhostFlash(ctx, screen.x, screen.y, size, camera.zoom, data);
         }
-        if (getBuildingPowerCost(type) > 0) {
+        // Per direct request ("add in a un-powered visual indicator on the
+        // manufacturer") — distinct from renderPowerShortageOverlay below
+        // (which is about the GRID being short on supply): this shows
+        // whenever the Manufacturer itself simply isn't drawing any power
+        // AT ALL this tick — no recipe picked yet, or idle between
+        // ingredients — so an inactive Manufacturer doesn't look
+        // indistinguishable from one that's genuinely working.
+        if (data && MANUFACTURER_TILES.has(type) && !data.processing) {
+          renderManufacturerIdleBadge(ctx, screen.x, screen.y, size, camera.zoom);
+        }
+        if (getBuildingPowerCost(type, data) > 0) {
           renderPowerShortageOverlay(ctx, screen.x, screen.y, size, camera.zoom, state.level.powerEfficiency, state.level.elapsed);
         }
       }
@@ -1686,19 +1732,98 @@ function renderCatalystGlow(ctx, x, y, size, elapsedMs) {
   ctx.restore();
 }
 
-// A single light on the Manufacturer, separate from the 4 process-progress
-// dots above — lights up once data.firstItemDone is true (the recipe's
-// first ingredient has finished processing), per direct spec. Placed on the
-// opposite (right) edge from the vertical dots so the two never overlap.
-function renderManufacturerFirstItemLight(ctx, x, y, size, firstItemDone) {
+// Two small lights on the Manufacturer, separate from the 4 vertical
+// process-progress dots above — one per recipe ingredient SLOT, replacing
+// an earlier single "first ingredient processed" light. Per direct request
+// ("add in a second dot... so it's visually obvious when an item still
+// needs to go in the manufacturer") — a slot lights up once its own
+// ingredient type has been fully absorbed AND finished processing (not in
+// data.pendingInputs any more, AND not the one currently mid-process via
+// data.currentItemType — so the ingredient actively being crunched right
+// now doesn't prematurely read as "done"). Stacked on the opposite (right)
+// edge from the vertical dots so the two indicators never overlap.
+function renderManufacturerIngredientLights(ctx, x, y, size, data) {
+  const recipe = MANUFACTURER_RECIPES[data.recipeId];
+  if (!recipe) return;
   const r = Math.max(1.5, size * 0.06);
+  for (let i = 0; i < recipe.inputs.length; i++) {
+    const type = recipe.inputs[i];
+    const done = !data.pendingInputs.includes(type) && data.currentItemType !== type;
+    ctx.beginPath();
+    ctx.arc(x + size * 0.86, y + size * (0.14 + i * 0.2), r, 0, Math.PI * 2);
+    ctx.fillStyle = done ? '#7cff5a' : 'rgba(0, 0, 0, 0.35)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
+}
+
+// A periodic "ghost icon" flash of whichever ingredient the Manufacturer is
+// still waiting on — per direct request ("when one item has been processed
+// ... the other item for the recipe flashes briefly as a ghost icon onto
+// the manufacturer every once in a while to indicate which item is still
+// needed"). Reuses each item type's own established flat color
+// (MANUFACTURER_INPUT_COLOR_BY_TYPE) rather than a mismatched emoji, since
+// items themselves are plain colored shapes in this game, not icons — reads
+// as a translucent preview of the exact item that needs to touch the tile.
+// Driven by data.ghostFlashTimerMs (ticked in updateBuildings above, only
+// while genuinely awaiting a second ingredient): flashes for the first
+// MANUFACTURER_GHOST_FLASH_DURATION_MS of every
+// MANUFACTURER_GHOST_FLASH_INTERVAL_MS-long cycle, repeating for as long as
+// that ingredient is still missing.
+const MANUFACTURER_GHOST_FLASH_INTERVAL_MS = 4000;
+const MANUFACTURER_GHOST_FLASH_DURATION_MS = 700;
+function renderManufacturerGhostFlash(ctx, x, y, size, zoom, data) {
+  if (data.processing || data.pendingInputs.length !== 1) return;
+  const phase = data.ghostFlashTimerMs % MANUFACTURER_GHOST_FLASH_INTERVAL_MS;
+  if (phase >= MANUFACTURER_GHOST_FLASH_DURATION_MS) return;
+  const t = phase / MANUFACTURER_GHOST_FLASH_DURATION_MS; // 0..1 across the flash's own lifetime
+  const alpha = Math.sin(t * Math.PI); // fades in, peaks at the midpoint, fades back out — no hard pop/cut
+  const color = MANUFACTURER_INPUT_COLOR_BY_TYPE[data.pendingInputs[0]];
+  if (!color) return;
+  const r = size * 0.22;
+  ctx.save();
+  ctx.globalAlpha = alpha * 0.75;
   ctx.beginPath();
-  ctx.arc(x + size * 0.86, y + size * 0.14, r, 0, Math.PI * 2);
-  ctx.fillStyle = firstItemDone ? '#7cff5a' : 'rgba(0, 0, 0, 0.35)';
+  ctx.arc(x + size / 2, y + size / 2, r, 0, Math.PI * 2);
+  ctx.fillStyle = color;
   ctx.fill();
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+  ctx.lineWidth = Math.max(1, 1.5 * zoom);
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+  ctx.stroke();
+  ctx.restore();
+}
+
+// A small "not drawing power" badge in the Manufacturer's bottom-right
+// corner — a dark circle, a dim lightning bolt, and a red slash through it,
+// same visual language renderPowerShortageOverlay's own stalled badge
+// already established (crossed lightning = "not running"), just scoped to
+// this ONE tile's own instantaneous draw rather than grid-wide supply.
+function renderManufacturerIdleBadge(ctx, x, y, size, zoom) {
+  const r = Math.max(2, size * 0.14);
+  const cx = x + size * 0.84;
+  const cy = y + size * 0.84;
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(40, 40, 40, 0.75)';
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
   ctx.lineWidth = 1;
   ctx.stroke();
+  ctx.font = `${Math.max(8, size * 0.2)}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = '#d8d8d8';
+  ctx.fillText('⚡', cx, cy);
+  ctx.strokeStyle = '#ff5a5a';
+  ctx.lineWidth = Math.max(1, 1.3 * zoom);
+  ctx.beginPath();
+  ctx.moveTo(cx - r * 0.6, cy + r * 0.6);
+  ctx.lineTo(cx + r * 0.6, cy - r * 0.6);
+  ctx.stroke();
+  ctx.restore();
 }
 
 // 5 dots on the Waste Turret — one per stored Waste unit, per direct
@@ -1725,15 +1850,21 @@ function renderTurretAmmoDots(ctx, x, y, size, ammo, zoom) {
   }
 }
 
-// A tile's own power draw rate, regardless of building type — 0 for a free
-// tier or a non-power building. Shared by the render overlay below and
-// anywhere else that just needs "does this specific tile cost power at all."
-function getBuildingPowerCost(type) {
+// A tile's own power draw rate RIGHT NOW, regardless of building type — 0
+// for a free tier, a non-power building, or (for the Manufacturer
+// specifically) one that isn't actively processing an ingredient this tick.
+// Shared by the render overlay below and anywhere else that just needs
+// "does this specific tile cost power at all." `data` is only actually read
+// for the Manufacturer's own per-item rate — every other lookup is a flat,
+// data-independent constant.
+function getBuildingPowerCost(type, data) {
   if (FAN_STATS[type]) return FAN_STATS[type].powerCost;
   if (PROCESSOR_STATS[type]) return PROCESSOR_STATS[type].powerCostPerSec;
   if (REFINERY_STATS[type]) return REFINERY_STATS[type].powerCostPerSec;
   if (TURRET_STATS[type]) return TURRET_STATS[type].powerCostPerSec;
-  if (MANUFACTURER_STATS[type]) return MANUFACTURER_STATS[type].powerCostPerSec;
+  if (MANUFACTURER_TILES.has(type)) {
+    return data && data.processing ? MANUFACTURER_ITEM_POWER_COST_MW[data.currentItemType] || 0 : 0;
+  }
   // POWER_PLANT_STATS has no powerCostPerSec field at all (it's a generator,
   // never a consumer) — falls through to the 0 default below.
   return 0;

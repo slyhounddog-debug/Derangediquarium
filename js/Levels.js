@@ -107,6 +107,7 @@ export function loadLevel(state, levelId) {
       postAlienTutorialShown: false, // gates the ONE-TIME decision of whether to offer the "arm up" guided walkthrough (Shop -> Waste Turret -> scroll down -> place it) — see Systems.js's updatePostAlienTutorial, fired ~10s after the first alien kill. Does NOT by itself mean the drag-Waste lesson was ever shown — see wasteDragTutorialShown below
       wasteDragTutorialShown: false, // set only once the "drag Waste into the Turret" lesson genuinely completes — via the tail of the full postalien walkthrough OR the standalone 'wastedrag' flow, see UI.js's onTutorialFlowComplete. Kept separate from postAlienTutorialShown so Escape-skipping the walkthrough before reaching that step doesn't permanently block the standalone fallback from firing later — see Systems.js's updatePostAlienTutorial
       mergeTutorialShown: false, // gates the "switch to Merge and drag two matching Adult fish together" guided tutorial to once, ever — triggered the first time two combinable fish exist on screen simultaneously, see Systems.js's updateMergeTutorialTrigger
+      recipeCopyTipShown: false, // fires a one-time chat tip about the Manufacturer/Power Plant drag-to-copy-recipe mechanic the first time 2+ of either are placed at once — see Systems.js's updateRecipeCopyTip
     },
     // Cinematic first-alien intro — per direct request, the very first alien
     // to ever spawn gets a dedicated teaching moment: once it's been alive
@@ -153,9 +154,30 @@ export function loadLevel(state, levelId) {
     coinBlockedEffects: [], // { x, y, age } — a "coin on fire, disintegrating" burst pushed by Entities.js's triggerProductionBlocked the instant a coin drop is blocked by the Coin Cap, aged out by updateCoinBlockedEffects; purely decorative, rendered by main.js
     turretProjectiles: [], // { id, x, y, targetId, damage } — a turret's homing shot, see Grid.js's updateBuildings (fires) / Entities.js's updateTurretProjectiles (homes + applies damage on impact) / main.js (renders)
     lifetimeMoneyEarned: 0, // real in-play income only (coins banked) — NOT the starting endowment or the bankruptcy bailout gift; see Entities.js's bankMoney and Config.js's MONEY_MILESTONE_1K
+    // End-game stats-modal counters (main.js's showGameOverModal), per direct
+    // spec ("stats about the game like how much total of each resource was
+    // accumulated, how much food was purchased, how many fish died, how many
+    // tank points accumulated, aliens killed, etc.") — all monotonically
+    // increasing, never decremented, same "lifetime" shape as
+    // lifetimeMoneyEarned above.
+    lifetimeScienceEarned: 0,
+    lifetimeScienceGreenEarned: 0,
+    foodPurchasedCount: 0,
+    fishDiedCount: 0,
+    aliensKilledCount: 0,
     bankruptcyActive: false, // true while "no fish + can't afford anything" is CURRENTLY true, so the bailout/game-over response only fires once per fresh occurrence of that condition, not every tick it holds — see Systems.js's updateStoryTriggers
     bankruptciesTriggered: 0, // 0 = never happened, 1 = the one-time $100 bailout already used, 2+ = game over
     gameOver: false, // set true on the second bankruptcy — main.js's update() stops simulating while this is true, same as state.ui.paused, but Escape still opens the pause menu so Restart stays reachable
+    // ---- Mother Alien Fish end-game boss sequence — see main.js's
+    // updateBossSequence for the full state machine. null until the node is
+    // actually purchased; walks 'intro_wait' -> 'fighting' -> 'defeated' ->
+    // 'gameover' in order, never backwards, never skipping a step.
+    bossPhase: null,
+    bossIntroTimerMs: 0, // counts up toward BOSS_INTRO_WAIT_MS during 'intro_wait'
+    bossEntityId: null, // the boss's own entity id once spawned, so main.js/UI.js can find it again for the top-middle health bar without scanning by isBoss every frame
+    bossDefeatedAtMs: null, // set by Entities.js's updateAlien the instant the boss's hp hits 0; main.js's updateBossSequence reads this to start the BOSS_DEFEATED_MODAL_DELAY_MS countdown to the stats modal
+    screenShakeUntilMs: 0, // main.js's render() offsets the whole canvas by a small random jitter while elapsed < this
+    screenFlashUntilMs: 0, // main.js's render() overlays a fading-white rect while elapsed < this
     waveTimer: 0,
     elapsed: 0,
   };

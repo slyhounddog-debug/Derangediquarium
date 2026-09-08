@@ -35,10 +35,12 @@ import {
   FISH_MAX_X,
   FISH_MIN_Y,
   SEABED_FLOOR_Y,
+  TILE_MANUFACTURER,
+  TILE_POWER_PLANT,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings } from './Levels.js';
 import { getFishPurchaseCost, findCombinablePair } from './Entities.js';
-import { hasWasteTurretPlaced } from './Grid.js';
+import { hasWasteTurretPlaced, countPlacedOfType } from './Grid.js';
 
 const BANKRUPTCY_BAILOUT_MESSAGE =
   "Oopah, looks like someone got their CDL so they could drive the struggle bus! Here's 100 gold to get you back on your feet. I'll be expecting that back (I'm lying).";
@@ -293,6 +295,11 @@ function spawnAlienWave(state) {
 // Entities.js (see spawnAlienWave's own comment) — this function only ever
 // decides WHEN a wave should start and pushes the resulting portal data.
 function updateAlienWaves(state) {
+  // Normal wave spawning is suspended entirely once the Mother Alien Fish
+  // sequence has started (any phase — 'intro_wait' through 'gameover') so a
+  // routine wave can't spawn on top of/immediately after the boss fight and
+  // muddy what's supposed to be a dedicated final encounter.
+  if (state.level.bossPhase) return;
   const elapsed = state.level.elapsed;
 
   // Per direct request, the countdown to the NEXT wave doesn't even start
@@ -340,6 +347,23 @@ function updateAlienWaves(state) {
   }
 }
 
+const RECIPE_COPY_TIP_MESSAGE =
+  "Psst — drag one of those onto another of the same kind and it'll copy its recipe over. Beats picking it twice.";
+
+// One-time tip the moment the player has 2+ placed Manufacturers OR 2+
+// placed Power Plants at once — per direct request ("add in a chat message
+// that will trigger letting them know about this mechanic when they have
+// two of either"). See main.js's updateRecipeDrag for the drag-to-copy
+// mechanic itself.
+function updateRecipeCopyTip(state) {
+  if (state.level.tutorialFlags.recipeCopyTipShown) return;
+  const grid = state.level.grid;
+  if (countPlacedOfType(grid, TILE_MANUFACTURER) >= 2 || countPlacedOfType(grid, TILE_POWER_PLANT) >= 2) {
+    state.level.tutorialFlags.recipeCopyTipShown = true;
+    pushNotification(state, RECIPE_COPY_TIP_MESSAGE);
+  }
+}
+
 // Called once per tick from main.js's update().
 export function updateStoryTriggers(state) {
   updateBankruptcy(state);
@@ -347,4 +371,5 @@ export function updateStoryTriggers(state) {
   updateAlienIntroTrigger(state);
   updatePostAlienTutorial(state);
   updateMergeTutorialTrigger(state);
+  updateRecipeCopyTip(state);
 }

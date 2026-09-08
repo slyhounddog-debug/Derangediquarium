@@ -30,6 +30,7 @@ import {
   MANUFACTURER_RECIPES,
   MANUFACTURER_RECIPE_LIST,
   MANUFACTURER_ITEM_PROCESS_MS,
+  MANUFACTURER_ITEM_POWER_COST_MW,
   MANUFACTURER_STATS,
   POWER_PLANT_RECIPES,
   POWER_PLANT_RECIPE_LIST,
@@ -65,6 +66,7 @@ import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
 import { playUpgrade, setMusicVolume, setSfxVolume, getMusicVolume, getSfxVolume, playPanelOpen, playPanelClose } from './Sound.js';
+import { hasSaveGame, saveGame, loadSaveGame } from './Save.js';
 
 const MOUND_MENU_GAP_PX = 12; // screen px of breathing room between the popup's bottom edge and the Mound's top edge
 const MOUND_MENU_TRANSITION_MS = 220; // must match #mound-menu's CSS transition duration
@@ -95,6 +97,10 @@ let recipeMenuOpen = false;
 let recipeMenuClosing = false;
 let recipeMenuCloseTimer = null;
 let recipeMenuTileKey = null; // "row,col" key of the Manufacturer/Power Plant tile this popup is currently open for
+let buildingInfoMenuOpen = false;
+let buildingInfoMenuClosing = false;
+let buildingInfoMenuCloseTimer = null;
+let buildingInfoTileKey = null; // "row,col" key of whichever placed building this generic info pop-up is currently open for
 let labMenuOpen = false;
 let labMenuClosing = false;
 let labMenuCloseTimer = null;
@@ -213,6 +219,11 @@ export function initUI(state) {
     alienCountdown: document.getElementById('alien-countdown'),
     alienCountdownWave: document.getElementById('alien-countdown-wave'),
     alienCountdownSeconds: document.getElementById('alien-countdown-seconds'),
+    bossHealthBarWrap: document.getElementById('boss-health-bar-wrap'),
+    bossHealthBarFill: document.getElementById('boss-health-bar-fill'),
+    bossVictoryOverlay: document.getElementById('boss-victory-overlay'),
+    bossVictoryStats: document.getElementById('boss-victory-stats'),
+    bossVictoryRestartBtn: document.getElementById('boss-victory-restart-btn'),
     scrollHint: document.getElementById('scroll-hint'),
     scrollHintText: document.getElementById('scroll-hint-text'),
     scrollHintArrows: document.querySelectorAll('.scroll-hint-arrow'),
@@ -220,6 +231,8 @@ export function initUI(state) {
     buildLegend: document.getElementById('build-legend'),
     buildLegendPurchase: document.getElementById('build-legend-purchase'),
     tutorialSkipLegend: document.getElementById('tutorial-skip-legend'),
+    hotkeyLegendE: document.getElementById('hotkey-legend-e'),
+    hotkeyLegendQ: document.getElementById('hotkey-legend-q'),
     tutorialOverlay: document.getElementById('tutorial-overlay'),
     tutorialText: document.getElementById('tutorial-text'),
     powerGraphCanvas: document.getElementById('hud-power-graph-canvas'),
@@ -243,6 +256,7 @@ export function initUI(state) {
     pauseMain: document.getElementById('pause-main'),
     pauseSettings: document.getElementById('pause-settings'),
     pauseResumeBtn: document.getElementById('pause-resume-btn'),
+    pauseSaveBtn: document.getElementById('pause-save-btn'),
     pauseRestartBtn: document.getElementById('pause-restart-btn'),
     pauseSettingsBtn: document.getElementById('pause-settings-btn'),
     pauseSettingsBackBtn: document.getElementById('pause-settings-back-btn'),
@@ -262,6 +276,14 @@ export function initUI(state) {
     recipeMenu: document.getElementById('recipe-menu'),
     recipeMenuTitle: document.getElementById('recipe-menu-title'),
     recipeMenuOptions: document.getElementById('recipe-menu-options'),
+    recipeMenuStats: document.getElementById('recipe-menu-stats'),
+    buildingInfoOverlay: document.getElementById('building-info-overlay'),
+    buildingInfoAnchor: document.getElementById('building-info-anchor'),
+    buildingInfoMenu: document.getElementById('building-info-menu'),
+    buildingInfoIcon: document.getElementById('building-info-icon'),
+    buildingInfoName: document.getElementById('building-info-name'),
+    buildingInfoDesc: document.getElementById('building-info-desc'),
+    buildingInfoStats: document.getElementById('building-info-stats'),
     labOverlay: document.getElementById('lab-overlay'),
     labModal: document.getElementById('lab-modal'),
     labScienceReadout: document.getElementById('lab-science-readout'),
@@ -284,7 +306,8 @@ export function initUI(state) {
     tankPointsDisplay: document.getElementById('tank-points-display'),
     tankUpgradeList: document.getElementById('tank-upgrade-list'),
     startOverlay: document.getElementById('start-overlay'),
-    startPlayBtn: document.getElementById('start-play-btn'),
+    startNewGameBtn: document.getElementById('start-new-game-btn'),
+    startContinueBtn: document.getElementById('start-continue-btn'),
     startSettingsBtn: document.getElementById('start-settings-btn'),
     startHelpBtn: document.getElementById('start-help-btn'),
     startHelpOverlay: document.getElementById('start-help-overlay'),
@@ -303,6 +326,9 @@ export function initUI(state) {
   });
   els.recipeOverlay.addEventListener('click', (e) => {
     if (e.target === els.recipeOverlay) closeRecipeMenu(); // clicked the backdrop, not the card — per direct spec ("clicking anywhere else will close the pop-up")
+  });
+  els.buildingInfoOverlay.addEventListener('click', (e) => {
+    if (e.target === els.buildingInfoOverlay) closeBuildingInfoMenu(); // same "click anywhere else closes it" precedent as the recipe/Mound pop-ups
   });
 
   // Gene-Splicing moved to the Tank Upgrades panel (see buildTankPanel) — no
@@ -389,7 +415,13 @@ export function initUI(state) {
   els.pauseToggleBtn.addEventListener('click', () => togglePauseMenu(state));
 
   els.pauseResumeBtn.addEventListener('click', () => closePauseMenu(state));
+  els.pauseSaveBtn.addEventListener('click', () => saveGameFromPause(state));
   els.pauseRestartBtn.addEventListener('click', () => restartLevel(state));
+  els.bossVictoryRestartBtn.addEventListener('click', () => {
+    els.bossVictoryOverlay.classList.remove('visible');
+    els.bossVictoryOverlay.classList.add('hidden');
+    restartLevel(state);
+  });
   els.pauseSettingsBtn.addEventListener('click', () => { showPauseSettings(); playPanelOpen(); });
   els.pauseSettingsBackBtn.addEventListener('click', () => returnFromPauseSettings(state));
   els.pauseOverlay.addEventListener('click', (e) => {
@@ -616,6 +648,82 @@ export function isRecipeMenuOpen() {
   return recipeMenuOpen;
 }
 
+// Generic "what is this and what does it do" pop-up for any OTHER placed
+// building (Manufacturer/Power Plant get their own recipe pop-up instead —
+// see main.js's click handler, which only ever calls this once
+// getRecipeBuildingKeyAt has already come back null) — per direct request
+// ("any building can be quickly clicked on to see what it is and what it
+// does," showing "the info that would normally show up in the shop
+// window"). Same fly-out-of-its-anchor mechanic as openRecipeMenu above,
+// just read-only content (icon/name/description/stats) instead of clickable
+// recipe options.
+const BUILDING_INFO_MENU_TRANSITION_MS = 220; // must match #building-info-menu's CSS transition duration
+
+export function openBuildingInfoMenu(state, tileKey) {
+  buildingInfoMenuOpen = true;
+  buildingInfoMenuClosing = false;
+  buildingInfoTileKey = tileKey;
+  if (buildingInfoMenuCloseTimer !== null) { clearTimeout(buildingInfoMenuCloseTimer); buildingInfoMenuCloseTimer = null; }
+  closeSidePanels(state);
+  els.buildingInfoOverlay.classList.remove('hidden');
+  refreshBuildingInfoMenu(state);
+  updateBuildingInfoMenuPosition(state);
+
+  els.buildingInfoMenu.classList.add('building-info-menu-closed');
+  void els.buildingInfoMenu.offsetWidth;
+  els.buildingInfoMenu.classList.remove('building-info-menu-closed');
+  playPanelOpen();
+}
+
+export function closeBuildingInfoMenu() {
+  if (!buildingInfoMenuOpen) return;
+  buildingInfoMenuOpen = false;
+  buildingInfoMenuClosing = true;
+  buildingInfoTileKey = null;
+  els.buildingInfoMenu.classList.add('building-info-menu-closed');
+  buildingInfoMenuCloseTimer = setTimeout(() => {
+    els.buildingInfoOverlay.classList.add('hidden');
+    buildingInfoMenuClosing = false;
+    buildingInfoMenuCloseTimer = null;
+  }, BUILDING_INFO_MENU_TRANSITION_MS);
+  playPanelClose();
+}
+
+export function isBuildingInfoMenuOpen() {
+  return buildingInfoMenuOpen;
+}
+
+function updateBuildingInfoMenuPosition(state) {
+  if (!buildingInfoTileKey) return;
+  const [row, col] = buildingInfoTileKey.split(',').map(Number);
+  const worldX = col * TILE_SIZE + TILE_SIZE / 2;
+  const worldY = row * TILE_SIZE;
+  const screen = worldToScreen(worldX, worldY, state.camera);
+  els.buildingInfoAnchor.style.left = `${screen.x}px`;
+  els.buildingInfoAnchor.style.top = `${screen.y - MOUND_MENU_GAP_PX}px`;
+}
+
+// Only rebuilds on open (same "don't rebuild every frame" fix the recipe
+// menu's own refreshRecipeMenu comment documents — this content is
+// completely static per building type anyway, so there's even less reason
+// to redo it every frame); the per-frame check in updateHUD just closes the
+// popup if the underlying tile gets demolished out from under it.
+function refreshBuildingInfoMenu(state) {
+  if (!buildingInfoTileKey) return;
+  const data = state.level.buildingData[buildingInfoTileKey];
+  const type = data ? data.type : (() => {
+    const [row, col] = buildingInfoTileKey.split(',').map(Number);
+    return getTile(state.level.grid, col, row);
+  })();
+  if (!type) { closeBuildingInfoMenu(); return; }
+  const def = BUILDING_TYPES[type];
+  if (!def) { closeBuildingInfoMenu(); return; }
+  els.buildingInfoIcon.textContent = def.icon;
+  els.buildingInfoName.textContent = def.name;
+  els.buildingInfoDesc.textContent = def.description;
+  els.buildingInfoStats.innerHTML = buildingStatsHtml(type);
+}
+
 // Tracks the clicked tile's live on-screen position so the popup stays
 // glued to it even if the player pans the camera while it's open.
 function updateRecipeMenuPosition(state) {
@@ -666,29 +774,75 @@ function refreshRecipeMenu(state) {
     }
     els.recipeMenuOptions.appendChild(optionEl);
   }
+  // The building's own general stats (per-ingredient processing time, power
+  // draw) — per direct request ("add in just the stats from the manufacturer
+  // into its recipe picker/fly out modal") — reusing buildingStatsHtml's
+  // exact output rather than a second copy of these numbers. The
+  // Manufacturer specifically ALSO gets the full per-item power breakdown
+  // here (and only here — the shop/Lab preview keeps the plain range) per a
+  // later direct request, since this is the one place ingredient choice
+  // actually matters.
+  els.recipeMenuStats.innerHTML = buildingStatsHtml(data.type) + (isManufacturer ? manufacturerPowerBreakdownHtml() : '');
 }
 
-// Clicking an already-selected recipe icon clears it back to "nothing," per
-// direct spec ("toggle-able... could be set back to nothing, but never
-// multiple recipes"). A fresh pick (or a clear) always resets whatever was
-// already absorbed/mid-process — ingredients only make sense in the
-// context of the recipe that wanted them.
-function toggleBuildingRecipe(state, tileKey, recipeId) {
-  const data = state.level.buildingData[tileKey];
-  if (!data) return;
-  const next = data.recipeId === recipeId ? null : recipeId;
+// Per direct request: "Add this stat into just the recipe modal" — the
+// Manufacturer's exact per-ingredient power draw (see
+// MANUFACTURER_ITEM_POWER_COST_MW), shown only in its own recipe pop-up
+// menu, not the shop/Lab preview (which shows the plain min-max range via
+// buildingStatsHtml instead).
+function manufacturerPowerBreakdownHtml() {
+  const p = MANUFACTURER_ITEM_POWER_COST_MW;
+  return (
+    `<div class="building-stat">🗑️ <b>${p.waste}</b>mw · 🍖 <b>${p.food}</b>mw</div>` +
+    `<div class="building-stat">🟤 <b>${p.biomass}</b>mw · 🔬 <b>${p.science}</b>mw</div>`
+  );
+}
+
+// Sets a building's recipe to exactly `next` (null clears it), resetting
+// whatever was already absorbed/mid-process — ingredients only make sense
+// in the context of the recipe that wanted them. Shared by
+// toggleBuildingRecipe (the recipe pop-up's own click-to-toggle) and
+// copyBuildingRecipe (the drag-to-copy mechanic) below, so the two can never
+// drift out of sync on what "picking a recipe" actually resets.
+function applyRecipeToBuilding(data, next) {
   data.recipeId = next;
   if (data.type === TILE_MANUFACTURER) {
     data.pendingInputs = next ? [...MANUFACTURER_RECIPES[next].inputs] : [];
     data.processing = false;
     data.currentItemType = null;
     data.progressMs = 0;
-    data.firstItemDone = false;
+    data.ghostFlashTimerMs = 0;
   } else {
     data.fueled = false;
     data.progressMs = 0;
   }
+}
+
+// Clicking an already-selected recipe icon clears it back to "nothing," per
+// direct spec ("toggle-able... could be set back to nothing, but never
+// multiple recipes").
+function toggleBuildingRecipe(state, tileKey, recipeId) {
+  const data = state.level.buildingData[tileKey];
+  if (!data) return;
+  const next = data.recipeId === recipeId ? null : recipeId;
+  applyRecipeToBuilding(data, next);
   refreshRecipeMenu(state);
+}
+
+// Drag-to-copy — per direct request ("click and dragged, and a ghost icon
+// of the building will go on the cursor... release the drag, copy the
+// recipe from the dragged building to the building the ghost was released
+// on. This will speed up having to set multiple recipes"). Called from
+// main.js's mouseup handler once it's confirmed both tiles are the same
+// building type and genuinely different tiles — see updateRecipeDrag there
+// for the drag/ghost-tint mechanics themselves, which live in main.js since
+// they're pure input/render state, not simulation.
+export function copyBuildingRecipe(state, sourceKey, targetKey) {
+  const sourceData = state.level.buildingData[sourceKey];
+  const targetData = state.level.buildingData[targetKey];
+  if (!sourceData || !targetData || sourceData.type !== targetData.type) return;
+  applyRecipeToBuilding(targetData, sourceData.recipeId);
+  if (recipeMenuOpen && recipeMenuTileKey === targetKey) refreshRecipeMenu(state);
 }
 
 // Tracks the Mound's live on-screen position so the popup stays glued to it
@@ -971,7 +1125,7 @@ function buildLabTree(state) {
     // relationship reads at a glance without opening the purchase modal.
     btn.addEventListener('mouseenter', () => { labHoveredNodeId = node.id; });
     btn.addEventListener('mouseleave', () => { labHoveredNodeId = null; });
-    labNodeButtons[node.id] = { btn, costEl };
+    labNodeButtons[node.id] = { btn, nameEl, costEl };
     columns[labNodeDepthMemo[node.id]].appendChild(btn);
   }
   refreshLabTree(state);
@@ -1028,6 +1182,16 @@ function buyLabUpgrade(state, id) {
     state.level.upgrades.scienceCapLevel += node.grants.scienceCapLevel;
   }
   playUpgrade();
+  // Mother Alien Fish, per direct spec — "it will trigger the end boss
+  // sequence. It will close the science lab, and wait 2 seconds..." — closes
+  // the Lab itself right here (UI.js already owns closeLabMenu), then hands
+  // off to main.js via a cross-module flag (same pattern
+  // state.ui.coinCapFlashPending already established) rather than importing
+  // main.js's simulation-level startBossSequence directly from this file.
+  if (node.grants.triggersBossFight) {
+    closeLabMenu();
+    state.ui.bossFightTriggerPending = true;
+  }
   refreshLabTree(state);
   refreshShopPanel(state);
 }
@@ -1042,6 +1206,25 @@ function buyLabUpgrade(state, id) {
 function openLabPurchaseModal(state, id) {
   const node = SCIENCE_LAB_UPGRADES[id];
   labPurchaseNodeId = id;
+  // A `mystery: true` node stays a total blank until its prerequisites are
+  // met, per direct spec ("a question mark node... that gives no info until
+  // it's unlockable") — no name, no icon, no cost, no description, nothing
+  // that would spoil what it actually is. `refreshLabPurchaseButton` (called
+  // every frame this modal is open) independently re-checks the same
+  // condition, so the instant the last prerequisite is bought while this
+  // modal happens to already be open, it reveals itself live.
+  const prereqsMetForMystery = node.requires.every((r) => state.meta.labUpgradesPurchased.includes(r));
+  if (node.mystery && !prereqsMetForMystery) {
+    els.labPurchaseIcon.textContent = '❓';
+    els.labPurchaseName.textContent = '???';
+    els.labPurchaseCost.textContent = '???';
+    els.labPurchaseDesc.innerHTML = '<div>Something is stirring in the deep... you\'ll need to have unlocked everything Green Science research offers, plus Bubble Cap 50, before you can learn any more.</div>';
+    els.labPurchaseStats.innerHTML = '';
+    refreshLabPurchaseButton(state);
+    els.labPurchaseOverlay.classList.remove('hidden');
+    playPanelOpen();
+    return;
+  }
   els.labPurchaseIcon.textContent = node.icon;
   els.labPurchaseName.textContent = node.name;
   els.labPurchaseCost.textContent = labNodeCostText(node);
@@ -1237,7 +1420,7 @@ function refreshLabTree(state) {
   // once, see labNodeHasEnoughScience's own comment.
   els.labScienceReadout.textContent = `🔬 ${state.level.science} · 🟢 ${state.level.scienceGreen} · 💰 $${Math.floor(state.level.money)}`;
   for (const node of SCIENCE_LAB_UPGRADE_LIST) {
-    const { btn, costEl } = labNodeButtons[node.id];
+    const { btn, nameEl, costEl } = labNodeButtons[node.id];
     const purchased = state.meta.labUpgradesPurchased.includes(node.id);
     const prereqsMet = node.requires.every((r) => state.meta.labUpgradesPurchased.includes(r));
     const affordable = labNodeHasEnoughScience(state, node) && state.level.money >= node.goldCost;
@@ -1252,7 +1435,16 @@ function refreshLabTree(state) {
     // reflects whether a purchase can happen right now — see
     // refreshLabPurchaseButton.
     btn.disabled = false;
+    // A `mystery: true` node (the "Mother Alien Fish" secret unlock, per
+    // direct spec — "a question mark node... that gives no info until it's
+    // unlockable") hides its own name/icon behind a plain "???" for as long
+    // as its prerequisites aren't met, even in the tree itself, not just the
+    // purchase modal — reads live every frame, same as everything else here,
+    // so it reveals itself the instant the last prerequisite is bought.
+    const isHiddenMystery = node.mystery && !prereqsMet;
+    nameEl.textContent = isHiddenMystery ? '❓ ???' : `${node.icon} ${node.name}`;
     if (purchased) costEl.textContent = 'Unlocked ✓';
+    else if (isHiddenMystery) costEl.textContent = '???';
     else if (!prereqsMet) costEl.textContent = 'Locked';
     else costEl.textContent = labNodeCostText(node);
   }
@@ -1350,7 +1542,27 @@ function returnFromPauseSettings(state) {
 // doesn't reach into main.js directly, same one-directional import
 // discipline every other main.js/UI.js hookup in this file already follows.
 export function initStartScreen(state, onStart) {
-  els.startPlayBtn.addEventListener('click', () => {
+  // Continue Game only ever shows up if a save actually exists — checked
+  // once here at page load, not re-checked afterward (nothing can create a
+  // save before the start screen is even up).
+  els.startContinueBtn.classList.toggle('hidden', !hasSaveGame());
+  els.startNewGameBtn.addEventListener('click', () => {
+    els.startOverlay.classList.add('hidden');
+    playPanelClose();
+    onStart();
+  });
+  els.startContinueBtn.addEventListener('click', () => {
+    const saved = loadSaveGame();
+    if (saved) {
+      // The whole point of a save being plain, JSON-serializable state (see
+      // CLAUDE.md's State Shape) is that "load" is just replacing these two
+      // slices wholesale — camera/ui/debug stay whatever they already were
+      // (a fresh page load's defaults), since those are session-local, not
+      // campaign progress.
+      state.meta = saved.meta;
+      state.level = saved.level;
+      centerCameraOnMound(state.camera); // same one-time re-center loadLevel's own callers already do, since a saved level has no camera position of its own
+    }
     els.startOverlay.classList.add('hidden');
     playPanelClose();
     onStart();
@@ -1376,6 +1588,22 @@ export function initStartScreen(state, onStart) {
     els.startOverlay.classList.remove('hidden');
     playPanelClose();
   });
+}
+
+// Saves the whole meta+level state to LocalStorage (Save.js) from the pause
+// menu's own Save button — a plain fire-and-forget action with a small
+// notification-ticker confirmation, same "push a real notification, don't
+// pop a confirmation modal" precedent every other one-off action in this
+// game already follows.
+function saveGameFromPause(state) {
+  const ok = saveGame(state);
+  const notifications = state.level.notifications;
+  notifications.push({
+    id: notifications.length + 1,
+    text: ok ? 'Game saved.' : "Couldn't save — your browser blocked it.",
+    elapsed: state.level.elapsed,
+  });
+  if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
 }
 
 // Rebuilds state.level from scratch via the real level-load path (same one
@@ -1826,7 +2054,7 @@ function refreshTankPanel(state) {
 // deliberately NOT wired to this — clicking it again already cycles to the
 // next tier (see buildFamilyButton), an established behavior this doesn't
 // change.
-function deselectShopSelection(state) {
+export function deselectShopSelection(state) {
   currentPreviewSpecies = null;
   currentPreviewBuilding = null;
   stopPreviewAnimation();
@@ -1871,9 +2099,28 @@ function selectSpeciesForPreview(state, species) {
   updateToolbar(state);
 }
 
+// The Pipette Tool ("Smart Copy") — per direct request: hovering an
+// already-placed fish or building and pressing Q arms that exact species/
+// building as the current tool, exactly as if its shop icon had been
+// clicked (same preview window, stats, and canvas ghost). main.js's keydown
+// handler resolves WHAT is under the cursor (Entities.js's
+// findFishForPipetteAt, or a real grid tile) and calls whichever of these
+// applies — both are thin wrappers around the shop's own selection
+// functions above, so there's exactly one place that actually builds the
+// preview UI.
+export function pipetteSelectSpecies(state, speciesId) {
+  const species = SPECIES[speciesId];
+  if (species) selectSpeciesForPreview(state, species);
+}
+
+export function pipetteSelectBuilding(state, buildingId) {
+  const building = BUILDING_TYPES[buildingId];
+  if (building) selectBuildingForPreview(state, building);
+}
+
 // Buildings share the exact same preview window as species (same box, same
 // name/description layout, same "click in the tank to place it" hint) — a
-// building's cost is dynamic now too (see Config.js's BUILDING_COST_INCREMENT),
+// building's cost is dynamic now too (see Grid.js's getBuildingCost),
 // so its name/price text is refreshed the same live way as a species'.
 function selectBuildingForPreview(state, building) {
   currentPreviewBuilding = building;
@@ -1943,11 +2190,17 @@ function buildingStatsHtml(buildingId) {
       `<div class="building-stat">⚡ <b>${r.powerCostPerSec}</b> mw/sec</div>`
     );
   }
-  const m = MANUFACTURER_STATS[buildingId];
-  if (m) {
+  if (MANUFACTURER_STATS[buildingId]) {
+    // Per direct request, power now depends on which ingredient is being
+    // processed (see MANUFACTURER_ITEM_POWER_COST_MW) — the shop/Lab
+    // preview shows it as a plain min-max range; the recipe pop-up menu
+    // (manufacturerPowerBreakdownHtml, below) shows the full per-item
+    // breakdown instead, since that's the one place ingredient choice
+    // actually matters.
+    const rates = Object.values(MANUFACTURER_ITEM_POWER_COST_MW);
     return (
       `<div class="building-stat">🗑️ 2s · 🍖 4s · 🟤 8s per item</div>` +
-      `<div class="building-stat">Pick a recipe once placed · ⚡ <b>${m.powerCostPerSec}</b> mw/sec</div>`
+      `<div class="building-stat">Pick a recipe once placed · ⚡ <b>${Math.min(...rates)}-${Math.max(...rates)}</b> mw</div>`
     );
   }
   if (buildingId === TILE_POWER_PLANT) {
@@ -2020,7 +2273,7 @@ function renderPreviewCanvas() {
 // Re-checked every frame (from updateHUD) so the name/price live-update if
 // money changes, or an economy species'/a building's dynamic price shifts,
 // while it happens to be previewed — see Config.js's
-// ECONOMY_FISH_COST_GROWTH_RATE and BUILDING_COST_INCREMENT.
+// ECONOMY_FISH_COST_GROWTH_RATE and Grid.js's tiered building cost growth.
 function refreshPreviewInfo(state) {
   if (currentPreviewSpecies) {
     els.previewName.textContent = `${currentPreviewSpecies.name} — $${getFishPurchaseCost(state, currentPreviewSpecies.id)}`;
@@ -2077,7 +2330,7 @@ function buildShopPanel(state) {
 // Called every frame the shop is open (from updateHUD) — species/building
 // costs can all shift live (economy species' population-based pricing,
 // every building's placed-count-based pricing — see Config.js's
-// ECONOMY_FISH_COST_GROWTH_RATE/BUILDING_COST_INCREMENT), so it's cheap
+// ECONOMY_FISH_COST_GROWTH_RATE/Grid.js's tiered building cost growth), so it's cheap
 // enough to just refresh every visible tag's text rather than tracking which
 // ones are actually dynamic separately.
 function refreshShopPrices(state) {
@@ -2336,6 +2589,7 @@ export function updateHUD(state) {
   // the popup if the underlying tile gets demolished out from under it.
   if (recipeMenuOpen && !state.level.buildingData[recipeMenuTileKey]) closeRecipeMenu();
   if (recipeMenuOpen || recipeMenuClosing) updateRecipeMenuPosition(state);
+  if (buildingInfoMenuOpen || buildingInfoMenuClosing) updateBuildingInfoMenuPosition(state);
   if (labMenuOpen) refreshLabTree(state); // no position-tracking needed any more — it's a centered modal now, not anchored to the Mound's screen position
   if (!state.ui.tankPanelCollapsed) refreshTankPanel(state);
 
@@ -2384,6 +2638,13 @@ export function updateHUD(state) {
   // positioned ancestor. Only bothers with the (layout-reading)
   // getBoundingClientRect call on a frame either one is actually visible.
   if (buildLegendVisible || tutorialActive) positionBottomLeftLegends();
+
+  // Persistent E/Q hotkey reminder, bottom-left corner — per direct
+  // request, always visible (unlike the two legends above), re-worded live
+  // to match what each key actually does right now. `toolIsPurchasable` is
+  // already computed above (a build:/fish: tool armed).
+  els.hotkeyLegendE.textContent = `E: ${state.ui.shopCollapsed ? 'Open Shop' : 'Close Shop'}`;
+  els.hotkeyLegendQ.textContent = `Q: ${toolIsPurchasable ? 'Clear Cursor' : 'Pipette Tool'}`;
 }
 
 function positionBottomLeftLegends() {
@@ -2837,6 +3098,50 @@ function updateAlienCountdown(state) {
   } else {
     els.alienCountdown.classList.add('hidden');
   }
+}
+
+// Mother Alien Fish — "a universal boss health bar at the top middle of the
+// screen instead of over the boss's head," per direct spec. Finds the boss
+// by its recorded state.level.bossEntityId rather than scanning entities for
+// isBoss every frame (there's only ever one, and its id is already known
+// the instant it's created — see main.js's updateBossSequence).
+export function updateBossHealthBar(state) {
+  const boss = state.level.bossEntityId === null
+    ? null
+    : state.level.entities.find((e) => e.id === state.level.bossEntityId && e.type === 'alien' && e.hp > 0);
+  if (!boss) { els.bossHealthBarWrap.classList.add('hidden'); return; }
+  els.bossHealthBarWrap.classList.remove('hidden');
+  const frac = Math.max(0, Math.min(1, boss.hp / boss.maxHp));
+  els.bossHealthBarFill.style.width = `${frac * 100}%`;
+}
+
+// The end-game stats modal, per direct spec ("slowly fade in a game over
+// modal, with stats about the game like how much total of each resource was
+// accumulated, how much food was purchased, how many fish died, how many
+// tank points accumulated, aliens killed, etc."). Called once by main.js's
+// updateBossSequence the instant bossPhase reaches 'gameover'. The "slowly
+// fade in" part is a plain CSS opacity transition (see style.css's
+// #boss-victory-overlay) — removing 'hidden' (display:none has no
+// transition) then adding 'visible' one frame later via the same
+// forced-reflow retrigger trick every other one-shot animation in this file
+// already uses, so the browser genuinely animates from opacity 0.
+export function showGameOverModal(state) {
+  const rows = [
+    ['💰 Total money earned', `$${Math.floor(state.level.lifetimeMoneyEarned)}`],
+    ['🔬 Total Blue Science earned', String(state.level.lifetimeScienceEarned)],
+    ['🟢 Total Green Science earned', String(state.level.lifetimeScienceGreenEarned)],
+    ['🍖 Food purchased', String(state.level.foodPurchasedCount)],
+    ['💀 Fish died', String(state.level.fishDiedCount)],
+    ['🏆 Tank Points accumulated', String(state.level.tankPoints.total)],
+    ['👽 Aliens killed', String(state.level.aliensKilledCount)],
+  ];
+  els.bossVictoryStats.innerHTML = rows.map(([label, value]) => (
+    `<div class="boss-victory-stat-row"><span>${label}</span><b>${value}</b></div>`
+  )).join('');
+  els.bossVictoryOverlay.classList.remove('hidden');
+  els.bossVictoryOverlay.classList.remove('visible');
+  void els.bossVictoryOverlay.offsetWidth; // forced reflow — same retrigger trick playFlash/the Lab modal's own open animation already use
+  els.bossVictoryOverlay.classList.add('visible');
 }
 
 export function updateDebugOverlay(state, stats) {

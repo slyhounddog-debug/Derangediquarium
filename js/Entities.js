@@ -54,6 +54,7 @@ import {
   ECONOMY_SPECIES_IDS,
   DYNAMIC_PRICED_SPECIES_IDS,
   ECONOMY_FISH_COST_GROWTH_RATE,
+  FISH_SCALING_LAB_ID,
   FISH_STAR_TIER_MAX,
   FISH_STAR_TIER_VALUE_MULTIPLIER,
   FISH_STAR_TIER_HUNGER_MULTIPLIER,
@@ -121,6 +122,15 @@ import {
   ALIEN_EGG_HATCH_MS,
   ALIEN_EGG_HATCH_INVULN_MS,
   ALIEN_EGG_RISE_SPEED,
+  ALIEN_MAX_ALIVE,
+  BOSS_HP_MULTIPLIER,
+  BOSS_RADIUS,
+  BOSS_SPEED,
+  BOSS_COLOR,
+  BOSS_MINION_SPAWN_INTERVAL_MS,
+  BOSS_MINION_SPAWN_COUNT,
+  BOSS_DEATH_SCIENCE_COUNT,
+  BOSS_DEATH_SCIENCE_GREEN_COUNT,
 } from './Config.js';
 import { stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemForces, updateBuildings } from './Grid.js';
 // Sound is a fire-and-forget side effect at the moment something already
@@ -138,6 +148,16 @@ function nextId() {
 // updateFood's own comment for why it can't push a new Waste item directly
 // from inside that filter's callback.
 const pendingFoodToWasteSpawns = [];
+
+// Same "filled during a filter callback, flushed right after" pattern —
+// updateAlien can't push a new alien directly into state.level.entities from
+// inside updateEntities' own state.level.entities.filter(...) callback (the
+// array reference gets reassigned to filter's OWN result the moment that
+// call returns, silently dropping anything pushed onto the pre-reassignment
+// array mid-callback) — so the Mother Alien Fish's minion-spawn timer queues
+// { x, y, archetypeId } records here instead, flushed by updateEntities
+// right after its entities filter completes.
+const pendingBossMinionSpawns = [];
 
 // state.level.cleanliness (0-100) — every Waste item that spawns costs
 // CLEANLINESS_PER_WASTE_EVENT, every one cleaned back up (a Scavenger fish
@@ -343,6 +363,30 @@ export function createAlien(x, y, hp, archetypeId) {
     hitFlashMs: 0, // counts down from ALIEN_HIT_FLASH_MS whenever damage is applied (Grid.js's Turret branch, main.js's click handler) — drives the red-flash/bounce read by main.js's render
     spawnProtectionUntilMs: 0, // Alien-Egg-hatched aliens only — see updateAlienEgg; a normal wave-spawned alien never has this set past 0, so every damage-site check below is a no-op for it
     risingToSurface: false, // Alien-Egg-hatched aliens only, and only when the egg hatched inside the seabed city — overrides all normal AI/movement in updateAlien until it clears SEABED_FLOOR_Y
+    isBoss: false, // Mother Alien Fish only — see createMotherAlienFish below; drives updateAlien's minion-spawn timer, main.js's top-middle boss health bar instead of a per-alien one, and the special death sequence
+    minionSpawnTimerMs: 0, // Mother Alien Fish only
+  };
+}
+
+// The end-game boss — per direct spec, "10x harder than a tier 5 alien,"
+// applied to ALIEN_ARCHETYPES' own top tier's hpMin/hpMax range rather than
+// a hand-tuned bespoke number, so it automatically stays "10x a Tier 5" if
+// that base archetype is ever rebalanced. Otherwise a plain alien entity
+// (same type: 'alien', reusing every existing alien mechanic — movement,
+// turret targeting, click damage, hit-flash — for free) with `isBoss: true`
+// as the one flag that changes its behavior: see updateAlien's own isBoss
+// branches for the minion-spawning timer and the special death sequence.
+export function createMotherAlienFish(x, y) {
+  const t5 = ALIEN_ARCHETYPES[ALIEN_ARCHETYPES.length - 1];
+  const hpMin = t5.hpMin * BOSS_HP_MULTIPLIER;
+  const hpMax = t5.hpMax * BOSS_HP_MULTIPLIER;
+  const hp = hpMin + Math.floor(Math.random() * (hpMax - hpMin + 1));
+  return {
+    id: nextId(), type: 'alien', x, y, vx: 0, vy: 0, hp, maxHp: hp,
+    archetypeId: 'mother_alien_fish', speed: BOSS_SPEED, radius: BOSS_RADIUS, color: BOSS_COLOR,
+    dnaYield: 0, // no ordinary Alien DNA drop on death — see updateAlien's isBoss death branch for its own Science-burst instead
+    wanderTimer: 0, poopTimer: 0, hitFlashMs: 0, spawnProtectionUntilMs: 0, risingToSurface: false,
+    isBoss: true, minionSpawnTimerMs: 0,
   };
 }
 
@@ -389,8 +433,35 @@ function updateAlien(alien, state, dtMs) {
     // just vanishing — a short expanding/fading burst, fully decoupled from
     // the alien entity itself (which is removed right here), same
     // independent-particle pattern state.level.floatingTexts already uses.
-    state.level.alienDeathEffects.push({ x: alien.x, y: alien.y, age: 0, color: alien.color });
+    state.level.alienDeathEffects.push({ x: alien.x, y: alien.y, age: 0, color: alien.color, big: alien.isBoss });
     playAlienDeath();
+    // Mother Alien Fish's own death sequence, per direct spec — "have the
+    // boss exploded and turn into a bunch of green and blue science (ignore
+    // the bubble cap at this point so it will spawn a bunch of science)."
+    // Pushed directly rather than through the usual canSpawnMore*/Bubble-Cap
+    // checks every OTHER science-producing site respects, since the spec
+    // explicitly calls out ignoring the cap here. Doesn't fall through to
+    // the ordinary alien death bookkeeping below (dnaYield is 0 anyway,
+    // aliensKilledCount deliberately doesn't count the boss — the end-game
+    // stats modal reports defeating it as its own separate highlight
+    // instead — see main.js's showGameOverModal).
+    if (alien.isBoss) {
+      for (let i = 0; i < BOSS_DEATH_SCIENCE_COUNT; i++) {
+        const jitterX = alien.x + (Math.random() - 0.5) * alien.radius * 2;
+        const jitterY = alien.y + (Math.random() - 0.5) * alien.radius * 2;
+        state.level.items.push(createScience(jitterX, jitterY));
+      }
+      for (let i = 0; i < BOSS_DEATH_SCIENCE_GREEN_COUNT; i++) {
+        const jitterX = alien.x + (Math.random() - 0.5) * alien.radius * 2;
+        const jitterY = alien.y + (Math.random() - 0.5) * alien.radius * 2;
+        state.level.items.push(createScienceGreen(jitterX, jitterY));
+      }
+      // Picked up by main.js's updateBossSequence to start the
+      // "slowly fade in a game over modal" countdown — see
+      // Config.js's BOSS_DEFEATED_MODAL_DELAY_MS.
+      state.level.bossDefeatedAtMs = state.level.elapsed;
+      return false;
+    }
     // Dynamic Alien Archetypes: drops alien.dnaYield separate, discrete
     // alien_dna items (a Tier 5's "bulk/dense" yield reads as a genuine
     // shower of items, not one item carrying a hidden value field) — same
@@ -406,6 +477,7 @@ function updateAlien(alien, state, dtMs) {
       const jitterY = alien.y + (Math.random() - 0.5) * alien.radius * 1.5;
       state.level.items.push(createAlienDna(jitterX, jitterY));
     }
+    state.level.aliensKilledCount += 1; // end-game stats modal only — see main.js's showGameOverModal
     // The very first alien ever killed starts the countdown to the
     // post-alien "arm up" guided tutorial (Systems.js's updateStoryTriggers
     // checks state.level.elapsed against this ALIEN_TUTORIAL_DELAY_MS later).
@@ -491,6 +563,32 @@ function updateAlien(alien, state, dtMs) {
   if (alien.y < FISH_MIN_Y) { alien.y = FISH_MIN_Y; alien.vy = Math.abs(alien.vy); }
   if (alien.y > SEABED_FLOOR_Y) { alien.y = SEABED_FLOOR_Y; alien.vy = -Math.abs(alien.vy); } // aliens can't swim into the seabed city either, same rule as fish
 
+  // Mother Alien Fish only — "spawns extra aliens out of its mouth every
+  // couple seconds," per direct spec. Queued into pendingBossMinionSpawns
+  // (see that array's own comment) rather than pushed directly into
+  // state.level.entities, since this runs from inside updateEntities' own
+  // entities.filter(...) callback. Still respects ALIEN_MAX_ALIVE (counting
+  // both already-alive aliens and any of THIS tick's own queued-but-not-yet-
+  // flushed minions, so a fast timer can't sneak a burst past the cap).
+  if (alien.isBoss) {
+    alien.minionSpawnTimerMs += dtMs;
+    if (alien.minionSpawnTimerMs >= BOSS_MINION_SPAWN_INTERVAL_MS) {
+      alien.minionSpawnTimerMs -= BOSS_MINION_SPAWN_INTERVAL_MS;
+      const aliveCount = state.level.entities.reduce((n, e) => n + (e.type === 'alien' && e.hp > 0 ? 1 : 0), 0);
+      const room = Math.max(0, ALIEN_MAX_ALIVE - aliveCount - pendingBossMinionSpawns.length);
+      const spawnCount = Math.min(BOSS_MINION_SPAWN_COUNT, room);
+      for (let i = 0; i < spawnCount; i++) {
+        const archetype = ALIEN_ARCHETYPES[Math.floor(Math.random() * 2)]; // Tier 1 or 2 minions only, never as tough as the boss itself
+        const hp = archetype.hpMin + Math.floor(Math.random() * (archetype.hpMax - archetype.hpMin + 1));
+        pendingBossMinionSpawns.push({
+          x: alien.x + (Math.random() - 0.5) * alien.radius,
+          y: alien.y + (Math.random() - 0.5) * alien.radius,
+          hp, archetypeId: archetype.id,
+        });
+      }
+    }
+  }
+
   // Alien-Egg hatch grace period — per direct spec, a freshly-hatched alien
   // doesn't produce Waste for its first ALIEN_EGG_HATCH_INVULN_MS. Its
   // poopTimer still accumulates underneath (not reset/paused), so it doesn't
@@ -549,6 +647,8 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
     poopTimer: 0, // WASTE_POOP_INTERVAL_MS — a non-Scavenger fish poops out Waste directly on this timer, see updateFish
     eatCooldownRemainingMs: 0, // Scavenger only — see updateFish's SCAVENGER eat branch; a growth-stage's dropInterval is reused as the eat cooldown
     distanceAccumPx: 0, // pure-Generator only — pixels swum since the last MW produced, see updateFish's GENERATOR branch
+    powerTextAccumMw: 0, // pure-Generator only — MW banked toward the next once-per-second floating text, see updateFish's GENERATOR branch
+    powerTextTimerMs: 0, // pure-Generator only — counts up to 1000ms before flushing powerTextAccumMw into a floating text
     researchTickIndex: 0, // pure-Researcher only — which tenth of the current brew cycle's "+0.1" progress bubbles have already fired, see updateFish's RESEARCHER branch
     hungerCriticalSfxPlayed: false, // plays playHunger() once per crossing into HUNGER_CRITICAL_THRESHOLD, reset once hunger drops back below it (e.g. after eating) — see updateFish
     alienNearby: false, // recomputed every tick in updateFish — true while a living alien is within ALIEN_INCOME_BLOCK_RADIUS, driving both the coin-production block and the continuous gray tint (main.js's render)
@@ -738,6 +838,7 @@ export function trySpawnFood(state, x, y) {
   if (state.level.money < FOOD_COST) return 'no_money';
   state.level.money -= FOOD_COST;
   state.level.items.push(createFood(x, y));
+  state.level.foodPurchasedCount += 1; // end-game stats modal only — see main.js's showGameOverModal
   playFoodPlace();
   const foodCount = state.level.items.reduce((n, i) => n + (i.type === 'food' ? 1 : 0), 0);
   if (foodCount >= 5) maybeWarnFoodRot(state);
@@ -793,6 +894,7 @@ function bankMoney(state, amount) {
 // milestone tracking needed, unlike bankMoney — nothing currently reads one.
 function bankScience(state, amount) {
   state.level.science += amount;
+  state.level.lifetimeScienceEarned += amount; // end-game stats modal only — see main.js's showGameOverModal
 }
 
 // Green Science's own separate reserve (state.level.scienceGreen) — mirrors
@@ -801,6 +903,7 @@ function bankScience(state, amount) {
 // touch the blue Science total at all.
 function bankScienceGreen(state, amount) {
   state.level.scienceGreen += amount;
+  state.level.lifetimeScienceGreenEarned += amount; // end-game stats modal only — see main.js's showGameOverModal
 }
 
 export function tryBankScienceAt(state, worldX, worldY) {
@@ -896,11 +999,26 @@ export function countLivingFishOfSpecies(state, speciesId) {
 // (they're pulled from the buyable grid entirely — see UI.js's
 // buildShopPanel), so this function is never even called for one; their
 // SPECIES.cost is only ever read as-is by anything that still wants it.
+// Halves the growth rate's own SCALING (the amount above 1.0), not the rate
+// itself — per direct spec ("reduces the price scaling for fish to half the
+// scaling amount it is now... 1.2x would make it 1.1x"), computed off
+// whatever ECONOMY_FISH_COST_GROWTH_RATE actually is rather than a
+// hardcoded second constant, so this stays correct if that base rate is
+// ever retuned again. Applies the instant the Fish Scaling lab node is
+// bought — getFishPurchaseCost (below) always reads it live, so it takes
+// effect on every already-placed species' price immediately, no re-roll
+// needed.
+export function effectiveFishCostGrowthRate(state) {
+  const scaling = ECONOMY_FISH_COST_GROWTH_RATE - 1;
+  const hasFishScaling = state.meta.labUpgradesPurchased.includes(FISH_SCALING_LAB_ID);
+  return 1 + (hasFishScaling ? scaling / 2 : scaling);
+}
+
 export function getFishPurchaseCost(state, speciesId) {
   const def = SPECIES[speciesId];
   if (!DYNAMIC_PRICED_SPECIES_IDS.includes(speciesId)) return def.cost;
   const n = countLivingFishOfSpecies(state, speciesId);
-  return Math.round(def.cost * Math.pow(ECONOMY_FISH_COST_GROWTH_RATE, n));
+  return Math.round(def.cost * Math.pow(effectiveFishCostGrowthRate(state), n));
 }
 
 // ---- Economy Fish Combining/Splicing (Tier 2) ----
@@ -923,6 +1041,31 @@ export function findFishAt(state, worldX, worldY, excludeId = null) {
     const dy = entity.y - worldY;
     const d2 = dx * dx + dy * dy;
     if (d2 <= hitRadius * hitRadius && d2 < bestDist) {
+      bestDist = d2;
+      best = entity;
+    }
+  }
+  return best;
+}
+
+// The Pipette Tool ("Smart Copy") — per direct request, hovering a fish and
+// pressing Q arms that exact species as the current tool, same as clicking
+// its shop icon. Deliberately uses the FULL fish size as the hit radius
+// (fraction 1.0), not findFishAt's own 0.6 (FISH_DRAG_HIT_RADIUS_FRACTION) —
+// "give the fish an activation radius that's as big as the shimmer/shine
+// effect, so it's easier to select a fish" — main.js's own shimmer clip
+// circle around a fish is drawn at exactly this same unshrunk size.
+export function findFishForPipetteAt(state, worldX, worldY) {
+  let best = null;
+  let bestDist = Infinity;
+  for (const entity of state.level.entities) {
+    if (entity.type !== 'fish') continue;
+    const def = SPECIES[entity.speciesId];
+    const size = FISH_BASE_SIZE * def.growthStages[entity.stage].scale;
+    const dx = entity.x - worldX;
+    const dy = entity.y - worldY;
+    const d2 = dx * dx + dy * dy;
+    if (d2 <= size * size && d2 < bestDist) {
       bestDist = d2;
       best = entity;
     }
@@ -1665,6 +1808,22 @@ function updateFish(fish, state, dtMs) {
   const def = SPECIES[fish.speciesId];
   const dt = dtMs / 1000;
 
+  // Alien Invasion reactions — moved to the very top of the function, per
+  // direct request, so fish.alienNearby reflects THIS tick's proximity (not
+  // last tick's) everywhere below that reads it, including the hunger-rate
+  // calc right after this. A fish near a living alien usually (not always —
+  // see wander's own ALIEN_FLEE_CHANCE bias) tries to move away from it, and
+  // can't produce a coin at all while this close (checked below, only on
+  // the coin-drop branch). fish.alienNearby also drives the continuous gray
+  // tint in main.js's render, separate from the timed Coin-Cap-blocked tint
+  // below, AND (per direct request) now halves Suckerfish's own hunger
+  // accumulation, halves how often the Feeder Fish/Xeno Octopus hybrids
+  // produce Food/Bio-Sludge, and halves electricity production for every
+  // Generator fish/hybrid — see each of those sites' own comments.
+  const nearbyAlien = findNearestAlienWithin(state.level.entities, fish.x, fish.y, ALIEN_AWARENESS_RADIUS);
+  fish.alienNearby = !!(nearbyAlien && Math.hypot(nearbyAlien.x - fish.x, nearbyAlien.y - fish.y) <= ALIEN_INCOME_BLOCK_RADIUS);
+  if (fish.capBlockedTintRemainingMs > 0) fish.capBlockedTintRemainingMs = Math.max(0, fish.capBlockedTintRemainingMs - dtMs);
+
   // A higher star tier is also less hungry — compounding 10%-per-tier
   // reduction, same ^(starTier-1) pattern as the coin-value multiplier below.
   // starTier defaults to 1 (a no-op ^0 = 1x) for every fish that's never been
@@ -1674,11 +1833,19 @@ function updateFish(fish, state, dtMs) {
   // above the threshold, same as every other not-yet-relevant multiplier in
   // this codebase's formulas.
   const stress = cleanlinessStressFactor(state);
+  // Per direct request ("suckerfish hunger should go up half as fast when
+  // next to aliens") — a Suckerfish near a living alien gets hungry more
+  // slowly, which indirectly means it seeks out Waste less often while an
+  // alien lingers nearby (the same "aliens quietly disrupt your economy"
+  // theme the coin-block/food-production halving below share, just applied
+  // to Suckerfish's own non-production role).
+  const alienHungerMultiplier = (fish.speciesId === 'suckerfish' && fish.alienNearby) ? 0.5 : 1;
   const hungerRate = def.hungerRate * Math.pow(FISH_STAR_TIER_HUNGER_MULTIPLIER, (fish.starTier || 1) - 1)
-    * (1 + stress * (CLEANLINESS_STRESS_MAX_HUNGER_MULTIPLIER - 1));
+    * (1 + stress * (CLEANLINESS_STRESS_MAX_HUNGER_MULTIPLIER - 1)) * alienHungerMultiplier;
   fish.hunger = Math.min(HUNGER_MAX, fish.hunger + hungerRate * dt);
   if (fish.hunger >= HUNGER_MAX) {
     playFishDeath();
+    state.level.fishDiedCount += 1; // end-game stats modal only — see main.js's showGameOverModal
     if (!state.level.tutorialFlags.firstFishDied) {
       state.level.tutorialFlags.firstFishDied = true;
       pushStoryNotification(state, FIRST_FISH_DEATH_MESSAGE);
@@ -1722,24 +1889,17 @@ function updateFish(fish, state, dtMs) {
   // spawns a real Food item once it crosses ELECTRIC_SUCKER_FOOD_INTERVAL_MS.
   // Its power generation is the OTHER half of the toggle — see the
   // isPureGenerator branch further down, which this fish's speciesId is
-  // deliberately excluded from while autoFoodOn is true.
+  // deliberately excluded from while autoFoodOn is true. Per direct request
+  // ("the hybrids that produce food and bio-sludge should produce half as
+  // often when next to alien fish"), the timer itself advances at half
+  // speed while alienNearby — takes 2x as long to fill, not a flat pause.
   if (fish.speciesId === 'zap_sucker' && fish.autoFoodOn) {
-    fish.autoFoodTimerMs += dtMs;
+    fish.autoFoodTimerMs += dtMs * (fish.alienNearby ? 0.5 : 1);
     if (fish.autoFoodTimerMs >= ELECTRIC_SUCKER_FOOD_INTERVAL_MS) {
       fish.autoFoodTimerMs -= ELECTRIC_SUCKER_FOOD_INTERVAL_MS;
       state.level.items.push(createFood(fish.x, fish.y));
     }
   }
-
-  // Alien Invasion reactions, per direct request: a fish near a living alien
-  // usually (not always — see wander's own ALIEN_FLEE_CHANCE bias) tries to
-  // move away from it, and can't produce a coin at all while this close
-  // (checked below, only on the coin-drop branch — waste/science/power are
-  // untouched). fish.alienNearby also drives the continuous gray tint in
-  // main.js's render, separate from the timed Coin-Cap-blocked tint below.
-  const nearbyAlien = findNearestAlienWithin(state.level.entities, fish.x, fish.y, ALIEN_AWARENESS_RADIUS);
-  fish.alienNearby = !!(nearbyAlien && Math.hypot(nearbyAlien.x - fish.x, nearbyAlien.y - fish.y) <= ALIEN_INCOME_BLOCK_RADIUS);
-  if (fish.capBlockedTintRemainingMs > 0) fish.capBlockedTintRemainingMs = Math.max(0, fish.capBlockedTintRemainingMs - dtMs);
 
   const isScavenger = def.behavior.includes('SCAVENGER'); // Suckerfish (and any future SCAVENGER species) eats ONLY Waste, never Food
   // A SCAVENGER+FEEDER hybrid (Scrub-Guppy/Dartfin/Blimpfish) still eats
@@ -1909,7 +2069,10 @@ function updateFish(fish, state, dtMs) {
     // other fish (nothing here changes hunger/starvation) — only what its
     // dropTimer produces changes.
     if (fish.speciesId === 'xeno_octopus' && fish.alienDnaModeOn) {
-      fish.dropTimer += dtMs;
+      // Per direct request ("the hybrids that produce food and bio-sludge
+      // should produce half as often when next to alien fish") — same
+      // half-speed-timer treatment the Feeder Fish's own dispenser gets.
+      fish.dropTimer += dtMs * (fish.alienNearby ? 0.5 : 1);
       if (fish.dropTimer >= SCIENCE_ALIEN_DNA_INTERVAL_MS) {
         fish.dropTimer = 0;
         if (canSpawnMoreAlienDna(state)) {
@@ -1984,7 +2147,13 @@ function updateFish(fish, state, dtMs) {
     // toggled back to generator mode.
     const pixelsPerMW = stageDef.pixelsPerMW || 5;
     const productionMultiplier = (fish.speciesId === 'eel_blimp' && fish.mutagenBuffActive) ? EEL_BLIMP_MUTAGEN_PRODUCTION_MULTIPLIER : 1;
-    fish.distanceAccumPx += speed * dt * productionMultiplier;
+    // Per direct request ("when aliens are close to electric fish and
+    // hybrids that produce electricity, make them produce half as much
+    // electricity") — halves the rate distance credit accrues, so it takes
+    // twice as long to reach pixelsPerMW rather than flat-out blocking
+    // production the way the coin-drop branch below does.
+    const alienProximityMultiplier = fish.alienNearby ? 0.5 : 1;
+    fish.distanceAccumPx += speed * dt * productionMultiplier * alienProximityMultiplier;
     while (fish.distanceAccumPx >= pixelsPerMW) {
       fish.distanceAccumPx -= pixelsPerMW;
       // Power is not a battery — this only feeds the CURRENT in-progress
@@ -1992,7 +2161,22 @@ function updateFish(fish, state, dtMs) {
       // second into state.level.powerHistory/powerEfficiency); nothing here
       // accumulates forever any more. See Levels.js's powerGenAccumMw.
       state.level.powerGenAccumMw += 1;
-      state.level.floatingTexts.push(createPickupText(fish.x, fish.y, '+1 ⚡', POWER_COLOR));
+      // Per direct request ("a pop up text every one second with the amount
+      // of MW produced that second, instead of a pop up text every time it
+      // produces 1 mw") — actual generation above is still fully real-time
+      // and un-batched; only the FLOATING TEXT display is queued up and
+      // flushed once a second below, so a fast-swimming fish producing
+      // several MW within one second shows one combined "+N ⚡" instead of
+      // a flurry of "+1"s.
+      fish.powerTextAccumMw += 1;
+    }
+    fish.powerTextTimerMs += dtMs;
+    if (fish.powerTextTimerMs >= 1000) {
+      fish.powerTextTimerMs -= 1000; // subtract rather than reset to 0, so a slight overshoot doesn't compound into drift over a long session
+      if (fish.powerTextAccumMw > 0) {
+        state.level.floatingTexts.push(createPickupText(fish.x, fish.y, `+${fish.powerTextAccumMw} ⚡`, POWER_COLOR));
+        fish.powerTextAccumMw = 0;
+      }
     }
   } else if (!isPureScavenger) {
     // Every plain FEEDER and Gene-Splicing hybrid (feeder-based or
@@ -2254,9 +2438,13 @@ export function updateEntities(state, dtMs) {
 
   state.level.floatingTexts = state.level.floatingTexts.filter((ft) => updatePickupText(ft, dtMs));
 
+  pendingBossMinionSpawns.length = 0; // updateAlien (below) fills this — see that array's own comment for why it can't push into state.level.entities directly
   state.level.entities = state.level.entities.filter((entity) => {
     if (entity.type === 'fish') return updateFish(entity, state, dtMs);
     if (entity.type === 'alien') return updateAlien(entity, state, dtMs);
     return true;
   });
+  for (const spawn of pendingBossMinionSpawns) {
+    state.level.entities.push(createAlien(spawn.x, spawn.y, spawn.hp, spawn.archetypeId));
+  }
 }
