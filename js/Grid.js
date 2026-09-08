@@ -825,7 +825,7 @@ export function updateBuildings(state, dtMs) {
       // Fan force/Collector/Refinery/Manufacturer progress, which genuinely
       // slow down); firing itself is a hard binary gate instead, requiring
       // FULL power availability (powerEfficiency === 1, i.e. the grid — Eels
-      // plus whatever an Eel-Blimp battery is covering — meets 100% of
+      // plus whatever a Blimp-Battery is covering — meets 100% of
       // total demand this second) rather than just "> 0." A free tier
       // (Waste Turret) never checks this at all. A linked, non-hungry
       // Catalyst Fish still speeds the cooldown up regardless — that's a

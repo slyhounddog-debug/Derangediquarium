@@ -49,6 +49,7 @@
   <div id="hud-coin-cap" class="sheen-target" title="Coins currently sitting in the tank, uncollected — capped by your Coin Capacity Tank Upgrade">🪙 0/10</div>
   <div id="hud-science-cap" class="sheen-target hidden" title="Science Bubbles currently sitting in the tank, uncollected — capped by the Science Lab's Bubble Capacity upgrade">🔬 0/5</div>
   <div id="hud-cleanliness" class="sheen-target" title="Tank cleanliness — a dirty tank stresses your fish: they get hungrier faster and produce money less often">✨ 100%</div>
+  <div id="hud-waves" class="sheen-target hidden" title="Alien waves survived so far">👽 Wave 0</div>
   <div id="hud-power-wrap">
     <button id="hud-power" class="sheen-target hidden" title="Electricity — current draw / accumulated capacity. Click for a rolling graph.">⚡ 0/0 mw</button>
     <div id="hud-power-graph" class="hidden"><canvas id="hud-power-graph-canvas" width="220" height="90"></canvas></div>
@@ -81,7 +82,7 @@
 </div>
 <div id="tutorial-skip-legend" class="hidden">(Esc) to skip tutorial</div>
 
-<div id="alien-countdown" class="hidden">👽 Alien wave incoming: <span id="alien-countdown-seconds">10</span>s</div>
+<div id="alien-countdown" class="hidden">👽 Wave <span id="alien-countdown-wave">1</span> incoming: <span id="alien-countdown-seconds">10</span>s</div>
 
 <div id="scroll-hint" class="hidden">
   <div id="scroll-hint-text">Scroll down</div>

@@ -556,8 +556,8 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
     mutagenBuffActive: false, // Adult-only Mutagen Paste buff — see updateFish's eat branch; cleared once hunger crosses back into HUNGER_CRITICAL_THRESHOLD
     magnetOn: false, // Buffer Fish only — toggled by clicking the fish (main.js's click handler); pulls nearby Waste toward it while true, see computeBufferFishMagnetForce
     linkedBuildingKey: null, // Catalyst Fish only — the "row,col" buildingData key it's currently linked to, or null; set by main.js's catalyst link-click flow, read by Grid.js's getCatalystSpeedMultiplier
-    autoFoodOn: false, // Zap Sucker only — toggled by clicking the fish; while true, dispenses a real Food item every ELECTRIC_SUCKER_FOOD_INTERVAL_MS with no feeding required — see updateFish's own dedicated timer block
-    autoFoodTimerMs: 0, // Zap Sucker only — counts up toward ELECTRIC_SUCKER_FOOD_INTERVAL_MS, only while autoFoodOn is true
+    autoFoodOn: false, // Feeder Fish only — toggled by clicking the fish; while true, dispenses a real Food item every ELECTRIC_SUCKER_FOOD_INTERVAL_MS with no feeding required (and generates no power meanwhile — see updateFish's isPureGenerator branch) — see updateFish's own dedicated timer block
+    autoFoodTimerMs: 0, // Feeder Fish only — counts up toward ELECTRIC_SUCKER_FOOD_INTERVAL_MS, only while autoFoodOn is true
     alienDnaModeOn: false, // Xeno Octopus only — toggled by clicking the fish; while true, replaces the normal Science brew cycle with a fixed SCIENCE_ALIEN_DNA_INTERVAL_MS timer producing Bio-Sludge instead — see updateFish's isPureResearcher branch
     wanderTimer: 0,
     tailPhase: 0, // only rendered once fully grown; advances faster the faster the fish is currently moving
@@ -602,9 +602,9 @@ export function countTankItemsByType(state, type) {
   return n;
 }
 
-// Eel-Blimp's battery role — summed fresh each call (same "no separate
+// Blimp-Battery's battery role — summed fresh each call (same "no separate
 // bookkeeping to keep in sync" pattern as getBuildingCost/
-// countLivingFishOfSpecies elsewhere) from every LIVING Eel-Blimp's own
+// countLivingFishOfSpecies elsewhere) from every LIVING one's own
 // current capacity, which is higher while its own mutagenBuffActive is true
 // ("a temporary battery boost to 2GW for the fish while it's fed" — per
 // spec, the boost is per-fish, not a tank-wide flag). Called once per real
@@ -1714,12 +1714,15 @@ function updateFish(fish, state, dtMs) {
   // refreshes it exactly as before.
   if (fish.mutagenBuffActive && fish.hunger >= HUNGER_CRITICAL_THRESHOLD) fish.mutagenBuffActive = false;
 
-  // Zap Sucker's auto-food dispenser — a completely independent timer from
+  // Feeder Fish's auto-food dispenser — a completely independent timer from
   // every other production mechanic, per direct spec ("spits out food
   // automatically... without needing to be fed"): it doesn't gate on
   // hunger, eating, or any of the isPureX branches below, it just ticks
   // whenever toggled on (fish.autoFoodOn, main.js's click handler) and
   // spawns a real Food item once it crosses ELECTRIC_SUCKER_FOOD_INTERVAL_MS.
+  // Its power generation is the OTHER half of the toggle — see the
+  // isPureGenerator branch further down, which this fish's speciesId is
+  // deliberately excluded from while autoFoodOn is true.
   if (fish.speciesId === 'zap_sucker' && fish.autoFoodOn) {
     fish.autoFoodTimerMs += dtMs;
     if (fish.autoFoodTimerMs >= ELECTRIC_SUCKER_FOOD_INTERVAL_MS) {
@@ -1956,7 +1959,7 @@ function updateFish(fish, state, dtMs) {
       }
     }
     }
-  } else if (isPureGenerator || fish.speciesId === 'eel_blimp') {
+  } else if ((isPureGenerator && !(fish.speciesId === 'zap_sucker' && fish.autoFoodOn)) || fish.speciesId === 'eel_blimp') {
     // Distance-based, per direct request ("produces 1MW per 10 pixels swam
     // as a baby, and 1MW per 5 pixels as an adult") — a literal
     // pixels-traveled meter instead of an indirect speed-vs-baseline ratio,
@@ -1965,12 +1968,20 @@ function updateFish(fish, state, dtMs) {
     // (computed above for the tail-wag) already reflects all of that.
     // Accumulates every tick unconditionally, not gated behind any timer.
     // A hybrid without its own pixelsPerMW field falls back to the eel's own
-    // adult rate. Eel-Blimp shares this exact mechanism by speciesId
+    // adult rate. Blimp-Battery shares this exact mechanism by speciesId
     // (bypassing the normal "GENERATOR+FEEDER is impure, doesn't generate"
     // rule every other hybrid follows — its whole point per direct spec is
     // to generate power) — Mutagen Paste doubles its production by simply
     // filling the distance meter EEL_BLIMP_MUTAGEN_PRODUCTION_MULTIPLIER
     // times faster for the same real distance swum.
+    // Feeder Fish (zap_sucker) is the one exception carved out of the outer
+    // branch condition above, per direct request ("make it so it only
+    // generates power when toggled off, when making food it makes no
+    // power") — while its dispenser is on, this whole branch is skipped
+    // entirely (falls through to the plain-Scavenger no-op below, since it's
+    // also isPureScavenger), so distanceAccumPx doesn't even accrue while
+    // making food — no banked credit suddenly cashes out the moment it's
+    // toggled back to generator mode.
     const pixelsPerMW = stageDef.pixelsPerMW || 5;
     const productionMultiplier = (fish.speciesId === 'eel_blimp' && fish.mutagenBuffActive) ? EEL_BLIMP_MUTAGEN_PRODUCTION_MULTIPLIER : 1;
     fish.distanceAccumPx += speed * dt * productionMultiplier;

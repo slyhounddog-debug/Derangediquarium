@@ -1118,8 +1118,11 @@ export const SPECIES = {
   // SCAVENGER tag — its bespoke "eats Waste, produces Food" mechanic is
   // layered ON TOP of the ordinary Suckerfish-style eat-cooldown/targeting
   // that tag already provides, rather than replacing it.
+  // Renamed 'Eel-Blimp' -> 'Blimp-Battery' per direct request — the id
+  // (eel_blimp) is left alone, an internal identifier other code/nodes
+  // reference, not a player-facing "mention."
   eel_blimp: {
-    id: 'eel_blimp', name: 'Eel-Blimp', tier: 4, unlockPhase: 4, cost: 130,
+    id: 'eel_blimp', name: 'Blimp-Battery', tier: 4, unlockPhase: 4, cost: 130,
     description: 'Electric Eel × Blimpfish — a living 1GW battery for the power grid. Stores surplus generation and covers shortfalls before efficiency ever drops. Feed it Mutagen Paste for double production and a temporary 2GW capacity boost.',
     behavior: [], dropType: 'battery', parents: ['electric_eel', 'blimpfish'],
     swimSpeed: 19, lifespan: 300000, hungerRate: 1.068,
@@ -1152,9 +1155,12 @@ export const SPECIES = {
   // click-toggle mechanic is a bonus layered on top, not a full behavior
   // replacement, same "Buffer Fish keeps eating Waste, just also makes Food"
   // precedent the original 3 hybrids already established.
+  // Renamed 'Zap Sucker' -> 'Feeder Fish' per direct request, alongside a
+  // real mechanic change to match — see updateFish's own comment on the
+  // isPureGenerator branch for the "no power while making food" half.
   zap_sucker: {
-    id: 'zap_sucker', name: 'Zap Sucker', tier: 4, unlockPhase: 4, cost: 90,
-    description: 'Electric Eel × Suckerfish — click it to toggle an automatic Food dispenser on/off. While on, it spits out one Food item every 6 seconds with no feeding required to trigger it. Still eats Waste and generates power like its parents.',
+    id: 'zap_sucker', name: 'Feeder Fish', tier: 4, unlockPhase: 4, cost: 90,
+    description: 'Electric Eel × Suckerfish — click it to toggle its automatic Food dispenser on/off. While OFF, it generates power like an Electric Eel; while ON, it spits out one Food item every 6 seconds (no feeding required to trigger it) and generates no power at all. Still eats Waste either way.',
     behavior: ['SCAVENGER', 'GENERATOR'], dropType: 'auto_food', parents: ['electric_eel', 'suckerfish'],
     swimSpeed: 30, lifespan: 300000, hungerRate: 0.9,
     // pixelsPerMW (Generator half) and dropInterval (Scavenger eat-cooldown
@@ -1817,7 +1823,7 @@ export const SCIENCE_LAB_UPGRADES = {
     requires: ['science_cap_2', 'suckerfish'], grants: { species: ['buffer_fish'] },
   },
   hybrid_eel_blimp: {
-    id: 'hybrid_eel_blimp', name: 'Eel-Blimp', icon: '🔋', scienceCost: 30, goldCost: 8000,
+    id: 'hybrid_eel_blimp', name: 'Blimp-Battery', icon: '🔋', scienceCost: 30, goldCost: 8000,
     requires: ['science_cap_3'], grants: { species: ['eel_blimp'] },
   },
   // The one hybrid node requiring Green Science as well as Blue, per direct
@@ -1832,13 +1838,13 @@ export const SCIENCE_LAB_UPGRADES = {
   },
   // Two more hybrids, per direct request — each gated behind a Manufacturer
   // recipe instead of a Bubble Cap tier, since both are thematically tied to
-  // that production chain rather than raw research depth. Zap Sucker
+  // that production chain rather than raw research depth. Feeder Fish
   // (Electric Eel × Suckerfish) really is spliced like the 3 above (both
   // parents are real fish); Xeno Octopus has no real "Alien" fish to splice
   // from, so it's a directly-purchasable species instead (no `parents`
   // field) — the same pattern the 3 base utility species already use.
   hybrid_zap_sucker: {
-    id: 'hybrid_zap_sucker', name: 'Zap Sucker', icon: '🔌', scienceCost: 35, goldCost: 9000,
+    id: 'hybrid_zap_sucker', name: 'Feeder Fish', icon: '🔌', scienceCost: 35, goldCost: 9000,
     requires: ['recipe_bio_sludge'], grants: { species: ['zap_sucker'] },
   },
   hybrid_xeno_octopus: {
@@ -1912,18 +1918,21 @@ export const POWER_HISTORY_MAX = 60;
 // that need the same check outside the tree itself).
 export const GREEN_SCIENCE_LAB_ID = 'green_science_tech';
 
-// ---- Hybrid Mechanics (Eel-Blimp, Buffer Fish, Catalyst Fish) ----
+// ---- Hybrid Mechanics (Blimp-Battery, Buffer Fish, Catalyst Fish) ----
 // Each of the 3 reworked hybrids gets a genuinely unique, hand-built
 // mechanic (see the SPECIES table's own comment above) rather than a
 // generic behavior-tag formula — these are the tunable numbers each one
-// reads directly by speciesId.
+// reads directly by speciesId. Constant names below still say EEL_BLIMP
+// (the species' own internal id, `eel_blimp`, unchanged since its display
+// name was renamed to "Blimp-Battery" — same "keep the internal identifier,
+// change what's shown" precedent every other rename in this project follows).
 
-// Eel-Blimp: acts as a living battery for the whole power grid (see
+// Blimp-Battery: acts as a living battery for the whole power grid (see
 // main.js's once-per-second power-sampling block and Entities.js's
-// computeEelBlimpBatteryCapacityMw). Each living Eel-Blimp contributes this
-// much capacity normally, or the buffed amount while its own
-// mutagenBuffActive is true — capacities are summed across every living
-// Eel-Blimp, so 2 fish (1 fed, 1 not) contribute 1000+2000=3000 total.
+// computeEelBlimpBatteryCapacityMw). Each living one contributes this much
+// capacity normally, or the buffed amount while its own mutagenBuffActive is
+// true — capacities are summed across every living one, so 2 fish (1 fed, 1
+// not) contribute 1000+2000=3000 total.
 export const EEL_BLIMP_BATTERY_CAPACITY_MW = 1000; // 1GW
 export const EEL_BLIMP_BATTERY_CAPACITY_MUTAGEN_MW = 2000; // 2GW while fed
 // Mutagen Paste also doubles the fish's own power PRODUCTION (its bespoke
@@ -1954,10 +1963,12 @@ export const CATALYST_BUFF_MULTIPLIER_MUTAGEN = 1.75;
 // and the building will flash").
 export const CATALYST_FLASH_DURATION_MS = 700;
 
-// Zap Sucker: click it to toggle an automatic Food dispenser (fish.autoFoodOn,
+// Feeder Fish: click it to toggle an automatic Food dispenser (fish.autoFoodOn,
 // toggled by main.js's click handler) — while on, it spits out one real Food
 // item every ELECTRIC_SUCKER_FOOD_INTERVAL_MS with no feeding required to
-// trigger it (see updateFish's fish.autoFoodOn branch and fish.autoFoodTimerMs).
+// trigger it, and generates no power at all while doing so; while off, it
+// generates power like a plain Electric Eel instead (see updateFish's
+// isPureGenerator branch and fish.autoFoodTimerMs).
 export const ELECTRIC_SUCKER_FOOD_INTERVAL_MS = 6000;
 // Xeno Octopus: click it to toggle Bio-Sludge mode (fish.alienDnaModeOn) —
 // while on, its normal long Science brew cycle is replaced entirely by a

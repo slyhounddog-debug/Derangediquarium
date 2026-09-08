@@ -667,9 +667,10 @@ input.clickHandlers.push((sx, sy) => {
     return;
   }
 
-  // Zap Sucker: click toggles its automatic Food dispenser on/off, per
-  // direct spec — same click-to-toggle precedent as the Buffer Fish's own
-  // magnet above.
+  // Feeder Fish: click toggles its automatic Food dispenser on/off (and
+  // with it, whether it generates power instead — see updateFish's
+  // isPureGenerator branch), per direct spec — same click-to-toggle
+  // precedent as the Buffer Fish's own magnet above.
   if (clickedFish && clickedFish.speciesId === 'zap_sucker') {
     clickedFish.autoFoodOn = !clickedFish.autoFoodOn;
     return;
@@ -1212,12 +1213,12 @@ function update(dtMs) {
   if (powerSampleAccumMs >= 1000) {
     powerSampleAccumMs -= 1000;
     const demand = computeCurrentPowerDemand(state);
-    const rawSupply = state.level.powerGenAccumMw; // whatever Eels/Eel-Blimps generated during the window that just closed — see Levels.js's powerGenAccumMw
-    // Eel-Blimp battery — per direct spec ("power will need to be
+    const rawSupply = state.level.powerGenAccumMw; // whatever Eels/Blimp-Batteries generated during the window that just closed — see Levels.js's powerGenAccumMw
+    // Blimp-Battery — per direct spec ("power will need to be
     // calculated every second, and if there's excess, it can be stored...
     // if power usage exceeds power production, the stored electricity can
     // be used instead of reducing city efficiency"). Capacity is recomputed
-    // fresh every second from whichever Eel-Blimps are currently alive (and
+    // fresh every second from whichever Blimp-Batteries are currently alive (and
     // fed) rather than tracked separately, so a fish dying mid-level
     // shrinks it immediately — clamping stored charge down to match rather
     // than letting it silently exceed a capacity that no longer exists.
@@ -1892,9 +1893,11 @@ function render() {
       ctx.restore();
     }
 
-    // Zap Sucker's auto-food dispenser — a pulsing orange ring while toggled
+    // Feeder Fish's auto-food dispenser — a pulsing orange ring while toggled
     // on, per direct spec ("with a visual for when on"), same pulsing-ring
-    // treatment the Buffer Fish's own magnet already gets.
+    // treatment the Buffer Fish's own magnet already gets. While off, it's
+    // generating power instead — no ring, matching every other Generator
+    // fish's lack of a status ring.
     if (fish.speciesId === 'zap_sucker' && fish.autoFoodOn) {
       const ringRadius = size * state.camera.zoom * (1.15 + 0.1 * Math.sin(performance.now() / 220));
       ctx.save();

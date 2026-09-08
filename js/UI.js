@@ -207,9 +207,11 @@ export function initUI(state) {
     coinCap: document.getElementById('hud-coin-cap'),
     scienceCap: document.getElementById('hud-science-cap'),
     cleanliness: document.getElementById('hud-cleanliness'),
+    waves: document.getElementById('hud-waves'),
     power: document.getElementById('hud-power'),
     powerGraph: document.getElementById('hud-power-graph'),
     alienCountdown: document.getElementById('alien-countdown'),
+    alienCountdownWave: document.getElementById('alien-countdown-wave'),
     alienCountdownSeconds: document.getElementById('alien-countdown-seconds'),
     scrollHint: document.getElementById('scroll-hint'),
     scrollHintText: document.getElementById('scroll-hint-text'),
@@ -2297,6 +2299,13 @@ export function updateHUD(state) {
     lastScienceCapCount = scienceCapCount;
   }
 
+  // Waves — hidden until the first alien wave has actually spawned, same
+  // "hidden until relevant" precedent as the Science/electricity readouts.
+  // Per direct request ("add a Waves counter for the alien waves").
+  const wavesSpawned = state.level.alienWavesSpawned;
+  els.waves.classList.toggle('hidden', wavesSpawned === 0);
+  if (wavesSpawned > 0) els.waves.textContent = `👽 Wave ${wavesSpawned}`;
+
   // Electricity — only shown at all once Electric Eel is unlocked, per
   // direct request. Text only updates once a real second, matching the
   // "updates every second" request exactly, since state.level.powerHistory
@@ -2819,6 +2828,11 @@ function updateAlienCountdown(state) {
   const msRemaining = state.level.alienNextWaveAtMs - state.level.elapsed;
   if (msRemaining > 0 && msRemaining <= ALIEN_COUNTDOWN_START_MS) {
     els.alienCountdown.classList.remove('hidden');
+    // alienWavesSpawned counts waves that have ALREADY started — the one
+    // this countdown is ticking down to is always one more than that, per
+    // direct request ("make sure the incoming wave countdown mentions the
+    // wave number").
+    els.alienCountdownWave.textContent = String(state.level.alienWavesSpawned + 1);
     els.alienCountdownSeconds.textContent = String(Math.ceil(msRemaining / 1000));
   } else {
     els.alienCountdown.classList.add('hidden');
