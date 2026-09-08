@@ -274,7 +274,23 @@ export const FAN_T4_POWER_COST = 6; // doubled from 3 per direct request ("make 
 // fraction of a tile out — "make it so the collectors and auto-feeders
 // output on top, by default." Renamed from AUTO_FEEDER_PORT_OFFSET_FRACTION
 // now that the Auto-Feeder itself is gone (replaced by the Refinery family).
-export const BUILDING_OUTPUT_PORT_OFFSET_FRACTION = 0.5; // fraction of TILE_SIZE — how far above the tile's center the fixed output point sits
+// Real bug, found and fixed after a direct report ("the output bounces on
+// top of the building"): at the old 0.5 (exactly the tile's own top edge),
+// a freshly-spawned item's CENTER sits precisely on the solid tile's own
+// boundary — its lower half is still embedded inside the solid tile, which
+// the very next item-vs-tile overlap resolution shoves clear with a single
+// hard, visible "pop" (confirmed directly: a Food item jumped ~6.5px
+// upward in exactly one tick right after spawning). That pop is easy to
+// miss for a building with ordinary open seabed above it, but reads as an
+// obvious bounce for a building sitting in the CITY'S OWN TOPMOST row,
+// where the same shove launches the item clean across the water/seabed
+// physics boundary into open water, which then has to pull it back down
+// through a completely different gravity profile. Bumped to 0.9 (28.8px
+// from center, ~12.8px of genuine clearance above the tile's edge) so every
+// current item type (max radius 10, Biomass/Bio-Sludge) spawns fully
+// outside the solid tile's footprint from the very first tick — nothing
+// left to shove clear, so there's no pop to begin with.
+export const BUILDING_OUTPUT_PORT_OFFSET_FRACTION = 0.9; // fraction of TILE_SIZE — how far above the tile's center the fixed output point sits
 
 // A Collector doesn't bank an item the instant it lands any more — it visibly
 // draws it in toward the tile's center and holds it there for that tile's
@@ -613,10 +629,23 @@ export const SCIENCE_GREEN_COLOR = '#3fd66f'; // HUD/floating-text accent, mirro
 // output, Food+Biomass. All three fall/route through the exact same seabed
 // physics every other item already uses (see Grid.js's stepItemOnGrid) —
 // only their mass (ITEM_MASS_BY_TYPE), radius, and color are unique to each.
-export const ALIEN_DNA_RADIUS = 7.5;
-export const ALIEN_DNA_COLOR = '#7cff5a'; // acid green — reads as "alien"/organic, distinct from every other item's color family
-export const BIOMASS_RADIUS = 9;
-export const BIOMASS_COLOR = '#c98a4b'; // organic brown-orange — "refined biological matter"
+// ALIEN_DNA_RADIUS matches BIOMASS_RADIUS exactly, per direct request — a
+// Refinery converts one directly into the other, so the two are sized (and
+// weighed — see ITEM_MASS_BY_TYPE's shared Class 5 entry) identically.
+export const ALIEN_DNA_RADIUS = 10;
+export const ALIEN_DNA_COLOR = '#7cff5a'; // acid green — reads as "alien"/organic/raw, distinct from every other item's color family
+export const BIOMASS_RADIUS = 10; // bumped from 9 alongside the recolor below, per direct request ("change biomass size")
+// A richer, more settled green than Bio-Sludge's own raw acid-green — per
+// direct request ("visually distinct and more interesting, and visually
+// close to bio-sludge so it's obvious bio-sludge is the pre-refined
+// version"). Paired with BIOMASS_COLOR_CORE below in main.js's own dedicated
+// two-tone gradient render (replacing the old flat single-color fill every
+// other item type still gets) — the core color is deliberately
+// ALIEN_DNA_COLOR itself, so Biomass literally has Bio-Sludge's own color
+// glowing at its center, tying the two together directly rather than just
+// via a similar hue.
+export const BIOMASS_COLOR = '#3f8a34';
+export const BIOMASS_COLOR_CORE = ALIEN_DNA_COLOR;
 export const MUTAGEN_PASTE_RADIUS = FOOD_RADIUS; // Class 1, same size class as Food
 export const MUTAGEN_PASTE_COLOR = '#e64de0'; // vivid magenta/pink — unmistakably not plain Food, matches its "high-value" framing
 // Same "hard, silent safety cap" precedent as WASTE_MAX_ON_SCREEN above —
@@ -1391,7 +1420,7 @@ export const PROCESSOR_STATS = {
 // powerCostPerSec is still the derived rate (powerCostPerShot * shotsPerSec)
 // computeCurrentPowerDemand needs — 6*2=12, 15*3=45.
 export const TURRET_STATS = {
-  [TILE_TURRET_WASTE]: { shotsPerSec: 1.5, damage: 4, powerCostPerShot: 0, powerCostPerSec: 0 },
+  [TILE_TURRET_WASTE]: { shotsPerSec: 1.75, damage: 2, powerCostPerShot: 0, powerCostPerSec: 0 }, // retuned per direct request (was 1.5/sec, 4 dmg)
   [TILE_TURRET_ELECTRIC]: { shotsPerSec: 2, damage: 6, powerCostPerShot: 6, powerCostPerSec: 12 },
   [TILE_TURRET_ADVANCED]: { shotsPerSec: 3, damage: 8, powerCostPerShot: 15, powerCostPerSec: 45 },
 };
@@ -1472,17 +1501,10 @@ export const REFINERY_STATS = {
 // internally as recipeId/labNodeId-adjacent identifiers) are left alone
 // except bio_pellets -> bio_sludge, which is a real merge, not just a
 // rename — see that entry's own comment below.
+// Per direct request, the display order (MANUFACTURER_RECIPE_LIST below,
+// object key insertion order) is: Bio-Sludge, Mutagen Paste, Blue Science,
+// Alien Egg, Green Science.
 export const MANUFACTURER_RECIPES = {
-  bio_feeder: {
-    id: 'bio_feeder', name: 'Mutagen Paste', icon: '🩷', color: '#e690e0',
-    inputs: ['food', 'biomass'], output: 'mutagen_paste', labNodeId: 'recipe_bio_feeder',
-    description: 'Food + Biomass -> Mutagen Paste',
-  },
-  bio_combustor: {
-    id: 'bio_combustor', name: 'Blue Science', icon: '🔥', color: '#ff9f5a',
-    inputs: ['waste', 'biomass'], output: 'science', labNodeId: 'recipe_bio_combustor',
-    description: 'Waste + Biomass -> Blue Science',
-  },
   // Per direct request ("change all other mentions of Alien DNA to
   // Bio-Sludge... to make it clear it's a pre-refined version of the
   // Biomass") — the old standalone `bio_pellets` item (which had no use
@@ -1496,6 +1518,16 @@ export const MANUFACTURER_RECIPES = {
     id: 'bio_sludge', name: 'Bio-Sludge', icon: '🧫', color: ALIEN_DNA_COLOR,
     inputs: ['food', 'waste'], output: 'alien_dna', labNodeId: 'recipe_bio_sludge',
     description: 'Food + Waste -> Bio-Sludge',
+  },
+  bio_feeder: {
+    id: 'bio_feeder', name: 'Mutagen Paste', icon: '🩷', color: '#e690e0',
+    inputs: ['food', 'biomass'], output: 'mutagen_paste', labNodeId: 'recipe_bio_feeder',
+    description: 'Food + Biomass -> Mutagen Paste',
+  },
+  bio_combustor: {
+    id: 'bio_combustor', name: 'Blue Science', icon: '🔥', color: '#ff9f5a',
+    inputs: ['waste', 'biomass'], output: 'science', labNodeId: 'recipe_bio_combustor',
+    description: 'Waste + Biomass -> Blue Science',
   },
   alien_egg: {
     id: 'alien_egg', name: 'Alien Egg', icon: '🥚', color: '#c9a86b',
@@ -1524,12 +1556,12 @@ export const MANUFACTURER_RECIPE_LIST = Object.values(MANUFACTURER_RECIPES);
 // Per direct spec: "at base, manufacturers will take time to process each
 // type of item depending on what it's processing" — a flat per-ITEM-TYPE
 // duration, not a per-recipe one; a recipe's total cycle time is just the
-// sum of its 2 ingredients' own durations (e.g. Bio-Sludge: food 4s + waste
-// 2s = 6s total), since the two are processed one at a time in sequence
+// sum of its 2 ingredients' own durations (e.g. Bio-Sludge: food 8s + waste
+// 5s = 13s total), since the two are processed one at a time in sequence
 // (see updateBuildings — only one item may be absorbed/mid-process at once).
-// `science` added alongside the Alien Egg recipe, its one ingredient type
-// that didn't already have a duration here.
-export const MANUFACTURER_ITEM_PROCESS_MS = { waste: 2000, food: 4000, biomass: 8000, science: 6000 };
+// Retuned per a later direct request (was waste 2000/food 4000/biomass
+// 8000/science 6000).
+export const MANUFACTURER_ITEM_PROCESS_MS = { waste: 5000, food: 8000, biomass: 12000, science: 16000 };
 // Per direct request, the Manufacturer's power draw is no longer a flat
 // rate — it depends on WHICH ingredient it's currently processing (heavier
 // items cost more to crunch), drawn only while actively processing an
@@ -1559,7 +1591,7 @@ export const POWER_PLANT_RECIPES = {
     description: 'Food -> 20mw for 15s',
   },
   biomass: {
-    id: 'biomass', name: 'Biomass', icon: '🟤', color: '#c98a4b',
+    id: 'biomass', name: 'Biomass', icon: '🟩', color: BIOMASS_COLOR,
     inputs: ['biomass'], powerOutputMw: 40, durationMs: 20000, labNodeId: 'power_plant_biomass',
     description: 'Biomass -> 40mw for 20s',
   },
@@ -1818,7 +1850,7 @@ export const SCIENCE_LAB_UPGRADES = {
   // Bio-Sludge recipe, per direct spec; its Blue Science recipe is locked
   // behind Green Science Tech.
   power_plant_biomass: {
-    id: 'power_plant_biomass', name: 'Power Plant: Biomass', icon: '🟤', scienceCost: 50, goldCost: 10000,
+    id: 'power_plant_biomass', name: 'Power Plant: Biomass', icon: '🟩', scienceCost: 50, goldCost: 10000,
     requires: ['power_plant', 'recipe_bio_sludge'], grants: {},
   },
   // Requires Green Science Tech to be unlocked, so per direct request it

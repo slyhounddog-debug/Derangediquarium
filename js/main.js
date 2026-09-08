@@ -38,6 +38,7 @@ import {
   SCIENCE_GREEN_COLOR_B,
   ALIEN_DNA_COLOR,
   BIOMASS_COLOR,
+  BIOMASS_COLOR_CORE,
   MUTAGEN_PASTE_COLOR,
   CATALYST_FLASH_DURATION_MS,
   FOOD_STALE_FRACTION,
@@ -177,14 +178,14 @@ const ctx = canvas.getContext('2d');
 
 // Every flat-fill item type's own color — coin is the one exception (its
 // color is value-tier-derived via getCoinColor, checked separately), and
-// science/science_green get their own two-tone bubble treatment above this
-// lookup entirely. Bio-chain items (alien_dna, biomass, mutagen_paste)
-// slot into this exact same flat-fill render path Food/Waste already use.
+// science/science_green/biomass each get their own two-tone gradient
+// treatment above this lookup entirely. Bio-chain items still using the
+// plain flat-fill path (alien_dna, mutagen_paste) slot into this exact same
+// render Food/Waste already use.
 const ITEM_FLAT_COLOR_BY_TYPE = {
   food: FOOD_COLOR,
   waste: WASTE_COLOR,
   alien_dna: ALIEN_DNA_COLOR,
-  biomass: BIOMASS_COLOR,
   mutagen_paste: MUTAGEN_PASTE_COLOR,
   // alien_egg deliberately NOT listed here — it gets its own dedicated
   // render branch below (a countdown-to-hatch ring on top of the shell
@@ -1894,6 +1895,36 @@ function render() {
       ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
       ctx.beginPath();
       ctx.arc(pos.x - item.radius * 0.3, pos.y - item.radius * 0.3, item.radius * 0.28, 0, Math.PI * 2);
+      ctx.fill();
+      continue;
+    }
+
+    if (item.type === 'biomass') {
+      // A two-tone radial gradient — per direct request ("visually distinct
+      // and more interesting"), replacing the flat single-color fill every
+      // other Bio-chain item still gets below. The bright core is
+      // deliberately BIOMASS_COLOR_CORE, which IS Bio-Sludge's own
+      // ALIEN_DNA_COLOR — literally the same acid-green glowing at the
+      // center of a deeper, more "refined-looking" green shell, so the two
+      // read as pre/post-refined stages of the same material at a glance
+      // rather than just sharing a similar hue. Same gradient technique as
+      // the Science Bubble/Diamond coin's own special renders above.
+      const gradient = ctx.createRadialGradient(
+        pos.x - item.radius * 0.3, pos.y - item.radius * 0.3, item.radius * 0.1,
+        pos.x, pos.y, item.radius
+      );
+      gradient.addColorStop(0, BIOMASS_COLOR_CORE);
+      gradient.addColorStop(1, BIOMASS_COLOR);
+      ctx.beginPath();
+      ctx.fillStyle = gradient;
+      ctx.arc(pos.x, pos.y, item.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+      ctx.beginPath();
+      ctx.arc(pos.x - item.radius * 0.3, pos.y - item.radius * 0.3, item.radius * 0.26, 0, Math.PI * 2);
       ctx.fill();
       continue;
     }

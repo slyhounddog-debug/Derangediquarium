@@ -1080,6 +1080,10 @@ html, body {
 }
 .pause-btn:last-child { margin-bottom: 0; }
 .pause-btn:hover { transform: scale(1.03); background: linear-gradient(160deg, #fffaf3 0%, #ffd0e4 100%); }
+/* Per direct request — Continue Game stays visible but reads as clearly
+   unavailable (rather than disappearing outright) when there's no save. */
+.pause-btn:disabled { opacity: 0.45; cursor: not-allowed; filter: grayscale(0.6); transform: none; }
+.pause-btn:disabled:hover { transform: none; background: linear-gradient(160deg, #fffdf8 0%, #ffe0ee 100%); }
 #pause-resume-btn { background: linear-gradient(160deg, #a8f0cb 0%, #7ad4a8 100%); color: #1f4a34; box-shadow: 0 3px 8px rgba(53, 145, 97, 0.35), inset 0 2px 0 rgba(255, 255, 255, 0.5); }
 #pause-resume-btn:hover { background: linear-gradient(160deg, #97e8bd 0%, #68c896 100%); }
 
@@ -1293,7 +1297,10 @@ html, body {
 }
 
 #recipe-menu {
-  width: 300px;
+  width: 320px;
+  max-height: 74vh;
+  display: flex;
+  flex-direction: column;
   background: #fff8f0;
   color: #6b4c6b;
   border-radius: 21px;
@@ -1309,27 +1316,57 @@ html, body {
   transform: scale(0.05);
   opacity: 0;
 }
-#recipe-menu-title { font-size: 15px; font-weight: 800; color: #c25f8f; margin-bottom: 12px; }
-#recipe-menu-options { display: flex; gap: 10px; justify-content: center; }
+#recipe-menu-title { flex-shrink: 0; font-size: 15px; font-weight: 800; color: #c25f8f; margin-bottom: 12px; }
+/* Per direct request — each recipe now lays out horizontally (icon left,
+   name+description stacked to its right) and the whole list stacks
+   vertically, one per line, since a Manufacturer now has 5 recipes to show
+   at once (up from 3-4) — too many for a side-by-side row to fit
+   comfortably. Scrolls independently of the sticky stats footer below it
+   (#recipe-menu-stats) via its own overflow-y, capped by #recipe-menu's own
+   max-height above. */
+#recipe-menu-options {
+  display: flex; flex-direction: column; gap: 8px;
+  flex: 1 1 auto;
+  min-height: 0; /* required for overflow-y to actually constrain a flex child instead of just growing past #recipe-menu's own max-height */
+  overflow-y: auto;
+  padding-right: 4px;
+}
 .recipe-option {
-  flex: 1;
-  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  display: flex; flex-direction: row; align-items: center; gap: 10px;
   background: #f3e9dd; border: 2px solid transparent; border-radius: 14px;
-  padding: 10px 6px;
+  padding: 8px 10px;
+  text-align: left;
   cursor: pointer;
   transition: transform 0.1s ease, border-color 0.1s ease, background 0.1s ease;
 }
-.recipe-option:hover { transform: scale(1.04); }
+.recipe-option:hover { transform: scale(1.02); }
 .recipe-option.selected { border-color: var(--recipe-color, #8fe0b8); background: #eafaf1; }
 .recipe-option.locked { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
-.recipe-option-icon { font-size: 26px; }
+.recipe-option-icon { font-size: 26px; flex-shrink: 0; }
+.recipe-option-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .recipe-option-name { font-size: 11px; font-weight: 800; }
 .recipe-option-desc { font-size: 9.5px; color: #8a7a8a; line-height: 1.25; }
 /* The Manufacturer/Power Plant's own general stats (per-ingredient timing,
    power draw) — per direct request ("add in just the stats from the
    manufacturer into its recipe picker"), reusing buildingStatsHtml's exact
-   .building-stat chip output rather than a bespoke second copy of it. */
-#recipe-menu-stats { display: flex; flex-wrap: wrap; gap: 4px 8px; justify-content: center; margin-top: 12px; }
+   .building-stat chip output rather than a bespoke second copy of it.
+   "Sticky at the bottom of the popup" per direct request — achieved here
+   via plain flexbox rather than CSS position:sticky (which needs its OWN
+   scrolling ancestor to track against; this element is a plain SIBLING of
+   the scrolling #recipe-menu-options above, not a descendant of it, so
+   sticky positioning would have nothing to stick to). #recipe-menu itself
+   is the fixed-height flex column (max-height + overflow hidden by virtue
+   of #recipe-menu-options being the only child that scrolls, via its own
+   flex:1/min-height:0/overflow-y — see that rule's own comment); this
+   footer just sits after it as a flex-shrink:0 item, which reads as
+   "always visible at the bottom" for free with no scroll-tracking needed.
+   A top border visually separates it from the scrolling list above. */
+#recipe-menu-stats {
+  display: flex; flex-wrap: wrap; gap: 4px 8px; justify-content: center;
+  flex-shrink: 0;
+  padding-top: 10px; margin-top: 10px;
+  border-top: 1px solid rgba(107, 76, 107, 0.15);
+}
 
 /* Generic "what is this and what does it do" pop-up for any placed building
    — per direct request ("every building has a pop out modal kinda like the

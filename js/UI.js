@@ -763,15 +763,21 @@ function refreshRecipeMenu(state) {
     const icon = document.createElement('div');
     icon.className = 'recipe-option-icon';
     icon.textContent = recipe.icon;
+    // Name + description share a text column next to the icon now — per
+    // direct request, each recipe row lays out horizontally (icon on the
+    // left, text stacked to its right) instead of the old icon-on-top card.
+    const text = document.createElement('div');
+    text.className = 'recipe-option-text';
     const name = document.createElement('div');
     name.className = 'recipe-option-name';
     name.textContent = unlocked ? recipe.name : `🔒 ${recipe.name}`;
     const desc = document.createElement('div');
     desc.className = 'recipe-option-desc';
     desc.textContent = recipe.description;
+    text.appendChild(name);
+    text.appendChild(desc);
     optionEl.appendChild(icon);
-    optionEl.appendChild(name);
-    optionEl.appendChild(desc);
+    optionEl.appendChild(text);
     if (unlocked) {
       optionEl.addEventListener('click', () => toggleBuildingRecipe(state, recipeMenuTileKey, recipe.id));
     }
@@ -785,7 +791,7 @@ function refreshRecipeMenu(state) {
   // here (and only here — the shop/Lab preview keeps the plain range) per a
   // later direct request, since this is the one place ingredient choice
   // actually matters.
-  els.recipeMenuStats.innerHTML = buildingStatsHtml(data.type) + (isManufacturer ? manufacturerPowerBreakdownHtml() : '');
+  els.recipeMenuStats.innerHTML = isManufacturer ? manufacturerRecipeMenuStatsHtml() : buildingStatsHtml(data.type);
 }
 
 // Per direct request: "Add this stat into just the recipe modal" — the
@@ -797,7 +803,7 @@ function manufacturerPowerBreakdownHtml() {
   const p = MANUFACTURER_ITEM_POWER_COST_MW;
   return (
     `<div class="building-stat">🗑️ <b>${p.waste}</b>mw · 🍖 <b>${p.food}</b>mw</div>` +
-    `<div class="building-stat">🟤 <b>${p.biomass}</b>mw · 🔬 <b>${p.science}</b>mw</div>`
+    `<div class="building-stat">🟩 <b>${p.biomass}</b>mw · 🔬 <b>${p.science}</b>mw</div>`
   );
 }
 
@@ -1545,10 +1551,11 @@ function returnFromPauseSettings(state) {
 // doesn't reach into main.js directly, same one-directional import
 // discipline every other main.js/UI.js hookup in this file already follows.
 export function initStartScreen(state, onStart) {
-  // Continue Game only ever shows up if a save actually exists — checked
+  // Continue Game stays visible but grayed out/disabled unless a save
+  // actually exists — per direct request (was fully hidden before) — checked
   // once here at page load, not re-checked afterward (nothing can create a
   // save before the start screen is even up).
-  els.startContinueBtn.classList.toggle('hidden', !hasSaveGame());
+  els.startContinueBtn.disabled = !hasSaveGame();
   els.startNewGameBtn.addEventListener('click', () => {
     els.startOverlay.classList.add('hidden');
     playPanelClose();
@@ -2189,7 +2196,7 @@ function buildingStatsHtml(buildingId) {
   if (r) {
     const dnaS = (r.foodProcessMs * ALIEN_DNA_REFINERY_TIME_MULTIPLIER) / 1000;
     return (
-      `<div class="building-stat">🗑️➜🍖 <b>${r.foodProcessMs / 1000}s</b> · 🧬➜🟤 <b>${dnaS}s</b></div>` +
+      `<div class="building-stat">🗑️➜🍖 <b>${r.foodProcessMs / 1000}s</b> · 🧬➜🟩 <b>${dnaS}s</b></div>` +
       `<div class="building-stat">⚡ <b>${r.powerCostPerSec}</b> mw/sec</div>`
     );
   }
@@ -2197,22 +2204,38 @@ function buildingStatsHtml(buildingId) {
     // Per direct request, power now depends on which ingredient is being
     // processed (see MANUFACTURER_ITEM_POWER_COST_MW) — the shop/Lab
     // preview shows it as a plain min-max range; the recipe pop-up menu
-    // (manufacturerPowerBreakdownHtml, below) shows the full per-item
+    // (manufacturerRecipeMenuStatsHtml, below) shows the full per-item
     // breakdown instead, since that's the one place ingredient choice
     // actually matters.
     const rates = Object.values(MANUFACTURER_ITEM_POWER_COST_MW);
+    const p = MANUFACTURER_ITEM_PROCESS_MS;
     return (
-      `<div class="building-stat">🗑️ 2s · 🍖 4s · 🟤 8s per item</div>` +
+      `<div class="building-stat">🗑️ ${p.waste / 1000}s · 🍖 ${p.food / 1000}s · 🟩 ${p.biomass / 1000}s per item</div>` +
       `<div class="building-stat">Pick a recipe once placed · ⚡ <b>${Math.min(...rates)}-${Math.max(...rates)}</b> mw</div>`
     );
   }
   if (buildingId === TILE_POWER_PLANT) {
     return (
-      `<div class="building-stat">🍖➜20mw/15s · 🟤➜40mw/20s · 🔬➜100mw/30s</div>` +
+      `<div class="building-stat">🍖➜20mw/15s · 🟩➜40mw/20s · 🔬➜100mw/30s</div>` +
       `<div class="building-stat">Pick a fuel recipe once placed</div>`
     );
   }
   return '';
+}
+
+// The Manufacturer's own recipe pop-up (refreshRecipeMenu below) gets a
+// fuller, dedicated stats block instead of reusing buildingStatsHtml
+// verbatim — per direct request, it drops the "Pick a recipe once placed"
+// range line entirely (the shop/Lab preview above keeps it, unchanged) and
+// shows the exact per-item processing time for all 4 ingredient types (not
+// just the 3 the shop's own brief summary fits), plus the full power
+// breakdown.
+function manufacturerRecipeMenuStatsHtml() {
+  const p = MANUFACTURER_ITEM_PROCESS_MS;
+  return (
+    `<div class="building-stat">🗑️ ${p.waste / 1000}s · 🍖 ${p.food / 1000}s · 🟩 ${p.biomass / 1000}s · 🔬 ${p.science / 1000}s per item</div>` +
+    manufacturerPowerBreakdownHtml()
+  );
 }
 
 // A live, idling adult-stage fish (same drawFish the real tank uses)

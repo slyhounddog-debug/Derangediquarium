@@ -691,11 +691,25 @@ export function stepItemOnGrid(item, state, dt, physics) {
 // direction) — per an earlier direct request ("let's remove the arrows and
 // the need for a specific input side... will suck any appropriate item
 // touching it"), simple touch-proximity is all that's checked now.
+// Real bug, found and fixed after a direct report ("Powerplants... won't
+// accept food"): an item resting flush against a tile's surface — by FAR
+// the single most common way anything ever touches a building, since
+// that's exactly what "landed on it" physics produces — settles at a
+// position that is mathematically EXACTLY `half + itemRadius` away from
+// center, and floating-point rounding on that subtraction/hypot chain can
+// land a few ULPs on the wrong side of that exact boundary (confirmed
+// directly: a real settled Food item measured 6.600000000000023 against a
+// 6.6 radius, failing a strict `<=` by 2.3e-14). Once an item is at rest —
+// not moving, nothing left to nudge it back onto the "touching" side — that
+// failure is PERMANENT, not a one-tick fluke, so the intake silently never
+// fires again. TOUCH_EPSILON_PX is a small, deliberately generous tolerance
+// that absorbs both this exact float error and any similar near-miss.
+const TOUCH_EPSILON_PX = 0.5;
 function isTouchingBuildingTile(centerX, centerY, itemX, itemY, itemRadius) {
   const half = TILE_SIZE / 2;
   const dx = Math.max(Math.abs(itemX - centerX) - half, 0);
   const dy = Math.max(Math.abs(itemY - centerY) - half, 0);
-  return Math.hypot(dx, dy) <= itemRadius;
+  return Math.hypot(dx, dy) <= itemRadius + TOUCH_EPSILON_PX;
 }
 
 // Starts the same pull-to-center hold stepCollectorProcessing eases through
