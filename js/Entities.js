@@ -38,6 +38,7 @@ import {
   FISH_SPEED_MULTIPLIER,
   TAIL_WAG_RATE,
   COIN_TIMER_FEED_BONUS_FRACTION,
+  WASTE_TIMER_FEED_BONUS_FRACTION,
   SEABED_FLOOR_Y,
   FISH_MIN_X,
   FISH_MAX_X,
@@ -158,6 +159,13 @@ const pendingFoodToWasteSpawns = [];
 // { x, y, archetypeId } records here instead, flushed by updateEntities
 // right after its entities filter completes.
 const pendingBossMinionSpawns = [];
+
+// Same array-mutation-during-filter workaround as pendingBossMinionSpawns
+// above, for the turret tutorial's own "another alien instantly spawns"
+// moment (see updateAlien's death branch) — a single { x, y, hp,
+// archetypeId } record, flushed by updateEntities right after its own
+// entities.filter completes.
+const pendingTurretTutorialAlienSpawns = [];
 
 // state.level.cleanliness (0-100) — every Waste item that spawns costs
 // CLEANLINESS_PER_WASTE_EVENT, every one cleaned back up (a Scavenger fish
@@ -478,10 +486,27 @@ function updateAlien(alien, state, dtMs) {
       state.level.items.push(createAlienDna(jitterX, jitterY));
     }
     state.level.aliensKilledCount += 1; // end-game stats modal only — see main.js's showGameOverModal
-    // The very first alien ever killed starts the countdown to the
-    // post-alien "arm up" guided tutorial (Systems.js's updateStoryTriggers
-    // checks state.level.elapsed against this ALIEN_TUTORIAL_DELAY_MS later).
-    if (state.level.firstAlienKilledAtMs === null) state.level.firstAlienKilledAtMs = state.level.elapsed;
+    // The very first alien ever killed triggers the turret tutorial's own
+    // cinematic setup, per direct spec ("right after they kill the first
+    // alien, another one instantly spawns, and 1 second later it triggers
+    // the turret tutorial... so you instantly see the benefits of the
+    // turret"): a fresh Tier-1 alien is queued (pendingTurretTutorialAlienSpawns
+    // — same array-mutation-during-filter workaround pendingBossMinionSpawns
+    // already uses, since this runs inside updateEntities' own
+    // entities.filter callback) and `turretTutorialAlienAppearedAtMs` is set
+    // the instant it's actually flushed into a real entity, below — Systems.js's
+    // updateTurretTutorialTrigger starts the 'postalien' flow
+    // TURRET_TUTORIAL_DELAY_MS after that.
+    if (state.level.firstAlienKilledAtMs === null) {
+      state.level.firstAlienKilledAtMs = state.level.elapsed;
+      const archetype = ALIEN_ARCHETYPES[0]; // Tier 1 — same gentle intro tier the very first wave's own lone alien already uses
+      pendingTurretTutorialAlienSpawns.push({
+        x: FISH_MIN_X + Math.random() * (FISH_MAX_X - FISH_MIN_X),
+        y: FISH_MIN_Y + Math.random() * (SEABED_FLOOR_Y * 0.7 - FISH_MIN_Y),
+        hp: archetype.hpMin + Math.floor(Math.random() * (archetype.hpMax - archetype.hpMin + 1)),
+        archetypeId: archetype.id,
+      });
+    }
     // Per direct request ("so you don't accidentally place 4 food after
     // killing a fish"): Food can't be placed for ALIEN_FOOD_BLOCK_DURATION_MS
     // within what was the alien's own clickable radius — a rapid-click kill
@@ -493,6 +518,16 @@ function updateAlien(alien, state, dtMs) {
     state.level.alienFoodBlockZones.push({ x: alien.x, y: alien.y, expiresAtMs: state.level.elapsed + ALIEN_FOOD_BLOCK_DURATION_MS });
     return false;
   }
+  // Frozen in place for the whole duration of the turret tutorial (its full
+  // 'postalien' walkthrough AND the standalone 'wastedrag' fallback) — per
+  // direct request ("make sure the alien and everything is paused during
+  // the turret tutorial"). Placed after the hp<=0 death branch above (so a
+  // kill still processes normally if it somehow happens) but before
+  // everything else — no movement, no attacking, no poop timer — so the
+  // demo alien sits still as a safe, guaranteed target until the player
+  // actually finishes arming the turret on it.
+  const tutorialFlow = state.level.tutorialFlow;
+  if (tutorialFlow && (tutorialFlow.id === 'postalien' || tutorialFlow.id === 'wastedrag')) return true;
   const dt = dtMs / 1000;
 
   if (alien.hitFlashMs > 0) alien.hitFlashMs = Math.max(0, alien.hitFlashMs - dtMs);
@@ -2005,6 +2040,14 @@ function updateFish(fish, state, dtMs) {
           // Scavenger (it doesn't use dropTimer at all — see the eat-cooldown
           // branch above), so skipped for it.
           if (!isScavenger) fish.dropTimer += def.growthStages[fish.stage].dropInterval * COIN_TIMER_FEED_BONUS_FRACTION;
+          // Same idea for the Waste poop timer, per direct request ("food
+          // fills up the waste meter of a fish by 25%, if the fish produces
+          // waste") — only meaningful for a fish that actually poops
+          // (non-Scavenger, same condition as updateFish's own poop-timer
+          // branch below), using that exact same per-species interval
+          // formula so the bonus fraction always applies to the fish's real
+          // current cycle length, not a flat guess.
+          if (!isScavenger) fish.poopTimer += WASTE_POOP_INTERVAL_MS * (def.wastePoopIntervalMultiplier || 1) * WASTE_TIMER_FEED_BONUS_FRACTION;
           fish.totalFeeds += 1;
           const wasAdult = fish.stage === def.growthStages.length - 1;
           const prevStage = fish.stage;
@@ -2439,6 +2482,7 @@ export function updateEntities(state, dtMs) {
   state.level.floatingTexts = state.level.floatingTexts.filter((ft) => updatePickupText(ft, dtMs));
 
   pendingBossMinionSpawns.length = 0; // updateAlien (below) fills this — see that array's own comment for why it can't push into state.level.entities directly
+  pendingTurretTutorialAlienSpawns.length = 0;
   state.level.entities = state.level.entities.filter((entity) => {
     if (entity.type === 'fish') return updateFish(entity, state, dtMs);
     if (entity.type === 'alien') return updateAlien(entity, state, dtMs);
@@ -2446,5 +2490,12 @@ export function updateEntities(state, dtMs) {
   });
   for (const spawn of pendingBossMinionSpawns) {
     state.level.entities.push(createAlien(spawn.x, spawn.y, spawn.hp, spawn.archetypeId));
+  }
+  for (const spawn of pendingTurretTutorialAlienSpawns) {
+    state.level.entities.push(createAlien(spawn.x, spawn.y, spawn.hp, spawn.archetypeId));
+    // The 1-second countdown to the turret tutorial starts from the moment
+    // this alien genuinely exists on screen, not from the moment its
+    // predecessor died — see Systems.js's updateTurretTutorialTrigger.
+    state.level.turretTutorialAlienAppearedAtMs = state.level.elapsed;
   }
 }

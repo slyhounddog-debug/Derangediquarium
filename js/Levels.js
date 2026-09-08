@@ -76,8 +76,7 @@ export function loadLevel(state, levelId) {
     buildingData: {}, // sparse "row,col" -> { type, angle, ... } map for buildings that need per-instance data the grid's bare type-id strings can't hold (Fans' aim angle, Refinery/Manufacturer/Power Plant's absorb/process/recipe state) — see Grid.js's placeTile/removeTile
     gridStats: { itemsRoutedTotal: 0 }, // lifetime count of items consumed by a Collector tile, for the debug overlay's throughput readout
     tier: 1, // 1-5, Mound-driven progression — see Mound.js and CLAUDE.md's "Tier Progression & The Mound"; level-scoped like everything else here, even though the meta-unlocks a previous crack granted stay permanent
-    moundTeased: false, // has the Mound's first "throw money" attempt already happened this level? — see Mound.js's crackMound/getMoundNextCost. A pure no-op joke again — the Rudimentary Fan moved to its own paid "Tier 1.75" step below, per direct request
-    fanUnlockPurchased: false, // "Tier 1.75" — the $500 step (after the tease, before the real Tier 1->2 crack) that grants ONLY the Rudimentary Fan — see Mound.js's crackMound/getMoundNextCost and Config.js's FAN_UNLOCK_COST
+    moundTeased: false, // has the Mound's first "throw money" attempt already happened this level? — see Mound.js's crackMound/getMoundNextCost. A pure no-op joke — the Rudimentary Fan is unlocked from level start now (see Config.js's BUILDING_TYPES), no paid step needed for it any more
     notifications: [{ id: 1, text: WELCOME_MESSAGE, elapsed: 0 }], // rolling log for UI.js's ticker — { id, text, elapsed }, capped at NOTIFICATION_LOG_MAX. Seeded with the welcome message as a real entry (not a UI fallback) so it survives in the scrollback log
     tankPoints: { total: 0, available: 0 }, // earned by Entities.js on fish adult-growth transitions, spent in UI.js's Tank Upgrades panel — see CLAUDE.md's "Tank Points & Tank Upgrades"
     upgrades: { foodQuality: 0, fishMovement: 0, coinCapLevel: 0, scienceCapLevel: 0 }, // purchased Tank Upgrade levels, 0 = not yet bought; read live by Entities.js, not baked into fish/food at creation time. Fish Merging is no longer gated by a Tank Upgrade at all — see Entities.js's isCombinableFish. coinCapLevel is a Tank Upgrade (COIN_CAP_UPGRADE_COSTS); scienceCapLevel is bought in the Science Lab instead (SCIENCE_CAP_UPGRADE_SCIENCE_COSTS/_GOLD_COSTS) but lives here alongside it since both index the same way into their own *_CAP_BY_LEVEL table. foodCapacity retired entirely — see Config.js's FOOD_STATIONARY_TO_WASTE_MS
@@ -138,7 +137,8 @@ export function loadLevel(state, levelId) {
     // clip-path "hole" to physically restrict clicks to whatever this step's
     // target is, so no separate click-swallowing logic is needed elsewhere.
     tutorialFlow: null,
-    firstAlienKilledAtMs: null, // set once, the instant the very first alien ever dies (Entities.js's updateAlien) — Systems.js's updateStoryTriggers starts the post-alien tutorial flow ALIEN_TUTORIAL_DELAY_MS after this
+    firstAlienKilledAtMs: null, // set once, the instant the very first alien ever dies (Entities.js's updateAlien) — that same moment also queues a fresh replacement alien to spawn (see pendingTurretTutorialAlienSpawns)
+    turretTutorialAlienAppearedAtMs: null, // set the instant that replacement alien actually spawns (Entities.js's updateEntities) — Systems.js's updateTurretTutorialTrigger starts the turret tutorial TURRET_TUTORIAL_DELAY_MS after this, with the alien on screen the whole time
     // Alien Invasion (see Config.js's ALIEN_* constants, Systems.js's updateAlienWaves,
     // Entities.js's createAlien/updateAlien) — all level-scoped/reset on restart like
     // everything else here. alienNextWaveAtMs is an absolute state.level.elapsed target,

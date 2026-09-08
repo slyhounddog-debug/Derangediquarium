@@ -82,6 +82,9 @@ import {
   BOSS_SHAKE_MAGNITUDE_PX,
   BOSS_FLASH_DURATION_MS,
   BOSS_DEFEATED_MODAL_DELAY_MS,
+  TURRET_TUTORIAL_GOLD_GRANT,
+  TURRET_TUTORIAL_GOLD_GRANT_MESSAGE,
+  NOTIFICATION_LOG_MAX,
 } from './Config.js';
 import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop } from './Engine.js';
 import { loadLevel, LEVELS } from './Levels.js';
@@ -161,6 +164,7 @@ import {
   initStartScreen,
   scheduleShopButtonReminder,
   cancelActiveTool,
+  togglePauseMenu,
   advanceTutorialFlow,
   closeSidePanels,
   tutorialScrollDirectionNeeded,
@@ -966,12 +970,12 @@ input.keydownHandlers.push((e) => {
   // click-through "hole" is the only interaction that should work.
   if (state.level.tutorialFlow) return;
   if (e.code === 'Escape') {
-    // Per direct request, Escape no longer opens the pause menu — that's now
-    // the dedicated #pause-toggle-btn button (top-right, below the HUD).
-    // Escape's new job: close whatever popup is on top (or the Shop/Tank
+    // Escape's job: close whatever popup is on top (or the Shop/Tank
     // Upgrades panel, if one's open), and cancel an armed build/demolish/
-    // merge tool back to Food. A no-op beyond that if none of those apply
-    // (Food or a fish selection stay armed).
+    // merge tool back to Food. Per direct request, if NONE of that applies —
+    // no popup open, no panel open, Food already selected — it toggles the
+    // pause menu instead (on top of the dedicated #pause-toggle-btn button,
+    // not replacing it), so Escape is never just a silent no-op.
     if (isMoundMenuOpen()) { closeMoundMenu(); return; }
     if (isRecipeMenuOpen()) { closeRecipeMenu(); return; }
     if (isBuildingInfoMenuOpen()) { closeBuildingInfoMenu(); return; }
@@ -982,8 +986,13 @@ input.keydownHandlers.push((e) => {
       cancelActiveTool(state); // ...and the armed Fan tool itself, back to Food — a Fan is still a "building selected" per direct request
       return;
     }
-    closeSidePanels(state); // per direct request — Escape also closes the Shop/Tank Upgrades panel if one's open
-    cancelActiveTool(state);
+    const somethingSelected = state.ui.selectedTool !== 'food' || !state.ui.shopCollapsed || !state.ui.tankPanelCollapsed;
+    if (somethingSelected) {
+      closeSidePanels(state); // per direct request — Escape also closes the Shop/Tank Upgrades panel if one's open
+      cancelActiveTool(state);
+      return;
+    }
+    togglePauseMenu(state);
     return;
   }
   if (state.ui.paused) return; // swallow every other key while the pause menu is open
@@ -1068,23 +1077,12 @@ input.keydownHandlers.push((e) => {
       break;
     }
     case 'KeyN': { // force-crack the Mound to the next real tier, free
-      // Previously pre-set moundTeased/fanUnlockPurchased to true and called
-      // crackMound() once — but crackMound's own grant branches are each
-      // gated on the matching flag still being FALSE
-      // (`!state.level.fanUnlockPurchased`, etc.), so forcing them true
-      // first made every one of those branches skip itself, and crackMound
-      // fell straight through to a bare tier increment with nothing
-      // granted. That silently ate the Rudimentary Fan grant every time this
-      // cheat was used — a real bug, not just a testing quirk, since it made
-      // the debug cheat lie about what a real playthrough actually unlocks.
-      // Fixed by calling the REAL crackMound() repeatedly (topping up money
-      // before each call so affordability is never the blocker) until the
-      // tier genuinely advances — this walks through the tease/Fan-grant
-      // sub-steps for real, exactly like a player clicking the Mound
-      // several times would, with zero duplicated knowledge of what each
-      // step grants. (The old "Tier 2.5" Auto-Feeder-unlock sub-step this
-      // comment used to also mention is gone entirely, along with the
-      // Auto-Feeder — see Mound.js's getMoundNextCost/crackMound.)
+      // Calls the REAL crackMound() repeatedly (topping up money before each
+      // call so affordability is never the blocker) until the tier genuinely
+      // advances — this walks through the tease and any other paid sub-step
+      // for real, exactly like a player clicking the Mound several times
+      // would, with zero duplicated knowledge of what each step grants. See
+      // Mound.js's getMoundNextCost/crackMound for the current sequence.
       const startTier = state.level.tier;
       let guard = 0;
       while (state.level.tier === startTier && state.level.tier < MOUND_MAX_TIER && guard < 10) {
@@ -1356,6 +1354,15 @@ function update(dtMs) {
     // started).
     if (state.level.tutorialFlow.id === 'postalien' && state.level.tutorialFlow.step === 'scroll' && isScrolledToBottom(state)) {
       state.level.tutorialFlow.step = 'place';
+      // Per direct request — a one-time gift the instant this step begins,
+      // guaranteeing the Waste Turret is affordable regardless of how the
+      // player already spent their starting money; naturally one-shot since
+      // this whole branch only ever fires once, on the 'scroll' -> 'place'
+      // transition itself.
+      state.level.money += TURRET_TUTORIAL_GOLD_GRANT;
+      const notifications = state.level.notifications;
+      notifications.push({ id: notifications.length + 1, text: TURRET_TUTORIAL_GOLD_GRANT_MESSAGE, elapsed: state.level.elapsed });
+      if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
     }
     // The "drag Waste into the Turret" step needs the WHOLE simulation
     // running normally, not just camera/build-drag like every other step's

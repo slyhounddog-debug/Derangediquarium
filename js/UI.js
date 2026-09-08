@@ -215,6 +215,8 @@ export function initUI(state) {
     cleanliness: document.getElementById('hud-cleanliness'),
     waves: document.getElementById('hud-waves'),
     power: document.getElementById('hud-power'),
+    powerText: document.getElementById('hud-power-text'),
+    powerArrow: document.getElementById('hud-power-arrow'),
     powerGraph: document.getElementById('hud-power-graph'),
     alienCountdown: document.getElementById('alien-countdown'),
     alienCountdownWave: document.getElementById('alien-countdown-wave'),
@@ -437,6 +439,7 @@ export function initUI(state) {
   els.power.addEventListener('click', () => {
     powerGraphOpen = !powerGraphOpen;
     els.powerGraph.classList.toggle('hidden', !powerGraphOpen);
+    els.powerArrow.classList.toggle('open', powerGraphOpen); // flips the chevron to point up while the graph is showing
     if (powerGraphOpen) renderPowerGraph(state);
     (powerGraphOpen ? playPanelOpen : playPanelClose)();
   });
@@ -2568,11 +2571,12 @@ export function updateHUD(state) {
   if (eelUnlocked) {
     const history = state.level.powerHistory;
     const last = history[history.length - 1];
-    els.power.textContent = last ? `⚡ ${last.demand}/${last.supply} mw` : '⚡ 0/0 mw';
+    els.powerText.textContent = last ? `⚡ ${last.demand}/${last.supply} mw` : '⚡ 0/0 mw';
     if (powerGraphOpen) renderPowerGraph(state);
   } else if (powerGraphOpen) {
     powerGraphOpen = false;
     els.powerGraph.classList.add('hidden');
+    els.powerArrow.classList.remove('open');
   }
 
   refreshPreviewInfo(state);
@@ -2864,7 +2868,7 @@ const TUTORIAL_FLOWS = {
     { id: 'scroll', text: 'Scroll all the way down to the bottom of the tank!', tool: `build:${TILE_TURRET_WASTE}`, noSpotlight: true },
     {
       id: 'place',
-      text: 'Place the Waste Turret down here!',
+      text: 'Place the Waste Turret down here! (Here’s 25 gold to cover it.)',
       tool: `build:${TILE_TURRET_WASTE}`,
       getCircle: (state) => {
         const screen = worldToScreen(POST_ALIEN_TURRET_SPOT.x, POST_ALIEN_TURRET_SPOT.y, state.camera);

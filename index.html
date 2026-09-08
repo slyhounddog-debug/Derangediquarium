@@ -52,7 +52,10 @@
   <div id="hud-cleanliness" class="sheen-target" title="Tank cleanliness — a dirty tank stresses your fish: they get hungrier faster and produce money less often">✨ 100%</div>
   <div id="hud-waves" class="sheen-target hidden" title="Alien waves survived so far">👽 Wave 0</div>
   <div id="hud-power-wrap">
-    <button id="hud-power" class="sheen-target hidden" title="Electricity — current draw / accumulated capacity. Click for a rolling graph.">⚡ 0/0 mw</button>
+    <button id="hud-power" class="sheen-target hidden" title="Electricity — current draw / accumulated capacity. Click for a rolling graph.">
+      <span id="hud-power-text">⚡ 0/0 mw</span>
+      <span id="hud-power-arrow">▾</span>
+    </button>
     <div id="hud-power-graph" class="hidden"><canvas id="hud-power-graph-canvas" width="220" height="90"></canvas></div>
   </div>
 </div>
@@ -129,7 +132,7 @@
   <div id="mound-menu-anchor">
     <div id="mound-menu">
       <div id="mound-title">Throw money at it</div>
-      <button id="mound-throw-btn" class="mound-throw-btn">$150</button>
+      <button id="mound-throw-btn" class="mound-throw-btn">$75</button>
       <button id="mound-cancel-btn" class="pause-btn">Cancel</button>
     </div>
   </div>

@@ -21,8 +21,6 @@ import {
   MOUND_HEIGHT_PX,
   TIER_UNLOCKS,
   NOTIFICATION_LOG_MAX,
-  TILE_FAN_T2,
-  FAN_UNLOCK_COST,
 } from './Config.js';
 import { worldToScreen } from './Engine.js';
 import { createShimmerTimer, updateShimmerTimer, drawShimmerSweep } from './Shimmer.js';
@@ -50,18 +48,13 @@ export function centerCameraOnMound(camera) {
   camera.x = Math.max(0, Math.min(MOUND_X - camera.viewWidth / 2, maxX));
 }
 
-// The Tier 1.5 "tease" — a pure joke again, per direct request: the
-// Rudimentary Fan moved off this step entirely, onto its own paid "Tier
-// 1.75" step below (MOUND_FAN_UNLOCK_MESSAGE) — so the very first "throw
-// money" attempt goes back to spending $150 for nothing but a punchline.
-const MOUND_TEASE_MESSAGE = "You throw $150 at a suspicious lump of dirt. Nothing happens. Absolutely nothing. You have been scammed by a rock.";
-
-// "Tier 1.75" — the new real reward the tease used to grant directly: a
-// second, separately-priced attempt (after the tease, before the actual
-// Tier 1->2 crack) that costs FAN_UNLOCK_COST ($500) and grants only the
-// Rudimentary Fan, still without advancing state.level.tier — see
-// getMoundNextCost/crackMound below and Config.js's FAN_UNLOCK_COST.
-const MOUND_FAN_UNLOCK_MESSAGE = "You throw another $500 at the same lump of dirt, out of spite this time. Something's fishy... and it works! A crack splits open and a Rudimentary Fan flops out, blades already spinning. Turns out bribery works on geology too — you just had to pay full price.";
+// The Tier 1.5 "tease" — a pure joke, per direct request: the Rudimentary
+// Fan is granted from level start now (BUILDING_TYPES[TILE_FAN_T2].
+// unlockedByDefault, alongside Platform/Waste Turret — see Config.js), so
+// there's no longer a paid "Tier 1.75" step to grant it separately. The
+// very first "throw money" attempt is still just a punchline, at the
+// reduced MOUND_TEASE_COST ($75, cut from $150 per direct request).
+const MOUND_TEASE_MESSAGE = `You throw $${MOUND_TEASE_COST} at a suspicious lump of dirt. Nothing happens. Absolutely nothing. You have been scammed by a rock.`;
 
 // Per direct request, the Mound is a short on-ramp now, not the game's
 // whole arc — it only ever grants Octopus/Processor/Refinery (Tier 2)
@@ -79,29 +72,25 @@ function pushNotification(state, text) {
   if (state.level.notifications.length > NOTIFICATION_LOG_MAX) state.level.notifications.shift();
 }
 
-// Three distinct steps sit across the first real tier, per direct request:
+// Two steps sit across the first real tier, per direct request (the old
+// paid "Tier 1.75" Fan-unlock sub-step is gone entirely — the Rudimentary
+// Fan is free from level start now, see Config.js's BUILDING_TYPES):
 // (1) the Tier 1.5 "tease" (MOUND_TEASE_COST, a pure joke — does nothing),
-// (2) "Tier 1.75" (FAN_UNLOCK_COST, grants ONLY the Rudimentary Fan), then
-// (3) the real Tier 1->2 crack (MOUND_CRACK_COST[1], grants the Processor +
-// Refinery + Octopus). The old "Tier 2.5" paid sub-step (which used to grant
-// only the Auto-Feeder) is gone along with the Auto-Feeder itself — the real
-// Tier 2->3 crack (MOUND_CRACK_COST[2]) now follows directly.
+// then (2) the real Tier 1->2 crack (MOUND_CRACK_COST[1], grants the
+// Collector + Refinery + Octopus). The real Tier 2->3 crack
+// (MOUND_CRACK_COST[2]) follows directly after that.
 export function getMoundNextCost(state) {
   const tier = state.level.tier;
   if (tier === 1 && !state.level.moundTeased) return MOUND_TEASE_COST;
-  if (tier === 1 && !state.level.fanUnlockPurchased) return FAN_UNLOCK_COST;
   return MOUND_CRACK_COST[tier];
 }
 
 // How many crack lines should currently be visible on the dome. Driven by
-// every real money-spend milestone EXCEPT the pure-joke $150 tease (which
-// grants nothing and shouldn't visibly damage the mound at all) — the Fan
-// unlock ($500) and the real Tier 1->2 crack ($1000) each add one.
+// every real money-spend milestone EXCEPT the pure-joke tease (which grants
+// nothing and shouldn't visibly damage the mound at all) — the real Tier
+// 1->2 crack is the only one left now that the Fan-unlock sub-step is gone.
 export function getMoundCrackCount(state) {
-  let count = 0;
-  if (state.level.fanUnlockPurchased) count++;
-  if (state.level.tier >= 2) count++;
-  return count;
+  return state.level.tier >= 2 ? 1 : 0;
 }
 
 export function canCrackMound(state) {
@@ -118,13 +107,6 @@ export function crackMound(state) {
     state.level.moundTeased = true;
     pushNotification(state, MOUND_TEASE_MESSAGE);
     return true; // money spent, nothing granted — the tier does NOT advance
-  }
-
-  if (state.level.tier === 1 && !state.level.fanUnlockPurchased) {
-    state.level.fanUnlockPurchased = true;
-    if (!state.meta.buildingsUnlocked.includes(TILE_FAN_T2)) state.meta.buildingsUnlocked.push(TILE_FAN_T2);
-    pushNotification(state, MOUND_FAN_UNLOCK_MESSAGE);
-    return true; // money spent, Fan granted — still no tier advance
   }
 
   state.level.tier += 1;

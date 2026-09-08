@@ -783,6 +783,13 @@ export const FOOD_HUNGER_RELIEF_BY_LEVEL = [55, 65, 75, 85, 100, 115]; // index 
 // waiting. TODO(later phase): restrict this bonus to manually-dropped food
 // only, once automated feeders exist, to keep active play worth doing.
 export const COIN_TIMER_FEED_BONUS_FRACTION = 0.5;
+// Same idea, for a non-Scavenger fish's Waste poop timer — per direct
+// request ("make it so that food fills up the waste meter of a fish by
+// 25%, if the fish produces waste, similar to how food also makes money
+// produce faster"). Deliberately a separate, smaller fraction from the
+// coin-timer bonus above (25%, not 50%) — feeding shouldn't speed up
+// dirtying the tank as much as it speeds up getting paid.
+export const WASTE_TIMER_FEED_BONUS_FRACTION = 0.25;
 // Design rule: no species should reach the seek-threshold faster than every
 // 13.2s (i.e. hungerRate should stay <= HUNGER_SEEK_THRESHOLD/13.2 = 3.56).
 // hungerRate is flat per species now (growth stage no longer accelerates
@@ -1254,7 +1261,7 @@ export const BUILDING_TYPES = {
   [TILE_FAN_T2]: {
     id: TILE_FAN_T2, name: 'Rudimentary Fan', icon: '🌀', cost: 15,
     description: `Blows a cone of force wherever you aim it. Free, but short reach (${FAN_T2_MAX_RANGE}px) and weak — struggles to lift a coin.`,
-    color: '#9fd8ff', unlockedByDefault: false,
+    color: '#9fd8ff', unlockedByDefault: true, // per direct request — no longer gated behind the Mound's old paid "Tier 1.75" step, available from level start alongside Platform/Waste Turret
   },
   [TILE_FAN_T3]: {
     id: TILE_FAN_T3, name: 'Electric Fan', icon: '💨', cost: 45,
@@ -1609,27 +1616,17 @@ export const PROCESS_DOTS_COUNT = 4;
 // tied to Mound progress at all. MOUND_MAX_TIER dropped from 4 to 3
 // accordingly.
 export const MOUND_MAX_TIER = 3; // reaching this shatters the Mound completely into the Science Lab instead of cracking further
-export const MOUND_TEASE_COST = 150; // unchanged — the tease is still a Tier 1 no-op regardless of how many tiers exist above it
-// "Tier 1.75" — a paid step between the tease and the real Tier 1->2 crack:
-// $500, grants ONLY the Rudimentary Fan, still without advancing
-// state.level.tier. Tracked by state.level.fanUnlockPurchased (Levels.js),
-// checked the same way moundTeased already is — see Mound.js's
-// getMoundNextCost/crackMound.
-export const FAN_UNLOCK_COST = 500;
-// "Tier 2.5" (a paid sub-step that used to sit here, granting only the
-// Auto-Feeder) is gone — removed along with the Auto-Feeder itself, per
-// direct request. The Mound's own paid steps are back down to just the
-// tease and the Tier 1.75 Fan unlock before each real tier crack.
-export const MOUND_CRACK_COST = { 1: 1000, 2: 5000 }; // 1: Tier 1->2 (Processor + Refinery + Octopus); 2: Tier 2->3 (shatters into the Science Lab, grants nothing directly)
+export const MOUND_TEASE_COST = 75; // cut from 150 per direct request — still a pure Tier 1 no-op joke, just cheaper
+// The old paid "Tier 1.75" step (FAN_UNLOCK_COST, $500, granted ONLY the
+// Rudimentary Fan) is gone entirely, per direct request — the Rudimentary
+// Fan is unlocked from level start now instead (BUILDING_TYPES'
+// unlockedByDefault, alongside Platform/Waste Turret, below).
+export const MOUND_CRACK_COST = { 1: 500, 2: 5000 }; // 1: Tier 1->2 (Collector + Refinery + Octopus), cut from 1000 per direct request; 2: Tier 2->3 (shatters into the Science Lab, grants nothing directly)
 export const MOUND_WIDTH_TILES = 4.4; // how many seabed tiles wide its clickable footprint is — 10% bigger than the original 4
 export const MOUND_HEIGHT_PX = 62; // how far it mounds up above the seabed surface — 10% bigger than the original 56
-// Platform itself is NOT tier-gated at all — see BUILDING_TYPES'
-// unlockedByDefault above — per direct request it's available from level
-// start rather than waiting on any crack (unrelated to whether anything
-// else needs to anchor to it — see canPlaceTile's own comment). The
-// Rudimentary Fan isn't granted by a
-// TIER_UNLOCKS entry at all — it's granted by the Mound's paid "Tier 1.75"
-// step (FAN_UNLOCK_COST, $500) — see Mound.js's getMoundNextCost/crackMound.
+// Platform, the Waste Turret, and the Rudimentary Fan are all NOT tier-gated
+// at all — see BUILDING_TYPES' unlockedByDefault below — per direct request
+// each is available from level start rather than waiting on any crack.
 export const TIER_UNLOCKS = {
   2: {
     species: ['octopus'], // per direct request — Octopus moved off the Science Lab (it's the one utility species that doesn't gate anything ELSE in the Lab's tree) onto the Mound itself, so the Lab's tree starts truly empty and every one of its 8 nodes is a real choice
@@ -2165,7 +2162,24 @@ export const NOTIFICATION_LOG_MAX = 50; // oldest entries drop off past this man
 // else in this file, even though their triggers live in several modules.
 export const BANKRUPTCY_BAILOUT_AMOUNT = 100; // $ granted the first time the player has no fish left AND can't afford anything in the shop — see Systems.js's updateStoryTriggers
 export const MONEY_MILESTONE_1K = 1000; // lifetime money EARNED (not current balance) that triggers the one-time "save some for the fishes" notification — see Entities.js's bankMoney
-export const ALIEN_TUTORIAL_DELAY_MS = 10000; // 10s of state.level.elapsed after the first alien is ever killed (Entities.js's updateAlien sets state.level.firstAlienKilledAtMs) before the post-alien "arm up" guided tutorial starts — see Systems.js's updateStoryTriggers
+// Per direct request ("right after they kill the first alien, another one
+// instantly spawns, and 1 second later it triggers the turret tutorial...
+// so you instantly see the benefits of the turret") — replaces the old
+// flat 10s-after-first-kill delay (which fired with no alien necessarily
+// still on screen) with a much shorter delay timed off the REPLACEMENT
+// alien's own appearance instead (Entities.js's updateEntities sets
+// state.level.turretTutorialAlienAppearedAtMs the instant it spawns) — see
+// Systems.js's updateTurretTutorialTrigger.
+export const TURRET_TUTORIAL_DELAY_MS = 1000;
+// Per direct request ("give the player 25 gold right at the step of the
+// tutorial where they buy the turret... make sure to mention it in the
+// text") — granted the instant the 'postalien' flow's 'scroll' step
+// resolves into its 'place' step (main.js's update()), matching the Waste
+// Turret's own base cost (BUILDING_TYPES[TILE_TURRET_WASTE].cost) exactly,
+// so the step is always affordable regardless of how the player already
+// spent their starting money.
+export const TURRET_TUTORIAL_GOLD_GRANT = 25;
+export const TURRET_TUTORIAL_GOLD_GRANT_MESSAGE = "Here's 25 gold — go place that turret.";
 export const ALIEN_INTRO_DELAY_MS = 1000; // per direct request, the cinematic first-alien intro no longer triggers the instant the alien spawns — it has to actually be alive and visibly moving on screen for this long first (Entities.js's updateAlienPortals records when it appeared; Systems.js's updateStoryTriggers checks this delay before starting the 'alienintro' guided-tutorial flow)
 export const ALIEN_FOOD_BLOCK_DURATION_MS = 1000; // per direct request ("so you don't accidentally place 4 food after killing a fish") — Food can't be placed within a just-killed alien's old click radius for this long; see Entities.js's trySpawnFood/isInAlienFoodBlockZone
 export const WASTE_DRAG_TUTORIAL_WAIT_MS = 1000; // per direct request — if the player already placed a Waste Turret before the post-alien tutorial would fire, it waits this long after Waste first appears in the city before teaching just the "drag Waste into it" step — see Systems.js's updatePostAlienTutorial

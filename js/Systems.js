@@ -11,7 +11,7 @@
 import {
   FOOD_COST,
   BANKRUPTCY_BAILOUT_AMOUNT,
-  ALIEN_TUTORIAL_DELAY_MS,
+  TURRET_TUTORIAL_DELAY_MS,
   ALIEN_INTRO_DELAY_MS,
   WASTE_DRAG_TUTORIAL_WAIT_MS,
   NOTIFICATION_LOG_MAX,
@@ -129,46 +129,52 @@ function updateMergeTutorialTrigger(state) {
 }
 
 // Starts the post-alien "arm up" guided tutorial (Shop -> Waste Turret ->
-// scroll -> place — see UI.js's TUTORIAL_FLOWS) ALIEN_TUTORIAL_DELAY_MS
-// after the very first alien ever dies. Gated the same one-time way every
-// other tutorial trigger is, and deferred while any OTHER tutorial flow is
-// already active (the tank-point tutorial, most likely, if the player
-// happened to grow a fish to adulthood around the same time) rather than
-// stomping it — this check just runs again next tick until that clears.
+// scroll -> place — see UI.js's TUTORIAL_FLOWS) TURRET_TUTORIAL_DELAY_MS
+// after the REPLACEMENT alien Entities.js spawns the instant the first
+// alien ever dies (state.level.turretTutorialAlienAppearedAtMs) — per
+// direct request ("right after they kill the first alien, another one
+// instantly spawns, and 1 second later it triggers the turret tutorial...
+// so you instantly see the benefits of the turret"), replacing the old flat
+// 10-second-after-the-kill delay entirely. One-shot: consumes
+// turretTutorialAlienAppearedAtMs back to null the moment this resolves
+// (mirrors updateAlienIntroTrigger's own one-shot shape above), and deferred
+// while any OTHER tutorial flow is already active rather than stomping it.
+function updateTurretTutorialTrigger(state) {
+  if (state.level.turretTutorialAlienAppearedAtMs === null || state.level.tutorialFlow) return;
+  if (state.level.elapsed - state.level.turretTutorialAlienAppearedAtMs < TURRET_TUTORIAL_DELAY_MS) return;
+  state.level.turretTutorialAlienAppearedAtMs = null;
+  const flags = state.level.tutorialFlags;
+  // One-shot decision point: offer the full Shop -> Turret -> scroll ->
+  // place walkthrough if there's no Turret yet (per direct request — "make
+  // sure the turret tutorial only triggers if there's not a turret"); if
+  // one already exists (or this has already fired once), updatePostAlienTutorial's
+  // own standalone waste-drag fallback below picks up the slack instead.
+  if (flags.postAlienTutorialShown) return;
+  flags.postAlienTutorialShown = true;
+  if (!hasWasteTurretPlaced(state)) {
+    state.level.tutorialFlow = { id: 'postalien', step: 'shop' };
+  }
+}
+
+// The "drag Waste into the Turret" lesson specifically — runs whenever a
+// Waste Turret and some Waste both exist in the city, regardless of how the
+// full walkthrough above was handled (completed, skipped, or never offered
+// because a Turret already existed by the time updateTurretTutorialTrigger
+// fired). Waits until there's actually some Waste sitting in the city to
+// drag (nothing to demonstrate on otherwise), then
+// WASTE_DRAG_TUTORIAL_WAIT_MS (1s) more once it appears. Only runs once the
+// one-time decision above has actually been made (flags.postAlienTutorialShown) —
+// wasteDragTutorialShown is tracked separately (set only once the drag
+// lesson itself genuinely completes — see UI.js's onTutorialFlowComplete),
+// so Escape-skipping the full walkthrough before it ever reaches its own
+// final 'dragwaste' step doesn't permanently block this standalone fallback
+// from firing later — per direct request ("make sure this part of the
+// waste dragging into a turret tutorial is also triggered even if the whole
+// turret tutorial is skipped").
 function updatePostAlienTutorial(state) {
   const flags = state.level.tutorialFlags;
   if (state.level.tutorialFlow) return;
-  if (state.level.firstAlienKilledAtMs === null) return;
-  if (state.level.elapsed - state.level.firstAlienKilledAtMs < ALIEN_TUTORIAL_DELAY_MS) return;
-
-  // One-shot decision point, the first time the delay above is ever
-  // satisfied: offer the full Shop -> Turret -> scroll -> place walkthrough
-  // if there's no Turret yet (per direct request — "make sure the turret
-  // tutorial only triggers if there's not a turret"), or fall straight
-  // through to the waste-drag-only fallback below if one already exists.
-  // postAlienTutorialShown ONLY gates this one-time decision now — whether
-  // the drag lesson itself actually gets shown is tracked separately
-  // (wasteDragTutorialShown, set only once that lesson genuinely completes
-  // — see UI.js's onTutorialFlowComplete), so Escape-skipping the full
-  // walkthrough before it ever reaches its own final 'dragwaste' step
-  // doesn't permanently block the standalone fallback below from ever
-  // firing later — per direct request ("make sure this part of the waste
-  // dragging into a turret tutorial is also triggered even if the whole
-  // turret tutorial is skipped").
-  if (!flags.postAlienTutorialShown) {
-    flags.postAlienTutorialShown = true;
-    if (!hasWasteTurretPlaced(state)) {
-      state.level.tutorialFlow = { id: 'postalien', step: 'shop' };
-      return;
-    }
-  }
-
-  // The "drag Waste into the Turret" lesson specifically — runs whenever a
-  // Waste Turret and some Waste both exist in the city, regardless of how
-  // the walkthrough above was handled (completed, skipped, or never offered
-  // because a Turret already existed). Waits until there's actually some
-  // Waste sitting in the city to drag (nothing to demonstrate on
-  // otherwise), then WASTE_DRAG_TUTORIAL_WAIT_MS (1s) more once it appears.
+  if (!flags.postAlienTutorialShown) return;
   if (flags.wasteDragTutorialShown) return;
   if (!hasWasteTurretPlaced(state)) return;
   const wasteInCity = state.level.items.some((it) => it.type === 'waste' && it.y >= SEABED_FLOOR_Y);
@@ -369,6 +375,7 @@ export function updateStoryTriggers(state) {
   updateBankruptcy(state);
   updateAlienWaves(state);
   updateAlienIntroTrigger(state);
+  updateTurretTutorialTrigger(state);
   updatePostAlienTutorial(state);
   updateMergeTutorialTrigger(state);
   updateRecipeCopyTip(state);
