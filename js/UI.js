@@ -229,12 +229,11 @@ export function initUI(state) {
     scrollHint: document.getElementById('scroll-hint'),
     scrollHintText: document.getElementById('scroll-hint-text'),
     scrollHintArrows: document.querySelectorAll('.scroll-hint-arrow'),
-    pauseToggleBtn: document.getElementById('pause-toggle-btn'),
     buildLegend: document.getElementById('build-legend'),
-    buildLegendPurchase: document.getElementById('build-legend-purchase'),
     tutorialSkipLegend: document.getElementById('tutorial-skip-legend'),
     hotkeyLegendE: document.getElementById('hotkey-legend-e'),
     hotkeyLegendQ: document.getElementById('hotkey-legend-q'),
+    hotkeyLegendEsc: document.getElementById('hotkey-legend-esc'),
     tutorialOverlay: document.getElementById('tutorial-overlay'),
     tutorialText: document.getElementById('tutorial-text'),
     powerGraphCanvas: document.getElementById('hud-power-graph-canvas'),
@@ -410,12 +409,9 @@ export function initUI(state) {
     if (!state.ui.tankPanelCollapsed) advanceTutorialFlow(state, 'tankpoint', 'tankbtn');
   });
 
-  // Per direct request, the pause menu is opened by a dedicated circular
-  // button now (top-right, below #hud, matching the Shop/Tank Upgrades
-  // toggle style) instead of the Escape key — see main.js's keydown handler
-  // for Escape's new job (cancelling an armed build/demolish/merge tool).
-  els.pauseToggleBtn.addEventListener('click', () => togglePauseMenu(state));
-
+  // The dedicated pause-menu button is gone per direct request — Escape is
+  // the only way to open/close the pause menu now (main.js's keydown
+  // handler, togglePauseMenu still does the actual work either way).
   els.pauseResumeBtn.addEventListener('click', () => closePauseMenu(state));
   els.pauseSaveBtn.addEventListener('click', () => saveGameFromPause(state));
   els.pauseRestartBtn.addEventListener('click', () => restartLevel(state));
@@ -1155,9 +1151,13 @@ function labNodeHasEnoughScience(state, node) {
   return true;
 }
 function labNodeCostText(node) {
-  let text = `${node.scienceCost} 🔬`;
-  if (node.scienceGreenCost != null) text += ` · ${node.scienceGreenCost} 🟢`;
-  return `${text} · $${node.goldCost}`;
+  // A handful of nodes (the tree's 3 new gold-only roots — Suckerfish,
+  // Science Octopus, Bubble Cap 10) cost 0 Science, per direct request
+  // ("none of those three cost science, only money") — omitted entirely
+  // rather than shown as "0 🔬", so the cost genuinely reads as gold-only.
+  let text = node.scienceCost > 0 ? `${node.scienceCost} 🔬` : '';
+  if (node.scienceGreenCost != null) text += (text ? ' · ' : '') + `${node.scienceGreenCost} 🟢`;
+  return (text ? `${text} · ` : '') + `$${node.goldCost}`;
 }
 
 // Every Science Lab node spends Science (Blue, plus Green for the handful of
@@ -1682,17 +1682,20 @@ export function selectTool(state, tool) {
   updateToolbar(state);
 }
 
-// Called by the Escape key (main.js) — per direct request, replacing the old
-// "Escape opens the pause menu" behavior (see the new #pause-toggle-btn
-// button instead): cancels an actively-armed build/demolish/merge tool and
-// defaults back to Food. A no-op while Food (or a fish) is selected — Escape
-// was only asked to cancel these three. Building selection reuses
-// deselectShopSelection so its preview window clears too, exactly like
-// clicking the same building icon a second time already does; Demolish/
-// Merge have no preview to clear, just the tool itself.
+// Called by the Escape key (main.js): cancels an actively-armed build/fish/
+// demolish/merge tool and defaults back to Food. A no-op while Food is
+// already selected. Building AND fish selection both reuse
+// deselectShopSelection so the preview window clears too, exactly like
+// clicking the same shop icon a second time already does — fish selection
+// used to be excluded here (a stale no-op left over from before the
+// dedicated pause-menu button was removed), which meant Escape's own "(Esc)
+// to cancel" legend was actually a lie while a fish was armed; fixed as part
+// of making the new bottom-left Esc hotkey legend (see updateHUD) honest for
+// every tool it claims to clear. Demolish/Merge have no preview to clear,
+// just the tool itself.
 export function cancelActiveTool(state) {
   const tool = state.ui.selectedTool;
-  if (tool.startsWith('build:')) {
+  if (tool.startsWith('build:') || tool.startsWith('fish:')) {
     deselectShopSelection(state);
   } else if (tool === 'demolish' || tool === 'merge') {
     state.ui.selectedTool = 'food';
@@ -2633,26 +2636,21 @@ export function updateHUD(state) {
   updateAlienCountdown(state);
   updateScrollHint(state);
   updateTutorialOverlay(state);
-  // Purchase legend — "Click to purchase" / "(Esc) to cancel" — shown while
-  // a building OR a fish is armed (state.ui.selectedTool starts with
-  // 'build:'/'fish:'), per direct request ("for the fish as well as the
-  // buildings"). Suppressed during a guided tutorial — Escape doesn't
-  // cancel the tool while one's active (it's locked/self-healing, see
-  // TUTORIAL_FLOWS' own comment), it skips the tutorial instead, so showing
-  // "Esc to cancel" here would be actively misleading; the skip legend
-  // below covers that case instead.
-  //
-  // Per a later direct request, the Merge tool also shows this legend
-  // while selected — cancelActiveTool already sends Escape back to Food
-  // from Merge, same as Demolish/a build tool — but ONLY the "(Esc) to
-  // cancel" half, since nothing is being purchased via Merge; the "Click to
-  // purchase" span is hidden in that case (buildLegendPurchase).
+  // Purchase legend — now ONLY ever says "Click to purchase", per direct
+  // request — shown while a building OR a fish is armed (state.ui.
+  // selectedTool starts with 'build:'/'fish:'). The "(Esc) to cancel" half
+  // that used to live here moved into the persistent bottom-left
+  // #hotkey-legend below as a dynamic Esc line instead, since Escape's own
+  // job doubles as opening the pause menu now that the dedicated pause
+  // button is gone — a single Esc line covering both meanings reads better
+  // than two separate "(Esc) to ___" hints in different corners. Suppressed
+  // during a guided tutorial, same as before (the skip legend covers that
+  // case instead). The Merge tool no longer shows this legend at all — it
+  // was only ever showing the now-removed "(Esc) to cancel" half here.
   const tutorialActive = !!state.level.tutorialFlow;
   const toolIsPurchasable = state.ui.selectedTool.startsWith('build:') || state.ui.selectedTool.startsWith('fish:');
-  const mergeSelected = state.ui.selectedTool === 'merge';
-  const buildLegendVisible = !tutorialActive && (toolIsPurchasable || mergeSelected);
+  const buildLegendVisible = !tutorialActive && toolIsPurchasable;
   els.buildLegend.classList.toggle('hidden', !buildLegendVisible);
-  els.buildLegendPurchase.classList.toggle('hidden', !toolIsPurchasable);
   // Tutorial-skip legend — "(Esc) to skip tutorial" — shown for the whole
   // duration of any guided tutorial flow, per direct request; main.js's
   // Escape handler now actually honors this (see its own comment).
@@ -2666,12 +2664,25 @@ export function updateHUD(state) {
   // getBoundingClientRect call on a frame either one is actually visible.
   if (buildLegendVisible || tutorialActive) positionBottomLeftLegends();
 
-  // Persistent E/Q hotkey reminder, bottom-left corner — per direct
+  // Persistent E/Q/Esc hotkey reminder, bottom-left corner — per direct
   // request, always visible (unlike the two legends above), re-worded live
   // to match what each key actually does right now. `toolIsPurchasable` is
-  // already computed above (a build:/fish: tool armed).
+  // already computed above (a build:/fish: tool armed). The Esc line
+  // mirrors main.js's own Escape keydown branch's decision tree exactly —
+  // "Clear Cursor" whenever Escape would close a popup/panel/tool instead of
+  // opening the pause menu, "Pause Game" otherwise — using the same popup
+  // checks and selectedTool/panel-collapsed reads that branch itself uses,
+  // so this can never drift out of sync with what Escape actually does.
   els.hotkeyLegendE.textContent = `E: ${state.ui.shopCollapsed ? 'Open Shop' : 'Close Shop'}`;
   els.hotkeyLegendQ.textContent = `Q: ${toolIsPurchasable ? 'Clear Cursor' : 'Pipette Tool'}`;
+  const escHasSomethingToClear = !tutorialActive && (
+    isMoundMenuOpen() || isRecipeMenuOpen() || isBuildingInfoMenuOpen() ||
+    isLabPurchaseModalOpen() || isLabMenuOpen() ||
+    state.ui.selectedTool !== 'food' || !state.ui.shopCollapsed || !state.ui.tankPanelCollapsed
+  );
+  els.hotkeyLegendEsc.textContent = tutorialActive
+    ? 'Esc: Skip Tutorial'
+    : `Esc: ${escHasSomethingToClear ? 'Clear Cursor' : 'Pause Game'}`;
 }
 
 function positionBottomLeftLegends() {

@@ -1272,18 +1272,23 @@ export const BUILDING_TYPES = {
     description: 'Solid floor. Items land and rest on top — cheap, optional item routing.',
     color: '#dba36f', unlockedByDefault: true, // available from level start, unchanged — no longer load-bearing for whether anything ELSE can be placed, though (see canPlaceTile's own comment)
   },
+  // Renamed per direct request — the base tier now draws real power (see
+  // PROCESSOR_STATS[TILE_COLLECTOR].powerCostPerSec), so "Electric" fits it
+  // better than the old bare "Collector"; the two tiers above it each
+  // shifted up one name to make room (old Electric -> Advanced, old
+  // Advanced -> Bio). Base cost raised 12 -> 40 per direct request.
   [TILE_COLLECTOR]: {
-    id: TILE_COLLECTOR, name: 'Collector', icon: '🧲', cost: 12,
-    description: 'Auto-banks coins and Science touching it. Unpowered.',
+    id: TILE_COLLECTOR, name: 'Electric Collector', icon: '🧲', cost: 40,
+    description: 'Auto-banks coins and Science touching it. Draws 3mw while collecting.',
     color: '#8fe0b8', unlockedByDefault: false,
   },
   [TILE_COLLECTOR_ELECTRIC]: {
-    id: TILE_COLLECTOR_ELECTRIC, name: 'Electric Collector', icon: '🧲', cost: 60,
-    description: 'Faster than the base Collector. Draws power while holding an item.',
+    id: TILE_COLLECTOR_ELECTRIC, name: 'Advanced Collector', icon: '🧲', cost: 60,
+    description: 'Faster than the Electric Collector. Draws power while holding an item.',
     color: '#5fb8ff', unlockedByDefault: false,
   },
   [TILE_COLLECTOR_ADVANCED]: {
-    id: TILE_COLLECTOR_ADVANCED, name: 'Advanced Collector', icon: '🧲', cost: 150,
+    id: TILE_COLLECTOR_ADVANCED, name: 'Bio Collector', icon: '🧲', cost: 150,
     description: 'The fastest Collector money can buy.',
     color: '#c9a8ff', unlockedByDefault: false,
   },
@@ -1317,23 +1322,31 @@ export const BUILDING_TYPES = {
     description: 'The strongest turret — fastest, hardest-hitting.',
     color: '#c9a8ff', unlockedByDefault: false,
   },
+  // Renamed per direct request, same reasoning/shift as the Collector family
+  // above — the base tier now draws real power (see
+  // REFINERY_STATS[TILE_REFINERY].powerCostPerSec), so it's "Electric" now;
+  // every tier above it shifted up one name (old Electric -> Advanced, old
+  // Advanced -> Bio), and the tier that already existed above THAT (the old
+  // "Bio-Refinery," gated behind Green Science Tech) is renamed "Ultra
+  // Refinery" so it doesn't collide with the newly-renamed Bio Refinery
+  // directly below it. Base cost cut 80 -> 30 per direct request.
   [TILE_REFINERY]: {
-    id: TILE_REFINERY, name: 'Refinery', icon: '⚗️', cost: 80,
-    description: 'Waste -> Food, or Bio-Sludge -> Biomass (Bio-Sludge takes priority if both touch at once, and takes 50% longer). One item at a time.',
+    id: TILE_REFINERY, name: 'Electric Refinery', icon: '⚗️', cost: 30,
+    description: 'Waste -> Food, or Bio-Sludge -> Biomass (Bio-Sludge takes priority if both touch at once, and takes 50% longer). One item at a time. Draws 5mw while refining.',
     color: '#b8a888', unlockedByDefault: false,
   },
   [TILE_REFINERY_ELECTRIC]: {
-    id: TILE_REFINERY_ELECTRIC, name: 'Electric Refinery', icon: '⚗️', cost: 140,
-    description: 'Processes Waste (and Bio-Sludge) faster than the base Refinery. Draws power while working.',
+    id: TILE_REFINERY_ELECTRIC, name: 'Advanced Refinery', icon: '⚗️', cost: 140,
+    description: 'Processes Waste (and Bio-Sludge) faster than the Electric Refinery. Draws power while working.',
     color: '#4fd6e0', unlockedByDefault: false,
   },
   [TILE_REFINERY_ADVANCED]: {
-    id: TILE_REFINERY_ADVANCED, name: 'Advanced Refinery', icon: '⚗️', cost: 260,
-    description: 'The fastest Refinery short of the Bio-Refinery.',
+    id: TILE_REFINERY_ADVANCED, name: 'Bio Refinery', icon: '⚗️', cost: 260,
+    description: 'The fastest Refinery short of the Ultra Refinery.',
     color: '#ffd76f', unlockedByDefault: false,
   },
   [TILE_REFINERY_BIO]: {
-    id: TILE_REFINERY_BIO, name: 'Bio-Refinery', icon: '🧬', cost: 400,
+    id: TILE_REFINERY_BIO, name: 'Ultra Refinery', icon: '🧬', cost: 400,
     description: 'The fastest Refinery — requires Green Science.',
     color: '#8fff9a', unlockedByDefault: false,
   },
@@ -1377,8 +1390,13 @@ export const BUILDING_FAMILIES = {
 // downside; the old wasteEveryMs background clock (and its
 // state.level.buildingData wasteAccumMs field) is removed entirely, not just
 // zeroed. coinMs set to the exact requested 9/6/4 seconds across the 3 tiers.
+// The base tier (now "Electric Collector") draws 3mw while collecting, per
+// direct request — computeCurrentPowerDemand/getBuildingPowerCost's own
+// `stats.powerCostPerSec > 0` checks already generically gate every tier on
+// "is it actually processing right now," so this needed no code changes,
+// just a nonzero value here.
 export const PROCESSOR_STATS = {
-  [TILE_COLLECTOR]: { coinMs: 9000, scienceMs: 20000, powerCostPerSec: 0 },
+  [TILE_COLLECTOR]: { coinMs: 9000, scienceMs: 20000, powerCostPerSec: 3 },
   [TILE_COLLECTOR_ELECTRIC]: { coinMs: 6000, scienceMs: 15000, powerCostPerSec: 20 },
   [TILE_COLLECTOR_ADVANCED]: { coinMs: 4000, scienceMs: 9000, powerCostPerSec: 40 },
 };
@@ -1467,12 +1485,15 @@ export const TURRET_PROJECTILE_COLOR = '#ffe066'; // a bright, easy-to-track yel
 // DNA->Biomass recipe takes ALIEN_DNA_REFINERY_TIME_MULTIPLIER times as long
 // on the SAME tile (Grid.js's updateBuildings computes this at runtime
 // rather than storing a second constant per tier, since it's always a flat
-// 50% multiple of the food time). The base tier is unpowered (granted early
-// via the Mound); Electric/Advanced/Bio all draw power only while actively
+// 50% multiple of the food time). The base tier (now "Electric Refinery")
+// draws 5mw while refining, per direct request — the same generic
+// `stats.powerCostPerSec > 0` gate every other tier already uses (see
+// updateBuildings/computeCurrentPowerDemand) applies here automatically,
+// needing no code change; every tier draws power only while actively
 // processing an absorbed item.
 export const ALIEN_DNA_REFINERY_TIME_MULTIPLIER = 1.5;
 export const REFINERY_STATS = {
-  [TILE_REFINERY]: { foodProcessMs: 20000, powerCostPerSec: 0 },
+  [TILE_REFINERY]: { foodProcessMs: 20000, powerCostPerSec: 5 },
   [TILE_REFINERY_ELECTRIC]: { foodProcessMs: 14000, powerCostPerSec: 10 },
   [TILE_REFINERY_ADVANCED]: { foodProcessMs: 9000, powerCostPerSec: 20 },
   [TILE_REFINERY_BIO]: { foodProcessMs: 5000, powerCostPerSec: 30 },
@@ -1661,7 +1682,14 @@ export const MOUND_HEIGHT_PX = 62; // how far it mounds up above the seabed surf
 // each is available from level start rather than waiting on any crack.
 export const TIER_UNLOCKS = {
   2: {
-    species: ['octopus'], // per direct request — Octopus moved off the Science Lab (it's the one utility species that doesn't gate anything ELSE in the Lab's tree) onto the Mound itself, so the Lab's tree starts truly empty and every one of its 8 nodes is a real choice
+    // Per direct request, this crack now grants Electric Eel instead of
+    // Science Octopus — Octopus moved (back) into the Science Lab as one of
+    // its 3 new root purchases (gold-only, no Bubble Cap gate — see
+    // SCIENCE_LAB_UPGRADES.octopus), and Electric Eel moved off the Lab
+    // entirely onto the Mound, so every node that used to require the Lab's
+    // own `eel` purchase now requires Bubble Cap 20 instead (see that
+    // section's own comment for the full reasoning).
+    species: ['electric_eel'],
     // The base Refinery is granted here rather than through the Science Lab
     // (unlike its Electric/Advanced/Bio tiers) — it's the foundational
     // recycler the whole chain is built on, and both its recipes (Waste->
@@ -1689,64 +1717,78 @@ export const TIER_UNLOCKS = {
 // (state.meta.labUpgradesPurchased) before this one can be bought — UI.js's
 // Lab popup renders this as an actual node-link tree (one column per
 // dependency depth, connector lines drawn between related nodes), not just
-// disabled buttons, so the shape of the tree is visible at a glance. The
-// Electric Auto-Feeder deliberately requires BOTH `eel` and `suckerfish` —
-// per direct request ("make sure the two branch together so it's obviously
-// that both the eel and suckerfish are requirements") — so its node has two
-// incoming connector lines, one from each parent, instead of a single
-// linear chain. `grants` is the same { species, buildings } shape
+// disabled buttons, so the shape of the tree is visible at a glance. Bubble
+// Cap 20 (science_cap_2, below) deliberately requires all 3 of the tree's
+// new roots at once (Suckerfish, Science Octopus, Bubble Cap 10) — per
+// direct request — so its node has three incoming connector lines instead
+// of a single linear chain. `grants` is the same { species, buildings } shape
 // TIER_UNLOCKS entries use (plus a newer `scienceCapLevel` field the
 // `science_cap_*` chain below uses — see its own comment) — UI.js's
 // buyLabUpgrade pushes each into state.meta/state.level the same way
 // Mound.js's crackMound already does for species/buildings.
 export const SCIENCE_LAB_UPGRADES = {
-  // Per direct request, Eel/Suckerfish are no longer tree roots — both now
-  // require Bubble Cap 10 (science_cap_1, declared further down this same
-  // object) first. labNodeDepth (UI.js) computes column placement purely
-  // from `requires` depth, so this alone re-lays the tree with the capacity
-  // chain now feeding INTO the two utility species rather than sitting
-  // beside them as an unrelated branch.
-  eel: {
-    id: 'eel', name: 'Electric Eel', icon: '🐍', scienceCost: 10, goldCost: 1000,
-    requires: ['science_cap_1'], grants: { species: ['electric_eel'] },
-  },
+  // ---- The tree's new roots, per direct request ----
+  // Suckerfish, Science Octopus, and Bubble Cap 10 are now the only 3 things
+  // purchasable from a fresh Lab, all costing gold ONLY (scienceCost: 0 —
+  // labNodeCostText/labNodeHasEnoughScience in UI.js both special-case a
+  // zero scienceCost to omit the Blue-Science half of the cost display
+  // entirely, so these three genuinely read as gold-only, not "0 science").
+  // Science Octopus moved here from the Mound's own Tier 2 crack (which now
+  // grants Electric Eel instead — see TIER_UNLOCKS above) so it's a real
+  // Lab purchase like every other utility species; Electric Eel itself is
+  // no longer a Lab node at all. Bubble Cap 20 (science_cap_2, below) is the
+  // ONE thing gated behind all 3 of these together — "once all of those
+  // have been unlocked, it leads to just the bubble cap 20" — and every
+  // node that used to require the Lab's own `eel` purchase now requires
+  // Bubble Cap 20 instead, since that's the new gate standing in for "the
+  // Eel line is up and running" once Eel itself moved to the Mound.
   suckerfish: {
-    id: 'suckerfish', name: 'Suckerfish', icon: '🐠', scienceCost: 15, goldCost: 1000,
-    requires: ['science_cap_1'], grants: { species: ['suckerfish'] },
+    id: 'suckerfish', name: 'Suckerfish', icon: '🐠', scienceCost: 0, goldCost: 1000,
+    requires: [], grants: { species: ['suckerfish'] },
+  },
+  octopus: {
+    id: 'octopus', name: 'Science Octopus', icon: '🐙', scienceCost: 0, goldCost: 1500,
+    requires: [], grants: { species: ['octopus'] },
   },
   electric_fan: {
     id: 'electric_fan', name: 'Electric Fan', icon: '💨', scienceCost: 20, goldCost: 2500,
-    requires: ['eel'], grants: { buildings: [TILE_FAN_T3] },
+    requires: ['science_cap_2'], grants: { buildings: [TILE_FAN_T3] },
   },
+  // Grants TILE_COLLECTOR_ELECTRIC, now displayed "Advanced Collector" (see
+  // BUILDING_TYPES' Collector-family rename) — the node's own `name` field
+  // is kept in sync with that display name; its internal id stays
+  // `electric_collector`, an opaque identifier other nodes' `requires`
+  // arrays reference, not a player-facing "mention."
   electric_collector: {
-    id: 'electric_collector', name: 'Electric Collector', icon: '🧲', scienceCost: 50, goldCost: 5000,
-    requires: ['eel'], grants: { buildings: [TILE_COLLECTOR_ELECTRIC] },
+    id: 'electric_collector', name: 'Advanced Collector', icon: '🧲', scienceCost: 50, goldCost: 5000,
+    requires: ['science_cap_2'], grants: { buildings: [TILE_COLLECTOR_ELECTRIC] },
   },
-  // Per direct request ("make the requirement for the electric auto-feeder
-  // be the requirements for the electric refinery") — same requires/costs
-  // the old electric_auto_feeder node had, just granting the Refinery's
-  // Electric tier instead now that the Auto-Feeder itself is gone.
+  // Grants TILE_REFINERY_ELECTRIC, now displayed "Advanced Refinery" (see
+  // BUILDING_TYPES' Refinery-family rename) — same "keep the id, sync the
+  // display name" treatment as electric_collector above.
   electric_refinery: {
-    id: 'electric_refinery', name: 'Electric Refinery', icon: '⚗️', scienceCost: 30, goldCost: 5000,
-    requires: ['eel', 'suckerfish'], grants: { buildings: [TILE_REFINERY_ELECTRIC] },
+    id: 'electric_refinery', name: 'Advanced Refinery', icon: '⚗️', scienceCost: 30, goldCost: 5000,
+    requires: ['science_cap_2'], grants: { buildings: [TILE_REFINERY_ELECTRIC] },
   },
   advanced_fan: {
     id: 'advanced_fan', name: 'Advanced Fan', icon: '🌪️', scienceCost: 100, goldCost: 15000,
     requires: ['electric_fan'], grants: { buildings: [TILE_FAN_T4] },
   },
+  // Grants TILE_COLLECTOR_ADVANCED, now displayed "Bio Collector."
   advanced_collector: {
-    id: 'advanced_collector', name: 'Advanced Collector', icon: '🧲', scienceCost: 250, goldCost: 25000,
+    id: 'advanced_collector', name: 'Bio Collector', icon: '🧲', scienceCost: 250, goldCost: 25000,
     requires: ['electric_collector'], grants: { buildings: [TILE_COLLECTOR_ADVANCED] },
   },
+  // Grants TILE_REFINERY_ADVANCED, now displayed "Bio Refinery."
   advanced_refinery: {
-    id: 'advanced_refinery', name: 'Advanced Refinery', icon: '⚗️', scienceCost: 150, goldCost: 15000,
+    id: 'advanced_refinery', name: 'Bio Refinery', icon: '⚗️', scienceCost: 150, goldCost: 15000,
     requires: ['electric_refinery'], grants: { buildings: [TILE_REFINERY_ADVANCED] },
   },
   // The Waste Turret needs no node at all — it's unlockedByDefault: true,
   // same as Platform (see BUILDING_TYPES), free from the very start.
   electric_turret: {
     id: 'electric_turret', name: 'Electric Turret', icon: '🔫', scienceCost: 25, goldCost: 3000,
-    requires: ['eel'], grants: { buildings: [TILE_TURRET_ELECTRIC] },
+    requires: ['science_cap_2'], grants: { buildings: [TILE_TURRET_ELECTRIC] },
   },
   advanced_turret: {
     id: 'advanced_turret', name: 'Advanced Turret', icon: '🔫', scienceCost: 120, goldCost: 18000,
@@ -1757,49 +1799,38 @@ export const SCIENCE_LAB_UPGRADES = {
   // Per direct request, the old standalone Bio-Feeder/Bio-Combuster
   // buildings are gone, replaced by the Manufacturer (one building, 3
   // selectable recipes) and the renamed Power Plant (one building, 3
-  // selectable fuel recipes). Both buildings themselves sit right after the
-  // Eel — "add the manufacturer building into the science lab as an unlock
-  // after the electric eel," "have the power plant building unlocked
-  // sooner in the science lab, right after the eel." Each RECIPE is then
-  // its own separate node gating MANUFACTURER_RECIPES/POWER_PLANT_RECIPES'
-  // own `labNodeId` field (UI.js's recipe pop-up menu and Grid.js's
-  // updateBuildings both check state.meta.labUpgradesPurchased for it).
-  // Per direct request ("make the suckerfish a requirement for the
-  // manufacturer") — requires both utility species now, not just the Eel.
+  // selectable fuel recipes). Both buildings now require Bubble Cap 20 only
+  // (see the tree-roots comment above for why) — Manufacturer no longer
+  // separately requires Suckerfish, since reaching Bubble Cap 20 already
+  // requires it transitively.
   manufacturer: {
     id: 'manufacturer', name: 'Manufacturer', icon: '🏭', scienceCost: 35, goldCost: 5000,
-    requires: ['eel', 'suckerfish'], grants: { buildings: [TILE_MANUFACTURER] },
+    requires: ['science_cap_2'], grants: { buildings: [TILE_MANUFACTURER] },
   },
   power_plant: {
     id: 'power_plant', name: 'Power Plant', icon: '☢️', scienceCost: 35, goldCost: 5000,
     // Grants the building AND (implicitly — POWER_PLANT_RECIPES.food.labNodeId
-    // is null) its Food recipe at once, per spec ("unlocked... right after
-    // the eel, which unlocks the new recipe that accepts food as a power
-    // source").
-    requires: ['eel'], grants: { buildings: [TILE_POWER_PLANT] },
+    // is null) its Food recipe at once.
+    requires: ['science_cap_2'], grants: { buildings: [TILE_POWER_PLANT] },
   },
-  // Per direct request ("instead of having the electric processor be the
-  // requirement... for the bio-feeder and bio-combustor recipes, make the
-  // requirements be the manufacturer building and the Power Plant
-  // buildings") — both now require BOTH buildings rather than either old
-  // Electric-tier building. Same costs their old building-unlock nodes had.
-  // Names updated per direct request ("change the name of the bio-feeder
-  // recipe... to the mutagen paste recipe," "change the name of the
-  // bio-combustor recipe into blue science recipe") — matches each recipe's
-  // own MANUFACTURER_RECIPES.name now, not its old standalone-building flavor
-  // name. The object's own id/key is left as `recipe_bio_feeder` (an internal
-  // identifier other nodes' `requires` arrays reference, not a player-facing
-  // "mention").
+  // Per direct request, Mutagen Paste/Bio-Sludge/Alien Egg all moved off
+  // requiring the Manufacturer+Power Plant buildings directly onto Bubble
+  // Cap 30 (science_cap_3, below) as their one and only requirement instead
+  // — reaching Bubble Cap 30 already requires the Manufacturer itself (see
+  // that node's own `requires`), so the dependency chain is still intact,
+  // just gated one step further up the tree. Names match each recipe's own
+  // MANUFACTURER_RECIPES.name; the object's own id/key is left as
+  // `recipe_bio_feeder` (an internal identifier other nodes' `requires`
+  // arrays reference, not a player-facing "mention").
   recipe_bio_feeder: {
     id: 'recipe_bio_feeder', name: 'Mutagen Paste Recipe', icon: '🩷', scienceCost: 45, goldCost: 7000,
-    requires: ['manufacturer', 'power_plant'], grants: {},
+    requires: ['science_cap_3'], grants: {},
   },
-  // Per direct request ("add a alien egg recipe to the manufacturer...
-  // with this recipe as a requirement for the bio-combustor recipe") — the
-  // Bio-Combustor recipe now also needs the Alien Egg recipe unlocked first.
+  // Per direct request, now requires Bubble Cap 30 AND the Alien Egg recipe
+  // (instead of the Manufacturer/Power Plant buildings directly).
   recipe_bio_combustor: {
     id: 'recipe_bio_combustor', name: 'Blue Science Recipe', icon: '🔥', scienceCost: 40, goldCost: 6000,
-    requires: ['manufacturer', 'power_plant', 'recipe_alien_egg'], grants: {},
+    requires: ['science_cap_3', 'recipe_alien_egg'], grants: {},
   },
   // Green Science Tech grants nothing by itself (`grants: {}`) — a pure
   // recipe-unlock flag, same "presence in state.meta.labUpgradesPurchased
@@ -1825,26 +1856,26 @@ export const SCIENCE_LAB_UPGRADES = {
     id: 'recipe_green_science', name: 'Green Science Recipe', icon: '🟢', scienceCost: 55, goldCost: 10000,
     requires: ['green_science_tech'], grants: {},
   },
-  // Per direct request, "add in unlock for the bio-pellets in the science
-  // lab behind the manufacturer" — just the building, no Power Plant needed.
-  // Renamed id/name from recipe_bio_pellets/'Bio-Pellets Recipe' to
-  // recipe_bio_sludge/'Bio-Sludge Recipe', per a later direct request — the
-  // standalone `bio_pellets` item this used to produce is retired entirely
-  // and merged into Alien DNA (now displayed as "Bio-Sludge" everywhere —
-  // see MANUFACTURER_RECIPES.bio_sludge's own comment). Icon changed to a
-  // petri-dish glyph, matching the new "sludge" theme.
+  // Per direct request, Bio-Sludge's Recipe now requires Bubble Cap 30
+  // ONLY, instead of the Manufacturer building directly (reaching Bubble
+  // Cap 30 already requires the Manufacturer — see science_cap_3's own
+  // `requires` below). Renamed id/name from recipe_bio_pellets/'Bio-Pellets
+  // Recipe' to recipe_bio_sludge/'Bio-Sludge Recipe' — the standalone
+  // `bio_pellets` item this used to produce is retired entirely and merged
+  // into Alien DNA (now displayed as "Bio-Sludge" everywhere — see
+  // MANUFACTURER_RECIPES.bio_sludge's own comment).
   recipe_bio_sludge: {
     id: 'recipe_bio_sludge', name: 'Bio-Sludge Recipe', icon: '🧫', scienceCost: 50, goldCost: 9000,
-    requires: ['manufacturer'], grants: {},
+    requires: ['science_cap_3'], grants: {},
   },
   // New Manufacturer recipe, per direct spec — Blue Science + Food -> a
   // physical, draggable Alien Egg that hatches into a live Tier-1 alien
   // after ALIEN_EGG_HATCH_MS (see MANUFACTURER_RECIPES.alien_egg and
-  // Entities.js's updateAlienEgg). Gated behind the Manufacturer alone, same
-  // as Bio-Sludge — it doesn't need the Power Plant.
+  // Entities.js's updateAlienEgg). Also moved onto Bubble Cap 30 alone, per
+  // direct request, same reasoning as Bio-Sludge above.
   recipe_alien_egg: {
     id: 'recipe_alien_egg', name: 'Alien Egg Recipe', icon: '🥚', scienceCost: 55, goldCost: 10000,
-    requires: ['manufacturer'], grants: {},
+    requires: ['science_cap_3'], grants: {},
   },
   // The Power Plant's Biomass recipe is locked behind the Manufacturer's
   // Bio-Sludge recipe, per direct spec; its Blue Science recipe is locked
@@ -1861,11 +1892,12 @@ export const SCIENCE_LAB_UPGRADES = {
     id: 'power_plant_science', name: 'Power Plant: Blue Science', icon: '🔬', scienceCost: 70, scienceGreenCost: 35, goldCost: 15000,
     requires: ['power_plant', 'green_science_tech'], grants: {},
   },
-  // Bio-Refinery — the top Refinery tier, per direct request ("make it so
-  // the bio-refinery requires green science unlocked in the science lab").
-  // Also costs Green Science itself now, same additive-half-of-blue rule.
+  // Ultra Refinery (renamed from "Bio-Refinery" — see BUILDING_TYPES'
+  // Refinery-family rename comment) — the top Refinery tier, requires Green
+  // Science unlocked in the Science Lab. Also costs Green Science itself,
+  // same additive-half-of-blue rule as every other Green-Science-gated node.
   bio_refinery: {
-    id: 'bio_refinery', name: 'Bio-Refinery', icon: '🧬', scienceCost: 100, scienceGreenCost: 50, goldCost: 20000,
+    id: 'bio_refinery', name: 'Ultra Refinery', icon: '🧬', scienceCost: 100, scienceGreenCost: 50, goldCost: 20000,
     requires: ['green_science_tech'], grants: { buildings: [TILE_REFINERY_BIO] },
   },
 
@@ -1881,11 +1913,14 @@ export const SCIENCE_LAB_UPGRADES = {
   // `state.meta.speciesUnlocked.includes(hybridId)` per specific pair, so a
   // combination with no matching hybrid (or a locked one) simply never
   // resolves — no separate "splicing enabled" flag needed anywhere.
-  // Per direct request ("make the suckerfish a requirement for the buffer
-  // fish") — on top of its existing Bubble Cap 20 gate.
+  // Moved onto Bubble Cap 30 as its one and only requirement, per direct
+  // request — Suckerfish is already required transitively (Bubble Cap 30
+  // requires the Manufacturer and Bubble Cap 20, and Bubble Cap 20 requires
+  // Suckerfish itself), so dropping the separate direct requirement here
+  // doesn't loosen anything.
   hybrid_buffer_fish: {
     id: 'hybrid_buffer_fish', name: 'Buffer Fish', icon: '🧲', scienceCost: 20, goldCost: 4000,
-    requires: ['science_cap_2', 'suckerfish'], grants: { species: ['buffer_fish'] },
+    requires: ['science_cap_3'], grants: { species: ['buffer_fish'] },
   },
   hybrid_eel_blimp: {
     id: 'hybrid_eel_blimp', name: 'Blimp-Battery', icon: '🔋', scienceCost: 30, goldCost: 8000,
@@ -1928,20 +1963,32 @@ export const SCIENCE_LAB_UPGRADES = {
   // read straight from SCIENCE_CAP_UPGRADE_SCIENCE_COSTS/_GOLD_COSTS above —
   // the exact same 5-level progression, just expressed as 5 nodes instead of
   // one button pressed 5 times.
+  // Bubble Cap 10 is one of the tree's 3 new gold-only roots, per direct
+  // request — a hardcoded 0 here (not SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[0],
+  // which every OTHER node in this chain still reads from) rather than
+  // reading from the shared cost array, since only this one tier is
+  // supposed to be science-free. Its goldCost already happened to land on
+  // the exact requested 500 from that array, so that half is untouched.
   science_cap_1: {
     id: 'science_cap_1', name: 'Bubble Cap 10', icon: '🫧',
-    scienceCost: SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[0], goldCost: SCIENCE_CAP_UPGRADE_GOLD_COSTS[0],
+    scienceCost: 0, goldCost: SCIENCE_CAP_UPGRADE_GOLD_COSTS[0],
     requires: [], grants: { scienceCapLevel: 1 },
   },
+  // Per direct request, Bubble Cap 20 is the ONE thing gated behind all 3 of
+  // the tree's new roots together (Suckerfish, Science Octopus, Bubble Cap
+  // 10) — "once all of those have been unlocked, it leads to just the
+  // bubble cap 20 that can be unlocked."
   science_cap_2: {
     id: 'science_cap_2', name: 'Bubble Cap 20', icon: '🫧',
     scienceCost: SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[1], goldCost: SCIENCE_CAP_UPGRADE_GOLD_COSTS[1],
-    requires: ['science_cap_1'], grants: { scienceCapLevel: 1 },
+    requires: ['suckerfish', 'octopus', 'science_cap_1'], grants: { scienceCapLevel: 1 },
   },
+  // Per direct request, "the 2 requirements for bubble cap 30 is the
+  // manufacturer and the bubble cap 20."
   science_cap_3: {
     id: 'science_cap_3', name: 'Bubble Cap 30', icon: '🫧',
     scienceCost: SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[2], goldCost: SCIENCE_CAP_UPGRADE_GOLD_COSTS[2],
-    requires: ['science_cap_2'], grants: { scienceCapLevel: 1 },
+    requires: ['manufacturer', 'science_cap_2'], grants: { scienceCapLevel: 1 },
   },
   science_cap_4: {
     id: 'science_cap_4', name: 'Bubble Cap 40', icon: '🫧',

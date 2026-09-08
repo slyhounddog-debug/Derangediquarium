@@ -1091,9 +1091,9 @@ export function computeCurrentPowerDemand(state) {
       // the Processor already follows above.
       if (data.firing) demand += TURRET_STATS[data.type].powerCostPerSec;
     } else if (REFINERY_TILES.has(data.type)) {
-      // The base tier is unpowered (powerCostPerSec 0, a no-op either way);
-      // Electric/Advanced/Bio only draw while actively processing a locked
-      // recipe, same "only while actually doing something" rule.
+      // Every tier — including the base (now "Electric Refinery") — only
+      // draws while actively processing a locked recipe, same "only while
+      // actually doing something" rule.
       if (data.lockedRecipe !== null) demand += REFINERY_STATS[data.type].powerCostPerSec;
     } else if (MANUFACTURER_TILES.has(data.type)) {
       // Only draws while actively processing an absorbed ingredient — no

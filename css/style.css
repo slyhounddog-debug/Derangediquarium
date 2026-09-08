@@ -145,9 +145,7 @@ html, body {
 #hud-power-arrow.open { transform: rotate(180deg); }
 #hud-power-graph {
   /* Shifted down and left from directly-below-the-pill, per direct report
-     that it overlapped both #hud itself and #pause-toggle-btn (which sits
-     fixed just below #hud, in roughly the same right-edge column this popup
-     used to drop straight into). */
+     that it overlapped #hud itself. */
   position: absolute; top: calc(100% + 24px); right: 70px;
   background: linear-gradient(165deg, #fffaf3 0%, #fff3d9 100%);
   border: 2px solid #ffffff;
@@ -159,34 +157,15 @@ html, body {
 #hud-power-graph.hidden { display: none; }
 #hud-power-graph-canvas { display: block; }
 
-/* Pause menu toggle — per direct request, a circular hamburger button
-   top-right, below #hud, "matching the style of the shop and tank upgrade"
-   (see #shop-collapse-btn/#tank-collapse-btn's own block below) — replaces
-   the old Escape-opens-the-pause-menu behavior entirely (see main.js's
-   keydown handler for Escape's new job). #hud sits at top:14, and its own
-   pill is ~46px tall at this font size, so 68px clears it with a visible
-   gap while staying tight to the same corner. */
-#pause-toggle-btn {
-  /* Same live glass-wall-clearing offset as #hud above, so it stays aligned
-     under it at every viewport size instead of drifting sideways relative
-     to it. */
-  position: fixed; top: 68px; right: calc(14px + var(--glass-wall-right-width, 22px)); z-index: 10;
-  width: 54px; height: 54px;
-  display: flex; align-items: center; justify-content: center;
-  background: linear-gradient(160deg, #ffe4f2 0%, #ffc2e0 100%);
-  border: 2px solid #ffffff; border-radius: 50%;
-  cursor: pointer;
-  font-size: 24px;
-  line-height: 1;
-  color: #6b4c6b;
-  box-shadow: 0 3px 8px rgba(255, 150, 200, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.8);
-  transition: transform 0.12s ease, background 0.12s ease;
-}
-#pause-toggle-btn:hover { background: linear-gradient(160deg, #ffdcee 0%, #ffb0d8 100%); transform: scale(1.08); }
+/* The dedicated circular pause-menu toggle button (top-right, below #hud)
+   is gone per direct request — Escape is the only way to open/close the
+   pause menu now (see main.js's keydown handler and #hotkey-legend's
+   dynamic Esc line below). */
 
-/* Build/fish legend — "Click to purchase" / "(Esc) to cancel" — and the
-   tutorial-skip legend — "(Esc) to skip tutorial" — per direct
-   request/report. Went through three placements: first just above the
+/* Build/fish legend — now just "Click to purchase" (see index.html's own
+   comment for why the old "(Esc) to cancel" half moved into #hotkey-legend
+   instead) — and the tutorial-skip legend — "(Esc) to skip tutorial" — per
+   direct request/report. Went through three placements: first just above the
    fixed bottom tool-bar (blocked the view of the tank), then top-middle
    (still in the way, per a direct follow-up), then tucked into the
    bottom-left corner right next to the Shop toggle button, as a child of

@@ -972,11 +972,13 @@ input.keydownHandlers.push((e) => {
   if (state.level.tutorialFlow) return;
   if (e.code === 'Escape') {
     // Escape's job: close whatever popup is on top (or the Shop/Tank
-    // Upgrades panel, if one's open), and cancel an armed build/demolish/
-    // merge tool back to Food. Per direct request, if NONE of that applies —
-    // no popup open, no panel open, Food already selected — it toggles the
-    // pause menu instead (on top of the dedicated #pause-toggle-btn button,
-    // not replacing it), so Escape is never just a silent no-op.
+    // Upgrades panel, if one's open), and cancel an armed build/fish/
+    // demolish/merge tool back to Food. Per direct request, if NONE of that
+    // applies — no popup open, no panel open, Food already selected — it
+    // toggles the pause menu instead. The dedicated pause-menu button
+    // (#pause-toggle-btn) was removed per a later direct request — Escape is
+    // the only way to open/close the pause menu now, so it's never just a
+    // silent no-op either way.
     if (isMoundMenuOpen()) { closeMoundMenu(); return; }
     if (isRecipeMenuOpen()) { closeRecipeMenu(); return; }
     if (isBuildingInfoMenuOpen()) { closeBuildingInfoMenu(); return; }
@@ -1563,7 +1565,7 @@ function renderTankWalls(ctx, state, canvasWidth) {
   // Exposes each wall's actual live on-screen width as a CSS custom property
   // — per direct request, the HUD/chat pill (both fixed-position DOM
   // elements pinned near the corners) read these (see style.css's #hud/
-  // #pause-toggle-btn/#notification-ticker) to offset themselves clear of
+  // #notification-ticker) to offset themselves clear of
   // the glass instead of visually overlapping it, at every viewport size
   // rather than guessing one fixed margin that only happens to work for
   // some. Only written when actually changed (camera/canvas size are

@@ -38,7 +38,7 @@
       <div class="help-row"><div class="help-icon">⚗️</div><div class="help-text"><b>Refineries</b> absorb Waste and dispense fresh Food (or Bio-Sludge into Biomass) — Electric, Advanced, and Bio tiers process faster.</div></div>
       <div class="help-row"><div class="help-icon">💰</div><div class="help-text"><b>Click a coin to bank it</b> yourself any time — Collectors are a convenience, not a requirement. Waste can be left for a Suckerfish or a Refinery to clean up.</div></div>
       <div class="help-row"><div class="help-icon">⛰️</div><div class="help-text"><b>The Mound</b> (seabed, early game) cracks open for gold, unlocking new buildings and fish as you feed it money. It eventually shatters into...</div></div>
-      <div class="help-row"><div class="help-icon">🔬</div><div class="help-text"><b>...the Science Lab</b> — the long-term goal. Spend Science Bubbles (dropped by the Science Octopus) and gold on its branching tree to unlock the Electric Eel, Suckerfish, Advanced buildings, and every Gene-Spliced hybrid fish.</div></div>
+      <div class="help-row"><div class="help-icon">🔬</div><div class="help-text"><b>...the Science Lab</b> — the long-term goal. Buy Suckerfish and Science Octopus with gold alone to get started, then spend Science Bubbles (dropped by the Octopus) and gold on the rest of its branching tree to unlock Advanced/Bio buildings and every Gene-Spliced hybrid fish.</div></div>
       <div class="help-row"><div class="help-icon">🧤</div><div class="help-text"><b>The Merge tool</b> (hotkey 3) lets you drag one Adult fish onto a matching one to combine them into a bigger, shinier fish, or drag an Adult Suckerfish/Eel/Octopus onto another Adult fish to splice a hybrid.</div></div>
       <div class="help-row"><div class="help-icon">🏆</div><div class="help-text"><b>Tank Points</b> (earned every time a fish grows to an adult) buy permanent upgrades in the Tank Upgrades panel — faster fish, better food, bigger coin caps, and more.</div></div>
     </div>
@@ -60,8 +60,6 @@
   </div>
 </div>
 
-<button id="pause-toggle-btn" class="sheen-target" title="Menu">☰</button>
-
 <div id="tutorial-overlay" class="hidden"></div>
 <div id="tutorial-text" class="hidden"></div>
 <!-- Deliberately NOT nested inside #bottom-bar-row (see that element's own
@@ -80,21 +78,28 @@
      isn't static CSS — #bottom-bar-row centers itself, so its width
      depends on live content), instead of the old `position: absolute`
      relative to #shop-anchor. -->
-<div id="build-legend" class="hidden">
-  <span id="build-legend-purchase">Click to purchase</span>
-  <span>(Esc) to cancel</span>
-</div>
+<!-- Per direct request, this legend now only ever says "Click to purchase"
+     — the "(Esc) to cancel" half moved into the persistent bottom-left
+     #hotkey-legend below (as a dynamic Esc line), since Escape's own job
+     doubles as the pause-menu hotkey now that the dedicated pause button is
+     gone. -->
+<div id="build-legend" class="hidden">Click to purchase</div>
 <div id="tutorial-skip-legend" class="hidden">(Esc) to skip tutorial</div>
 
 <!-- Persistent, always-on hotkey reminder, bottom-left corner — per direct
      request. Small white text, dynamically re-worded by UI.js's updateHUD
      every frame: E flips between "Open Shop"/"Close Shop" (state.ui.
      shopCollapsed), Q between "Pipette Tool"/"Clear Cursor" (whether a
-     build:/fish: tool is currently armed) — see main.js's KeyE/KeyQ
-     handlers for what each actually does. -->
+     build:/fish: tool is currently armed), Esc between "Pause Game"/"Clear
+     Cursor" (whether Escape currently has a popup/panel/tool to close
+     instead of opening the pause menu) — see main.js's KeyE/KeyQ handlers
+     and Escape's own keydown branch for what each actually does. The
+     dedicated pause-menu button (#pause-toggle-btn) was removed per direct
+     request — Escape is the only way to open/close the pause menu now. -->
 <div id="hotkey-legend">
   <div id="hotkey-legend-e">E: Open Shop</div>
   <div id="hotkey-legend-q">Q: Pipette Tool</div>
+  <div id="hotkey-legend-esc">Esc: Pause Game</div>
 </div>
 
 <div id="alien-countdown" class="hidden">👽 Wave <span id="alien-countdown-wave">1</span> incoming: <span id="alien-countdown-seconds">10</span>s</div>

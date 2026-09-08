@@ -57,13 +57,15 @@ export function centerCameraOnMound(camera) {
 const MOUND_TEASE_MESSAGE = `You throw $${MOUND_TEASE_COST} at a suspicious lump of dirt. Nothing happens. Absolutely nothing. You have been scammed by a rock.`;
 
 // Per direct request, the Mound is a short on-ramp now, not the game's
-// whole arc — it only ever grants Octopus/Processor/Refinery (Tier 2)
-// before shattering outright at MOUND_MAX_TIER (3) into the Science Lab,
-// where the REAL progression (Suckerfish, Electric Eel, every Electric/
-// Advanced building) lives from then on. See SCIENCE_LAB_UPGRADES in
-// Config.js.
+// whole arc — it only ever grants Electric Eel/Electric Collector/Electric
+// Refinery (Tier 2, renamed per BUILDING_TYPES' own comment — these are the
+// buildings' NEW base-tier display names, not their old "Collector"/
+// "Refinery" ones) before shattering outright at MOUND_MAX_TIER (3) into
+// the Science Lab, where the REAL progression (Suckerfish, Science Octopus,
+// every Advanced/Bio building) lives from then on. See SCIENCE_LAB_UPGRADES
+// in Config.js.
 const TIER_CRACK_MESSAGES = {
-  2: 'Another crack spreads wider. A Collector and a Refinery tumble out, closely followed by a Science Octopus that looks personally offended by the mess.',
+  2: 'Another crack spreads wider. An Electric Collector and an Electric Refinery tumble out, closely followed by an Electric Eel that looks personally offended by the mess.',
   3: 'The mound stops cracking and just gives up, shattering completely. Underneath: a Science Lab that has apparently been there the whole time, humming with unfinished research. Everything from here on out is going to cost Science.',
 };
 
@@ -77,8 +79,8 @@ function pushNotification(state, text) {
 // Fan is free from level start now, see Config.js's BUILDING_TYPES):
 // (1) the Tier 1.5 "tease" (MOUND_TEASE_COST, a pure joke — does nothing),
 // then (2) the real Tier 1->2 crack (MOUND_CRACK_COST[1], grants the
-// Collector + Refinery + Octopus). The real Tier 2->3 crack
-// (MOUND_CRACK_COST[2]) follows directly after that.
+// Electric Collector + Electric Refinery + Electric Eel). The real Tier
+// 2->3 crack (MOUND_CRACK_COST[2]) follows directly after that.
 export function getMoundNextCost(state) {
   const tier = state.level.tier;
   if (tier === 1 && !state.level.moundTeased) return MOUND_TEASE_COST;
