@@ -107,6 +107,7 @@ export function loadLevel(state, levelId) {
       wasteDragTutorialShown: false, // set only once the "drag Waste into the Turret" lesson genuinely completes — via the tail of the full postalien walkthrough OR the standalone 'wastedrag' flow, see UI.js's onTutorialFlowComplete. Kept separate from postAlienTutorialShown so Escape-skipping the walkthrough before reaching that step doesn't permanently block the standalone fallback from firing later — see Systems.js's updatePostAlienTutorial
       mergeTutorialShown: false, // gates the "switch to Merge and drag two matching Adult fish together" guided tutorial to once, ever — triggered the first time two combinable fish exist on screen simultaneously, see Systems.js's updateMergeTutorialTrigger
       recipeCopyTipShown: false, // fires a one-time chat tip about the Manufacturer/Power Plant drag-to-copy-recipe mechanic the first time 2+ of either are placed at once — see Systems.js's updateRecipeCopyTip
+      firstBioSludgeShown: false, // fires a one-time chat tip the first time a Bio-Sludge (alien_dna) item is ever created — worded differently depending on whether the Refinery is already unlocked, see Entities.js's maybeAnnounceFirstBioSludge
     },
     // Cinematic first-alien intro — per direct request, the very first alien
     // to ever spawn gets a dedicated teaching moment: once it's been alive

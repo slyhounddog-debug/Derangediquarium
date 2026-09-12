@@ -14,6 +14,7 @@ const PORT = 8080;
 // folders plus index.html itself, explicitly.
 app.use('/css', express.static(path.join(__dirname, 'css')));
 app.use('/js', express.static(path.join(__dirname, 'js')));
+app.use('/audio', express.static(path.join(__dirname, 'audio')));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
 app.listen(PORT, () => {

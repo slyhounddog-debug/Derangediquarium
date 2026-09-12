@@ -1,3 +1,8 @@
 node_modules/
 .env
 *.log
+# Windows Explorer auto-generates these when browsing a folder of media
+# files with embedded album art (e.g. the mp3s in audio/) — OS-level cache
+# junk, never real project assets.
+Folder.jpg
+AlbumArtSmall.jpg

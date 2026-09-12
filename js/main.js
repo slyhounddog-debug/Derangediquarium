@@ -56,6 +56,7 @@ import {
   ALIEN_HEALTH_BAR_WIDTH,
   ALIEN_HEALTH_BAR_HEIGHT,
   ALIEN_COUNTDOWN_START_MS,
+  ALIEN_MUSIC_BATTLE_LEAD_MS,
   ALIEN_PORTAL_OPEN_MS,
   ALIEN_PORTAL_CLOSE_MS,
   ALIEN_PORTAL_RADIUS,
@@ -92,7 +93,7 @@ import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop
 import { loadLevel, LEVELS } from './Levels.js';
 import { updateStoryTriggers } from './Systems.js';
 import { updateAmbience, renderAmbience } from './Ambience.js';
-import { resumeAudio, playAlienHit } from './Sound.js';
+import { resumeAudio, playAlienHit, setBattleMusicActive } from './Sound.js';
 import {
   updateEntities,
   trySpawnFood,
@@ -1278,6 +1279,26 @@ function updateBossSequence(state, dtMs) {
   }
 }
 
+// Battle music should be audible whenever an alien is genuinely on screen,
+// OR within ALIEN_MUSIC_BATTLE_LEAD_MS of the next wave actually spawning —
+// per direct request ("have the Game music fade out and the Battle music
+// fade in when there's 3 seconds of a count-down for aliens left"). The
+// pre-wave lead-in reads state.level.alienNextWaveAtMs/alienWaveActive the
+// same way UI.js's own on-screen countdown banner does (see its
+// updateAlienCountdown) — alienNextWaveAtMs is only a meaningful countdown
+// while alienWaveActive is false (see Systems.js's updateAlienWaves), so
+// that guard keeps this from misreading a stale timestamp while a wave's
+// own aliens are still alive (though aliensAlive below would already be
+// true in that case regardless). Sound.js's setBattleMusicActive itself
+// no-ops on a repeat call with the same value, so calling this every single
+// tick is cheap and never restarts an in-flight crossfade.
+function updateBattleMusic(state) {
+  const aliensAlive = state.level.entities.some((e) => e.type === 'alien');
+  const msUntilNextWave = state.level.alienNextWaveAtMs - state.level.elapsed;
+  const withinPreBattleWindow = !state.level.alienWaveActive && msUntilNextWave > 0 && msUntilNextWave <= ALIEN_MUSIC_BATTLE_LEAD_MS;
+  setBattleMusicActive(aliensAlive || withinPreBattleWindow);
+}
+
 function update(dtMs) {
   // Ambience (bubbles/seaweed) deliberately does NOT run before the game
   // has started — the start screen's #start-overlay blurs the tank behind
@@ -1292,6 +1313,7 @@ function update(dtMs) {
   // satisfying "the tank blurry behind it" — it's just not animating.
   if (state.ui.gameStarted) updateAmbience(dtMs);
   if (!state.ui.gameStarted) return; // frozen until the player clicks Start on the first-launch start screen — render() still runs (a static frame), same "frozen but visible" pattern the pause menu already uses
+  updateBattleMusic(state);
   // Cross-module flag (UI.js's buyLabUpgrade sets it, same pattern
   // state.ui.coinCapFlashPending already established) — the Mother Alien
   // Fish purchase's own gameplay-state transition (starting the boss
@@ -1731,7 +1753,21 @@ const CURSOR_BY_TOOL = {
   // into the solid head shape) — it sits at the top of the hammer's head,
   // not its very tip corner.
   demolish: emojiCursorCss('🔨', 13, 8),
-  merge: emojiCursorCss('🧤'),
+  // Real bug fixed, per direct report ("the center of the cursor is way too
+  // far to the bottom left of the glove icon... I have to click in the top
+  // right corner of the fish for it to work"). The default hotspot (4, 26)
+  // — near the bottom-LEFT corner of the 32x32 glyph box, tuned for a glyph
+  // shaped like the hammer's own handle-and-head silhouette — lands almost
+  // entirely OUTSIDE the glove emoji's own rendered pixels at this exact
+  // font/size (measured directly via an offscreen-canvas pixel scan: the
+  // glove's real bounding box is x:6-27, y:4-29, so x=4 sits to the left of
+  // every one of its pixels). (17, 17) is that same glove's own measured
+  // bounding-box center — unlike the hammer (whose hotspot is deliberately
+  // its striking head, not its bounding-box center, since a hammer's visual
+  // weight skews toward one corner), a glove/mitten shape is roughly
+  // symmetric, so its true center is exactly where "grabbing with the
+  // glove" should click from.
+  merge: emojiCursorCss('🧤', 17, 17),
   food: circleCursorCss(FOOD_COLOR),
 };
 let lastCursorTool = null;

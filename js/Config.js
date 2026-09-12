@@ -759,6 +759,16 @@ export const WASTE_MAX_ON_SCREEN = 200;
 export const CLEANLINESS_WARNING_THRESHOLD = 90;
 export const CLEANLINESS_WARNING_MESSAGE =
   'Looking a little dirty in there champ. The dirtier your tank is, the less often your fish produce money. If only there was a way to clean it......';
+// The first-ever Bio-Sludge (alien_dna) item, per direct request — worded
+// differently depending on whether the Refinery is already unlocked (it's
+// granted by the Mound's real Tier 1->2 crack), since a player who hasn't
+// reached that yet has nothing to actually DO with the Bio-Sludge yet, and
+// should be nudged back toward the Mound instead of toward a building they
+// don't have. See Entities.js's maybeAnnounceFirstBioSludge.
+export const FIRST_BIO_SLUDGE_WITH_REFINERY_MESSAGE =
+  "Ooh, fresh Bio-Sludge! You've already got a Refinery sitting there looking useful — throw it in and see what dribbles out the other end.";
+export const FIRST_BIO_SLUDGE_NO_REFINERY_MESSAGE =
+  "You've got yourself some Bio-Sludge and absolutely nothing to do with it yet. That mound sitting in your seabed looks suspiciously like it's hiding the answer.";
 // The #hud-cleanliness/#shop-cleanliness readout's text color is a live
 // gradient between these two, per direct request — bright blue at 100%
 // fading to an olive green at 0%. CLEANLINESS_COLOR_DIRTY is deliberately
@@ -994,16 +1004,20 @@ export const SPECIES = {
     hungerRate: 1.218, // hunger points/sec — 25% slower again per direct request ("all fish get hungrier 25% slower"); was 1.624
     // Per direct request ("fish spawn coins at the same rate as adult, they
     // are just worth more value...") — every stage shares the ADULT's own
-    // dropInterval (19382), so growing up no longer speeds up production at
-    // all, only raises the payout. Coin value cut twice since: first to a
-    // flat $7/$10/$13 ("range from 7-13 instead of 8-16"), then down again
-    // to $5/$7/$9 per direct request ("too close to the blimpfish in
-    // economy") — Guppy is meant to read as the cheap/low-value baseline,
-    // clearly below Blimpfish's $12.7/$16.5/$22.
+    // dropInterval, so growing up no longer speeds up production at all,
+    // only raises the payout. Coin value cut twice since: first to a flat
+    // $7/$10/$13 ("range from 7-13 instead of 8-16"), then down again to
+    // $5/$7/$9 per direct request ("too close to the blimpfish in economy")
+    // — Guppy is meant to read as the cheap/low-value baseline, clearly
+    // below Blimpfish's own values. Most recently, per direct request
+    // ("make coins worth ~25% more but drop ~80% as often, for all fish"),
+    // dropValue *= 1.25 and dropInterval /= 0.8 (same "rate-based" ÷X
+    // convention this file already uses for "X% as often" — see e.g.
+    // WASTE_POOP_INTERVAL_MS's own comment) across all 3 base feeders.
     growthStages: [
-      { feedsRequired: 0, scale: 0.5, dropInterval: 19382, dropValue: 5 }, // stage 1: hatchling
-      { feedsRequired: 3, scale: 0.75, dropInterval: 19382, dropValue: 7 }, // stage 2: juvenile
-      { feedsRequired: 6, scale: 1.0, dropInterval: 19382, dropValue: 9 }, // stage 3: adult
+      { feedsRequired: 0, scale: 0.5, dropInterval: 24228, dropValue: 6.25 }, // stage 1: hatchling
+      { feedsRequired: 3, scale: 0.75, dropInterval: 24228, dropValue: 8.75 }, // stage 2: juvenile
+      { feedsRequired: 6, scale: 1.0, dropInterval: 24228, dropValue: 11.25 }, // stage 3: adult
     ],
     // Per-species multiplier on the flat WASTE_POOP_INTERVAL_MS fish-poop
     // timer (Entities.js's updateFish) — omitted here since Guppy IS the
@@ -1019,12 +1033,13 @@ export const SPECIES = {
     lifespan: 240000,
     hungerRate: 0.948, // 25% slower again per direct request — was 1.264 — lowest coin value of the three, so it's the least demanding to keep fed
     // Same "share the adult's own dropInterval, scale only the value ~2x
-    // baby-to-adult" treatment as Guppy above — adult dropValue (3) is
-    // unchanged, only the per-stage split and the now-flat interval are new.
+    // baby-to-adult" treatment as Guppy above. Per direct request ("make
+    // coins worth ~25% more but drop ~80% as often, for all fish"),
+    // dropValue *= 1.25 and dropInterval /= 0.8, same as every other feeder.
     growthStages: [
-      { feedsRequired: 0, scale: 0.5, dropInterval: 9382, dropValue: 1.5 }, // hatchling — half the adult value
-      { feedsRequired: 3, scale: 0.75, dropInterval: 9382, dropValue: 2.25 }, // juvenile — three-quarters
-      { feedsRequired: 6, scale: 1.0, dropInterval: 9382, dropValue: 3 }, // adult — still the high-frequency coin firehose of the three, just slightly less so
+      { feedsRequired: 0, scale: 0.5, dropInterval: 11728, dropValue: 1.875 }, // hatchling — half the adult value
+      { feedsRequired: 3, scale: 0.75, dropInterval: 11728, dropValue: 2.8125 }, // juvenile — three-quarters
+      { feedsRequired: 6, scale: 1.0, dropInterval: 11728, dropValue: 3.75 }, // adult — still the high-frequency coin firehose of the three, just slightly less so
     ],
     // 10% slower waste production than Guppy, per direct request — same
     // "÷(1-x)" convention this codebase already uses for "X% slower"
@@ -1043,16 +1058,17 @@ export const SPECIES = {
     lifespan: 360000,
     hungerRate: 1.554, // 25% slower again per direct request — was 2.072 — highest coin value of the three, so it's still the most demanding to keep fed
     // Same "share the adult's own dropInterval" treatment as Guppy/Dartfin
-    // above — every stage fires at the adult's own 29259ms, that old
-    // per-stage speed-up (41852/35802/29259) is gone. Baby dropValue tuned
-    // per a direct follow-up ("make it so the starting blimpfish coin value
-    // makes it closer to 26 money/min as a baby, and keep the adult the
-    // same") — 12.7 lands right at ~$26.04/min (12.7 / 29259 * 60000);
-    // adult (22) and juvenile (16.5) are unchanged from the prior pass.
+    // above — every stage fires at the same interval, that old per-stage
+    // speed-up (41852/35802/29259) is gone. Baby dropValue was tuned to land
+    // at ~$26/min before the pass below; per direct request ("make coins
+    // worth ~25% more but drop ~80% as often, for all fish"), dropValue *=
+    // 1.25 and dropInterval /= 0.8 across all 3 stages, same as every other
+    // feeder — the effective $/min for each stage scales by the same net
+    // 1.25/0.8 = 1.5625x this produces everywhere.
     growthStages: [
-      { feedsRequired: 0, scale: 0.6, dropInterval: 29259, dropValue: 12.7 }, // hatchling — ~$26/min
-      { feedsRequired: 3, scale: 0.8, dropInterval: 29259, dropValue: 16.5 }, // juvenile
-      { feedsRequired: 6, scale: 1.0, dropInterval: 29259, dropValue: 22 }, // adult — unchanged per direct request
+      { feedsRequired: 0, scale: 0.6, dropInterval: 36574, dropValue: 15.875 }, // hatchling
+      { feedsRequired: 3, scale: 0.8, dropInterval: 36574, dropValue: 20.625 }, // juvenile
+      { feedsRequired: 6, scale: 1.0, dropInterval: 36574, dropValue: 27.5 }, // adult
     ],
     // 5% faster waste production than Guppy, per direct request — same
     // per-species multiplier mechanism as Dartfin's own (slower) one above,
@@ -2237,8 +2253,15 @@ export const FISH_STAR_Y_OFFSET_RATIO = 0.55; // how far above the fish's center
 // Hit-test radius (as a fraction of the fish's current on-screen size) used
 // by main.js's drag-to-combine mousedown/mouseup and the live hover-target
 // check — generous enough to grab a fish without needing pixel precision,
-// same spirit as COIN_CLICK_RADIUS_MULTIPLIER above.
-export const FISH_DRAG_HIT_RADIUS_FRACTION = 0.6;
+// same spirit as COIN_CLICK_RADIUS_MULTIPLIER above. Raised from 0.6 to 1.0
+// per direct request ("make the adult fish have a bigger clickable area for
+// merging") — since only Adult-stage fish are ever legal merge/splice
+// targets in the first place (canCombineFish/canSpliceFish both require it),
+// this reads as "the whole visible fish body is clickable" for exactly the
+// fish this tool is ever actually used on, matching the same full-size
+// (fraction 1.0) precedent findFishForPipetteAt already established for
+// "easier to select."
+export const FISH_DRAG_HIT_RADIUS_FRACTION = 1.0;
 
 // ---- Rolling notification log ----
 export const NOTIFICATION_LOG_MAX = 50; // oldest entries drop off past this many
@@ -2353,6 +2376,14 @@ export const ALIEN_MAX_ALIVE = 20;
 export const ALIEN_WARNING_MS_1 = 60000; // first chat-log warning, 60s out
 export const ALIEN_WARNING_MS_2 = 30000; // second chat-log warning, 30s out
 export const ALIEN_COUNTDOWN_START_MS = 10000; // the visible on-screen "10... 9... 8..." banner takes over from here
+// How far ahead of an incoming wave the Battle music starts fading in, per
+// direct request ("have the Game music fade out and the Battle music fade
+// in when there's 3 seconds of a count-down for aliens left") — main.js's
+// per-tick music-state check compares this against the same
+// alienNextWaveAtMs - elapsed countdown the on-screen banner above already
+// reads. Sound.js's own crossfade duration is set to match this exactly, so
+// Battle reaches full volume right as the wave actually spawns.
+export const ALIEN_MUSIC_BATTLE_LEAD_MS = 3000;
 export const ALIEN_WARNING_MESSAGE_1 = "Something's stirring out past the reef... probably nothing.";
 export const ALIEN_WARNING_MESSAGE_2 = "Uh oh, I'm reading movement out there. Get your turrets ready.";
 export const ALIEN_FIRST_WAVE_TIP_MESSAGE = "Aliens incoming! Click 'em for 1 damage a pop, or let a turret handle it. While they're alive they'll poop waste and scare nearby fish off their coins, so don't dawdle.";

@@ -1,24 +1,41 @@
-// Sound.js — synthesized SFX + a looping chiptune-style background track,
-// entirely generated via the Web Audio API. No audio files/assets at all:
-// real 8-bit console audio was square/triangle/noise wave synthesis in the
-// first place, so building "8-bit style" sound this way is the genuine
-// article, not a placeholder. Autoplay policies mean the AudioContext can't
-// actually produce sound until a real user gesture — main.js calls
-// resumeAudio() from the very first pointerdown/keydown the page sees.
-// Forbidden: no gameplay logic — every export here is a fire-and-forget
-// side effect a caller triggers at the moment something already happened.
+// Sound.js — synthesized SFX (still pure Web Audio API oscillators/noise,
+// same as ever) + 3 real music tracks (Game/Battle/Boss, per direct
+// request — replacing the previous synthesized chiptune background loop
+// entirely). The 3 tracks live in audio/ at the repo root — see
+// ensureMusicTracks below for how they're loaded/wired/crossfaded.
+// Autoplay policies mean the AudioContext (and any <audio> element routed
+// through it) can't actually produce sound until a real user gesture —
+// main.js calls resumeAudio() from the very first pointerdown/keydown the
+// page sees. Forbidden: no gameplay logic — every export here is a
+// fire-and-forget side effect a caller triggers at the moment something
+// already happened.
+
+import { ALIEN_MUSIC_BATTLE_LEAD_MS } from './Config.js';
 
 let ctx = null;
 let musicGain = null;
 let sfxGain = null;
 let musicStarted = false;
-let musicTimer = null;
-// The performance.now() wall-clock moment the currently-armed musicTimer is
-// due to fire scheduleMusicLoop again — tracked separately from the timer
-// handle itself so a blur/focus cycle can re-arm the SAME intended moment
-// (see the blur/focus listeners below) instead of restarting the loop's own
-// cadence from scratch.
-let musicNextFireAt = null;
+
+// The 3 real music tracks (see ensureMusicTracks below) and their own
+// per-track gain nodes, feeding into the shared musicGain above so the
+// Settings volume slider still controls all of them uniformly.
+let gameMusicEl = null;
+let battleMusicEl = null;
+let bossMusicEl = null;
+let gameTrackGain = null;
+let battleTrackGain = null;
+let bossTrackGain = null;
+// Whether Battle should currently be the audible one (crossfade target) —
+// tracked so setBattleMusicActive can no-op on repeat calls with the same
+// value instead of restarting an in-flight ramp every frame it's called
+// from main.js's per-tick check.
+let battleActive = false;
+// Once the end-game boss track has been triggered, it stays the permanent
+// audio state for the rest of the session — setBattleMusicActive becomes a
+// no-op so a still-alive alien (the boss itself is `type: 'alien'`) can't
+// fight the boss track for the music slot.
+let bossActive = false;
 
 // Volume sliders in the pause menu's Settings panel (UI.js) call
 // setMusicVolume/setSfxVolume below, which need to work even before the
@@ -46,46 +63,27 @@ function ensureContext() {
 // Silence (and genuinely stop processing) all audio the instant the
 // window/tab loses focus, resuming automatically the instant it's back —
 // per direct request. AudioContext.suspend()/resume() is the correct
-// primitive for this rather than zeroing the gain nodes — it also halts
-// the audio graph's actual CPU work while backgrounded, not just its
-// output, and needs no separate bookkeeping to restore the right volume
-// afterward (setMusicVolume/setSfxVolume's own musicVolume/sfxVolume
-// variables are completely untouched by this). A no-op if the context
-// doesn't exist yet (nothing to silence before the first real user gesture
-// unlocks it) or is already in the target state (switching tabs can fire
-// blur/focus more than once in a row in some browsers).
-//
-// Real bug fixed here, per direct report ("if I unfocus and re-focus, the
-// music resumes playing as well as a new music track, so multiple are
-// playing at the same time"): suspending the AudioContext freezes its own
-// `currentTime` and pauses whatever's already scheduled, but does NOT pause
-// this file's music-loop `setTimeout` chain (musicTimer) — that's a plain
-// JS timer running on real wall-clock time, completely independent of the
-// AudioContext's state. Left alone, it kept firing scheduleMusicLoop() on
-// its normal cadence throughout a long blur, and each firing scheduled a
-// WHOLE NEW loop iteration's worth of oscillators against the same frozen
-// (suspended) currentTime the ORIGINAL, still-mid-flight iteration's own
-// notes were already scheduled against — so resuming played both at once.
-// Fixed by clearing musicTimer on blur (stopping the chain from re-firing
-// while backgrounded, so no second iteration ever gets scheduled) and
-// re-arming it on focus at the SAME wall-clock moment it was always due to
-// fire (musicNextFireAt, set by scheduleMusicLoop itself), not a fresh
-// full-length delay — so the loop's real cadence isn't disturbed by
-// whatever length the blur happened to be, and only ever one continuation
-// is ever pending at a time.
+// primitive for this rather than zeroing the gain nodes — it also halts the
+// audio graph's actual CPU work while backgrounded, not just its output,
+// and needs no separate bookkeeping to restore the right volume afterward
+// (setMusicVolume/setSfxVolume's own musicVolume/sfxVolume variables are
+// completely untouched by this). A no-op if the context doesn't exist yet
+// (nothing to silence before the first real user gesture unlocks it) or is
+// already in the target state (switching tabs can fire blur/focus more
+// than once in a row in some browsers). Suspending the context silences a
+// MediaElementAudioSourceNode's OUTPUT, but — unlike the oscillator-based
+// scheduling this file used to do for its background music — does NOT pause
+// the underlying <audio> element's own playback clock, which keeps
+// advancing on real wall-clock time regardless; that's actually exactly
+// what's wanted here, since it means the Game/Battle tracks stay perfectly
+// in sync with each other (and with real time) across any blur/focus cycle,
+// with no risk of the old "double-scheduled" bug this file's synthesized
+// music loop used to have — nothing here is ever scheduled twice.
 window.addEventListener('blur', () => {
   if (ctx && ctx.state === 'running') ctx.suspend();
-  if (musicTimer != null) {
-    clearTimeout(musicTimer);
-    musicTimer = null;
-  }
 });
 window.addEventListener('focus', () => {
   if (ctx && ctx.state === 'suspended') ctx.resume();
-  if (musicStarted && musicTimer == null && musicNextFireAt != null) {
-    const remainingMs = Math.max(0, musicNextFireAt - performance.now());
-    musicTimer = setTimeout(scheduleMusicLoop, remainingMs);
-  }
 });
 
 // v is 0-1 — UI.js's Settings sliders call these directly on `input`, so the
@@ -102,8 +100,9 @@ export function getMusicVolume() { return musicVolume; }
 export function getSfxVolume() { return sfxVolume; }
 
 // Called from main.js on the very first pointerdown/keydown — browsers
-// refuse to run an AudioContext until a real user gesture, and this is also
-// what kicks off the looping background music for the first time.
+// refuse to run an AudioContext (or play an <audio> element routed through
+// one) until a real user gesture, and this is also what starts the Game and
+// Battle tracks playing for the first time (see startMusic below).
 export function resumeAudio() {
   const audioCtx = ensureContext();
   if (!audioCtx) return;
@@ -238,6 +237,30 @@ export function playTankPoint() {
   playTone(1567.98, 0.09, { type: 'triangle', gain: 0.12, when: 0.05 }); // G6
 }
 
+// A small, simple two-note chime — a fish growing from baby to mid-size.
+// Deliberately plainer than playGrowToAdult below, since reaching the
+// adult stage is the bigger milestone (a Tank Point too, via
+// Entities.js's awardTankPoint, which calls playTankPoint independently of
+// this pair — the two are separate cues that happen to land on the same
+// moment, not a duplicate of each other).
+export function playGrowToMid() {
+  playTone(880, 0.07, { type: 'sine', gain: 0.1 }); // A5
+  playTone(1174.66, 0.09, { type: 'sine', gain: 0.1, when: 0.05 }); // D6
+}
+
+// A slightly more elaborate, "magical" sparkle — a fish reaching full adult
+// size, whether that's a Mutagen-Paste jump straight from baby or an
+// ordinary feed from mid-size. A 3-note ascending phrase (real chord tones,
+// not just a scale run) with a soft high shimmer note layered under the
+// last one for a touch of sparkle, per direct request ("a slightly more
+// magical sound when growing to the adult size").
+export function playGrowToAdult() {
+  playTone(659.25, 0.06, { type: 'sine', gain: 0.09 }); // E5
+  playTone(880, 0.07, { type: 'sine', gain: 0.1, when: 0.06 }); // A5
+  playTone(1318.5, 0.12, { type: 'sine', gain: 0.11, when: 0.13 }); // E6
+  playTone(1760, 0.16, { type: 'triangle', gain: 0.05, when: 0.15, attack: 0.03, release: 0.1 }); // A6 — a soft shimmer layered under the last note
+}
+
 // A soft rising blip — opening a panel (Shop, Tank Upgrades, pause menu, the
 // electricity HUD's graph popup) or switching into a pause-menu sub-tab
 // (Settings). Deliberately gentler/quieter than playPurchase's own rising
@@ -319,136 +342,114 @@ export function playDispense() {
 }
 
 // ---- Background music ----
-// Reworked a third time, per direct request ("I hate it... more melodic,
-// upbeat and adventurous feeling, with more substance, and no random
-// clicks in the song"). The "random clicks" were almost certainly the
-// previous version's own rhythmic "bounce" pulse — a bare, fast-attack
-// square-wave tick layered under the bass, described in that version's own
-// comment as exactly that ("a tiny... square-wave tick"). It's gone
-// entirely this time, not just quieted — nothing in this track is a bare
-// percussive blip any more, only tuned notes.
+// Replaced entirely with 3 real tracks, per direct request — the previous
+// synthesized chiptune loop (hand-composed melody/chords/bass, all pure
+// oscillators) is gone. Game.mp3 plays whenever there's no alien threat;
+// Battle.mp3 takes over whenever there is; Boss.mp3 takes over permanently
+// once the end-game boss upgrade is purchased. The 3 files live in audio/
+// at the repo root (moved there from the project root, where they were
+// first added) and are loaded as plain <audio> elements routed through the
+// existing WebAudio graph via createMediaElementSource, so the Settings
+// panel's music-volume slider (musicGain) and the blur/focus silencing
+// above both keep working uniformly across all 3 without any special-casing.
 //
-// The bigger change is real harmonic "substance": the previous two passes
-// were melody-plus-single-bass-note, built entirely off one pentatonic
-// scale so nothing could ever clash. This version is hand-composed (never
-// randomized) over an actual I-V-vi-IV chord progression (C-G-Am-F,
-// repeated twice across an 8-bar loop) — the single most common
-// "hopeful/adventurous" progression in game and pop music (it's the
-// backbone of a huge fraction of upbeat anthems) — using the full C major
-// scale rather than just its pentatonic subset, so the melody can leap
-// along real chord tones (full triads, not just neighboring scale steps)
-// for a much more "fanfare" contour: e.g. bar 1 arpeggiates straight up the
-// C major triad, bar 7 leaps up to the loop's highest note (A5) right
-// before the final turnaround. Three real, independent voices now play
-// every bar: the lead melody, a moving root-then-fifth bass line (a classic
-// "oom-pah" pattern, not a static drone), and a soft sustained pad holding
-// the FULL triad (root+third+fifth) underneath — that pad is what actually
-// makes a chord change audible as a chord change, not just a bass note
-// change. All three stay 'sine'/'triangle' (never 'square' at a fast
-// attack) specifically to keep everything smooth — a square wave's sharp
-// edges are what read as "clicky" at a short, fast-attack duration. Scheduled
-// the same way as every prior version: the whole loop's notes are converted
-// into absolute `when` offsets up front, then the next loop is scheduled via
-// setTimeout timed to the loop's own total duration, so any timer drift only
-// ever delays the NEXT loop's first note by a few ms, never an audible glitch
-// mid-phrase.
-const MUSIC_TEMPO_BPM = 132;
-const BEAT_S = 60 / MUSIC_TEMPO_BPM;
-const BAR_BEATS = 4;
-// Full C major scale across 2+ octaves (not just the pentatonic subset) —
-// index 0 = C4 ... index 14 = C6. Every melody/chord note below is chosen
-// deliberately against the chord progression, so using the full scale (with
-// its 4th/7th degrees available) carries no dissonance risk the way
-// generating notes programmatically would.
-const SCALE = [
-  261.63, 293.66, 329.63, 349.23, 392.0, 440.0, 493.88, // C4 D4 E4 F4 G4 A4 B4
-  523.25, 587.33, 659.25, 698.46, 783.99, 880.0, 987.77, 1046.5, // C5 D5 E5 F5 G5 A5 B5 C6
-];
-// I-V-vi-IV, repeated twice across the loop — [root, third, fifth] as SCALE
-// indices. The classic "hopeful anthem" progression; F -> C across the loop
-// boundary (bar 8 back to bar 1) is a plagal ("amen") cadence, which is why
-// the loop point itself feels like a satisfying resolve rather than a hard
-// cut.
-const CHORDS = {
-  C: [0, 2, 4],
-  G: [4, 6, 8],
-  Am: [5, 7, 9],
-  F: [3, 5, 7],
-};
-const CHORD_PROGRESSION = ['C', 'G', 'Am', 'F', 'C', 'G', 'Am', 'F'];
-// One bar (4 beats) of melody per chord above, chosen to outline that
-// chord's own triad on the strong beats — an ascending arpeggio hop over
-// the opening C, a full run up to the octave over G, a slightly more
-// syncopated minor-tinged bar over Am, climbing to a high point over F, a
-// mirrored/descending echo of bar 1 for the "return" (bar 5), then a real
-// climax (A5, the loop's highest note) over the second Am before a
-// four-note descending close leads back into the loop.
-const MELODY_BARS = [
-  [{ deg: 0, beats: 0.5 }, { deg: 2, beats: 0.5 }, { deg: 4, beats: 0.5 }, { deg: 7, beats: 0.5 }, { deg: 9, beats: 0.5 }, { deg: 7, beats: 0.5 }, { deg: 4, beats: 0.5 }, { deg: 2, beats: 0.5 }],
-  [{ deg: 4, beats: 0.5 }, { deg: 6, beats: 0.5 }, { deg: 8, beats: 0.5 }, { deg: 11, beats: 0.5 }, { deg: 8, beats: 0.5 }, { deg: 6, beats: 0.5 }, { deg: 4, beats: 1 }],
-  [{ deg: 5, beats: 0.5 }, { deg: 7, beats: 0.5 }, { deg: 9, beats: 0.5 }, { deg: 7, beats: 0.5 }, { deg: 5, beats: 0.5 }, { deg: 2, beats: 0.5 }, { deg: 3, beats: 0.5 }, { deg: 5, beats: 0.5 }],
-  [{ deg: 3, beats: 1 }, { deg: 5, beats: 0.5 }, { deg: 7, beats: 0.5 }, { deg: 10, beats: 1 }, { deg: 7, beats: 0.5 }, { deg: 5, beats: 0.5 }],
-  [{ deg: 7, beats: 0.5 }, { deg: 9, beats: 0.5 }, { deg: 11, beats: 0.5 }, { deg: 9, beats: 0.5 }, { deg: 7, beats: 0.5 }, { deg: 4, beats: 0.5 }, { deg: 2, beats: 0.5 }, { deg: 0, beats: 0.5 }],
-  [{ deg: 4, beats: 0.5 }, { deg: 6, beats: 0.5 }, { deg: 8, beats: 0.5 }, { deg: 6, beats: 0.5 }, { deg: 4, beats: 1 }, { deg: 2, beats: 1 }],
-  [{ deg: 5, beats: 0.5 }, { deg: 7, beats: 0.5 }, { deg: 9, beats: 0.5 }, { deg: 12, beats: 0.5 }, { deg: 9, beats: 0.5 }, { deg: 7, beats: 0.5 }, { deg: 5, beats: 1 }],
-  [{ deg: 10, beats: 0.5 }, { deg: 7, beats: 0.5 }, { deg: 5, beats: 0.5 }, { deg: 3, beats: 0.5 }, { deg: 5, beats: 1 }, { deg: 3, beats: 1 }],
-];
+// Game and Battle are BOTH always playing, in lockstep, for the entire
+// session — only their own gain is what actually changes. Per direct
+// spec ("their timings are lined up exactly, so you can switch... with a
+// seamless transition"), the two tracks are musically aligned throughout,
+// not just at one specific timestamp — keeping both permanently in sync via
+// looping playback (rather than pausing one and seeking/starting the other
+// on demand) is what actually guarantees that alignment holds at whatever
+// moment a crossfade happens to start, with zero risk of drift between the
+// two tracks' own loop points ever creeping in. Boss is different by
+// design — per direct request ("that music can start immediately, from the
+// beginning") it isn't kept synced with anything; it simply starts fresh
+// from position 0 the instant it's triggered.
+const MUSIC_CROSSFADE_S = ALIEN_MUSIC_BATTLE_LEAD_MS / 1000; // matches the 3-second pre-wave window main.js starts the fade-in from, so Battle reaches full volume right as the wave actually spawns
 
-function scheduleMusicLoop() {
-  const audioCtx = ensureContext();
-  if (!audioCtx) return;
-  let beatCursor = 0;
-  for (const bar of MELODY_BARS) {
-    for (const note of bar) {
-      playTone(SCALE[note.deg], note.beats * BEAT_S * 0.97, {
-        type: 'sine',
-        gain: 0.13,
-        attack: 0.015,
-        release: 0.16,
-        when: beatCursor * BEAT_S,
-        destination: musicGain,
-      });
-      beatCursor += note.beats;
-    }
-  }
-  const totalBeats = beatCursor;
+function ensureMusicTracks() {
+  if (gameMusicEl) return;
+  gameMusicEl = new Audio('audio/Game.mp3');
+  gameMusicEl.loop = true;
+  battleMusicEl = new Audio('audio/Battle.mp3');
+  battleMusicEl.loop = true;
+  bossMusicEl = new Audio('audio/Boss.mp3');
+  bossMusicEl.loop = true;
 
-  CHORD_PROGRESSION.forEach((chordName, barIndex) => {
-    const [rootIdx, thirdIdx, fifthIdx] = CHORDS[chordName];
-    const barStart = barIndex * BAR_BEATS * BEAT_S;
+  gameTrackGain = ctx.createGain();
+  battleTrackGain = ctx.createGain();
+  bossTrackGain = ctx.createGain();
+  // Read the current target state rather than hardcoding 0/1 — covers the
+  // (unlikely but possible) edge case of setBattleMusicActive/
+  // triggerBossMusic having already been called once before the very first
+  // user-gesture unlock created these nodes at all.
+  gameTrackGain.gain.value = bossActive ? 0 : (battleActive ? 0 : 1);
+  battleTrackGain.gain.value = bossActive ? 0 : (battleActive ? 1 : 0);
+  bossTrackGain.gain.value = bossActive ? 1 : 0;
 
-    // Bass: a real "oom-pah" — the root on beat 1 (the longer, anchoring
-    // hit) and the fifth on beat 3 (shorter), one octave down.
-    playTone(SCALE[rootIdx] / 2, BEAT_S * 1.6, {
-      type: 'triangle', gain: 0.09, attack: 0.012, release: 0.22, when: barStart, destination: musicGain,
-    });
-    playTone(SCALE[fifthIdx] / 2, BEAT_S * 1.0, {
-      type: 'triangle', gain: 0.07, attack: 0.012, release: 0.18, when: barStart + 2 * BEAT_S, destination: musicGain,
-    });
-
-    // The pad: the full triad, held for nearly the whole bar at a low
-    // gain — this is what makes each chord change actually read as a chord
-    // change (a harmony shift) rather than just the bass note moving.
-    for (const idx of [rootIdx, thirdIdx, fifthIdx]) {
-      playTone(SCALE[idx], BAR_BEATS * BEAT_S * 0.95, {
-        type: 'triangle', gain: 0.028, attack: 0.12, release: 0.3, when: barStart, destination: musicGain,
-      });
-    }
-  });
-
-  const delayMs = totalBeats * BEAT_S * 1000;
-  musicNextFireAt = performance.now() + delayMs;
-  musicTimer = setTimeout(scheduleMusicLoop, delayMs);
+  ctx.createMediaElementSource(gameMusicEl).connect(gameTrackGain).connect(musicGain);
+  ctx.createMediaElementSource(battleMusicEl).connect(battleTrackGain).connect(musicGain);
+  ctx.createMediaElementSource(bossMusicEl).connect(bossTrackGain).connect(musicGain);
 }
 
 function startMusic() {
-  scheduleMusicLoop();
+  ensureMusicTracks();
+  gameMusicEl.play().catch(() => {});
+  battleMusicEl.play().catch(() => {});
+  if (bossActive) bossMusicEl.play().catch(() => {});
+}
+
+// Called every tick from main.js with whether Battle should currently be the
+// audible track (aliens genuinely on screen, OR within
+// ALIEN_MUSIC_BATTLE_LEAD_MS of the next wave spawning) — per direct
+// request. No-ops on a repeat call with the same value (so calling this
+// every single tick doesn't restart the ramp from wherever it currently is
+// every frame) and once the boss track has taken over permanently (see
+// triggerBossMusic below).
+export function setBattleMusicActive(active) {
+  if (bossActive || active === battleActive) return;
+  battleActive = active;
+  if (!ctx || !gameTrackGain || !battleTrackGain) return; // audio not unlocked yet — nothing to ramp
+  const now = ctx.currentTime;
+  const battleTarget = active ? 1 : 0;
+  const gameTarget = active ? 0 : 1;
+  // Cancel-then-hold-then-ramp — the standard way to safely retarget a gain
+  // ramp that might already be mid-flight (e.g. aliens clearing right as the
+  // next wave's own 3-second lead-in begins) without an audible jump/click.
+  battleTrackGain.gain.cancelScheduledValues(now);
+  battleTrackGain.gain.setValueAtTime(battleTrackGain.gain.value, now);
+  battleTrackGain.gain.linearRampToValueAtTime(battleTarget, now + MUSIC_CROSSFADE_S);
+  gameTrackGain.gain.cancelScheduledValues(now);
+  gameTrackGain.gain.setValueAtTime(gameTrackGain.gain.value, now);
+  gameTrackGain.gain.linearRampToValueAtTime(gameTarget, now + MUSIC_CROSSFADE_S);
+}
+
+// Called once, the instant the end-game boss upgrade is purchased (UI.js's
+// buyLabUpgrade) — per direct request, starts immediately, from the
+// beginning, with no fade and no further Game/Battle involvement for the
+// rest of the session.
+export function triggerBossMusic() {
+  if (bossActive) return;
+  bossActive = true;
+  if (!ctx) return; // shouldn't happen in practice — audio is unlocked well before any Lab purchase is possible
+  ensureMusicTracks();
+  const now = ctx.currentTime;
+  gameTrackGain.gain.cancelScheduledValues(now);
+  gameTrackGain.gain.setValueAtTime(0, now);
+  battleTrackGain.gain.cancelScheduledValues(now);
+  battleTrackGain.gain.setValueAtTime(0, now);
+  gameMusicEl.pause();
+  battleMusicEl.pause();
+  bossTrackGain.gain.value = 1;
+  bossMusicEl.currentTime = 0;
+  bossMusicEl.play().catch(() => {});
 }
 
 // Exported for completeness (e.g. a future mute toggle) — not currently
 // wired to any UI control, since none was requested.
 export function stopMusic() {
-  if (musicTimer !== null) { clearTimeout(musicTimer); musicTimer = null; }
   musicStarted = false;
-  musicNextFireAt = null;
+  if (gameMusicEl) gameMusicEl.pause();
+  if (battleMusicEl) battleMusicEl.pause();
+  if (bossMusicEl) bossMusicEl.pause();
 }

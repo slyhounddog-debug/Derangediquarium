@@ -64,7 +64,7 @@ import { getTile, worldToTile, getBuildingCost, FAN_STATS, hasAnyBuildingPlaced,
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
-import { playUpgrade, setMusicVolume, setSfxVolume, getMusicVolume, getSfxVolume, playPanelOpen, playPanelClose } from './Sound.js';
+import { playUpgrade, setMusicVolume, setSfxVolume, getMusicVolume, getSfxVolume, playPanelOpen, playPanelClose, triggerBossMusic } from './Sound.js';
 import { hasSaveGame, saveGame, loadSaveGame } from './Save.js';
 
 const MOUND_MENU_GAP_PX = 12; // screen px of breathing room between the popup's bottom edge and the Mound's top edge
@@ -1196,9 +1196,14 @@ function buyLabUpgrade(state, id) {
   // off to main.js via a cross-module flag (same pattern
   // state.ui.coinCapFlashPending already established) rather than importing
   // main.js's simulation-level startBossSequence directly from this file.
+  // The Boss music itself starts right here too, per direct request ("that
+  // music can start immediately, from the beginning") — the purchase moment
+  // itself, not the later 2-second cinematic wait main.js's own
+  // updateBossSequence still handles for the actual fish spawn.
   if (node.grants.triggersBossFight) {
     closeLabMenu();
     state.ui.bossFightTriggerPending = true;
+    triggerBossMusic();
   }
   refreshLabTree(state);
   refreshShopPanel(state);

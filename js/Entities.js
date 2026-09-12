@@ -68,6 +68,9 @@ import {
   CLEANLINESS_PER_WASTE_EVENT,
   CLEANLINESS_WARNING_THRESHOLD,
   CLEANLINESS_WARNING_MESSAGE,
+  TILE_REFINERY,
+  FIRST_BIO_SLUDGE_WITH_REFINERY_MESSAGE,
+  FIRST_BIO_SLUDGE_NO_REFINERY_MESSAGE,
   SCIENCE_COLOR,
   POWER_COLOR,
   UTILITY_SPECIES_IDS,
@@ -136,7 +139,7 @@ import { stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemFo
 // Sound is a fire-and-forget side effect at the moment something already
 // happened — the same pattern this file already uses for floatingTexts/
 // notifications, just for audio instead of a visual/text readout.
-import { playPurchase, playFoodPlace, playEat, playFishDeath, playCoinBank, playTankPoint, playProductionBlocked, playHunger, playAlienHit, playAlienDeath, playDispense } from './Sound.js';
+import { playPurchase, playFoodPlace, playEat, playFishDeath, playCoinBank, playTankPoint, playProductionBlocked, playHunger, playAlienHit, playAlienDeath, playDispense, playGrowToMid, playGrowToAdult } from './Sound.js';
 
 let _nextId = 1;
 function nextId() {
@@ -483,6 +486,7 @@ function updateAlien(alien, state, dtMs) {
       const jitterX = alien.x + (Math.random() - 0.5) * alien.radius * 1.5;
       const jitterY = alien.y + (Math.random() - 0.5) * alien.radius * 1.5;
       state.level.items.push(createAlienDna(jitterX, jitterY));
+      maybeAnnounceFirstBioSludge(state);
     }
     state.level.aliensKilledCount += 1; // end-game stats modal only — see main.js's showGameOverModal
     // The very first alien ever killed triggers the turret tutorial's own
@@ -1809,6 +1813,21 @@ function pushStoryNotification(state, text) {
   if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
 }
 
+// A one-time chat tip the first time a Bio-Sludge (alien_dna) item is ever
+// created, per direct request — worded differently depending on whether the
+// Refinery is already unlocked, since a player without it yet has nothing
+// to actually do with Bio-Sludge and should be nudged back toward the Mound
+// (the Refinery's own unlock source) instead. Called from every site that
+// creates an alien_dna item (an alien's death drop, the Manufacturer's
+// Bio-Sludge recipe, Xeno Octopus's toggled dispenser) — cheap to call
+// unconditionally from all of them since it's a no-op after the first time.
+function maybeAnnounceFirstBioSludge(state) {
+  if (state.level.tutorialFlags.firstBioSludgeShown) return;
+  state.level.tutorialFlags.firstBioSludgeShown = true;
+  const hasRefinery = state.meta.buildingsUnlocked.includes(TILE_REFINERY);
+  pushStoryNotification(state, hasRefinery ? FIRST_BIO_SLUDGE_WITH_REFINERY_MESSAGE : FIRST_BIO_SLUDGE_NO_REFINERY_MESSAGE);
+}
+
 // Every subsequent Tank Point just gets the usual small floating text; only
 // the very first one also explains what Tank Points even are, via the
 // rolling notification ticker (same state.level.notifications log Mound.js
@@ -2018,7 +2037,9 @@ function updateFish(fish, state, dtMs) {
             // recompute can't accidentally walk the stage back down.
             fish.totalFeeds = Math.max(fish.totalFeeds, def.growthStages[fish.stage].feedsRequired);
             fish.shimmerStartedAt = state.level.elapsed; // a real stage advance, same "shimmers when it grows" rule every other growth path follows
-            if (fish.stage === def.growthStages.length - 1) awardTankPoint(state, fish);
+            const reachedAdult = fish.stage === def.growthStages.length - 1;
+            if (reachedAdult) playGrowToAdult(); else playGrowToMid();
+            if (reachedAdult) awardTankPoint(state, fish);
           } else {
             fish.mutagenBuffActive = true;
           }
@@ -2051,8 +2072,14 @@ function updateFish(fish, state, dtMs) {
           fish.stage = stageIndexForFeeds(def, fish.totalFeeds);
           // Per direct request, a fish shimmers whenever it "grows in size" —
           // a real stage advance (hatchling->juvenile->adult), not just any
-          // feed (most feeds don't cross a stage boundary).
-          if (fish.stage > prevStage) fish.shimmerStartedAt = state.level.elapsed;
+          // feed (most feeds don't cross a stage boundary). A small chime
+          // plays for a non-final-stage advance (baby->mid), or a slightly
+          // more "magical" one for reaching the final (adult) stage — see
+          // Sound.js's playGrowToMid/playGrowToAdult, per direct request.
+          if (fish.stage > prevStage) {
+            fish.shimmerStartedAt = state.level.elapsed;
+            if (fish.stage === def.growthStages.length - 1) playGrowToAdult(); else playGrowToMid();
+          }
           if (!wasAdult && fish.stage === def.growthStages.length - 1) {
             awardTankPoint(state, fish);
           }
@@ -2117,6 +2144,7 @@ function updateFish(fish, state, dtMs) {
         fish.dropTimer = 0;
         if (canSpawnMoreAlienDna(state)) {
           state.level.items.push(createAlienDna(fish.x, fish.y));
+          maybeAnnounceFirstBioSludge(state);
         }
       }
       // Deliberately no `return` here — falls through past the rest of this
@@ -2463,7 +2491,7 @@ export function updateEntities(state, dtMs) {
     // (see Config.js's MANUFACTURER_RECIPES.bio_sludge comment) — so it
     // shares the exact same spawn-cap check every alien-drop Bio-Sludge
     // already uses.
-    else if (point.itemType === 'alien_dna') { if (canSpawnMoreAlienDna(state)) state.level.items.push(createAlienDna(point.x, point.y)); }
+    else if (point.itemType === 'alien_dna') { if (canSpawnMoreAlienDna(state)) { state.level.items.push(createAlienDna(point.x, point.y)); maybeAnnounceFirstBioSludge(state); } }
     else if (point.itemType === 'mutagen_paste') state.level.items.push(createMutagenPaste(point.x, point.y));
     else if (point.itemType === 'science') { if (countScienceCapacityUsed(state) < effectiveScienceCapacity(state)) state.level.items.push(createScience(point.x, point.y)); }
     else if (point.itemType === 'science_green') { if (countScienceCapacityUsed(state) < effectiveScienceCapacity(state)) state.level.items.push(createScienceGreen(point.x, point.y)); }
