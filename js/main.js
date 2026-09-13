@@ -799,7 +799,9 @@ input.clickHandlers.push((sx, sy) => {
   // tick since, so a left-click anywhere just confirms it and exits,
   // mirroring the placement flow's own "click 2 confirms whatever angle is
   // currently showing" behavior. Checked before everything else below so a
-  // confirm click can never also bank a coin/feed/place under it.
+  // confirm click can never also bank a coin/feed/place under it. Per direct
+  // request, a right-click confirms it too now (see the rightClickHandlers
+  // push below) — either button finishes the gesture.
   if (fanReaimKey != null) { fanReaimKey = null; return; }
   const world = screenToWorld(sx, sy, state.camera);
 
@@ -999,13 +1001,15 @@ input.rightClickHandlers.push((sx, sy) => {
 });
 
 // Right-click-to-redo-angle — see fanReaimKey's own comment above. Only
-// arms from the Food tool (matching the hover tooltip's own gating below)
-// and only if nothing's already being re-aimed — a second right-click
-// while one's in progress does nothing extra; a left-click is what
-// confirms it (see the click handler's own fanReaimKey check).
+// arms from the Food tool (matching the hover tooltip's own gating below).
+// Per direct request, a SECOND right-click while a re-aim is already in
+// progress now confirms it too — the exact same "just clear fanReaimKey,
+// leaving updateFanReaim's live-written angle in place" confirm the click
+// handler's own fanReaimKey check already does for a left-click, so either
+// button can finish the gesture.
 input.rightClickHandlers.push((sx, sy) => {
   if (state.ui.paused || state.level.tutorialFlow) return;
-  if (fanReaimKey != null) return;
+  if (fanReaimKey != null) { fanReaimKey = null; return; }
   if (state.ui.selectedTool !== 'food') return;
   const world = screenToWorld(sx, sy, state.camera);
   const { col, row } = worldToTile(world.x, world.y);
