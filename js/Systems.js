@@ -49,6 +49,8 @@ import {
   ACHIEVEMENT_LIST,
   ACHIEVEMENT_CLEANLINESS_ARM_THRESHOLD,
   ACHIEVEMENT_CLEANLINESS_COMPLETE_THRESHOLD,
+  IDLE_PURCHASE_HINT_DELAY_MS,
+  IDLE_PURCHASE_HINT_MESSAGE,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings } from './Levels.js';
 import { getFishPurchaseCost, findCombinablePair, spawnTurretTutorialWaste } from './Entities.js';
@@ -499,6 +501,20 @@ function updateAchievements(state) {
   }
 }
 
+// One-time nudge toward the Achievements tab, per direct request — fires
+// once real elapsed time since the last fish bought OR building placed
+// (state.level.lastPurchaseAtMs, updated by Entities.js's
+// trySpawnPurchasedFish/Grid.js's placeTile) crosses IDLE_PURCHASE_HINT_DELAY_MS.
+// Starts counting from level-start (lastPurchaseAtMs seeded at 0), so a
+// player who does nothing at all for the first 60 seconds gets it too, not
+// just one who goes quiet after already having bought something.
+function updateIdlePurchaseHint(state) {
+  if (state.level.tutorialFlags.idlePurchaseHintShown) return;
+  if (state.level.elapsed - state.level.lastPurchaseAtMs < IDLE_PURCHASE_HINT_DELAY_MS) return;
+  state.level.tutorialFlags.idlePurchaseHintShown = true;
+  pushNotification(state, IDLE_PURCHASE_HINT_MESSAGE);
+}
+
 export function updateStoryTriggers(state) {
   updateBankruptcy(state);
   updateAlienWaves(state);
@@ -510,4 +526,5 @@ export function updateStoryTriggers(state) {
   updateAutosave(state);
   updatePowerWarnings(state);
   updateAchievements(state);
+  updateIdlePurchaseHint(state);
 }

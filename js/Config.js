@@ -117,17 +117,21 @@ export const TILE_TURRET_ADVANCED = 'turret_advanced'; // solid — Science Lab 
 // alternative to the Auto-Feeder; Bio-Sludge->Biomass) are both usable well
 // before the Science Lab exists, so there's no reason to gate it behind the
 // Lab too. The other three are Science Lab nodes — see SCIENCE_LAB_UPGRADES.
-// Refinery family — 4 tiers now (base/Electric/Advanced/Bio), per direct
+// Refinery family — 3 tiers now (base/Electric/Advanced), per direct
 // request replacing the Auto-Feeder entirely. Every tier: single input, 2
 // possible recipes (Waste->Food, Bio-Sludge->Biomass, Bio-Sludge taking
 // ALIEN_DNA_REFINERY_TIME_MULTIPLIER longer than the Waste recipe) — see
 // Grid.js's updateBuildings and REFINERY_STATS below. The base tier is
-// granted at the real Tier 1->2 Mound crack (unchanged); Electric/Advanced/
-// Bio are Science Lab purchases (see SCIENCE_LAB_UPGRADES).
+// granted at the real Tier 1->2 Mound crack (unchanged); Electric/Advanced
+// are Science Lab purchases (see SCIENCE_LAB_UPGRADES). The old 4th tier,
+// Ultra Refinery (TILE_REFINERY_BIO), is removed entirely per direct
+// request ("remove the Ultra Refinery from the game") — Bio Refinery
+// (TILE_REFINERY_ADVANCED) now occupies its old slot in the Science Lab
+// tree, at its old cost, with its old stats (see SCIENCE_LAB_UPGRADES'
+// bio_refinery node and REFINERY_STATS below).
 export const TILE_REFINERY = 'refinery';
 export const TILE_REFINERY_ELECTRIC = 'refinery_electric';
 export const TILE_REFINERY_ADVANCED = 'refinery_advanced';
-export const TILE_REFINERY_BIO = 'refinery_bio';
 // Manufacturer — replaces the old single-purpose Bio-Feeder/Bio-Combuster
 // buildings with ONE building whose behavior is chosen after placement via a
 // recipe pop-up menu (see UI.js's openRecipeMenu) — per direct request,
@@ -528,6 +532,7 @@ export const CHEAT_GRANT_AMOUNT = 10000; // $ granted by the M debug key
 export const CHEAT_TANK_POINTS_GRANT_AMOUNT = 20; // Tank Points also granted by the M debug key, so testing the Tank Upgrades panel doesn't require grinding fish growth
 export const CHEAT_SCIENCE_GRANT_AMOUNT = 500; // Science Bubbles also granted by the M debug key, so testing the Science Lab's tech tree doesn't require grinding an Octopus's real brew-and-collect cycle
 export const CHEAT_SCIENCE_GREEN_GRANT_AMOUNT = 500; // Green Science too, per direct request ("so I can test those things") — same flat amount as blue Science above, granted alongside it by the M debug key
+export const CHEAT_FISHY_GEMS_GRANT_AMOUNT = 100; // per direct request ("make it so M debug hotkey gives me fishy gems") — comfortably covers even the priciest single hat (30) several times over, so testing the Customization panel doesn't require grinding real achievement claims first
 
 // Coin color + size tier by value — checked in ascending order, first match
 // wins. Entities.js's getCoinTier()/getCoinColor() do the lookup; kept here
@@ -1412,13 +1417,16 @@ export const BUILDING_TYPES = {
   // above — the base tier now draws real power (see
   // REFINERY_STATS[TILE_REFINERY].powerCostPerSec), so it's "Electric" now;
   // every tier above it shifted up one name (old Electric -> Advanced, old
-  // Advanced -> Bio), and the tier that already existed above THAT (the old
-  // "Bio-Refinery," gated behind Green Science Tech) is renamed "Ultra
-  // Refinery" so it doesn't collide with the newly-renamed Bio Refinery
-  // directly below it. Base cost cut 80 -> 30 per direct request.
+  // Advanced -> Bio). The tier that used to exist above THAT ("Ultra
+  // Refinery," gated behind Green Science Tech) is gone entirely per a later
+  // direct request ("remove the Ultra Refinery from the game") — Bio
+  // Refinery (TILE_REFINERY_ADVANCED) now occupies its old slot/cost/stats
+  // instead, making it the new top tier; see REFINERY_STATS and
+  // SCIENCE_LAB_UPGRADES' bio_refinery node. Base cost cut 80 -> 30 per
+  // direct request.
   [TILE_REFINERY]: {
     id: TILE_REFINERY, name: 'Electric Refinery', icon: '⚗️', cost: 30,
-    description: 'Waste -> Food, or Bio-Sludge -> Biomass (Bio-Sludge takes priority if both touch at once, and takes 50% longer). One item at a time. Draws 5mw while refining.',
+    description: 'Refines Waste -> Food, or Bio-Sludge -> Biomass. One item at a time.',
     color: '#b8a888', unlockedByDefault: false,
   },
   [TILE_REFINERY_ELECTRIC]: {
@@ -1427,14 +1435,9 @@ export const BUILDING_TYPES = {
     color: '#4fd6e0', unlockedByDefault: false,
   },
   [TILE_REFINERY_ADVANCED]: {
-    id: TILE_REFINERY_ADVANCED, name: 'Bio Refinery', icon: '⚗️', cost: 260,
-    description: 'The fastest Refinery short of the Ultra Refinery.',
+    id: TILE_REFINERY_ADVANCED, name: 'Bio Refinery', icon: '⚗️', cost: 400,
+    description: 'The fastest Refinery in the game.',
     color: '#ffd76f', unlockedByDefault: false,
-  },
-  [TILE_REFINERY_BIO]: {
-    id: TILE_REFINERY_BIO, name: 'Ultra Refinery', icon: '🧬', cost: 400,
-    description: 'The fastest Refinery — requires Green Science.',
-    color: '#8fff9a', unlockedByDefault: false,
   },
   [TILE_MANUFACTURER]: {
     id: TILE_MANUFACTURER, name: 'Manufacturer', icon: '🏭', cost: 125, // cut from 300 per direct request, to compensate for its own tier-2 (6%, base cost $101-200) compounding cost curve
@@ -1460,7 +1463,7 @@ export const BUILDING_LIST = Object.values(BUILDING_TYPES);
 export const BUILDING_FAMILIES = {
   fan: [TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4],
   collector: [TILE_COLLECTOR, TILE_COLLECTOR_ELECTRIC, TILE_COLLECTOR_ADVANCED],
-  refinery: [TILE_REFINERY, TILE_REFINERY_ELECTRIC, TILE_REFINERY_ADVANCED, TILE_REFINERY_BIO],
+  refinery: [TILE_REFINERY, TILE_REFINERY_ELECTRIC, TILE_REFINERY_ADVANCED],
   turret: [TILE_TURRET_WASTE, TILE_TURRET_ELECTRIC, TILE_TURRET_ADVANCED],
 };
 
@@ -1595,11 +1598,16 @@ export const TURRET_PROJECTILE_COLOR = '#ffe066'; // a bright, easy-to-track yel
 // needing no code change; every tier draws power only while actively
 // processing an absorbed item.
 export const ALIEN_DNA_REFINERY_TIME_MULTIPLIER = 1.5;
+// Per direct request: Advanced Refinery's own waste time cut 14s -> 10s
+// (its Bio-Sludge time falls out of the same ALIEN_DNA_REFINERY_TIME_MULTIPLIER
+// formula every tier already uses — 10000 * 1.5 = 15000, exactly the
+// requested "15 seconds," no separate field needed) and its power draw
+// raised 10 -> 15mw/sec. Bio Refinery inherits the old Ultra Refinery's
+// exact stats (5000ms/30mw) now that it occupies Ultra's old top-tier slot.
 export const REFINERY_STATS = {
   [TILE_REFINERY]: { foodProcessMs: 20000, powerCostPerSec: 5 },
-  [TILE_REFINERY_ELECTRIC]: { foodProcessMs: 14000, powerCostPerSec: 10 },
-  [TILE_REFINERY_ADVANCED]: { foodProcessMs: 9000, powerCostPerSec: 20 },
-  [TILE_REFINERY_BIO]: { foodProcessMs: 5000, powerCostPerSec: 30 },
+  [TILE_REFINERY_ELECTRIC]: { foodProcessMs: 10000, powerCostPerSec: 15 },
+  [TILE_REFINERY_ADVANCED]: { foodProcessMs: 5000, powerCostPerSec: 30 },
 };
 
 // ---- Manufacturer recipes ----
@@ -1897,11 +1905,6 @@ export const SCIENCE_LAB_UPGRADES = {
     id: 'advanced_collector', name: 'Bio Collector', icon: '🧲', scienceCost: 250, goldCost: 25000,
     requires: ['electric_collector'], grants: { buildings: [TILE_COLLECTOR_ADVANCED] },
   },
-  // Grants TILE_REFINERY_ADVANCED, now displayed "Bio Refinery."
-  advanced_refinery: {
-    id: 'advanced_refinery', name: 'Bio Refinery', icon: '⚗️', scienceCost: 150, goldCost: 15000,
-    requires: ['electric_refinery'], grants: { buildings: [TILE_REFINERY_ADVANCED] },
-  },
   // The Waste Turret needs no node at all — it's unlockedByDefault: true,
   // same as Platform (see BUILDING_TYPES), free from the very start.
   electric_turret: {
@@ -2030,13 +2033,20 @@ export const SCIENCE_LAB_UPGRADES = {
     id: 'power_plant_science', name: 'Power Plant: Blue Science', icon: '🔬', scienceCost: 70, scienceGreenCost: 35, goldCost: 15000,
     requires: ['power_plant', 'green_science_tech'], grants: {},
   },
-  // Ultra Refinery (renamed from "Bio-Refinery" — see BUILDING_TYPES'
-  // Refinery-family rename comment) — the top Refinery tier, requires Green
-  // Science unlocked in the Science Lab. Also costs Green Science itself,
-  // same additive-half-of-blue rule as every other Green-Science-gated node.
+  // Bio Refinery — the top Refinery tier now that Ultra Refinery is gone
+  // entirely, per direct request ("remove the Ultra Refinery... have the
+  // Bio refinery take its place in the science lab with the same costs
+  // that the ultra refinery has now"). This node's own id/scienceCost/
+  // scienceGreenCost/goldCost/requires are ALL untouched from when it used
+  // to grant the now-deleted Ultra Refinery — only `name` and
+  // `grants.buildings` changed, so "same costs" holds by construction
+  // rather than by re-typing the same numbers a second time. The old
+  // `advanced_refinery` node (which used to grant this exact building,
+  // requiring only `electric_refinery`) is deleted outright — Bio Refinery
+  // now has exactly one home in the tree, this one.
   bio_refinery: {
-    id: 'bio_refinery', name: 'Ultra Refinery', icon: '🧬', scienceCost: 100, scienceGreenCost: 50, goldCost: 20000,
-    requires: ['green_science_tech'], grants: { buildings: [TILE_REFINERY_BIO] },
+    id: 'bio_refinery', name: 'Bio Refinery', icon: '⚗️', scienceCost: 100, scienceGreenCost: 50, goldCost: 20000,
+    requires: ['green_science_tech'], grants: { buildings: [TILE_REFINERY_ADVANCED] },
   },
 
   // ---- Gene-Splicing hybrids — completely reworked, per direct request ----
@@ -2480,6 +2490,12 @@ export const ALIEN_FOOD_BLOCK_DURATION_MS = 1000; // per direct request ("so you
 export const WASTE_DRAG_TUTORIAL_WAIT_MS = 1000; // per direct request — if the player already placed a Waste Turret before the post-alien tutorial would fire, it waits this long after Waste first appears in the city before teaching just the "drag Waste into it" step — see Systems.js's updatePostAlienTutorial
 export const WASTE_DRAG_GHOST_CYCLE_MS = 1400; // one full waste->turret sweep of the "drag me here" ghost animation shown during that tutorial step — see main.js's render()
 export const POST_ALIEN_TUTORIAL_MESSAGE = "Now that's I'm talking about. A little firepower never hurt no one."; // per direct request's exact wording — posted once the player finishes placing the guided Waste Turret
+// Per direct request ("add in a chat a one time message when a fish or
+// building hasn't been purchased for 60 seconds that they should check out
+// the achievements to get ideas on how to progress") — see Systems.js's
+// updateIdlePurchaseHint, which tracks state.level.lastPurchaseAtMs.
+export const IDLE_PURCHASE_HINT_DELAY_MS = 60000;
+export const IDLE_PURCHASE_HINT_MESSAGE = "Not sure what to do next? Check the Achievements tab (🎖️) — it's full of ideas for how to keep growing your tank.";
 
 // ---- Power/Bio-Sludge/Biomass story tips ----
 // Per direct request: an occasional (not guaranteed every time), randomly-

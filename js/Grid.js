@@ -23,7 +23,6 @@ import {
   TILE_REFINERY,
   TILE_REFINERY_ELECTRIC,
   TILE_REFINERY_ADVANCED,
-  TILE_REFINERY_BIO,
   TILE_MANUFACTURER,
   TILE_POWER_PLANT,
   BUILDING_TYPES,
@@ -94,7 +93,7 @@ export const TURRET_TILES = new Set([TILE_TURRET_WASTE, TILE_TURRET_ELECTRIC, TI
 // Manufacturer/Power Plant are each a single standalone tile (no tiers), kept
 // as 1-member Sets for the same uniform `.has(type)` shape every other
 // building-type-group check in this file already uses.
-const REFINERY_TILES = new Set([TILE_REFINERY, TILE_REFINERY_ELECTRIC, TILE_REFINERY_ADVANCED, TILE_REFINERY_BIO]);
+const REFINERY_TILES = new Set([TILE_REFINERY, TILE_REFINERY_ELECTRIC, TILE_REFINERY_ADVANCED]);
 const MANUFACTURER_TILES = new Set([TILE_MANUFACTURER]);
 // Every building that "holds" an item in place while it processes (visually
 // pulled to the tile's own center and disintegrating — see
@@ -346,6 +345,7 @@ export function placeTile(state, col, row, buildingId, angle = 0) {
   state.level.money -= getBuildingCost(state, buildingId);
   state.level.grid[row][col] = buildingId;
   state.meta.stats.buildingsPlaced += 1; // buildings_placed_10/50 achievements
+  state.level.lastPurchaseAtMs = state.level.elapsed; // see Systems.js's updateIdlePurchaseHint
   if (FAN_TILES.has(buildingId)) {
     state.level.buildingData[buildingKey(col, row)] = { type: buildingId, angle };
   } else if (COLLECTOR_TILES.has(buildingId)) {
@@ -432,7 +432,7 @@ const CHEAT_CYCLE = [
   TILE_COLLECTOR, TILE_COLLECTOR_ELECTRIC, TILE_COLLECTOR_ADVANCED,
   TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4,
   TILE_TURRET_WASTE, TILE_TURRET_ELECTRIC, TILE_TURRET_ADVANCED,
-  TILE_REFINERY, TILE_REFINERY_ELECTRIC, TILE_REFINERY_ADVANCED, TILE_REFINERY_BIO,
+  TILE_REFINERY, TILE_REFINERY_ELECTRIC, TILE_REFINERY_ADVANCED,
   TILE_MANUFACTURER, TILE_POWER_PLANT,
 ];
 const CHEAT_DEFAULT_ANGLE = -Math.PI / 2; // straight up
@@ -1862,12 +1862,6 @@ function renderTierBadge(ctx, type, x, y, size) {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText('✨', x + size * 0.82, y + size * 0.2);
-  } else if (type === TILE_REFINERY_BIO) {
-    ctx.fillStyle = '#7cff5a';
-    ctx.font = `${Math.max(8, size * 0.34)}px sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText('🧬', x + size * 0.82, y + size * 0.2);
   }
 }
 

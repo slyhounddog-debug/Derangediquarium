@@ -1088,6 +1088,7 @@ export function trySpawnPurchasedFish(state, speciesId, x, y) {
   state.level.money -= cost;
   state.level.entities.push(createFish(speciesId, x, y, state, { grown: false }));
   playPurchase();
+  state.level.lastPurchaseAtMs = state.level.elapsed; // see Systems.js's updateIdlePurchaseHint
   if (!state.level.tutorialFlags.firstFishBought) {
     state.level.tutorialFlags.firstFishBought = true;
     pushStoryNotification(state, FIRST_FISH_BOUGHT_MESSAGE);

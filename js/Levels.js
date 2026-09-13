@@ -115,6 +115,8 @@ export function loadLevel(state, levelId) {
       recipeCopyTipShown: false, // fires a one-time chat tip about the Manufacturer/Power Plant drag-to-copy-recipe mechanic the first time 2+ of either are placed at once — see Systems.js's updateRecipeCopyTip
       firstBioSludgeShown: false, // fires a one-time chat tip the first time a Bio-Sludge (alien_dna) item is ever created — worded differently depending on whether the Refinery is already unlocked, see Entities.js's maybeAnnounceFirstBioSludge
       alienFoodDistractionTipShown: false, // fires a one-time chat tip right after the FIRST alien wave is fully cleared, explaining that Food distracts aliens off fish — see Systems.js's updateAlienWaves
+      firstTankPanelOpened: false, // gates the one-time bounce on the Achievements tab (#tank-tab-achievements) to the very first time the Tank panel is ever opened, however it's opened — see UI.js's maybeBounceAchievementTabFirstOpen
+      idlePurchaseHintShown: false, // fires a one-time chat tip suggesting the Achievements tab once 60 real seconds pass with no fish bought or building placed — see Systems.js's updateIdlePurchaseHint
     },
     // Cinematic first-alien intro — per direct request, the very first alien
     // to ever spawn gets a dedicated teaching moment: once it's been alive
@@ -189,6 +191,7 @@ export function loadLevel(state, levelId) {
     powerDeficitStreakMs: 0, // real-ms a continuous demand>supply streak has held, sampled once/real-second alongside the existing HUD power history
     powerSurplusStreakMs: 0, // same, for supply >= demand*ACHIEVEMENT_POWER_SURPLUS_RATIO
     cleanlinessRecoveryArmed: false, // set true the moment cleanliness first drops below ACHIEVEMENT_CLEANLINESS_ARM_THRESHOLD; the achievement completes (and this clears back to false) the moment it's true AND cleanliness reaches ACHIEVEMENT_CLEANLINESS_COMPLETE_THRESHOLD
+    lastPurchaseAtMs: 0, // real elapsed timestamp of the last fish bought OR building placed — see Entities.js's trySpawnPurchasedFish/Grid.js's placeTile (both update this on success) and Systems.js's updateIdlePurchaseHint (reads it to fire a one-time "check the Achievements tab" nudge after 60s of inactivity)
     bankruptcyActive: false, // true while "no fish + can't afford anything" is CURRENTLY true, so the bailout/game-over response only fires once per fresh occurrence of that condition, not every tick it holds — see Systems.js's updateStoryTriggers
     bankruptciesTriggered: 0, // 0 = never happened, 1 = the one-time $100 bailout already used, 2+ = game over
     gameOver: false, // set true on the second bankruptcy — main.js's update() stops simulating while this is true, same as state.ui.paused, but Escape still opens the pause menu so Restart stays reachable

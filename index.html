@@ -35,10 +35,21 @@
   <div id="start-modal">
     <button id="start-new-game-btn" class="pause-btn sheen-target">▶️ New Game</button>
     <button id="start-continue-btn" class="pause-btn sheen-target" disabled>💾 Continue Game</button>
+    <button id="start-achievements-btn" class="pause-btn sheen-target">🎖️ Achievements</button>
+    <button id="start-customization-btn" class="pause-btn sheen-target">🎩 Customize</button>
     <button id="start-settings-btn" class="pause-btn sheen-target">⚙️ Settings</button>
     <button id="start-help-btn" class="pause-btn sheen-target">❓ Help</button>
   </div>
 </div>
+
+<!-- Per direct request, Achievements/Customization are reachable from the
+     start screen too, before a game has even started — rather than build a
+     second copy of the Achievements list/hat grid, this just re-shows the
+     SAME #tank-panel (see UI.js's setTankPanelView) as a centered modal
+     (via the .modal-mode CSS override) with this dimmed backdrop behind it,
+     mirroring the exact "layer on top, don't hide #start-overlay" pattern
+     Settings-from-the-start-screen already established. -->
+<div id="start-tank-backdrop" class="hidden"></div>
 
 <div id="start-help-overlay" class="hidden">
   <div id="start-help-modal">
@@ -320,6 +331,14 @@
           <div class="tank-header-row">
             <div class="tank-header">Customize</div>
             <div id="customization-gems-display" class="sheen-target">💎 0</div>
+          </div>
+          <!-- Per direct request, a live preview of an adult Guppy wearing
+               whatever hat is currently equipped — the real FishRenderer.js
+               drawFish, same idle tail-wiggle animation the shop's own
+               species preview uses, so a hat can be seen before ever
+               starting a game. -->
+          <div id="customization-preview-wrap">
+            <canvas id="customization-preview-canvas" width="110" height="90"></canvas>
           </div>
           <div id="hat-grid"></div>
         </div>

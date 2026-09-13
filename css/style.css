@@ -557,14 +557,47 @@ html, body {
 }
 /* Shop got an extra 10% on top of that half-height (then another +10% on
    both axes per a later direct request — combined into one *1.21 height
-   multiplier and a 315px width, up from the shared 286px), #tank-panel stays
-   at the plain half-height/width above. */
+   multiplier and a 315px width, up from the shared 286px). #tank-panel (now
+   a 3-tab switcher between Tank Upgrades/Achievements/Customization, all
+   sharing this one panel) later got the SAME height multiplier per a direct
+   request ("increase the size of the menu for the tank upgrades/achievement/
+   customization to match the size of the shop height, while keeping the
+   width") — same *1.21 height, but its own 286px width from the shared rule
+   above stays untouched, deliberately narrower than the Shop's 315px. */
 #shop-panel { height: calc((100vh - 28px) / 2 * 1.21); width: 315px; }
+#tank-panel { height: calc((100vh - 28px) / 2 * 1.21); }
 #shop-panel.collapsed, #tank-panel.collapsed {
   transform: translateX(-50%) scale(0.05);
   opacity: 0;
   pointer-events: none;
 }
+
+/* Per direct request, the Tank panel (Upgrades/Achievements/Customization)
+   is also reachable from the start screen, before a game exists — rather
+   than build a second copy of its content, this CSS override repositions
+   the exact same #tank-panel element into a plain centered fixed modal
+   (instead of its usual "grows from its own anchor button" spot) whenever
+   UI.js adds this class, with a dedicated dimmed backdrop underneath it
+   (#start-tank-backdrop) and a z-index above #start-overlay (600) so it
+   actually renders on top instead of hidden behind it. */
+#tank-panel.modal-mode {
+  position: fixed;
+  top: 50%; left: 50%; bottom: auto;
+  transform: translate(-50%, -50%);
+  transform-origin: 50% 50%;
+  z-index: 610;
+}
+#tank-panel.modal-mode.collapsed {
+  transform: translate(-50%, -50%) scale(0.05);
+}
+#start-tank-backdrop {
+  position: fixed; inset: 0;
+  background: rgba(11, 37, 64, 0.45);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 605;
+}
+#start-tank-backdrop.hidden { display: none; }
 
 /* The actual scrolling now happens on an INNER wrapper, inset from the
    card's own edges, rather than on #shop-panel/#tank-panel directly — per
@@ -926,9 +959,16 @@ html, body {
    here. Sized generously enough that every real building/species' content
    fits without scrolling in practice; #shop-preview-content's own
    overflow-y:auto (below) is a safety net for anything that somehow doesn't,
-   scrolling INSIDE the fixed box instead of resizing it. */
+   scrolling INSIDE the fixed box instead of resizing it. Cut 232 -> 208px per
+   a later direct request ("reduce the size of the shop window slightly") —
+   this also moves #shop-sticky-header's own border-bottom (the "break"
+   between the window and the scrolling item grid below) up by the same
+   amount, satisfying that same request's other half with no separate change
+   needed. Re-checked after this cut that every species/building (including
+   the Manufacturer/Power Plant recipe pop-up's own stats, the tallest
+   content this box ever holds) still fits with no scrolling. */
 #shop-preview {
-  height: 232px;
+  height: 208px;
   display: flex;
   flex-direction: column;
   background: linear-gradient(165deg, #fffaf3 0%, #fff0f6 100%);
@@ -1094,6 +1134,17 @@ html, body {
 .achievement-claim-btn:hover { background: linear-gradient(160deg, #97e8bd 0%, #68c896 100%); transform: scale(1.02); }
 .achievement-claim-btn:disabled {
   background: #e6dcd0; color: #a99; opacity: 0.7; cursor: not-allowed; box-shadow: none; transform: none;
+}
+
+/* Live "what will my fish look like" preview — an adult Guppy, the equipped
+   hat rendered right on it, per direct request. */
+#customization-preview-wrap {
+  display: flex; align-items: center; justify-content: center;
+  background: linear-gradient(180deg, #cdeaf7 0%, #9fd0e8 100%);
+  border-radius: 14px;
+  border: 2px solid #ffffff;
+  margin-bottom: 12px;
+  padding: 6px 0;
 }
 
 /* Customization (hats) — a small icon grid, each cell showing the hat's own

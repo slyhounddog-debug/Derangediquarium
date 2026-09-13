@@ -18,6 +18,7 @@ import {
   CHEAT_TANK_POINTS_GRANT_AMOUNT,
   CHEAT_SCIENCE_GRANT_AMOUNT,
   CHEAT_SCIENCE_GREEN_GRANT_AMOUNT,
+  CHEAT_FISHY_GEMS_GRANT_AMOUNT,
   SIM_DT_MS,
   MAX_FRAME_SKIP,
   SEABED_FLOOR_Y,
@@ -1210,12 +1211,13 @@ input.keydownHandlers.push((e) => {
     case 'NumpadSubtract': // - — slower / pause at 0x
       state.debug.timeScaleIndex = Math.max(0, state.debug.timeScaleIndex - 1);
       break;
-    case 'KeyM': // grant $10,000, 20 Tank Points, 500 Science, and 500 Green Science, for testing the Mound/Tank Upgrades/Science Lab without grinding
+    case 'KeyM': // grant $10,000, 20 Tank Points, 500 Science, 500 Green Science, and 100 Fishy Gems, for testing the Mound/Tank Upgrades/Science Lab/Customization panel without grinding
       state.level.money += CHEAT_GRANT_AMOUNT;
       state.level.tankPoints.total += CHEAT_TANK_POINTS_GRANT_AMOUNT;
       state.level.tankPoints.available += CHEAT_TANK_POINTS_GRANT_AMOUNT;
       state.level.science += CHEAT_SCIENCE_GRANT_AMOUNT;
       state.level.scienceGreen += CHEAT_SCIENCE_GREEN_GRANT_AMOUNT; // per direct request, so Green-Science-gated Lab nodes/recipes can be tested without grinding a real Bio-Combuster/Manufacturer cycle
+      state.meta.fishyGems += CHEAT_FISHY_GEMS_GRANT_AMOUNT; // per direct request, so the Customization panel's hats can be tested without grinding real achievement claims first
       break;
     case 'KeyG': { // spawn selected species at cursor; Shift+G spawns fully grown
       const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);

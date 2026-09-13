@@ -213,6 +213,47 @@ export function scheduleShopButtonReminder(state) {
   }, delay);
 }
 
+// Same self-terminating bounce-chain shape as the Shop button's own reminder
+// above, for the Tank Upgrades icon — per direct request ("similar to how
+// the shop bounces at the beginning of the game, have the tank upgrade icon
+// on the main screen bounce 30 seconds after the first fish buying
+// tutorial"). Started once, 30s after the game-start guided tutorial ('start'
+// — Shop -> Guppy -> buy your first fish) finishes (see
+// onTutorialFlowComplete below), not from level start — a player who hasn't
+// even bought their first fish yet has no reason to see the Tank panel
+// pushed on them yet. Stops for good the moment the panel is first opened,
+// however it's opened (toggleTankPanel, or the start-screen's own
+// Achievements/Customization buttons) — see firstTankPanelOpened, shared
+// with the achievement-tab bounce below since both fire at that same
+// "opened for the first time" moment.
+let tankButtonReminderTimer = null;
+const TANK_BUTTON_REMINDER_START_DELAY_MS = 30000; // "30 seconds after the first fish buying tutorial" — see onTutorialFlowComplete's 'start' branch below
+const TANK_BUTTON_REMINDER_MIN_MS = 1500;
+const TANK_BUTTON_REMINDER_MAX_MS = 3000;
+export function scheduleTankButtonReminder(state) {
+  if (tankButtonReminderTimer !== null) return;
+  const delay = TANK_BUTTON_REMINDER_MIN_MS + Math.random() * (TANK_BUTTON_REMINDER_MAX_MS - TANK_BUTTON_REMINDER_MIN_MS);
+  tankButtonReminderTimer = setTimeout(() => {
+    tankButtonReminderTimer = null;
+    if (state.level.tutorialFlags.firstTankPanelOpened) return;
+    playFlash(els.tankCollapseBtn, 'bounce-play');
+    scheduleTankButtonReminder(state);
+  }, delay);
+}
+
+// Fires exactly once, ever, the very first time the Tank panel is opened by
+// ANY path (the toggle button/P hotkey, or the start-screen's own
+// Achievements/Customization shortcuts) — per direct request ("the first
+// time they open the tank upgrade menu, have the achievement tab bounce").
+// Also what permanently stops scheduleTankButtonReminder's own bounce chain
+// above, same "one flag, two effects, both meaning the exact same real-world
+// moment" shape firstShopOpened already has for the Shop button.
+function maybeBounceAchievementTabFirstOpen(state) {
+  if (state.level.tutorialFlags.firstTankPanelOpened) return;
+  state.level.tutorialFlags.firstTankPanelOpened = true;
+  playFlash(els.tankTabAchievementsBtn, 'bounce-play');
+}
+
 export function initUI(state) {
   els = {
     hud: document.getElementById('hud'),
@@ -312,6 +353,7 @@ export function initUI(state) {
     labPurchaseCost: document.getElementById('lab-purchase-cost'),
     labPurchaseCancelBtn: document.getElementById('lab-purchase-cancel-btn'),
     labPurchaseConfirmBtn: document.getElementById('lab-purchase-confirm-btn'),
+    tankAnchor: document.getElementById('tank-anchor'),
     tankPanel: document.getElementById('tank-panel'),
     tankCollapseBtn: document.getElementById('tank-collapse-btn'),
     tankPointsDisplay: document.getElementById('tank-points-display'),
@@ -326,6 +368,10 @@ export function initUI(state) {
     achievementGemsDisplay: document.getElementById('achievement-gems-display'),
     hatGrid: document.getElementById('hat-grid'),
     customizationGemsDisplay: document.getElementById('customization-gems-display'),
+    customizationPreviewCanvas: document.getElementById('customization-preview-canvas'),
+    startAchievementsBtn: document.getElementById('start-achievements-btn'),
+    startCustomizationBtn: document.getElementById('start-customization-btn'),
+    startTankBackdrop: document.getElementById('start-tank-backdrop'),
     startOverlay: document.getElementById('start-overlay'),
     startNewGameBtn: document.getElementById('start-new-game-btn'),
     startContinueBtn: document.getElementById('start-continue-btn'),
@@ -557,6 +603,7 @@ export function toggleTankPanel(state) {
   if (!state.ui.tankPanelCollapsed) {
     state.ui.shopCollapsed = true;
     updateShopCollapse(state);
+    maybeBounceAchievementTabFirstOpen(state);
   }
   updateTankPanelCollapse(state);
   (state.ui.tankPanelCollapsed ? playPanelClose : playPanelOpen)();
@@ -565,7 +612,12 @@ export function toggleTankPanel(state) {
 function updateTankPanelCollapse(state) {
   els.tankPanel.classList.toggle('collapsed', state.ui.tankPanelCollapsed);
   els.tankCollapseBtn.classList.toggle('panel-toggle-active', !state.ui.tankPanelCollapsed);
-  if (!state.ui.tankPanelCollapsed) refreshTankPanelView(state); // populate whichever of the 3 views is currently showing, fresh the moment the panel opens, not just on the next frame's updateHUD
+  if (state.ui.tankPanelCollapsed) {
+    stopCustomizationPreviewAnimation(); // no point animating a preview nobody can see, regardless of which view was showing
+  } else {
+    refreshTankPanelView(state); // populate whichever of the 3 views is currently showing, fresh the moment the panel opens, not just on the next frame's updateHUD
+    if (state.ui.tankPanelView === 'customization') startCustomizationPreviewAnimation(state);
+  }
 }
 
 // Called by the Escape key (wired in main.js) — toggles open/closed, always
@@ -1645,6 +1697,46 @@ export function initStartScreen(state, onStart) {
     playPanelClose();
     onStart();
   });
+  // Achievements/Customization from the start screen, per direct request
+  // ("add the achievements menu and the customization menu to the start
+  // menu, allowing them to see/claim achievements, and customize their fish
+  // there"). Same "layer on top, don't hide #start-overlay" pattern Settings
+  // already uses just above — #tank-panel's own .modal-mode class (see
+  // style.css) repositions it into a plain centered fixed modal with
+  // #start-tank-backdrop dimming everything behind it.
+  const openTankPanelFromStartScreen = (view) => {
+    // Real bug, caught during verification: #tank-panel's `position: fixed`
+    // gets TRAPPED inside #bottom-bar-row's own coordinate space, because
+    // that ancestor has a CSS `transform` on it (centering the row) — per
+    // spec, any transformed ancestor becomes the containing block for a
+    // fixed-position descendant, silently overriding "fixed relative to the
+    // viewport." That left the panel positioned relative to the toolbar row
+    // instead of the screen, AND z-index 610 only being compared within that
+    // row's own (much lower) local stacking context — so it rendered small,
+    // mispositioned, and visually BEHIND #start-overlay's blur despite the
+    // higher z-index. Reparenting to a direct child of <body> escapes every
+    // transformed ancestor entirely, which is what actually makes `position:
+    // fixed` behave the way it's meant to here — moved back to its normal
+    // #tank-anchor home on close, below.
+    document.body.appendChild(els.tankPanel);
+    els.startTankBackdrop.classList.remove('hidden');
+    els.tankPanel.classList.add('modal-mode');
+    state.ui.tankPanelCollapsed = false;
+    setTankPanelView(state, view);
+    updateTankPanelCollapse(state);
+    maybeBounceAchievementTabFirstOpen(state);
+    playPanelOpen();
+  };
+  els.startAchievementsBtn.addEventListener('click', () => openTankPanelFromStartScreen('achievements'));
+  els.startCustomizationBtn.addEventListener('click', () => openTankPanelFromStartScreen('customization'));
+  els.startTankBackdrop.addEventListener('click', () => {
+    state.ui.tankPanelCollapsed = true;
+    updateTankPanelCollapse(state);
+    els.tankPanel.classList.remove('modal-mode');
+    els.startTankBackdrop.classList.add('hidden');
+    els.tankAnchor.appendChild(els.tankPanel); // back to its normal anchored home for in-game use
+    playPanelClose();
+  });
   els.startSettingsBtn.addEventListener('click', () => {
     // Deliberately does NOT hide #start-overlay — #pause-overlay layers on
     // top of it instead (see its own z-index comment), so the start
@@ -2237,6 +2329,11 @@ export function setTankPanelView(state, view) {
   els.tankTabUpgradesBtn.classList.toggle('active', view === 'upgrades');
   els.tankTabAchievementsBtn.classList.toggle('active', view === 'achievements');
   els.tankTabCustomizationBtn.classList.toggle('active', view === 'customization');
+  // The live hat-preview guppy only needs to animate while its own view is
+  // actually the one showing — see startCustomizationPreviewAnimation's own
+  // comment.
+  if (view === 'customization') startCustomizationPreviewAnimation(state);
+  else stopCustomizationPreviewAnimation();
   refreshTankPanelView(state);
 }
 
@@ -2340,6 +2437,46 @@ function buildCustomizationPanel(state) {
     hatCards[hat.id] = { card, buyBtn };
   }
   refreshCustomizationPanel(state);
+}
+
+// Live "what will my fish look like" preview — an adult Guppy with whatever
+// hat is currently equipped, per direct request ("add a preview window of
+// an adult guppy swimming so we can see what they will look like with the
+// hats being chose without having to start the game first"). Same idle
+// tail-wiggle shape the shop's own species preview animation already uses
+// (a fresh rAF loop, restarted/stopped alongside the Customization view's
+// own visibility — see setTankPanelView/updateTankPanelCollapse), just
+// against this dedicated canvas instead of the shop's.
+let customizationPreviewAnimHandle = null;
+let customizationPreviewTailPhase = 0;
+let customizationPreviewLastFrameTime = 0;
+
+function startCustomizationPreviewAnimation(state) {
+  if (customizationPreviewAnimHandle !== null) return;
+  customizationPreviewLastFrameTime = performance.now();
+  const tick = (now) => {
+    const dt = Math.min(0.1, (now - customizationPreviewLastFrameTime) / 1000);
+    customizationPreviewLastFrameTime = now;
+    customizationPreviewTailPhase = (customizationPreviewTailPhase + SHOP_PREVIEW_TAIL_PHASE_RATE * dt) % (Math.PI * 2);
+    renderCustomizationPreview(state);
+    customizationPreviewAnimHandle = requestAnimationFrame(tick);
+  };
+  customizationPreviewAnimHandle = requestAnimationFrame(tick);
+}
+
+function stopCustomizationPreviewAnimation() {
+  if (customizationPreviewAnimHandle !== null) {
+    cancelAnimationFrame(customizationPreviewAnimHandle);
+    customizationPreviewAnimHandle = null;
+  }
+}
+
+function renderCustomizationPreview(state) {
+  const canvas = els.customizationPreviewCanvas;
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const adultStage = SPECIES.guppy.growthStages.length - 1;
+  drawFish(ctx, canvas.width / 2, canvas.height / 2, 'guppy', adultStage, 1, customizationPreviewTailPhase, { x: 1, y: 0 }, 1, 0, 0, state.meta.equippedHatId);
 }
 
 function buyOrEquipHat(state, id) {
@@ -2623,15 +2760,21 @@ function renderPreviewCanvas() {
   }
 }
 
-// Re-checked every frame (from updateHUD) so the name/price live-update if
-// money changes, or an economy species'/a building's dynamic price shifts,
-// while it happens to be previewed — see Config.js's
-// ECONOMY_FISH_COST_GROWTH_RATE and Grid.js's tiered building cost growth.
+// Re-checked every frame (from updateHUD) — the price itself used to be
+// appended right here ("Electric Refinery — $30"), but per direct request
+// ("remove all the prices from the titles of the shop items, since it
+// already shows the price below in the item list") that's gone now — the
+// icon grid's own per-item price-tag badge (speciesPriceTags/the building
+// family dots) is the only place a price shows any more. This still needs
+// to re-run every frame, even though the name itself never changes, purely
+// so it initializes correctly the instant a species/building is first
+// selected (selectSpeciesForPreview/selectBuildingForPreview don't call it
+// directly).
 function refreshPreviewInfo(state) {
   if (currentPreviewSpecies) {
-    els.previewName.textContent = `${currentPreviewSpecies.name} — $${getFishPurchaseCost(state, currentPreviewSpecies.id)}`;
+    els.previewName.textContent = currentPreviewSpecies.name;
   } else if (currentPreviewBuilding) {
-    els.previewName.textContent = `${currentPreviewBuilding.name} — $${getBuildingCost(state, currentPreviewBuilding.id)}`;
+    els.previewName.textContent = currentPreviewBuilding.name;
   }
 }
 
@@ -3300,10 +3443,15 @@ const TUTORIAL_FLOWS = {
 };
 
 // Fires once a flow finishes its last step — id-specific rewards/messages,
-// per direct request. The 'start' flow ends silently (nothing was asked for
-// beyond the fish itself getting placed).
+// per direct request.
 function onTutorialFlowComplete(state, id) {
-  if (id === 'tankpoint') {
+  if (id === 'start') {
+    // The 'start' flow itself ends silently (nothing was asked for beyond
+    // the fish itself getting placed) — but per a later direct request, it's
+    // also what starts the 30-second countdown to the Tank Upgrades icon's
+    // own bounce reminder (see scheduleTankButtonReminder above).
+    setTimeout(() => scheduleTankButtonReminder(state), TANK_BUTTON_REMINDER_START_DELAY_MS);
+  } else if (id === 'tankpoint') {
     // Per direct request: after this tutorial, grant one more Tank Point
     // with its own chat message — deliberately NOT routed through
     // awardTankPoint (that's a per-fish-growth award with its own
