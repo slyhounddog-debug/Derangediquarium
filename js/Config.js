@@ -2659,12 +2659,12 @@ export const ALIEN_FIRST_WAVE_TIP_MESSAGE = "Aliens incoming! Click 'em for 1 da
 // per a direct follow-up request so the reveal message posts right as the
 // music finishes fading OUT (not after the boss track has already faded
 // back in), leaving a genuine stretch of silence before the boss music
-// starts. Beat durations were rebalanced once more in a later follow-up
-// (silence cut, post-music wait and the white fade-in both extended) so the
-// boss track gets more real playing time before the screen turns white —
-// the shape below and every constant/comment beneath it already reflect
-// that latest pass, not the original 5s-silence/4s-post-wait/3s-white-fade
-// version:
+// starts. Beat durations were rebalanced twice more in later follow-ups
+// (silence cut, post-music wait extended, then the white fade-in extended
+// twice in a row) so the boss track gets more real playing time before the
+// screen turns white — the shape below and every constant/comment beneath
+// it already reflect the latest pass (a 17-second total), not any of the
+// earlier 15s/16s versions:
 //   [0, BOSS_MUSIC_FADE_OUT_MS)                        — Game/Battle fade OUT
 //                                                        (Sound.js's
 //                                                        triggerBossMusic)
@@ -2695,8 +2695,8 @@ export const BOSS_MUSIC_FADE_IN_START_MS = BOSS_INTRO_MESSAGE_AT_MS + BOSS_SILEN
 export const BOSS_MUSIC_FADE_IN_MS = 1000; // "then a 1 second song fade in"
 export const BOSS_POST_MUSIC_WAIT_MS = 5000; // raised from 4000 per direct request ("increase the wait after the fade in on the boss music to 5 seconds before the fade to white starts") — so the boss song has longer to play before the white fade-in starts
 export const BOSS_WHITE_FADE_IN_START_MS = BOSS_MUSIC_FADE_IN_START_MS + BOSS_MUSIC_FADE_IN_MS + BOSS_POST_MUSIC_WAIT_MS; // 6000 + 1000 + 5000 = 12000
-export const BOSS_WHITE_FADE_IN_MS = 4000; // raised from 3000 per direct request ("increase the time the screen fades to white... to 4 seconds, so the boss song has longer to play")
-export const BOSS_SPAWN_MS = BOSS_WHITE_FADE_IN_START_MS + BOSS_WHITE_FADE_IN_MS; // 12000 + 4000 = 16000 — total unchanged at 16s, just redistributed among the beats per this follow-up request
+export const BOSS_WHITE_FADE_IN_MS = 5000; // raised from 4000 per direct request ("increase the fade to white time to 5 seconds for a total of 17 seconds") — was raised from 3000 to 4000 the pass before this one for the same "boss song has longer to play" reason
+export const BOSS_SPAWN_MS = BOSS_WHITE_FADE_IN_START_MS + BOSS_WHITE_FADE_IN_MS; // 12000 + 5000 = 17000 — "a total of 17 seconds," matches exactly
 // "Then the white goes away and the boss appears" — no duration was given
 // for the white clearing itself (unchanged by this pass), so this stays a
 // deliberately short, snappy reveal (much quicker than the 3s fade-in)
