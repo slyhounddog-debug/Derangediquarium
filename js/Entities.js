@@ -73,6 +73,17 @@ import {
   BIO_SLUDGE_PILE_MESSAGE,
   BIO_SLUDGE_PILE_THRESHOLD,
   FIRST_BIOMASS_MESSAGE,
+  FISH_BUBBLE_INTERVAL_MIN_MS,
+  FISH_BUBBLE_INTERVAL_MAX_MS,
+  FISH_BUBBLE_SECOND_CHANCE,
+  FISH_BUBBLE_SECOND_DELAY_MS,
+  FISH_BUBBLE_LIFETIME_MS,
+  FISH_BUBBLE_RISE_SPEED_MIN,
+  FISH_BUBBLE_RISE_SPEED_MAX,
+  FISH_BUBBLE_RADIUS_MIN,
+  FISH_BUBBLE_RADIUS_MAX,
+  FISH_BUBBLE_SIZE_FISH_SCALE_WEIGHT,
+  FISH_BUBBLE_MOUTH_OFFSET_FRACTION,
   FIRST_BIO_SLUDGE_WITH_REFINERY_MESSAGE,
   FIRST_BIO_SLUDGE_NO_REFINERY_MESSAGE,
   SCIENCE_COLOR,
@@ -813,6 +824,16 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
     powerTextTimerMs: 0, // pure-Generator only — counts up to 1000ms before flushing powerTextAccumMw into a floating text
     researchTickIndex: 0, // pure-Researcher only — which tenth of the current brew cycle's "+0.1" progress bubbles have already fired, see updateFish's RESEARCHER branch
     hungerCriticalSfxPlayed: false, // plays playHunger() once per crossing into HUNGER_CRITICAL_THRESHOLD, reset once hunger drops back below it (e.g. after eating) — see updateFish
+    // Mouth bubbles, per direct request — counts DOWN, re-rolled to a fresh
+    // random FISH_BUBBLE_INTERVAL_MIN/MAX_MS span every time it fires
+    // (including the guaranteed hunger-triggered one below), seeded to a
+    // random initial value here too so every fish's own cycle starts out of
+    // sync with every other fish's. pendingSecondBubbleMs counts down to a
+    // rolled-in second bubble (FISH_BUBBLE_SECOND_CHANCE odds, only off the
+    // periodic timer's own emission, never the hunger one) — 0 means none
+    // pending. See emitFishBubble/updateFish.
+    bubbleTimerMs: FISH_BUBBLE_INTERVAL_MIN_MS + Math.random() * (FISH_BUBBLE_INTERVAL_MAX_MS - FISH_BUBBLE_INTERVAL_MIN_MS),
+    pendingSecondBubbleMs: 0,
     alienNearby: false, // recomputed every tick in updateFish — true while a living alien is within ALIEN_INCOME_BLOCK_RADIUS, driving both the coin-production block and the continuous gray tint (main.js's render)
     capBlockedTintRemainingMs: 0, // counts down from FISH_BLOCKED_TINT_MS whenever a coin drop is blocked by the Coin Cap — the OTHER (timed) source of the gray tint, see triggerProductionBlocked
     mutagenBuffActive: false, // Adult-only Mutagen Paste buff — see updateFish's eat branch; cleared once hunger crosses back into HUNGER_CRITICAL_THRESHOLD
@@ -1978,6 +1999,36 @@ function maybeAnnounceFirstBiomass(state) {
   pushStoryNotification(state, FIRST_BIOMASS_MESSAGE);
 }
 
+// A small bubble out of a fish's mouth, per direct request — duplicates
+// Ambience.js's own background-bubble look (rise + sideways sine wobble,
+// see main.js's render) as a one-shot, detached transient effect instead of
+// that file's fixed recycling pool, since each one has to spawn wherever
+// its own fish currently is, not a fixed slot. Size is "slightly dependent
+// on the size of the fish" per direct spec — sizeFactor blends a flat 1x
+// baseline with the fish's own current on-screen scale (relative to
+// FISH_BASE_SIZE, the same "1.0 = adult base feeder" reference every other
+// size-derived calc in this file already uses), weighted by
+// FISH_BUBBLE_SIZE_FISH_SCALE_WEIGHT so a baby fish still gets a real,
+// visible bubble rather than a near-invisible speck. Spawns just in front
+// of the fish's own center, in whichever direction it's currently facing
+// (fish only ever mirror horizontally, never rotate, so a horizontal-only
+// mouth offset matches how they're actually drawn).
+function emitFishBubble(state, fish, def) {
+  const fishSize = FISH_BASE_SIZE * def.growthStages[fish.stage].scale;
+  const facing = fish.vx >= 0 ? 1 : -1;
+  const sizeFactor = (1 - FISH_BUBBLE_SIZE_FISH_SCALE_WEIGHT) + FISH_BUBBLE_SIZE_FISH_SCALE_WEIGHT * (fishSize / FISH_BASE_SIZE);
+  state.level.fishBubbleEffects.push({
+    x: fish.x + facing * fishSize * FISH_BUBBLE_MOUTH_OFFSET_FRACTION,
+    y: fish.y,
+    radius: (FISH_BUBBLE_RADIUS_MIN + Math.random() * (FISH_BUBBLE_RADIUS_MAX - FISH_BUBBLE_RADIUS_MIN)) * sizeFactor,
+    age: 0,
+    riseSpeed: FISH_BUBBLE_RISE_SPEED_MIN + Math.random() * (FISH_BUBBLE_RISE_SPEED_MAX - FISH_BUBBLE_RISE_SPEED_MIN),
+    wobbleFreq: 1.2 + Math.random() * 1.6,
+    wobblePhase: Math.random() * Math.PI * 2,
+    wobbleAmp: 2 + Math.random() * 4,
+  });
+}
+
 // Every subsequent Tank Point just gets the usual small floating text; only
 // the very first one also explains what Tank Points even are, via the
 // rolling notification ticker (same state.level.notifications log Mound.js
@@ -2091,9 +2142,36 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
     if (!fish.hungerCriticalSfxPlayed) {
       fish.hungerCriticalSfxPlayed = true;
       playHunger();
+      // Per direct request, ALWAYS let out a bubble the instant a fish hits
+      // the second (more urgent) hunger stage — a guaranteed emission, on
+      // top of (not instead of) the fish's own independent periodic timer
+      // below, and never itself rolls a chance at a second bubble (that's
+      // only ever off the periodic timer's own emissions).
+      emitFishBubble(state, fish, def);
     }
   } else {
     fish.hungerCriticalSfxPlayed = false;
+  }
+
+  // Mouth bubbles — a small, purely decorative bubble every 5-20 seconds
+  // (re-rolled fresh each time, including after the guaranteed hunger one
+  // above), per direct request. Ticks unconditionally, every tick,
+  // regardless of hunger/state — see emitFishBubble/Config.js's FISH_BUBBLE_*.
+  fish.bubbleTimerMs -= dtMs;
+  if (fish.bubbleTimerMs <= 0) {
+    emitFishBubble(state, fish, def);
+    fish.bubbleTimerMs = FISH_BUBBLE_INTERVAL_MIN_MS + Math.random() * (FISH_BUBBLE_INTERVAL_MAX_MS - FISH_BUBBLE_INTERVAL_MIN_MS);
+    // A small chance of a second bubble ~0.5s later, per direct spec — the
+    // independent random rolls in emitFishBubble's own size/rise/wobble
+    // fields already guarantee it won't be identical to the first.
+    if (Math.random() < FISH_BUBBLE_SECOND_CHANCE) fish.pendingSecondBubbleMs = FISH_BUBBLE_SECOND_DELAY_MS;
+  }
+  if (fish.pendingSecondBubbleMs > 0) {
+    fish.pendingSecondBubbleMs -= dtMs;
+    if (fish.pendingSecondBubbleMs <= 0) {
+      fish.pendingSecondBubbleMs = 0;
+      emitFishBubble(state, fish, def);
+    }
   }
 
   // Mutagen Paste's Adult buff (2x coin drop + a glow, see the eat branch
@@ -2619,11 +2697,24 @@ function updateProductionBlockedEffects(state, dtMs) {
   });
 }
 
+// Same age-and-cull pattern as the two above, plus real motion (a fish
+// mouth bubble actually rises, unlike a death burst or a disintegrating
+// coin/science icon, which stay put and just fade) — see emitFishBubble.
+function updateFishBubbleEffects(state, dtMs) {
+  const dt = dtMs / 1000;
+  state.level.fishBubbleEffects = state.level.fishBubbleEffects.filter((b) => {
+    b.age += dtMs;
+    b.y -= b.riseSpeed * dt;
+    return b.age < FISH_BUBBLE_LIFETIME_MS;
+  });
+}
+
 export function updateEntities(state, dtMs) {
   maybeWarnBioSludgePile(state);
   updateAlienPortals(state);
   updateAlienDeathEffects(state, dtMs);
   updateProductionBlockedEffects(state, dtMs);
+  updateFishBubbleEffects(state, dtMs);
   pendingFoodToWasteSpawns.length = 0; // updateFood (below) fills this — see its own comment for why it can't push into state.level.items directly
   state.level.items = state.level.items.filter((item) => {
     if (item.type === 'food') return updateFood(item, state, dtMs);

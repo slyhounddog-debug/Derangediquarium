@@ -71,6 +71,7 @@ import {
   TURRET_PROJECTILE_COLOR,
   COIN_RADIUS,
   PRODUCTION_BLOCKED_EFFECT_DURATION_MS,
+  FISH_BUBBLE_LIFETIME_MS,
   WORLD_H,
   WORLD_W,
   CAMERA_BOTTOM_BUFFER_PX,
@@ -2669,6 +2670,34 @@ function render() {
       ctx.fill();
     }
 
+    ctx.restore();
+  }
+
+  // Fish mouth bubbles — per direct request, duplicating Ambience.js's own
+  // background-bubble look (a stroked ring plus a small glossy highlight
+  // dot, low opacity, sideways sine wobble as it rises) for a one-shot
+  // transient effect instead of that file's fixed recycling pool. Fades out
+  // over its own last 30% of life instead of popping off abruptly. Purely
+  // decorative — see Entities.js's emitFishBubble/updateFishBubbleEffects.
+  for (const b of state.level.fishBubbleEffects) {
+    const wobbleX = Math.sin((b.age / 1000) * b.wobbleFreq + b.wobblePhase) * b.wobbleAmp;
+    const pos = worldToScreen(b.x + wobbleX, b.y, state.camera);
+    if (pos.x < -20 || pos.x > canvas.width + 20 || pos.y < -20 || pos.y > canvas.height + 20) continue;
+    const lifeT = b.age / FISH_BUBBLE_LIFETIME_MS; // 0 -> 1
+    const fadeAlpha = lifeT > 0.7 ? 1 - (lifeT - 0.7) / 0.3 : 1;
+    const r = b.radius * state.camera.zoom;
+    ctx.save();
+    ctx.globalAlpha = 0.32 * fadeAlpha;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+    ctx.lineWidth = Math.max(1, state.camera.zoom);
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 0.45 * fadeAlpha;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.beginPath();
+    ctx.arc(pos.x - r * 0.3, pos.y - r * 0.3, r * 0.28, 0, Math.PI * 2);
+    ctx.fill();
     ctx.restore();
   }
 

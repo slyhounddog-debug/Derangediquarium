@@ -2280,6 +2280,33 @@ export const MANUFACTURER_INPUT_COLOR_BY_TYPE = {
 // PRODUCTION_BLOCKED_COLOR it was drawn in) is retired entirely — both
 // resources share this one effect now, nothing reads that color any more.
 export const PRODUCTION_BLOCKED_EFFECT_DURATION_MS = 800;
+
+// ---- Fish mouth bubbles (Entities.js's emitFishBubble/updateFishBubbleEffects) ----
+// Per direct request — a small, purely decorative bubble every fish
+// occasionally lets out of its mouth, duplicating the same rise-and-wobble
+// look Ambience.js's own background bubbles already use, just as a
+// detached, one-shot transient effect (state.level.fishBubbleEffects, same
+// "push it, age it, cull it" pattern as alienDeathEffects/
+// productionBlockedEffects) rather than a fixed recycling pool, since each
+// one has to spawn wherever its own fish currently is.
+export const FISH_BUBBLE_INTERVAL_MIN_MS = 5000; // re-rolled after every emission (including the hunger-triggered one), so intervals never resync across fish
+export const FISH_BUBBLE_INTERVAL_MAX_MS = 20000;
+// Per direct spec ("a small chance after .5 seconds for a second bubble
+// with a non-identical size/direction as the first") — rolled once per
+// FIRST bubble emitted (never for the hunger-triggered one, which is
+// already a guaranteed extra bubble of its own), never stacking further.
+export const FISH_BUBBLE_SECOND_CHANCE = 0.25;
+export const FISH_BUBBLE_SECOND_DELAY_MS = 500;
+export const FISH_BUBBLE_LIFETIME_MS = 2500; // how long a bubble rises before fading out/aging away
+export const FISH_BUBBLE_RISE_SPEED_MIN = 18;
+export const FISH_BUBBLE_RISE_SPEED_MAX = 34;
+export const FISH_BUBBLE_RADIUS_MIN = 1.5;
+export const FISH_BUBBLE_RADIUS_MAX = 4.5;
+// "Slightly dependent on the size of the fish," per direct spec — not a
+// direct multiplier (a baby fish still gets a real, visible bubble, just a
+// somewhat smaller one on average) — see emitFishBubble's own sizeFactor.
+export const FISH_BUBBLE_SIZE_FISH_SCALE_WEIGHT = 0.35;
+export const FISH_BUBBLE_MOUTH_OFFSET_FRACTION = 0.42; // how far forward of the fish's own center (as a fraction of its on-screen size) the bubble spawns, in whichever direction it's currently facing
 // The 3 utility species — the only valid splice SOURCES (dragged onto an
 // eligible target, never the other way around, to keep the interaction
 // symmetric with Economy Fish Combining's own single-direction drag). Also
