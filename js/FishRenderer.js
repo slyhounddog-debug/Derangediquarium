@@ -139,14 +139,32 @@ function drawEye(ctx, eyeX, eyeY, socketRadius, pupilRadius, eyeDirection) {
 // none of these three ever match a special-cased speciesId below — every
 // Gene-Splicing hybrid too, per direct request that a hybrid "should look
 // like the guppy, dartfin, or blimpfish fish that was used."
-function drawStandardBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGrown, color, eyeDirection) {
+// bodyShape ('normal' | 'slim' | 'round') gives Dartfin/Blimpfish (and any
+// hybrid spliced from them — see drawFish's own shapeSourceId comment) a
+// subtly different silhouette from Guppy's own baseline body, per direct
+// request ("slightly change the looks of the dartfin and the blimpfish so
+// they are more visually distinct from the guppy") — 'slim' reads as
+// leaner/quicker (Dartfin's own "cheaper and faster" flavor), 'round' reads
+// as chubbier/slower (Blimpfish's own "expensive and sluggish... voracious
+// appetite," and its literal name). Deliberately small, proportional
+// adjustments to the exact same body/tail this function already draws for
+// every standard fish — not a new silhouette — since "slightly" was the
+// explicit ask.
+const BODY_SHAPE_RATIOS = {
+  normal: { bodyW: 0.6, bodyH: 0.4, tailLen: 1, tailWidth: 1 },
+  slim: { bodyW: 0.62, bodyH: 0.33, tailLen: 1.12, tailWidth: 0.82 }, // Dartfin — leaner and a touch longer, a narrower tail fin
+  round: { bodyW: 0.56, bodyH: 0.48, tailLen: 0.85, tailWidth: 1.15 }, // Blimpfish — a rounder, plumper belly and a stubbier, broader tail
+};
+
+function drawStandardBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGrown, color, eyeDirection, bodyShape = 'normal') {
+  const shape = BODY_SHAPE_RATIOS[bodyShape] || BODY_SHAPE_RATIOS.normal;
   // Mid and adult stages get a fin — small at mid, bigger (but still
   // smaller than the old fixed size) at adult. Baby stays plain.
   if (stage >= 1) {
     const finScale = isFullyGrown ? 1.0 : MID_STAGE_FIN_SCALE;
     const backX = x - facing * size * 0.55;
-    const tailLength = size * TAIL_LENGTH_RATIO * finScale;
-    const tailHalfWidth = size * TAIL_WIDTH_RATIO * finScale;
+    const tailLength = size * TAIL_LENGTH_RATIO * finScale * shape.tailLen;
+    const tailHalfWidth = size * TAIL_WIDTH_RATIO * finScale * shape.tailWidth;
     const swing = Math.sin(tailPhase) * size * TAIL_SWING_RATIO * finScale;
     // Swishes side to side like a real tail fin sweeping through the water,
     // instead of just the tip flapping up/down against a fixed hinge, per
@@ -169,20 +187,22 @@ function drawStandardBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGrow
 
   ctx.fillStyle = color;
   ctx.beginPath();
-  ctx.ellipse(x, y, size * 0.6, size * 0.4, 0, 0, Math.PI * 2);
+  ctx.ellipse(x, y, size * shape.bodyW, size * shape.bodyH, 0, 0, Math.PI * 2);
   ctx.fill();
   // A soft, darker underside plus a small glossy highlight — per direct
   // request that fish "pop more and look less flat" than a single flat
   // fill. Cheap (two extra ellipses, no filters/gradients) so it doesn't
   // risk the same per-frame cost every fish, every frame would make a real
-  // canvas filter or gradient noticeably add up to.
+  // canvas filter or gradient noticeably add up to. Scaled proportionally to
+  // the body's own (possibly non-default) width/height above, so the shading
+  // still tracks a slimmer or rounder silhouette correctly.
   ctx.fillStyle = 'rgba(0, 0, 0, 0.12)';
   ctx.beginPath();
-  ctx.ellipse(x, y + size * 0.16, size * 0.55, size * 0.22, 0, 0, Math.PI * 2);
+  ctx.ellipse(x, y + size * shape.bodyH * 0.4, size * shape.bodyW * 0.92, size * shape.bodyH * 0.55, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
   ctx.beginPath();
-  ctx.ellipse(x - facing * size * 0.12, y - size * 0.16, size * 0.22, size * 0.12, 0, 0, Math.PI * 2);
+  ctx.ellipse(x - facing * size * shape.bodyW * 0.2, y - size * shape.bodyH * 0.4, size * shape.bodyW * 0.37, size * shape.bodyH * 0.3, 0, 0, Math.PI * 2);
   ctx.fill();
 
   if (isFullyGrown) {
@@ -360,7 +380,17 @@ export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDire
   } else if (isFullyGrown && speciesId === 'suckerfish') {
     drawSuckerfishBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGrown, color, eyeDirection);
   } else {
-    drawStandardBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGrown, color, eyeDirection);
+    // A hybrid's own body SHAPE follows whichever base feeder it was spliced
+    // from (def.parents' second entry, per the [utilityId, economyId]
+    // convention — e.g. Blimp-Battery's own economy parent is 'blimpfish'),
+    // same "should look like the guppy/dartfin/blimpfish that was used"
+    // precedent this function's color-blending already follows. Falls back
+    // to the species' own id for a non-hybrid, and to 'normal' for anything
+    // that isn't Dartfin/Blimpfish (Guppy included, and every
+    // utility-utility hybrid with no feeder parent at all).
+    const shapeSourceId = def.parents ? def.parents[1] : speciesId;
+    const bodyShape = shapeSourceId === 'dartfin' ? 'slim' : shapeSourceId === 'blimpfish' ? 'round' : 'normal';
+    drawStandardBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGrown, color, eyeDirection, bodyShape);
   }
 
   // Economy Fish Combining tier overlay — only ever nonzero on an adult fish

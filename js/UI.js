@@ -41,6 +41,8 @@ import {
   SCIENCE_LAB_UPGRADE_LIST,
   COIN_CAP_BY_LEVEL,
   COIN_CAP_UPGRADE_COSTS,
+  ELECTRICITY_GRAPH_UNLOCK_COST,
+  GOLD_PER_MIN_UNLOCK_COST,
   COIN_CAP_UPGRADE_MAX_LEVEL,
   WORLD_W,
   WORLD_H,
@@ -59,7 +61,7 @@ import {
   WASTE_TURRET_MAX_WASTE,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings, loadLevel } from './Levels.js';
-import { getFishPurchaseCost, effectiveCoinCapacity, effectiveScienceCapacity, countTankItemsByType, hasAnyMergeOpportunity, resolveMergeTutorialPair } from './Entities.js';
+import { getFishPurchaseCost, effectiveCoinCapacity, effectiveScienceCapacity, countTankItemsByType, hasAnyMergeOpportunity, resolveMergeTutorialPair, computeTheoreticalGoldPerMinute } from './Entities.js';
 import { getTile, worldToTile, getBuildingCost, FAN_STATS, hasAnyBuildingPlaced, findNearestWasteTurretAndWaste, getRecipeBuildingKeyAt } from './Grid.js';
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
@@ -213,6 +215,7 @@ export function initUI(state) {
     scienceCap: document.getElementById('hud-science-cap'),
     cleanliness: document.getElementById('hud-cleanliness'),
     waves: document.getElementById('hud-waves'),
+    goldPerMin: document.getElementById('hud-gold-per-min'),
     power: document.getElementById('hud-power'),
     powerText: document.getElementById('hud-power-text'),
     powerArrow: document.getElementById('hud-power-arrow'),
@@ -432,6 +435,11 @@ export function initUI(state) {
   // #hud is always visible now (top-right, never hidden while a panel is
   // open — see updateHUD's own comment), so this is clickable at any time.
   els.power.addEventListener('click', () => {
+    // Per direct request ("hide the electricity graph behind an unlock in
+    // the tank upgrade") — the mw text readout itself stays unconditionally
+    // visible once Electric Eel is unlocked (updateHUD's own concern); only
+    // the graph POPUP additionally requires this Tank Upgrade.
+    if (!state.level.upgrades.electricityGraphUnlocked) return;
     powerGraphOpen = !powerGraphOpen;
     els.powerGraph.classList.toggle('hidden', !powerGraphOpen);
     els.powerArrow.classList.toggle('open', powerGraphOpen); // flips the chevron to point up while the graph is showing
@@ -1281,6 +1289,13 @@ function openLabPurchaseModal(state, id) {
     if (recipe) {
       descLines.push(`Unlocks the <b>${recipe.name}</b> recipe: ${recipe.description}.`);
       statChips.push(`<div class="building-stat">${recipe.icon} <b>${recipe.description}</b></div>`);
+    } else if (node.description) {
+      // A plain node-level `description` string (e.g. the two Turret Fire
+      // Rate nodes — see Config.js) — describes a real mechanical effect
+      // that isn't a species/building/recipe/capacity grant, so it needs its
+      // own static text rather than falling all the way to the generic
+      // "prerequisite" line below.
+      descLines.push(node.description);
     } else {
       descLines.push('Doesn\'t unlock anything by itself — it\'s a prerequisite for what comes next.');
       const unlocksHtml = labNodeUnlocksHtml(id);
@@ -1501,9 +1516,22 @@ function drawLabTreeConnectors(state) {
       // Hovering `node` highlights every edge running FROM it to one of ITS
       // OWN prerequisites — a bright gold overlay wins over the normal
       // purchased/locked styling regardless of which state that edge was
-      // already in.
+      // already in. Per a later direct request, hovering an ALREADY-
+      // PURCHASED node also highlights every edge running the other way —
+      // to whichever OTHER nodes require IT (what it unlocks) — in a
+      // distinct cyan/blue rather than gold, so "what this needs" and "what
+      // this enables" read as two different, simultaneously-visible things
+      // rather than one direction winning over the other. Scoped to a
+      // purchased hovered node specifically (per the request's own wording)
+      // since an unpurchased node's own "what it would unlock" edges aren't
+      // reachable yet anyway.
+      const hoveredIsUnlockTarget = labHoveredNodeId === reqId && state.meta.labUpgradesPurchased.includes(labHoveredNodeId);
       if (labHoveredNodeId === node.id) {
-        ctx.strokeStyle = 'rgba(255, 209, 102, 0.95)';
+        ctx.strokeStyle = 'rgba(255, 209, 102, 0.95)'; // gold — requirements of the hovered node
+        ctx.lineWidth = 4;
+        ctx.setLineDash([]);
+      } else if (hoveredIsUnlockTarget) {
+        ctx.strokeStyle = 'rgba(90, 200, 255, 0.95)'; // cyan/blue — nodes the hovered node itself unlocks
         ctx.lineWidth = 4;
         ctx.setLineDash([]);
       } else {
@@ -1959,14 +1987,16 @@ function createUpgradeCard(name, icon) {
   return { card, levelEl, descEl, buyBtn };
 }
 
-let tankCards = null; // { foodQuality, fishMovement, coinCapacity, fishMerging } — each { card, levelEl, descEl, buyBtn }. Splicing itself was never a purchase here — see Config.js's SCIENCE_LAB_UPGRADES' 3 flat hybrid nodes. Food Capacity retired entirely — see Config.js's FOOD_STATIONARY_TO_WASTE_MS.
+let tankCards = null; // { foodQuality, fishMovement, coinCapacity, electricityGraph, goldPerMin } — each { card, levelEl, descEl, buyBtn }. Splicing itself was never a purchase here — see Config.js's SCIENCE_LAB_UPGRADES' 3 flat hybrid nodes. Food Capacity retired entirely — see Config.js's FOOD_STATIONARY_TO_WASTE_MS.
 
 function buildTankPanel(state) {
   els.tankUpgradeList.innerHTML = '';
   const foodQuality = createUpgradeCard('Food Quality', '🍽️');
   const fishMovement = createUpgradeCard('Fish Movement', '🏊');
   const coinCapacity = createUpgradeCard('Coin Capacity', '🪙');
-  tankCards = { foodQuality, fishMovement, coinCapacity };
+  const electricityGraph = createUpgradeCard('Electricity Graph', '📊');
+  const goldPerMin = createUpgradeCard('Gold/min Stat', '📈');
+  tankCards = { foodQuality, fishMovement, coinCapacity, electricityGraph, goldPerMin };
 
   foodQuality.buyBtn.addEventListener('click', () => {
     const level = state.level.upgrades.foodQuality;
@@ -2003,12 +2033,32 @@ function buildTankPanel(state) {
     // earned their very first Tank Point can always afford this.
     advanceTutorialFlow(state, 'tankpoint', 'coincapbuy');
   });
+  // Two new one-time boolean unlocks, per direct request — same
+  // buy-once/no-leveled-ladder shape the old Fish Merging card used before
+  // it was removed (see refreshTankPanel below for the shared "Unlocked"/
+  // "Unlock — cost" button-text pattern this reintroduces).
+  electricityGraph.buyBtn.addEventListener('click', () => {
+    if (state.level.upgrades.electricityGraphUnlocked) return;
+    if (state.level.tankPoints.available < ELECTRICITY_GRAPH_UNLOCK_COST) return;
+    state.level.tankPoints.available -= ELECTRICITY_GRAPH_UNLOCK_COST;
+    state.level.upgrades.electricityGraphUnlocked = true;
+    playUpgrade();
+    refreshTankPanel(state);
+  });
+  goldPerMin.buyBtn.addEventListener('click', () => {
+    if (state.level.upgrades.goldPerMinUnlocked) return;
+    if (state.level.tankPoints.available < GOLD_PER_MIN_UNLOCK_COST) return;
+    state.level.tankPoints.available -= GOLD_PER_MIN_UNLOCK_COST;
+    state.level.upgrades.goldPerMinUnlocked = true;
+    playUpgrade();
+    refreshTankPanel(state);
+  });
 
   // Fish Merging's own card is gone entirely — per direct request, merging
   // is always available now, no Tank Upgrade purchase needed (see
   // Entities.js's isCombinableFish). Coin Capacity kept its position at the
   // top of the list from the reorder that used to put Fish Merging there.
-  els.tankUpgradeList.append(coinCapacity.card, foodQuality.card, fishMovement.card);
+  els.tankUpgradeList.append(coinCapacity.card, electricityGraph.card, goldPerMin.card, foodQuality.card, fishMovement.card);
 
   // Defensive Capabilities: shown per the design update's Phase 2 UI-shell
   // scope, but locked — there's no alien system to upgrade yet (Phase 5).
@@ -2027,7 +2077,7 @@ function buildTankPanel(state) {
 // state can all change while the player has it open.
 function refreshTankPanel(state) {
   if (!tankCards) return;
-  const { foodQuality, fishMovement, coinCapacity } = tankCards;
+  const { foodQuality, fishMovement, coinCapacity, electricityGraph, goldPerMin } = tankCards;
   const available = state.level.tankPoints.available;
 
   const fqLevel = state.level.upgrades.foodQuality;
@@ -2064,6 +2114,31 @@ function refreshTankPanel(state) {
     const cost = COIN_CAP_UPGRADE_COSTS[ccLevel];
     coinCapacity.buyBtn.textContent = `${cost} 🏆`;
     coinCapacity.buyBtn.disabled = available < cost;
+  }
+
+  // Two one-time boolean unlocks — same "Unlocked" / "Unlock — cost"
+  // button-text pattern the old Fish Merging card used before it was
+  // removed, per direct request.
+  const egUnlocked = state.level.upgrades.electricityGraphUnlocked;
+  electricityGraph.levelEl.textContent = egUnlocked ? 'Unlocked' : 'Locked';
+  electricityGraph.descEl.textContent = 'Lets you click the electricity readout to open a rolling supply/demand graph.';
+  if (egUnlocked) {
+    electricityGraph.buyBtn.textContent = 'Unlocked ✓';
+    electricityGraph.buyBtn.disabled = true;
+  } else {
+    electricityGraph.buyBtn.textContent = `Unlock — ${ELECTRICITY_GRAPH_UNLOCK_COST} 🏆`;
+    electricityGraph.buyBtn.disabled = available < ELECTRICITY_GRAPH_UNLOCK_COST;
+  }
+
+  const gpmUnlocked = state.level.upgrades.goldPerMinUnlocked;
+  goldPerMin.levelEl.textContent = gpmUnlocked ? 'Unlocked' : 'Locked';
+  goldPerMin.descEl.textContent = "Adds a live gold/min stat to the HUD — your tank's current theoretical max earning rate.";
+  if (gpmUnlocked) {
+    goldPerMin.buyBtn.textContent = 'Unlocked ✓';
+    goldPerMin.buyBtn.disabled = true;
+  } else {
+    goldPerMin.buyBtn.textContent = `Unlock — ${GOLD_PER_MIN_UNLOCK_COST} 🏆`;
+    goldPerMin.buyBtn.disabled = available < GOLD_PER_MIN_UNLOCK_COST;
   }
 
   els.tankPointsDisplay.textContent = `🏆 ${available}`;
@@ -2597,6 +2672,17 @@ export function updateHUD(state) {
   const wavesSpawned = state.level.alienWavesSpawned;
   els.waves.classList.toggle('hidden', wavesSpawned === 0);
   if (wavesSpawned > 0) els.waves.textContent = `👽 Wave ${wavesSpawned}`;
+
+  // Theoretical gold/min — hidden until its own Tank Upgrade is bought, per
+  // direct request. Recomputed fresh every frame (cheap for this game's
+  // typical entity counts) so it updates instantly with fish growth/death,
+  // tank cleanliness, alien proximity, or a Mutagen Paste buff — exactly the
+  // 4 triggers named in the request — with no caching to keep in sync.
+  const goldPerMinUnlocked = state.level.upgrades.goldPerMinUnlocked;
+  els.goldPerMin.classList.toggle('hidden', !goldPerMinUnlocked);
+  if (goldPerMinUnlocked) {
+    els.goldPerMin.textContent = `📈 $${Math.round(computeTheoreticalGoldPerMinute(state))}/min`;
+  }
 
   // Electricity — only shown at all once Electric Eel is unlocked, per
   // direct request. Text only updates once a real second, matching the

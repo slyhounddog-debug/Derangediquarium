@@ -30,6 +30,7 @@ import {
   PROCESSOR_STATS,
   TURRET_STATS,
   TURRET_AMMO_TILES,
+  TURRET_FIRE_RATE_UPGRADE_MULTIPLIER,
   REFINERY_STATS,
   ALIEN_DNA_REFINERY_TIME_MULTIPLIER,
   MANUFACTURER_RECIPES,
@@ -601,6 +602,18 @@ export function getCatalystSpeedMultiplier(state, buildingKey) {
   return 1;
 }
 
+// Applies globally to EVERY turret tier at once, per direct request
+// ("increase all turrets firerate by 20%... increase it by another 20%") —
+// stacks multiplicatively, one +20% per Lab node actually purchased (up to
+// 1.2*1.2 = 1.44x with both). See Config.js's turret_fire_rate_1/_2 and
+// TURRET_STATS' own base shotsPerSec, cut to compensate.
+function getTurretFireRateMultiplier(state) {
+  let multiplier = 1;
+  if (state.meta.labUpgradesPurchased.includes('turret_fire_rate_1')) multiplier *= TURRET_FIRE_RATE_UPGRADE_MULTIPLIER;
+  if (state.meta.labUpgradesPurchased.includes('turret_fire_rate_2')) multiplier *= TURRET_FIRE_RATE_UPGRADE_MULTIPLIER;
+  return multiplier;
+}
+
 function stepCollectorProcessing(item, state, dt) {
   const grid = state.level.grid;
   const tileType = tileAt(grid, item.collectorCenterX, item.collectorCenterY);
@@ -891,7 +904,7 @@ export function updateBuildings(state, dtMs) {
         }
         if (nearestAlien) {
           turretShots.push({ x: centerX, y: centerY, targetId: nearestAlien.id, damage: turretStats.damage });
-          data.cooldownMs = 1000 / turretStats.shotsPerSec;
+          data.cooldownMs = 1000 / (turretStats.shotsPerSec * getTurretFireRateMultiplier(state));
           if (TURRET_AMMO_TILES.has(data.type)) data.ammo -= 1;
           firedThisTick = true;
           playTurretShoot();
@@ -1419,7 +1432,19 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
         // anything touching them from any side now, no "input side" any more).
         if (data) {
           const dotsInfo = computeProcessDotsInfo(state, type, data, col * TILE_SIZE + TILE_SIZE / 2, row * TILE_SIZE + TILE_SIZE / 2);
-          if (dotsInfo) renderProcessDots(ctx, screen.x, screen.y, size, camera.zoom, dotsInfo.fraction, dotsInfo.mode);
+          if (dotsInfo) {
+            renderProcessDots(ctx, screen.x, screen.y, size, camera.zoom, dotsInfo.fraction, dotsInfo.mode);
+            // A gentle pulsing outline whenever a Refinery/Collector/
+            // Manufacturer/Power Plant is actively working — per direct
+            // request ("have the refineries, collectors, manufacturer, and
+            // the powerplant pulse slightly when in use... so it's visually
+            // obvious which machines are running"). Reuses the exact same
+            // "actively processing" signal computeProcessDotsInfo already
+            // derives for the process-progress dots above (a non-null
+            // result IS the "in use" condition for all 4 building families),
+            // so there's no separate per-type active-check to keep in sync.
+            renderActiveMachinePulse(ctx, screen.x, screen.y, size, state.level.elapsed);
+          }
         }
         if (data && TURRET_AMMO_TILES.has(type)) {
           renderTurretAmmoDots(ctx, screen.x, screen.y, size, data.ammo, camera.zoom);
@@ -1743,6 +1768,25 @@ function renderCatalystGlow(ctx, x, y, size, elapsedMs) {
   ctx.shadowColor = '#ffe066';
   ctx.shadowBlur = 10;
   ctx.strokeRect(x + 1.5, y + 1.5, size - 3, size - 3);
+  ctx.restore();
+}
+
+// A gentle, subtle pulsing outline on a Refinery/Collector/Manufacturer/
+// Power Plant while it's actively processing something — per direct
+// request. Deliberately a different color and a much gentler alpha range
+// than renderCatalystGlow above (a soft white/cyan "machine humming" cue,
+// low-key enough to sit quietly on every currently-working building at
+// once without the screen turning into a light show), and a slower period
+// so it doesn't compete visually with the Catalyst Fish's own buff glow.
+function renderActiveMachinePulse(ctx, x, y, size, elapsedMs) {
+  const pulse = 0.25 + 0.25 * Math.sin(elapsedMs / 420);
+  ctx.save();
+  ctx.globalAlpha = pulse;
+  ctx.strokeStyle = '#dff6ff';
+  ctx.lineWidth = 2;
+  ctx.shadowColor = '#dff6ff';
+  ctx.shadowBlur = 6;
+  ctx.strokeRect(x + 1, y + 1, size - 2, size - 2);
   ctx.restore();
 }
 

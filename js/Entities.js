@@ -204,6 +204,41 @@ function cleanlinessStressFactor(state) {
   return (CLEANLINESS_STRESS_THRESHOLD - cleanliness) / CLEANLINESS_STRESS_THRESHOLD;
 }
 
+// The tank's current THEORETICAL max gold/min — "theoretical" because it
+// deliberately ignores the Coin Cap entirely (a fish still counts in full
+// even if a real drop would currently be blocked by an already-full cap) —
+// per direct request, backing the new Gold/min Tank Upgrade's HUD readout.
+// Live-computed every time it's read (UI.js's updateHUD calls this every
+// frame, cheap for this game's typical entity counts) rather than cached
+// anywhere, so it updates instantly the moment a fish grows/dies, the tank
+// dirties, an alien starts blocking a fish, or a Mutagen Paste buff starts
+// or ends — exactly the four triggers named in the request. Mirrors
+// updateFish's own real coin-drop math exactly (star-tier scaling, the
+// dirty-tank interval stretch, the Mutagen Paste multiplier, the
+// alien-proximity full block) but without the Math.ceil() a real discrete
+// coin drop gets — a per-minute RATE is a continuous number, not a sequence
+// of individual coins, so rounding happens once, on the final displayed
+// total, same convention UI.js's own fishEconomyStatsHtml already uses for
+// its baby/adult $/min range.
+export function computeTheoreticalGoldPerMinute(state) {
+  const stress = cleanlinessStressFactor(state);
+  const dirtyIntervalMultiplier = 1 + stress * (CLEANLINESS_STRESS_MAX_INTERVAL_MULTIPLIER - 1);
+  let total = 0;
+  for (const fish of state.level.entities) {
+    if (fish.type !== 'fish' || fish.alienNearby) continue; // a fish fully blocked by alien proximity contributes nothing, same as a real drop attempt would
+    const def = SPECIES[fish.speciesId];
+    if (!def.behavior.includes('FEEDER')) continue; // only coin-producing species/hybrids count
+    const stageDef = def.growthStages[fish.stage];
+    const mutagenMultiplier = fish.mutagenBuffActive ? MUTAGEN_PASTE_COIN_MULTIPLIER : 1;
+    const dropValue = (fish.dropValueOverride != null
+      ? fish.dropValueOverride
+      : stageDef.dropValue * Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, (fish.starTier || 1) - 1)) * mutagenMultiplier;
+    const effectiveDropInterval = stageDef.dropInterval * dirtyIntervalMultiplier;
+    total += (dropValue / effectiveDropInterval) * 60000;
+  }
+  return total;
+}
+
 // A sine wobble on horizontal velocity — same underlying idea Ambience.js's
 // bubbles already use for their own left-right drift, per direct request.
 // Self-correcting no matter what the item's actual fall looks like (a Fan

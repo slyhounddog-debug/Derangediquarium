@@ -437,6 +437,20 @@ function isWasteDragTutorialStepActive(state) {
   );
 }
 
+// Same idea as isWasteDragTutorialStepActive above, for the "mergefish"
+// flow's own 'drag' step — real bug fix, per direct report ("you can't grab
+// a fish during the tutorial"). The general tutorial freeze below used to
+// skip updateEntities/updateFishDrag for EVERY flow except the waste-drag
+// one, which meant a mousedown during this step still correctly armed
+// draggedFishId (that handler has no tutorialFlow check of its own), but the
+// dragged fish's position never actually followed the cursor — updateFishDrag,
+// the function that does that snapping, never ran — so the drag looked
+// completely unresponsive even though the underlying grab had technically
+// succeeded.
+function isMergeDragTutorialStepActive(state) {
+  return state.level.tutorialFlow?.id === 'mergefish' && state.level.tutorialFlow.step === 'drag';
+}
+
 // Item dragging — generalized from a Waste-only mechanic to every item type
 // (coin/food/waste/science), per direct request ("make it so that every
 // object can be clicked and dragged around, just like waste. Make sure the
@@ -1395,11 +1409,15 @@ function update(dtMs) {
     // exemption — dragging itself is driven by updateItemDrag below, but
     // actually getting absorbed depends on updateEntities' own turret-
     // intake scan (deep inside Grid.js's updateBuildings), which needs real
-    // per-tick execution to ever fire at all. Falls through to the normal
-    // path below instead of freezing — updateStoryTriggers' own tutorial
-    // triggers all self-gate on state.level.tutorialFlow already being set
-    // (this exact flow), so nothing else can start while this runs.
-    if (!isWasteDragTutorialStepActive(state)) return;
+    // per-tick execution to ever fire at all. The "drag one fish onto the
+    // other" merge-tutorial step needs the same exemption, for the same
+    // reason — updateFishDrag (which makes the grabbed fish actually follow
+    // the cursor) only ever runs as part of this same normal-simulation
+    // path. Falls through to the normal path below instead of freezing —
+    // updateStoryTriggers' own tutorial triggers all self-gate on
+    // state.level.tutorialFlow already being set (this exact flow), so
+    // nothing else can start while this runs.
+    if (!isWasteDragTutorialStepActive(state) && !isMergeDragTutorialStepActive(state)) return;
   }
   if (state.ui.buildErrorText) {
     state.ui.buildErrorElapsedMs += dtMs;

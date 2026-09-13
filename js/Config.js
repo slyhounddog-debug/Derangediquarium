@@ -561,7 +561,11 @@ export const ITEM_DRAG_CLICK_RADIUS_MULTIPLIER = 1.6;
 export const ITEM_DRAG_MOVE_THRESHOLD_PX = 6;
 export const WASTE_GRAVITY = GRAVITY; // sinks like a coin, not a drifting food pellet
 export const WASTE_MAX_FALL_SPEED = MAX_FALL_SPEED;
-export const WASTE_COLOR = '#6b8e4e';
+// Shifted from a plain olive-green (#6b8e4e) to a genuine brown, per direct
+// request ("change the color of waste to be slightly more brown so its
+// different from biomass") — the old olive sat too close to Biomass's own
+// green family to tell apart on the seabed at a glance.
+export const WASTE_COLOR = '#8a6f45';
 // Flat hunger relief for a Scavenger fish (Suckerfish) eating a Waste item —
 // deliberately NOT tied to the Food Quality Tank Upgrade tree, which is
 // themed around player-bought Food pellets specifically, not scavenged waste.
@@ -643,8 +647,14 @@ export const BIOMASS_RADIUS = 10; // bumped from 9 alongside the recolor below, 
 // other item type still gets) — the core color is deliberately
 // ALIEN_DNA_COLOR itself, so Biomass literally has Bio-Sludge's own color
 // glowing at its center, tying the two together directly rather than just
-// via a similar hue.
-export const BIOMASS_COLOR = '#3f8a34';
+// via a similar hue. Brightened per a later direct request ("make the
+// biomass slightly brighter green so it's a little closer to the
+// bio-sludge") — blended about 30% of the way from the original #3f8a34
+// toward ALIEN_DNA_COLOR's own acid-green, close enough to read as kin
+// without becoming the same color (the core gradient stop already IS
+// ALIEN_DNA_COLOR exactly, so the two colors staying distinct at the edge
+// is what keeps the gradient itself readable as a gradient).
+export const BIOMASS_COLOR = '#51ad3f';
 export const BIOMASS_COLOR_CORE = ALIEN_DNA_COLOR;
 export const MUTAGEN_PASTE_RADIUS = FOOD_RADIUS; // Class 1, same size class as Food
 export const MUTAGEN_PASTE_COLOR = '#e64de0'; // vivid magenta/pink — unmistakably not plain Food, matches its "high-value" framing
@@ -771,12 +781,13 @@ export const FIRST_BIO_SLUDGE_NO_REFINERY_MESSAGE =
   "You've got yourself some Bio-Sludge and absolutely nothing to do with it yet. That mound sitting in your seabed looks suspiciously like it's hiding the answer.";
 // The #hud-cleanliness/#shop-cleanliness readout's text color is a live
 // gradient between these two, per direct request — bright blue at 100%
-// fading to an olive green at 0%. CLEANLINESS_COLOR_DIRTY is deliberately
-// the exact same hex as WASTE_COLOR above — a dirty tank reading the color
-// of the Waste causing it is a nice, free bit of visual reinforcement.
+// fading to a brown at 0%. CLEANLINESS_COLOR_DIRTY is deliberately the
+// exact same hex as WASTE_COLOR above (kept in sync when that color was
+// later changed from olive to brown) — a dirty tank reading the color of
+// the Waste causing it is a nice, free bit of visual reinforcement.
 // UI.js's cleanlinessColor(pct) does the actual RGB lerp every frame.
 export const CLEANLINESS_COLOR_CLEAN = '#4fc3f7';
-export const CLEANLINESS_COLOR_DIRTY = '#6b8e4e';
+export const CLEANLINESS_COLOR_DIRTY = '#8a6f45';
 
 // Real gameplay detriments of a dirty tank, per direct request ("if the
 // detriments of tank cleanliness haven't been implemented, make sure they
@@ -929,6 +940,16 @@ export const FISH_SPEED_MULTIPLIER = 1.1;
 // still very much counts as an "active drop" the player hasn't banked yet).
 export const COIN_CAP_BY_LEVEL = [10, 25, 50, 100, 250, 500]; // index 0 = unupgraded default
 export const COIN_CAP_UPGRADE_COSTS = [1, 8, 20, 45, 80]; // Tank Points — level 1 cut from 3 to 1 per direct request, so a player can afford it off their very first-ever Tank Point (see the new Tank Point tutorial flow in UI.js); levels 2+ untouched, placeholder balance like every other economy constant here
+// Two new one-time Tank Upgrade unlocks, per direct request — same shape as
+// the old (now-removed) Fish Merging card: a flat cost, a boolean flag in
+// state.level.upgrades, no leveled ladder. "Electricity Graph" gates the
+// #hud-power click-to-open rolling graph popup (the mw text readout itself
+// still shows unconditionally once Electric Eel is unlocked, unaffected —
+// only the GRAPH is now hidden behind this); "Gold/min Stat" reveals a new
+// HUD readout showing the tank's live theoretical max gold/min — see
+// Entities.js's computeTheoreticalGoldPerMinute.
+export const ELECTRICITY_GRAPH_UNLOCK_COST = 3; // Tank Points
+export const GOLD_PER_MIN_UNLOCK_COST = 3; // Tank Points
 export const COIN_CAP_UPGRADE_MAX_LEVEL = COIN_CAP_UPGRADE_COSTS.length;
 
 // Shared by both the Coin Cap and Science Cap HUD readouts (UI.js's
@@ -1456,17 +1477,34 @@ export const PROCESSOR_STATS = {
 // most plausibly means its Electric tier, the only other turret with "waste"
 // in its current name) going 4->6, and the Advanced Turret 6->15.
 // powerCostPerSec is still the derived rate (powerCostPerShot * shotsPerSec)
-// computeCurrentPowerDemand needs — 6*2=12, 15*3=45.
+// computeCurrentPowerDemand needs.
+// Base shotsPerSec cut again (1.75->1.5, 2->1.75, 3->2.5) per direct
+// request, "to compensate" for the two new Turret Fire Rate Lab nodes below
+// (each a flat +20%, applied multiplicatively at fire time — see Grid.js's
+// getTurretFireRateMultiplier) — fully upgraded, a turret ends up FASTER
+// than its old un-upgraded rate (1.5*1.2*1.2=2.16 > 1.75, 1.75*1.44=2.52 >
+// 2, 2.5*1.44=3.6 > 3), so this is a temporary nerf for a player who hasn't
+// bought either node yet, with genuine net-positive payoff once both are.
+// powerCostPerSec recomputed to match the new base shotsPerSec (unaffected
+// by the two Lab nodes — those only change fire RATE, not power draw per
+// shot, so a fully-upgraded turret does draw its power faster in real time,
+// same as it always would from firing more often, with no separate field
+// needed to track that).
 export const TURRET_STATS = {
-  [TILE_TURRET_WASTE]: { shotsPerSec: 1.75, damage: 2, powerCostPerShot: 0, powerCostPerSec: 0 }, // retuned per direct request (was 1.5/sec, 4 dmg)
-  [TILE_TURRET_ELECTRIC]: { shotsPerSec: 2, damage: 6, powerCostPerShot: 6, powerCostPerSec: 12 },
-  [TILE_TURRET_ADVANCED]: { shotsPerSec: 3, damage: 8, powerCostPerShot: 15, powerCostPerSec: 45 },
+  [TILE_TURRET_WASTE]: { shotsPerSec: 1.5, damage: 2, powerCostPerShot: 0, powerCostPerSec: 0 },
+  [TILE_TURRET_ELECTRIC]: { shotsPerSec: 1.75, damage: 6, powerCostPerShot: 6, powerCostPerSec: 10.5 },
+  [TILE_TURRET_ADVANCED]: { shotsPerSec: 2.5, damage: 8, powerCostPerShot: 15, powerCostPerSec: 37.5 },
 };
 // Which turret tiers consume Waste as ammo (gating whether they can fire at
 // all, alongside the fire-rate cooldown) — per direct request, the Electric
 // tier ("Electric Waste Turret") now needs BOTH Waste ammo AND power to
 // shoot, not unlimited ammo any more; the Advanced tier stays ammo-free.
 export const TURRET_AMMO_TILES = new Set([TILE_TURRET_WASTE, TILE_TURRET_ELECTRIC]);
+// Each of the two Turret Fire Rate Lab nodes (turret_fire_rate_1/_2, in
+// SCIENCE_LAB_UPGRADES) applies this exact same +20% multiplicatively —
+// see Grid.js's getTurretFireRateMultiplier, which stacks it once per node
+// actually purchased (up to 1.2*1.2 = 1.44x total with both).
+export const TURRET_FIRE_RATE_UPGRADE_MULTIPLIER = 1.2;
 // Waste Turret ammo — per direct request: "each waste gives it 10 shots and
 // it can hold 5 waste (with dots indicating each waste/10 ammo)." Consumes a
 // touching Waste item exactly like an Auto-Feeder absorbs one (Grid.js's
@@ -1555,9 +1593,16 @@ export const MANUFACTURER_RECIPES = {
   // ALIEN_DNA_COLOR/_RADIUS's own comments). This also gives the recipe's
   // output a real downstream use it never had before: the Refinery's
   // existing Alien-DNA(Bio-Sludge)->Biomass recipe.
+  // Per direct request ("remove the bio-sludge recipe from the science lab,
+  // and have it unlocked for the player right when they unlock the
+  // manufacturer") — labNodeId: null means "always available the instant
+  // the Manufacturer itself is unlocked," same as POWER_PLANT_RECIPES.food's
+  // own null. The old recipe_bio_sludge Lab node is deleted entirely — see
+  // SCIENCE_LAB_UPGRADES' own comment for where its former dependents
+  // (power_plant_biomass, hybrid_zap_sucker) now point instead.
   bio_sludge: {
     id: 'bio_sludge', name: 'Bio-Sludge', icon: '🧫', color: ALIEN_DNA_COLOR,
-    inputs: ['food', 'waste'], output: 'alien_dna', labNodeId: 'recipe_bio_sludge',
+    inputs: ['food', 'waste'], output: 'alien_dna', labNodeId: null,
     description: 'Food + Waste -> Bio-Sludge',
   },
   bio_feeder: {
@@ -1814,6 +1859,25 @@ export const SCIENCE_LAB_UPGRADES = {
     id: 'advanced_turret', name: 'Advanced Turret', icon: '🔫', scienceCost: 120, goldCost: 18000,
     requires: ['electric_turret'], grants: { buildings: [TILE_TURRET_ADVANCED] },
   },
+  // Two new turret fire-rate Lab nodes, per direct request — each a flat
+  // +20% to EVERY turret's fire rate (applied multiplicatively at fire
+  // time, see Grid.js's getTurretFireRateMultiplier/TURRET_STATS' own base
+  // shotsPerSec cut to compensate). Node I costs the same resources the now
+  // deprecated recipe_bio_sludge node used to (per direct spec, "similar
+  // resources as the now-deprecated bio-sludge recipe"), gated behind
+  // Bubble Cap 30 like that node was; Node II requires Green Science Tech
+  // AND Node I, and costs Green Science too (additive, same half-of-blue
+  // convention every other Green-Science-gated node already follows).
+  turret_fire_rate_1: {
+    id: 'turret_fire_rate_1', name: 'Turret Fire Rate I', icon: '🔥', scienceCost: 50, goldCost: 9000,
+    description: "Increases every turret's fire rate by 20%.",
+    requires: ['science_cap_3'], grants: {},
+  },
+  turret_fire_rate_2: {
+    id: 'turret_fire_rate_2', name: 'Turret Fire Rate II', icon: '🔥', scienceCost: 70, scienceGreenCost: 35, goldCost: 15000,
+    description: "Increases every turret's fire rate by another 20%, on top of Turret Fire Rate I.",
+    requires: ['green_science_tech', 'turret_fire_rate_1'], grants: {},
+  },
 
   // ---- Manufacturer & Power Plant production chain ----
   // Per direct request, the old standalone Bio-Feeder/Bio-Combuster
@@ -1876,18 +1940,17 @@ export const SCIENCE_LAB_UPGRADES = {
     id: 'recipe_green_science', name: 'Green Science Recipe', icon: '🟢', scienceCost: 55, goldCost: 10000,
     requires: ['green_science_tech'], grants: {},
   },
-  // Per direct request, Bio-Sludge's Recipe now requires Bubble Cap 30
-  // ONLY, instead of the Manufacturer building directly (reaching Bubble
-  // Cap 30 already requires the Manufacturer — see science_cap_3's own
-  // `requires` below). Renamed id/name from recipe_bio_pellets/'Bio-Pellets
-  // Recipe' to recipe_bio_sludge/'Bio-Sludge Recipe' — the standalone
-  // `bio_pellets` item this used to produce is retired entirely and merged
-  // into Alien DNA (now displayed as "Bio-Sludge" everywhere — see
-  // MANUFACTURER_RECIPES.bio_sludge's own comment).
-  recipe_bio_sludge: {
-    id: 'recipe_bio_sludge', name: 'Bio-Sludge Recipe', icon: '🧫', scienceCost: 50, goldCost: 9000,
-    requires: ['science_cap_3'], grants: {},
-  },
+  // The old recipe_bio_sludge node (Bubble Cap 30 gated, previously named
+  // recipe_bio_pellets/'Bio-Pellets Recipe' before that) is REMOVED entirely,
+  // per direct request ("remove the bio-sludge recipe from the science lab,
+  // and have it unlocked for the player right when they unlock the
+  // manufacturer. Nothing in the science lab should be dependent on the
+  // bio-sludge") — see MANUFACTURER_RECIPES.bio_sludge's own `labNodeId:
+  // null`, which now grants it automatically the instant the Manufacturer
+  // building itself is unlocked. Its former dependents were repointed
+  // directly at `manufacturer` instead (power_plant_biomass and
+  // hybrid_zap_sucker, below) — reaching the Manufacturer already implies
+  // Bio-Sludge exists, so nothing downstream lost any real gating.
   // New Manufacturer recipe, per direct spec — Blue Science + Food -> a
   // physical, draggable Alien Egg that hatches into a live Tier-1 alien
   // after ALIEN_EGG_HATCH_MS (see MANUFACTURER_RECIPES.alien_egg and
@@ -1902,7 +1965,7 @@ export const SCIENCE_LAB_UPGRADES = {
   // behind Green Science Tech.
   power_plant_biomass: {
     id: 'power_plant_biomass', name: 'Power Plant: Biomass', icon: '🟩', scienceCost: 50, goldCost: 10000,
-    requires: ['power_plant', 'recipe_bio_sludge'], grants: {},
+    requires: ['power_plant', 'manufacturer'], grants: {},
   },
   // Requires Green Science Tech to be unlocked, so per direct request it
   // ALSO costs Green Science itself now (in addition to Blue), at half the
@@ -1965,7 +2028,7 @@ export const SCIENCE_LAB_UPGRADES = {
   // field) — the same pattern the 3 base utility species already use.
   hybrid_zap_sucker: {
     id: 'hybrid_zap_sucker', name: 'Feeder Fish', icon: '🔌', scienceCost: 35, goldCost: 9000,
-    requires: ['recipe_bio_sludge'], grants: { species: ['zap_sucker'] },
+    requires: ['manufacturer'], grants: { species: ['zap_sucker'] },
   },
   hybrid_xeno_octopus: {
     id: 'hybrid_xeno_octopus', name: 'Xeno Octopus', icon: '👽', scienceCost: 45, goldCost: 12000,
