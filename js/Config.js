@@ -2639,7 +2639,7 @@ export const ALIEN_FIRST_WAVE_TIP_MESSAGE = "Aliens incoming! Click 'em for 1 da
 
 // ---- Mother Alien Fish (end-game boss) ----
 // Per direct spec — a one-time purchase in the Science Lab (see
-// SCIENCE_LAB_UPGRADES.mother_alien_fish) triggers a 10-second cinematic
+// SCIENCE_LAB_UPGRADES.mother_alien_fish) triggers a 15-second cinematic
 // reveal before the boss itself actually appears (Entities.js's
 // createMotherAlienFish) — see main.js's updateBossSequence for the actual
 // state machine, all driven off one running state.level.bossIntroTimerMs
@@ -2650,32 +2650,37 @@ export const ALIEN_FIRST_WAVE_TIP_MESSAGE = "Aliens incoming! Click 'em for 1 da
 // a quick blink.
 //
 // Timeline (all in ms from the moment the purchase triggers it):
-//   [0, BOSS_MUSIC_FADE_MS)                        — Game/Battle fade out,
-//                                                     Boss fades in (Sound.js's
+//   [0, BOSS_MUSIC_FADE_OUT_MS)                     — Game/Battle fade OUT
+//                                                     (Sound.js's
 //                                                     triggerBossMusic)
-//   BOSS_INTRO_MESSAGE_AT_MS                        — the "so that's what
-//                                                     that button does" chat
-//                                                     line posts, once
+//   [BOSS_MUSIC_FADE_OUT_MS, BOSS_INTRO_MESSAGE_AT_MS) — THEN, sequentially
+//                                                     (not simultaneously),
+//                                                     Boss music fades IN
+//   BOSS_INTRO_MESSAGE_AT_MS                        — the reveal chat line
+//                                                     posts, once, right as
+//                                                     the music transition
+//                                                     finishes
 //   [BOSS_INTRO_MESSAGE_AT_MS, BOSS_WHITE_FADE_IN_START_MS) — nothing new;
-//                                                     the "5 more seconds"
+//                                                     the "7 more seconds"
 //                                                     wait
 //   [BOSS_WHITE_FADE_IN_START_MS, BOSS_SPAWN_MS)    — screen turns white
 //   BOSS_SPAWN_MS                                   — boss spawns; white
 //                                                     immediately starts
 //                                                     fading back out over
 //                                                     BOSS_WHITE_FADE_OUT_MS
-export const BOSS_MUSIC_FADE_MS = 3000; // "have the music fade out and the boss music fade in over the first 3 seconds"
-export const BOSS_INTRO_MESSAGE_AT_MS = BOSS_MUSIC_FADE_MS; // "then add in a chat message" — right as the music crossfade finishes
-export const BOSS_INTRO_MESSAGE = 'Seems like somthing was supposed to happen...'; // per direct spec's own exact wording
-export const BOSS_MESSAGE_WAIT_MS = 5000; // "and wait 5 more seconds"
-export const BOSS_WHITE_FADE_IN_MS = 2000; // "then have the screen turn white over 2 seconds"
-export const BOSS_WHITE_FADE_IN_START_MS = BOSS_INTRO_MESSAGE_AT_MS + BOSS_MESSAGE_WAIT_MS; // 3000 + 5000 = 8000
-export const BOSS_SPAWN_MS = BOSS_WHITE_FADE_IN_START_MS + BOSS_WHITE_FADE_IN_MS; // 8000 + 2000 = 10000 — "wait 10 seconds before the boss is summoned," matches exactly
+export const BOSS_MUSIC_FADE_OUT_MS = 3000; // "have the game music fade out over 3 seconds"
+export const BOSS_MUSIC_FADE_IN_MS = 2000; // "then the boss music fade in over 2 seconds" — starts only once the fade-out above has fully finished, not at the same time
+export const BOSS_INTRO_MESSAGE_AT_MS = BOSS_MUSIC_FADE_OUT_MS + BOSS_MUSIC_FADE_IN_MS; // 3000 + 2000 = 5000 — right as the sequential fade-out-then-fade-in finishes
+export const BOSS_INTRO_MESSAGE = 'Seems like something was supposed to happen...'; // typo fixed per direct request — "something," not "somthing"
+export const BOSS_MESSAGE_WAIT_MS = 7000; // "wait 7 seconds before turning the screen white"
+export const BOSS_WHITE_FADE_IN_MS = 3000; // "over 3 seconds instead of 2"
+export const BOSS_WHITE_FADE_IN_START_MS = BOSS_INTRO_MESSAGE_AT_MS + BOSS_MESSAGE_WAIT_MS; // 5000 + 7000 = 12000
+export const BOSS_SPAWN_MS = BOSS_WHITE_FADE_IN_START_MS + BOSS_WHITE_FADE_IN_MS; // 12000 + 3000 = 15000 — "the whole process takes 15 seconds instead of 10," matches exactly
 // "Then the white goes away and the boss appears" — no duration was given
-// for the white clearing itself, so this is a deliberately short, snappy
-// reveal (much quicker than the 2s fade-in) rather than a second long fade,
-// so the boss's actual appearance reads as the payoff moment, not another
-// slow transition.
+// for the white clearing itself (unchanged by this pass), so this stays a
+// deliberately short, snappy reveal (much quicker than the 3s fade-in)
+// rather than a second long fade, so the boss's actual appearance reads as
+// the payoff moment, not another slow transition.
 export const BOSS_WHITE_FADE_OUT_MS = 1000;
 // "A big ole alien enemy that's 10x harder than a tier 5 alien" — applied to
 // the existing Tier 5 archetype's own hpMin/hpMax range (150-220 -> 1500-2200),
