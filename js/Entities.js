@@ -69,6 +69,10 @@ import {
   CLEANLINESS_WARNING_THRESHOLD,
   CLEANLINESS_WARNING_MESSAGE,
   TILE_REFINERY,
+  TILE_MANUFACTURER,
+  BIO_SLUDGE_PILE_MESSAGE,
+  BIO_SLUDGE_PILE_THRESHOLD,
+  FIRST_BIOMASS_MESSAGE,
   FIRST_BIO_SLUDGE_WITH_REFINERY_MESSAGE,
   FIRST_BIO_SLUDGE_NO_REFINERY_MESSAGE,
   SCIENCE_COLOR,
@@ -411,6 +415,13 @@ export function createAlien(x, y, hp, archetypeId) {
     dnaYield: archetype.dnaYield,
     fishDamagePerSec: archetype.fishDamagePerSec, // per direct spec — applied once per second to any fish this alien is touching, see updateAlien
     fishDamageTimerMs: 0,
+    // Per direct request ("more visually distinct alien tiers") — copied
+    // straight from the archetype, same as radius/color above, so
+    // main.js's drawAlienBody needs no per-tier lookup of its own.
+    spikes: archetype.spikes,
+    bodyWidthMul: archetype.bodyWidthMul,
+    bodyHeightMul: archetype.bodyHeightMul,
+    glow: archetype.glow,
     wanderTimer: 0, // 0 so the very first tick immediately picks a heading, same as fish's own wanderTimer
     poopTimer: 0,
     hitFlashMs: 0, // counts down from ALIEN_HIT_FLASH_MS whenever damage is applied (Grid.js's Turret branch, main.js's click handler) — drives the red-flash/bounce read by main.js's render
@@ -439,6 +450,10 @@ export function createMotherAlienFish(x, y) {
     archetypeId: 'mother_alien_fish', speed: BOSS_SPEED, radius: BOSS_RADIUS, color: BOSS_COLOR,
     dnaYield: 0, // no ordinary Alien DNA drop on death — see updateAlien's isBoss death branch for its own Science-burst instead
     fishDamagePerSec: BOSS_FISH_DAMAGE_PER_SEC, fishDamageTimerMs: 0,
+    // The boss isn't one of the 5 ALIEN_ARCHETYPES tiers, so it gets its own
+    // fixed visual-distinction fields instead of copying an archetype's —
+    // biggest spike count, bulkiest body, always glowing.
+    spikes: 6, bodyWidthMul: 1.2, bodyHeightMul: 1.2, glow: true,
     wanderTimer: 0, poopTimer: 0, hitFlashMs: 0, spawnProtectionUntilMs: 0, risingToSurface: false,
     isBoss: true, minionSpawnTimerMs: 0,
   };
@@ -690,19 +705,41 @@ function updateAlien(alien, state, dtMs) {
     }
   }
 
-  // Aliens can now hurt and kill fish, per direct request — once per second
-  // (not continuously scaled by dt), to EVERY fish this alien is currently
-  // touching, at a flat rate that climbs by tier (alien.fishDamagePerSec,
-  // copied from its archetype — or BOSS_FISH_DAMAGE_PER_SEC for the Mother
-  // Alien Fish — by createAlien/createMotherAlienFish). Same hatch-grace-
-  // period exemption as the poop timer above — a still-protected Alien-Egg
-  // hatchling doesn't attack yet either. This only ever mutates a fish's own
-  // hp; the actual removal (hp <= 0) is checked at the top of that fish's
-  // own updateFish call, whether that lands later this same tick or the
-  // next one depending on entities.filter's iteration order — never here.
-  alien.fishDamageTimerMs += dtMs;
-  if (!stillProtected && alien.fishDamageTimerMs >= ALIEN_FISH_DAMAGE_INTERVAL_MS) {
-    alien.fishDamageTimerMs = 0;
+  // Aliens can now hurt and kill fish, per direct request/bug report — at
+  // most once per second (ALIEN_FISH_DAMAGE_INTERVAL_MS) to EVERY fish this
+  // alien is currently touching, at a flat rate that climbs by tier
+  // (alien.fishDamagePerSec, copied from its archetype — or
+  // BOSS_FISH_DAMAGE_PER_SEC for the Mother Alien Fish — by
+  // createAlien/createMotherAlienFish). Same hatch-grace-period exemption as
+  // the poop timer above — a still-protected Alien-Egg hatchling doesn't
+  // attack yet either. This only ever mutates a fish's own hp; the actual
+  // removal (hp <= 0) is checked at the top of that fish's own updateFish
+  // call, whether that lands later this same tick or the next one depending
+  // on entities.filter's iteration order — never here.
+  //
+  // Real bug fix, per direct report ("the aliens dont hurt the fish"): the
+  // original version only ever CHECKED for touching fish once every 1000ms,
+  // on a plain elapsed-time accumulator — it scanned for contact only at
+  // that one sampled instant, not continuously. Since both a fish (fleeing,
+  // 65% of the time per ALIEN_FLEE_CHANCE) and its alien (chasing, 85% of
+  // the time) are usually in motion relative to each other, and the actual
+  // touch distance (alien.radius + fishRadius) is small compared to how far
+  // either can move in a second, genuine contact was almost always transient
+  // — happening for a fraction of a second at some point, then gone again
+  // before the next once-a-second sample happened to land while it was still
+  // true. In an isolated test that forcibly PINNED an alien onto a fish's
+  // exact position every tick, contact was permanent, so the once-a-second
+  // sample always caught it — masking this exact failure mode. Fixed by
+  // checking for contact EVERY tick instead, gated by a per-alien cooldown
+  // (fishDamageTimerMs, now counted DOWN instead of up, ticking regardless
+  // of contact state so a stale cooldown from an earlier hit still expires
+  // even after the fish flees) — the instant contact begins with the
+  // cooldown already at 0, damage applies immediately and the cooldown
+  // resets, giving "roughly once per second while touching" without ever
+  // depending on a lucky coincidence between contact and an arbitrary clock.
+  if (alien.fishDamageTimerMs > 0) alien.fishDamageTimerMs = Math.max(0, alien.fishDamageTimerMs - dtMs);
+  if (!stillProtected && alien.fishDamageTimerMs <= 0) {
+    let dealtDamage = false;
     for (const entity of state.level.entities) {
       if (entity.type !== 'fish' || entity.hp <= 0) continue;
       const fishDef = SPECIES[entity.speciesId];
@@ -710,8 +747,10 @@ function updateAlien(alien, state, dtMs) {
       const dist = Math.hypot(entity.x - alien.x, entity.y - alien.y);
       if (dist <= alien.radius + fishRadius) {
         entity.hp = Math.max(0, entity.hp - alien.fishDamagePerSec);
+        dealtDamage = true;
       }
     }
+    if (dealtDamage) alien.fishDamageTimerMs = ALIEN_FISH_DAMAGE_INTERVAL_MS;
   }
 
   return true;
@@ -1913,6 +1952,32 @@ function maybeAnnounceFirstBioSludge(state) {
   pushStoryNotification(state, hasRefinery ? FIRST_BIO_SLUDGE_WITH_REFINERY_MESSAGE : FIRST_BIO_SLUDGE_NO_REFINERY_MESSAGE);
 }
 
+// One-time tip, per direct request — fires once more than
+// BIO_SLUDGE_PILE_THRESHOLD Bio-Sludge (alien_dna) items are sitting in the
+// tank at once, nudging a player who doesn't have a Manufacturer yet toward
+// getting one (the tip's whole point, so it's suppressed once they already
+// have it — nagging them about a building they already own would be a non
+// sequitur). Called once per tick from updateEntities; cheap enough to
+// count fresh every time given this game's typical item counts, same as
+// every other live item-count check in this file.
+function maybeWarnBioSludgePile(state) {
+  if (state.level.tutorialFlags.bioSludgePileWarningShown) return;
+  if (state.meta.buildingsUnlocked.includes(TILE_MANUFACTURER)) return;
+  if (countTankItemsByType(state, 'alien_dna') <= BIO_SLUDGE_PILE_THRESHOLD) return;
+  state.level.tutorialFlags.bioSludgePileWarningShown = true;
+  pushStoryNotification(state, BIO_SLUDGE_PILE_MESSAGE);
+}
+
+// One-time tip the first time a Biomass item is ever created (the
+// Refinery's own Alien-DNA/Bio-Sludge -> Biomass recipe), per direct
+// request — nudges the player toward the Manufacturer's Blue Science
+// recipe, Biomass's other real downstream use.
+function maybeAnnounceFirstBiomass(state) {
+  if (state.level.tutorialFlags.firstBiomassShown) return;
+  state.level.tutorialFlags.firstBiomassShown = true;
+  pushStoryNotification(state, FIRST_BIOMASS_MESSAGE);
+}
+
 // Every subsequent Tank Point just gets the usual small floating text; only
 // the very first one also explains what Tank Points even are, via the
 // rolling notification ticker (same state.level.notifications log Mound.js
@@ -2555,6 +2620,7 @@ function updateProductionBlockedEffects(state, dtMs) {
 }
 
 export function updateEntities(state, dtMs) {
+  maybeWarnBioSludgePile(state);
   updateAlienPortals(state);
   updateAlienDeathEffects(state, dtMs);
   updateProductionBlockedEffects(state, dtMs);
@@ -2600,7 +2666,7 @@ export function updateEntities(state, dtMs) {
   // production which does show a blocked-effect).
   for (const point of bioSpawnPoints) {
     if (point.itemType === 'food') state.level.items.push(createFood(point.x, point.y));
-    else if (point.itemType === 'biomass') { if (canSpawnMoreBiomass(state)) state.level.items.push(createBiomass(point.x, point.y)); }
+    else if (point.itemType === 'biomass') { if (canSpawnMoreBiomass(state)) { state.level.items.push(createBiomass(point.x, point.y)); maybeAnnounceFirstBiomass(state); } }
     // The Manufacturer's Bio-Sludge recipe (Food+Waste) outputs 'alien_dna' —
     // the same item type killing an alien drops, merged per direct request
     // (see Config.js's MANUFACTURER_RECIPES.bio_sludge comment) — so it

@@ -3,7 +3,7 @@
 // which species/buildings are available, win conditions, alien waves, and
 // meta rewards granted on completion.
 
-import { SPECIES_LIST, BUILDING_LIST, ALIEN_WAVE_INTERVAL_EARLY_MS, ALIEN_FIRST_WAVE_EARLY_MS, AUTOSAVE_INTERVAL_MS } from './Config.js';
+import { SPECIES_LIST, BUILDING_LIST, ALIEN_WAVE_INTERVAL_EARLY_MS, ALIEN_FIRST_WAVE_EARLY_MS, AUTOSAVE_INTERVAL_MS, POWER_WARNING_CHECK_INTERVAL_MS } from './Config.js';
 import { createGrid } from './Grid.js';
 
 // The very first entry in state.level.notifications, pushed at level load
@@ -155,6 +155,7 @@ export function loadLevel(state, levelId) {
     // later wave's own (now deterministic, not random) gap.
     alienNextWaveAtMs: Math.max(0, ALIEN_WAVE_INTERVAL_EARLY_MS - ALIEN_FIRST_WAVE_EARLY_MS),
     nextAutosaveAtMs: AUTOSAVE_INTERVAL_MS, // Systems.js's updateAutosave — an absolute state.level.elapsed target, same shape as alienNextWaveAtMs above
+    nextPowerWarningCheckAtMs: POWER_WARNING_CHECK_INTERVAL_MS, // Systems.js's updatePowerWarnings — same absolute-target shape, checked (and re-rolled) every POWER_WARNING_CHECK_INTERVAL_MS regardless of whether a message actually posts that time
     alienWavesSpawned: 0,
     alienWaveActive: false, // true from the moment a wave spawns until every one of its portals has opened AND every alien it produced is dead — see Systems.js's updateAlienWaves; the next wave's own countdown doesn't even start until this clears
     alienWarning1Shown: false,

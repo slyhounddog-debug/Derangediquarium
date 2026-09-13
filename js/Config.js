@@ -1617,15 +1617,19 @@ export const MANUFACTURER_RECIPES = {
     inputs: ['food', 'waste'], output: 'alien_dna', labNodeId: null,
     description: 'Food + Waste -> Bio-Sludge',
   },
-  bio_feeder: {
-    id: 'bio_feeder', name: 'Mutagen Paste', icon: '🩷', color: '#e690e0',
-    inputs: ['food', 'biomass'], output: 'mutagen_paste', labNodeId: 'recipe_bio_feeder',
-    description: 'Food + Biomass -> Mutagen Paste',
-  },
+  // Object key order drives the recipe pop-up's own display order
+  // (MANUFACTURER_RECIPE_LIST = Object.values(...) below) — Blue Science
+  // and Mutagen Paste swapped positions per direct request ("switch the
+  // recipe order... so blue science is the second recipe").
   bio_combustor: {
     id: 'bio_combustor', name: 'Blue Science', icon: '🔥', color: '#ff9f5a',
     inputs: ['waste', 'biomass'], output: 'science', labNodeId: 'recipe_bio_combustor',
     description: 'Waste + Biomass -> Blue Science',
+  },
+  bio_feeder: {
+    id: 'bio_feeder', name: 'Mutagen Paste', icon: '🩷', color: '#e690e0',
+    inputs: ['food', 'biomass'], output: 'mutagen_paste', labNodeId: 'recipe_bio_feeder',
+    description: 'Food + Biomass -> Mutagen Paste',
   },
   alien_egg: {
     id: 'alien_egg', name: 'Alien Egg', icon: '🥚', color: '#c9a86b',
@@ -1640,13 +1644,14 @@ export const MANUFACTURER_RECIPES = {
   // icon-per-recipe model has no room for that any more), but nothing was
   // ever added back in its place. This restores production as its own clean
   // recipe, using the exact Blue-Science-+-Biomass ingredient pair the old
-  // upgraded branch already used, gated behind Green Science Tech itself
-  // (recipe_green_science) so it's only ever available once that's
-  // researched — matching every other green-science-adjacent node's own
-  // gating.
+  // upgraded branch already used, gated behind the Science Lab's
+  // green_science_tech node (now itself the merged Green Science Recipe
+  // unlock — see that node's own comment) so it's only ever available once
+  // that's researched — matching every other green-science-adjacent node's
+  // own gating.
   green_science: {
     id: 'green_science', name: 'Green Science', icon: '🟢', color: SCIENCE_GREEN_COLOR,
-    inputs: ['science', 'biomass'], output: 'science_green', labNodeId: 'recipe_green_science',
+    inputs: ['science', 'biomass'], output: 'science_green', labNodeId: 'green_science_tech',
     description: 'Blue Science + Biomass -> Green Science',
   },
 };
@@ -1885,10 +1890,12 @@ export const SCIENCE_LAB_UPGRADES = {
     description: "Increases every turret's fire rate by 20%.",
     requires: ['science_cap_3'], grants: {},
   },
+  // Per direct request, gated behind Bubble Cap 50 now instead of Green
+  // Science Tech (still additionally requires Turret Fire Rate I, unchanged).
   turret_fire_rate_2: {
     id: 'turret_fire_rate_2', name: 'Turret Fire Rate II', icon: '🔥', scienceCost: 70, scienceGreenCost: 35, goldCost: 15000,
     description: "Increases every turret's fire rate by another 20%, on top of Turret Fire Rate I.",
-    requires: ['green_science_tech', 'turret_fire_rate_1'], grants: {},
+    requires: ['science_cap_5', 'turret_fire_rate_1'], grants: {},
   },
 
   // ---- Manufacturer & Power Plant production chain ----
@@ -1918,9 +1925,14 @@ export const SCIENCE_LAB_UPGRADES = {
   // MANUFACTURER_RECIPES.name; the object's own id/key is left as
   // `recipe_bio_feeder` (an internal identifier other nodes' `requires`
   // arrays reference, not a player-facing "mention").
+  // Per direct request, requires just the Manufacturer to be unlocked now
+  // (not Bubble Cap 30) — the same reasoning as Bio-Sludge's own null
+  // labNodeId above: reaching the Manufacturer already implies everything
+  // this recipe needs exists, so gating it a further step up the Bubble Cap
+  // chain was pure friction.
   recipe_bio_feeder: {
     id: 'recipe_bio_feeder', name: 'Mutagen Paste Recipe', icon: '🩷', scienceCost: 45, goldCost: 7000,
-    requires: ['science_cap_3'], grants: {},
+    requires: ['manufacturer'], grants: {},
   },
   // Per direct request, now requires Bubble Cap 30 AND the Alien Egg recipe
   // (instead of the Manufacturer/Power Plant buildings directly).
@@ -1928,29 +1940,22 @@ export const SCIENCE_LAB_UPGRADES = {
     id: 'recipe_bio_combustor', name: 'Blue Science Recipe', icon: '🔥', scienceCost: 40, goldCost: 6000,
     requires: ['science_cap_3', 'recipe_alien_egg'], grants: {},
   },
-  // Green Science Tech grants nothing by itself (`grants: {}`) — a pure
-  // recipe-unlock flag, same "presence in state.meta.labUpgradesPurchased
-  // IS the unlock" pattern this tree already used for its old gene_splicing
-  // root. Now sits behind the Bio-Combustor recipe (its closest analogue to
-  // the old bio_combuster building node it used to require) AND Bubble Cap
-  // 30, per direct request. Icon changed back to a plain green orb, per
-  // direct request — '🧬' (DNA helix) is now used elsewhere (Bio-Refinery)
-  // and read as a mismatch for "Green Science" specifically, which every
-  // other green-science surface (the currency icon, the physical item)
-  // already represents with a plain green circle.
+  // Per direct request, merged with the old standalone recipe_green_science
+  // node — "it didn't make sense to have a green science node that unlocked
+  // another node for the green science recipe." This node (id kept as
+  // green_science_tech so every existing dependent's `requires` array —
+  // turret_fire_rate_2 no longer among them, see below, but power_plant_science/
+  // bio_refinery/mother_alien_fish still are — stays valid with zero other
+  // changes needed) IS the Green Science recipe unlock now, not a separate
+  // prerequisite for one. Grants nothing structural itself
+  // (`grants: {}`) — MANUFACTURER_RECIPES.green_science's own `labNodeId`
+  // points directly at this id, so buying this node is what makes that
+  // recipe selectable, the same "presence in labUpgradesPurchased IS the
+  // unlock" pattern every other pure-recipe node in this tree already uses.
+  // Moved from Bubble Cap 30 to Bubble Cap 40, per direct request.
   green_science_tech: {
-    id: 'green_science_tech', name: 'Green Science Tech', icon: '🟢', scienceCost: 60, goldCost: 8000,
-    requires: ['recipe_bio_combustor', 'science_cap_3'], grants: {},
-  },
-  // Real bug fix (see MANUFACTURER_RECIPES.green_science's own comment) —
-  // Green Science's ONLY production path, gated behind Green Science Tech
-  // itself so it's never purchasable before that research exists. Costs
-  // only Blue Science + gold (no scienceGreenCost) — it would otherwise be
-  // a chicken-and-egg problem, since this node is what makes Green Science
-  // earnable in the first place.
-  recipe_green_science: {
-    id: 'recipe_green_science', name: 'Green Science Recipe', icon: '🟢', scienceCost: 55, goldCost: 10000,
-    requires: ['green_science_tech'], grants: {},
+    id: 'green_science_tech', name: 'Green Science Recipe', icon: '🟢', scienceCost: 60, goldCost: 8000,
+    requires: ['recipe_bio_combustor', 'science_cap_4'], grants: {},
   },
   // The old recipe_bio_sludge node (Bubble Cap 30 gated, previously named
   // recipe_bio_pellets/'Bio-Pellets Recipe' before that) is REMOVED entirely,
@@ -1968,9 +1973,11 @@ export const SCIENCE_LAB_UPGRADES = {
   // after ALIEN_EGG_HATCH_MS (see MANUFACTURER_RECIPES.alien_egg and
   // Entities.js's updateAlienEgg). Also moved onto Bubble Cap 30 alone, per
   // direct request, same reasoning as Bio-Sludge above.
+  // Per direct request, requires just the Manufacturer to be unlocked now
+  // (not Bubble Cap 30) — same reasoning as recipe_bio_feeder above.
   recipe_alien_egg: {
     id: 'recipe_alien_egg', name: 'Alien Egg Recipe', icon: '🥚', scienceCost: 55, goldCost: 10000,
-    requires: ['science_cap_3'], grants: {},
+    requires: ['manufacturer'], grants: {},
   },
   // The Power Plant's Biomass recipe is locked behind the Manufacturer's
   // Bio-Sludge recipe, per direct spec; its Blue Science recipe is locked
@@ -2027,9 +2034,14 @@ export const SCIENCE_LAB_UPGRADES = {
   // much as blue science") — scienceGreenCost is ADDITIVE now, not an
   // exclusive alternative to scienceCost (see labNodeHasEnoughScience's own
   // comment in UI.js for the full mechanism).
+  // Per direct request, locked behind just Bubble Cap 40 now (the separate
+  // green_science_tech requirement is gone) — it still costs real Green
+  // Science (scienceGreenCost below), which self-gates it economically
+  // behind actually having researched that recipe anyway, without a second
+  // explicit prerequisite on top.
   hybrid_catalyst_fish: {
     id: 'hybrid_catalyst_fish', name: 'Catalyst Fish', icon: '🎯', scienceCost: 40, scienceGreenCost: 20, goldCost: 15000,
-    requires: ['science_cap_4', 'green_science_tech'], grants: { species: ['catalyst_fish'] },
+    requires: ['science_cap_4'], grants: { species: ['catalyst_fish'] },
   },
   // Two more hybrids, per direct request — each gated behind a Manufacturer
   // recipe instead of a Bubble Cap tier, since both are thematically tied to
@@ -2038,9 +2050,12 @@ export const SCIENCE_LAB_UPGRADES = {
   // parents are real fish); Xeno Octopus has no real "Alien" fish to splice
   // from, so it's a directly-purchasable species instead (no `parents`
   // field) — the same pattern the 3 base utility species already use.
+  // Per direct request, locked behind just Bubble Cap 30 now (was
+  // 'manufacturer' — Bubble Cap 30 already requires the Manufacturer
+  // transitively, so this is a strictly later gate, not a looser one).
   hybrid_zap_sucker: {
     id: 'hybrid_zap_sucker', name: 'Feeder Fish', icon: '🔌', scienceCost: 35, goldCost: 9000,
-    requires: ['manufacturer'], grants: { species: ['zap_sucker'] },
+    requires: ['science_cap_3'], grants: { species: ['zap_sucker'] },
   },
   hybrid_xeno_octopus: {
     id: 'hybrid_xeno_octopus', name: 'Xeno Octopus', icon: '👽', scienceCost: 45, goldCost: 12000,
@@ -2123,8 +2138,11 @@ export const SCIENCE_LAB_UPGRADES = {
   // `requires` aren't all met, even though every OTHER node in this tree is
   // fully previewable while still locked. `requires` is deliberately every
   // node gated behind Green Science Tech (directly or transitively —
-  // recipe_green_science, power_plant_science, bio_refinery,
-  // hybrid_catalyst_fish all happen to be the same set either way) plus
+  // power_plant_science and bio_refinery still are, though the old separate
+  // recipe_green_science node this list used to also include is gone now,
+  // merged into green_science_tech itself; hybrid_catalyst_fish no longer
+  // requires green_science_tech transitively either, so it's listed here in
+  // its own right) plus
   // Bubble Cap 50, per spec ("everything that's locked behind the green
   // science node purchased first, and the bubble cap 50"). Buying it doesn't
   // grant a species/building/scienceCapLevel like every other node — its
@@ -2134,7 +2152,7 @@ export const SCIENCE_LAB_UPGRADES = {
   mother_alien_fish: {
     id: 'mother_alien_fish', name: 'Mother Alien Fish', icon: '👹', mystery: true,
     scienceCost: 250, scienceGreenCost: 100, goldCost: 50000,
-    requires: ['green_science_tech', 'recipe_green_science', 'power_plant_science', 'bio_refinery', 'hybrid_catalyst_fish', 'science_cap_5'],
+    requires: ['green_science_tech', 'power_plant_science', 'bio_refinery', 'hybrid_catalyst_fish', 'science_cap_5'],
     grants: { triggersBossFight: true },
   },
 };
@@ -2373,6 +2391,30 @@ export const WASTE_DRAG_TUTORIAL_WAIT_MS = 1000; // per direct request — if th
 export const WASTE_DRAG_GHOST_CYCLE_MS = 1400; // one full waste->turret sweep of the "drag me here" ghost animation shown during that tutorial step — see main.js's render()
 export const POST_ALIEN_TUTORIAL_MESSAGE = "Now that's I'm talking about. A little firepower never hurt no one."; // per direct request's exact wording — posted once the player finishes placing the guided Waste Turret
 
+// ---- Power/Bio-Sludge/Biomass story tips ----
+// Per direct request: an occasional (not guaranteed every time), randomly-
+// gated chat nudge while buildings are actively power-starved — checked
+// every POWER_WARNING_CHECK_INTERVAL_MS regardless of outcome (Systems.js's
+// updatePowerWarnings), with only a POWER_WARNING_CHANCE odds of actually
+// posting each time the condition holds, so it reads as occasional
+// commentary rather than a metronome. Two distinct messages for the two
+// distinct states state.level.powerEfficiency can represent: a full outage
+// (0, real demand against zero effective supply) vs. a partial shortfall
+// (anywhere in between).
+export const POWER_WARNING_CHECK_INTERVAL_MS = 30000;
+export const POWER_WARNING_CHANCE = 0.35;
+export const POWER_WARNING_NONE_MESSAGE = "Some of your buildings are just sitting there with zero juice. Might want to add some electricity to the grid.";
+export const POWER_WARNING_PARTIAL_MESSAGE = "Your grid's running short — buildings are chugging along slower than they could. A bit more electricity would help.";
+// One-time tip, per direct request — fires once more than 5 Bio-Sludge
+// (alien_dna) items are sitting in the tank at once, but only for a player
+// who doesn't have a Manufacturer yet (the tip's whole point is nudging them
+// toward getting one, so it'd be a non sequitur once they already have it).
+export const BIO_SLUDGE_PILE_MESSAGE = "That's a lot of Bio-Sludge piling up out there. A Manufacturer could actually put it to use.";
+export const BIO_SLUDGE_PILE_THRESHOLD = 5;
+// One-time tip, per direct request — fires the first time a Biomass item is
+// ever created (the Refinery's own Alien-DNA/Bio-Sludge -> Biomass recipe).
+export const FIRST_BIOMASS_MESSAGE = "Ooh, fresh Biomass. That'd go nicely with some Blue Science from the Manufacturer.";
+
 // ---- Autosave (Save.js) ----
 // Per direct request — a background save every 5 minutes of real elapsed sim
 // time, on top of the existing manual pause-menu Save button. See
@@ -2429,22 +2471,31 @@ export const ALIEN_WAVE_COUNT_LATE_MAX = 15;
 // aliens have higher health, faster movement... and drop significantly
 // more alien_dna"). hpMin/hpMax still give each tier a little natural
 // per-instance variance (Systems.js's spawnAlienWave rolls within it), same
-// as the old flat range did; every other field is fixed per tier. Colors
-// step from the existing dark ALIEN_COLOR up through progressively
-// brighter/more saturated purples/magentas so a screenful of a wave's mix
-// reads as visibly more dangerous at a glance, not just on the health bar.
+// as the old flat range did; every other field is fixed per tier.
 // Placeholder balance, like every other economy/combat number in this file
 // — tune once real playtesting exists.
 // fishDamagePerSec: per direct spec, each tier does progressively more
 // damage per second (once per second, not continuously — see
 // ALIEN_FISH_DAMAGE_INTERVAL_MS) to any fish it's touching — 5 for the
 // lowest tier up to 35 for the highest, evenly stepped across all 5.
+// Per direct request ("more visually distinct alien tiers, change the looks
+// and coloring more between different tiers") — the old palette was a
+// single brightness ramp through one purple/magenta hue family, which read
+// as "the same alien, slightly lighter" rather than genuinely different
+// tiers. Now each tier gets its own real hue family (main.js's
+// drawAlienBody reads these fields directly, no per-tier special-casing
+// there): `spikes` (dorsal-spike count, 1-5, one visible per tier),
+// `bodyWidthMul`/`bodyHeightMul` (scale the body ellipse's own base ratios —
+// Scout stays a plain round blob, Stalker stretches leaner/sleeker to match
+// its name, Behemoth/Leviathan both bulk up), and `glow` (a soft outer aura
+// for the top two tiers only, so they read as visibly more dangerous at a
+// glance even in a mixed-tier wave, not just via the health bar).
 export const ALIEN_ARCHETYPES = [
-  { id: 'alien_t1', tier: 1, name: 'Alien Scout', hpMin: 20, hpMax: 30, speed: 40, dnaYield: 1, radius: 16, color: '#5a2d6b', fishDamagePerSec: 5 },
-  { id: 'alien_t2', tier: 2, name: 'Alien Brute', hpMin: 40, hpMax: 55, speed: 46, dnaYield: 2, radius: 18, color: '#6b2f7a', fishDamagePerSec: 12.5 },
-  { id: 'alien_t3', tier: 3, name: 'Alien Stalker', hpMin: 65, hpMax: 85, speed: 54, dnaYield: 4, radius: 20, color: '#83318f', fishDamagePerSec: 20 },
-  { id: 'alien_t4', tier: 4, name: 'Alien Behemoth', hpMin: 95, hpMax: 130, speed: 62, dnaYield: 7, radius: 23, color: '#a13db8', fishDamagePerSec: 27.5 },
-  { id: 'alien_t5', tier: 5, name: 'Alien Leviathan', hpMin: 150, hpMax: 220, speed: 70, dnaYield: 12, radius: 27, color: '#d94ed4', fishDamagePerSec: 35 },
+  { id: 'alien_t1', tier: 1, name: 'Alien Scout', hpMin: 20, hpMax: 30, speed: 40, dnaYield: 1, radius: 16, color: '#5a2d6b', fishDamagePerSec: 5, spikes: 1, bodyWidthMul: 1.0, bodyHeightMul: 1.0, glow: false },
+  { id: 'alien_t2', tier: 2, name: 'Alien Brute', hpMin: 40, hpMax: 55, speed: 46, dnaYield: 2, radius: 18, color: '#3d4a8f', fishDamagePerSec: 12.5, spikes: 2, bodyWidthMul: 1.08, bodyHeightMul: 1.08, glow: false },
+  { id: 'alien_t3', tier: 3, name: 'Alien Stalker', hpMin: 65, hpMax: 85, speed: 54, dnaYield: 4, radius: 20, color: '#2d8f6e', fishDamagePerSec: 20, spikes: 3, bodyWidthMul: 1.3, bodyHeightMul: 0.8, glow: false },
+  { id: 'alien_t4', tier: 4, name: 'Alien Behemoth', hpMin: 95, hpMax: 130, speed: 62, dnaYield: 7, radius: 23, color: '#c4522a', fishDamagePerSec: 27.5, spikes: 4, bodyWidthMul: 1.18, bodyHeightMul: 1.18, glow: true },
+  { id: 'alien_t5', tier: 5, name: 'Alien Leviathan', hpMin: 150, hpMax: 220, speed: 70, dnaYield: 12, radius: 27, color: '#ff33dd', fishDamagePerSec: 35, spikes: 5, bodyWidthMul: 1.32, bodyHeightMul: 0.92, glow: true },
 ];
 // The rolling wave-mix weight curve — per direct spec's 5-phase description
 // (Early 100% T1 -> Mid-Early T1/T2 -> Mid T1/T2/T3 -> Late phases out T1,
@@ -2495,6 +2546,12 @@ export const ALIEN_COUNTDOWN_START_MS = 10000; // the visible on-screen "10... 9
 export const ALIEN_MUSIC_BATTLE_LEAD_MS = 3000;
 export const ALIEN_WARNING_MESSAGE_1 = "Something's stirring out past the reef... probably nothing.";
 export const ALIEN_WARNING_MESSAGE_2 = "Uh oh, I'm reading movement out there. Get your turrets ready.";
+// Per direct request, waves 2 and 3 get a slightly reworded version of the
+// 30s warning instead of a verbatim repeat; wave 1 still gets the original
+// wording above. Both go silent entirely after wave 3 — see
+// ALIEN_WARNING_MAX_WAVES and Systems.js's updateAlienWaves.
+export const ALIEN_WARNING_MESSAGE_2_REPEAT = "Uh oh, I'm picking up movement again. Get your turrets ready.";
+export const ALIEN_WARNING_MAX_WAVES = 3; // no more upcoming-wave chat warnings once this many waves have already spawned
 export const ALIEN_FIRST_WAVE_TIP_MESSAGE = "Aliens incoming! Click 'em for 1 damage a pop, or let a turret handle it. While they're alive they'll poop waste and scare nearby fish off their coins, so don't dawdle.";
 
 // ---- Mother Alien Fish (end-game boss) ----

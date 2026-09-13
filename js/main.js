@@ -520,6 +520,17 @@ input.mouseDownHandlers.push((sx, sy) => {
   if (state.ui.paused || (state.level.tutorialFlow && !isWasteDragTutorialStepActive(state))) return;
   if (draggedFishId != null) return; // a fish-drag already claimed this press
   const world = screenToWorld(sx, sy, state.camera);
+  // Per direct request ("objects can't be dragged when a building or fish
+  // is selected for purchasing... you have to be on the food cursor tool to
+  // drag objects") — reuses the same effectiveToolAt a build/demolish tool
+  // already gets silently reinterpreted as Food through while hovering open
+  // water, so this stays consistent with that existing behavior rather than
+  // introducing a second, slightly different notion of "which tool is this
+  // really." Fish/Merge are NOT given that same open-water carve-out by
+  // effectiveToolAt (see its own comment), so both correctly still block a
+  // drag here regardless of where the cursor is, matching "a fish selected
+  // for purchasing" explicitly named in the request.
+  if (effectiveToolAt(world.y) !== 'food') return;
   let best = null;
   let bestDistSq = Infinity;
   for (const item of state.level.items) {
@@ -1710,34 +1721,63 @@ function lerpRgbToString(from, to, t) {
 // render loop below) drives the single cyclops eye's pupil, per direct
 // request ("one eye like a cyclops... with a pupil that looks at the
 // closest fish").
-function drawAlienBody(ctx, x, y, radius, facing, color, gazeAngle) {
+function drawAlienBody(ctx, x, y, radius, facing, color, gazeAngle, spikes = 3, bodyWidthMul = 1, bodyHeightMul = 1, glow = false, glowHex = null) {
   ctx.save();
+
+  const bodyRx = radius * 1.05 * bodyWidthMul;
+  const bodyRy = radius * 0.85 * bodyHeightMul;
+
+  // A soft outer aura for the top tiers (and the boss), per direct request
+  // ("more visually distinct alien tiers") — drawn first, behind everything
+  // else, so it reads as ambient danger rather than a hard outline. Uses
+  // glowHex (the alien's own stable archetype color, always a real #hex
+  // string) rather than `color` — `color` can be an "rgb(r, g, b)" STRING
+  // during a hit-flash blend (see lerpRgbToString), and appending an alpha
+  // suffix to that would produce an invalid CSS color; the glow doesn't
+  // need to flash red on hit anyway; the body/eyes already do that.
+  if (glow) {
+    const hex = glowHex || color;
+    const glowR = Math.max(bodyRx, bodyRy) * 1.7;
+    const glowGradient = ctx.createRadialGradient(x, y, Math.max(bodyRx, bodyRy) * 0.6, x, y, glowR);
+    glowGradient.addColorStop(0, `${hex}55`);
+    glowGradient.addColorStop(1, `${hex}00`);
+    ctx.fillStyle = glowGradient;
+    ctx.beginPath();
+    ctx.arc(x, y, glowR, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
   // Tail fin, trailing behind the direction of travel.
   ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
   ctx.beginPath();
-  ctx.moveTo(x - facing * radius * 1.15, y);
-  ctx.lineTo(x - facing * radius * 0.55, y - radius * 0.5);
-  ctx.lineTo(x - facing * radius * 0.55, y + radius * 0.5);
+  ctx.moveTo(x - facing * bodyRx * 1.1, y);
+  ctx.lineTo(x - facing * bodyRx * 0.52, y - bodyRy * 0.6);
+  ctx.lineTo(x - facing * bodyRx * 0.52, y + bodyRy * 0.6);
   ctx.closePath();
   ctx.fill();
 
-  // Main body — an oval, not a perfect circle.
+  // Main body — an oval, not a perfect circle. bodyWidthMul/bodyHeightMul
+  // (per-tier, see ALIEN_ARCHETYPES) stretch/squash this beyond the base
+  // ratio so each tier reads as a genuinely different silhouette, not just
+  // a resized copy of the same shape.
   ctx.fillStyle = color;
   ctx.beginPath();
-  ctx.ellipse(x, y, radius * 1.05, radius * 0.85, 0, 0, Math.PI * 2);
+  ctx.ellipse(x, y, bodyRx, bodyRy, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  // A few dorsal spikes along the top — the one purely "alien/sea-monster"
-  // flourish, keeping it visually distinct from an ordinary fish silhouette
-  // despite sharing the same shading language.
+  // Dorsal spikes along the top, one per tier (see ALIEN_ARCHETYPES'
+  // `spikes` field) — the one purely "alien/sea-monster" flourish, keeping
+  // it visually distinct from an ordinary fish silhouette despite sharing
+  // the same shading language, and now itself a visible tier marker.
   ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
-  for (let i = -1; i <= 1; i++) {
-    const sx = x + i * radius * 0.32;
+  const spikeSpacing = radius * 0.3;
+  const spikeStartOffset = -((spikes - 1) / 2) * spikeSpacing;
+  for (let i = 0; i < spikes; i++) {
+    const sx = x + spikeStartOffset + i * spikeSpacing;
     ctx.beginPath();
-    ctx.moveTo(sx, y - radius * 0.95);
-    ctx.lineTo(sx - radius * 0.12, y - radius * 0.55);
-    ctx.lineTo(sx + radius * 0.12, y - radius * 0.55);
+    ctx.moveTo(sx, y - bodyRy * 1.15);
+    ctx.lineTo(sx - radius * 0.12, y - bodyRy * 0.65);
+    ctx.lineTo(sx + radius * 0.12, y - bodyRy * 0.65);
     ctx.closePath();
     ctx.fill();
   }
@@ -1746,17 +1786,17 @@ function drawAlienBody(ctx, x, y, radius, facing, color, gazeAngle) {
   // body already gets.
   ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
   ctx.beginPath();
-  ctx.ellipse(x, y + radius * 0.32, radius * 0.8, radius * 0.35, 0, 0, Math.PI * 2);
+  ctx.ellipse(x, y + bodyRy * 0.38, bodyRx * 0.76, bodyRy * 0.41, 0, 0, Math.PI * 2);
   ctx.fill();
   ctx.fillStyle = 'rgba(255, 255, 255, 0.28)';
   ctx.beginPath();
-  ctx.ellipse(x - facing * radius * 0.28, y - radius * 0.35, radius * 0.32, radius * 0.18, -0.3 * facing, 0, Math.PI * 2);
+  ctx.ellipse(x - facing * bodyRx * 0.27, y - bodyRy * 0.41, bodyRx * 0.3, bodyRy * 0.21, -0.3 * facing, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
   ctx.lineWidth = 1.5;
   ctx.beginPath();
-  ctx.ellipse(x, y, radius * 1.05, radius * 0.85, 0, 0, Math.PI * 2);
+  ctx.ellipse(x, y, bodyRx, bodyRy, 0, 0, Math.PI * 2);
   ctx.stroke();
 
   // A single cyclops eye, centered where the two separate eyes used to sit
@@ -2157,8 +2197,128 @@ function render() {
     }
   }
 
+  // Alien Invasion: portals (animated open, hold, then close — see
+  // Entities.js's updateAlienPortals for the timing this mirrors) and
+  // aliens themselves (with a health bar above each), rendered as their own
+  // pass BEFORE fish now — per direct report ("make all the fish and their
+  // health bars on top of the aliens visually, so they don't disappear
+  // behind the aliens"), swapped from the old fish-then-alien order so a
+  // fish drawn later (on top) can never be hidden by an alien overlapping
+  // it on screen. Portals are plain state.level.alienPortals data
+  // (Systems.js's spawnAlienWave), not entities.
+  for (const portal of state.level.alienPortals) {
+    const pos = worldToScreen(portal.x, portal.y, state.camera);
+    if (pos.x < -40 || pos.x > canvas.width + 40 || pos.y < -40 || pos.y > canvas.height + 40) continue;
+    const elapsed = state.level.elapsed;
+    // 0-1 "how open" the portal currently reads — ramps in over its own
+    // ALIEN_PORTAL_OPEN_MS delay, then ramps back out over ALIEN_PORTAL_CLOSE_MS
+    // once its alien has actually spawned (see Entities.js's updateAlienPortals).
+    const t = !portal.spawned
+      ? Math.min(1, Math.max(0, (elapsed - portal.openAtMs) / ALIEN_PORTAL_OPEN_MS))
+      : Math.max(0, 1 - (elapsed - portal.spawnedAtMs) / ALIEN_PORTAL_CLOSE_MS);
+    if (t <= 0) continue;
+    const radius = ALIEN_PORTAL_RADIUS * state.camera.zoom * t;
+    if (radius <= 0.5) continue;
+    ctx.save();
+    ctx.globalAlpha = 0.85 * t;
+    const gradient = ctx.createRadialGradient(pos.x, pos.y, radius * 0.15, pos.x, pos.y, radius);
+    gradient.addColorStop(0, 'rgba(190, 100, 230, 0.9)');
+    gradient.addColorStop(1, 'rgba(90, 20, 130, 0.05)');
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(220, 170, 255, 0.9)';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  for (const alien of state.level.entities) {
+    if (alien.type !== 'alien' || alien.hp <= 0) continue;
+    const pos = worldToScreen(alien.x, alien.y, state.camera);
+    if (pos.x < -40 || pos.x > canvas.width + 40 || pos.y < -40 || pos.y > canvas.height + 40) continue;
+    // Dynamic Alien Archetypes: each alien's own radius/color (copied from
+    // its archetype at creation — see Entities.js's createAlien) drive
+    // these now instead of the flat ALIEN_RADIUS/ALIEN_COLOR constants,
+    // which stay only as a defensive fallback.
+    const baseRadius = (alien.radius ?? ALIEN_RADIUS) * state.camera.zoom;
+    // Hit flash + "bounce": both decay together over ALIEN_HIT_FLASH_MS —
+    // flashFrac (1 at the instant of a hit, decaying to 0) drives the red
+    // color blend directly; the bounce is a scale-punch (grows then
+    // shrinks back to 1x, peaking at the midpoint) rather than a position
+    // offset, since displacing an already-moving alien would just read as a
+    // stutter. Only the body/eyes scale with it — the health bar stays
+    // anchored off the unscaled baseRadius so it doesn't jitter.
+    const flashFrac = alien.hitFlashMs / ALIEN_HIT_FLASH_MS;
+    const bounceProgress = 1 - flashFrac; // 0 (just hit) -> 1 (flash fully decayed)
+    const bounceScaleMul = alien.hitFlashMs > 0 ? 1 + ALIEN_HIT_BOUNCE_SCALE * Math.sin(bounceProgress * Math.PI) : 1;
+    const radius = baseRadius * bounceScaleMul;
+    const alienBaseColor = alien.color || ALIEN_COLOR;
+    const color = flashFrac > 0 ? lerpRgbToString(hexToRgb(alienBaseColor), ALIEN_HIT_FLASH_COLOR, flashFrac) : alienBaseColor;
+    const facing = alien.vx >= 0 ? 1 : -1;
+    // Nearest fish, for the cyclops eye's pupil to track — a plain O(n)
+    // scan over entities is cheap enough here (at most ALIEN_MAX_ALIVE
+    // aliens, each doing this once per frame). Falls back to looking
+    // straight ahead (the alien's own facing direction) if no fish exist.
+    let nearestFish = null;
+    let nearestDist = Infinity;
+    for (const other of state.level.entities) {
+      if (other.type !== 'fish') continue;
+      const d = Math.hypot(other.x - alien.x, other.y - alien.y);
+      if (d < nearestDist) { nearestDist = d; nearestFish = other; }
+    }
+    const gazeAngle = nearestFish ? Math.atan2(nearestFish.y - alien.y, nearestFish.x - alien.x) : (facing > 0 ? 0 : Math.PI);
+    drawAlienBody(ctx, pos.x, pos.y, radius, facing, color, gazeAngle, alien.spikes, alien.bodyWidthMul, alien.bodyHeightMul, alien.glow, alienBaseColor);
+
+    // Alien-Egg hatch grace period — a soft pulsing shield ring, so a click
+    // or turret shot doing nothing to it doesn't read as broken.
+    if (alien.spawnProtectionUntilMs > state.level.elapsed) {
+      ctx.save();
+      ctx.strokeStyle = 'rgba(140, 220, 255, 0.7)';
+      ctx.lineWidth = Math.max(1, 2 * state.camera.zoom);
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, baseRadius + 6 * state.camera.zoom, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Per direct spec ("when mother alien fish is on screen, have a
+    // universal boss health bar at the top middle of the screen instead of
+    // over the boss's head") — the boss gets NO per-head bar at all;
+    // UI.js's updateBossHealthBar (called once per frame from render()'s
+    // own tail, alongside updateHUD) owns its dedicated top-middle DOM bar
+    // instead.
+    if (!alien.isBoss) {
+      const barW = ALIEN_HEALTH_BAR_WIDTH * state.camera.zoom;
+      const barH = ALIEN_HEALTH_BAR_HEIGHT * state.camera.zoom;
+      const barX = pos.x - barW / 2;
+      const barY = pos.y - baseRadius - barH - 8;
+      const barRadius = barH / 2;
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(barX, barY, barW, barH, barRadius);
+      ctx.fillStyle = 'rgba(20, 8, 8, 0.65)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.lineWidth = Math.max(0.5, 0.6 * state.camera.zoom);
+      ctx.stroke();
+      const hpFrac = Math.max(0, alien.hp / alien.maxHp);
+      if (hpFrac > 0) {
+        ctx.beginPath();
+        ctx.roundRect(barX, barY, Math.max(barH, barW * hpFrac), barH, barRadius);
+        const barGradient = ctx.createLinearGradient(barX, barY, barX, barY + barH);
+        barGradient.addColorStop(0, '#ff9a8a');
+        barGradient.addColorStop(1, '#e0392b');
+        ctx.fillStyle = barGradient;
+        ctx.fill();
+      }
+      ctx.restore();
+    }
+  }
+
   for (const fish of state.level.entities) {
-    if (fish.type !== 'fish') continue; // state.level.entities also holds Alien Invasion aliens now — rendered separately below
+    if (fish.type !== 'fish') continue; // state.level.entities also holds Alien Invasion aliens now — rendered separately above, BEFORE this loop, so fish (and their health bars) always draw on top and never disappear behind an alien
     const pos = worldToScreen(fish.x, fish.y, state.camera);
     if (pos.x < -60 || pos.x > canvas.width + 60 || pos.y < -60 || pos.y > canvas.height + 60) continue; // cull offscreen
     const def = SPECIES[fish.speciesId];
@@ -2362,122 +2522,6 @@ function render() {
       ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
       ctx.font = '10px sans-serif';
       ctx.fillText('!', pos.x - 2, pos.y - size * 0.5 - 4);
-    }
-  }
-
-  // Alien Invasion: portals (animated open, hold, then close — see
-  // Entities.js's updateAlienPortals for the timing this mirrors) and
-  // aliens themselves (with a health bar above each), rendered as their own
-  // pass after fish. Portals are plain state.level.alienPortals data
-  // (Systems.js's spawnAlienWave), not entities.
-  for (const portal of state.level.alienPortals) {
-    const pos = worldToScreen(portal.x, portal.y, state.camera);
-    if (pos.x < -40 || pos.x > canvas.width + 40 || pos.y < -40 || pos.y > canvas.height + 40) continue;
-    const elapsed = state.level.elapsed;
-    // 0-1 "how open" the portal currently reads — ramps in over its own
-    // ALIEN_PORTAL_OPEN_MS delay, then ramps back out over ALIEN_PORTAL_CLOSE_MS
-    // once its alien has actually spawned (see Entities.js's updateAlienPortals).
-    const t = !portal.spawned
-      ? Math.min(1, Math.max(0, (elapsed - portal.openAtMs) / ALIEN_PORTAL_OPEN_MS))
-      : Math.max(0, 1 - (elapsed - portal.spawnedAtMs) / ALIEN_PORTAL_CLOSE_MS);
-    if (t <= 0) continue;
-    const radius = ALIEN_PORTAL_RADIUS * state.camera.zoom * t;
-    if (radius <= 0.5) continue;
-    ctx.save();
-    ctx.globalAlpha = 0.85 * t;
-    const gradient = ctx.createRadialGradient(pos.x, pos.y, radius * 0.15, pos.x, pos.y, radius);
-    gradient.addColorStop(0, 'rgba(190, 100, 230, 0.9)');
-    gradient.addColorStop(1, 'rgba(90, 20, 130, 0.05)');
-    ctx.fillStyle = gradient;
-    ctx.beginPath();
-    ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(220, 170, 255, 0.9)';
-    ctx.lineWidth = 2;
-    ctx.stroke();
-    ctx.restore();
-  }
-
-  for (const alien of state.level.entities) {
-    if (alien.type !== 'alien' || alien.hp <= 0) continue;
-    const pos = worldToScreen(alien.x, alien.y, state.camera);
-    if (pos.x < -40 || pos.x > canvas.width + 40 || pos.y < -40 || pos.y > canvas.height + 40) continue;
-    // Dynamic Alien Archetypes: each alien's own radius/color (copied from
-    // its archetype at creation — see Entities.js's createAlien) drive
-    // these now instead of the flat ALIEN_RADIUS/ALIEN_COLOR constants,
-    // which stay only as a defensive fallback.
-    const baseRadius = (alien.radius ?? ALIEN_RADIUS) * state.camera.zoom;
-    // Hit flash + "bounce": both decay together over ALIEN_HIT_FLASH_MS —
-    // flashFrac (1 at the instant of a hit, decaying to 0) drives the red
-    // color blend directly; the bounce is a scale-punch (grows then
-    // shrinks back to 1x, peaking at the midpoint) rather than a position
-    // offset, since displacing an already-moving alien would just read as a
-    // stutter. Only the body/eyes scale with it — the health bar stays
-    // anchored off the unscaled baseRadius so it doesn't jitter.
-    const flashFrac = alien.hitFlashMs / ALIEN_HIT_FLASH_MS;
-    const bounceProgress = 1 - flashFrac; // 0 (just hit) -> 1 (flash fully decayed)
-    const bounceScaleMul = alien.hitFlashMs > 0 ? 1 + ALIEN_HIT_BOUNCE_SCALE * Math.sin(bounceProgress * Math.PI) : 1;
-    const radius = baseRadius * bounceScaleMul;
-    const alienBaseColor = alien.color || ALIEN_COLOR;
-    const color = flashFrac > 0 ? lerpRgbToString(hexToRgb(alienBaseColor), ALIEN_HIT_FLASH_COLOR, flashFrac) : alienBaseColor;
-    const facing = alien.vx >= 0 ? 1 : -1;
-    // Nearest fish, for the cyclops eye's pupil to track — a plain O(n)
-    // scan over entities is cheap enough here (at most ALIEN_MAX_ALIVE
-    // aliens, each doing this once per frame). Falls back to looking
-    // straight ahead (the alien's own facing direction) if no fish exist.
-    let nearestFish = null;
-    let nearestDist = Infinity;
-    for (const other of state.level.entities) {
-      if (other.type !== 'fish') continue;
-      const d = Math.hypot(other.x - alien.x, other.y - alien.y);
-      if (d < nearestDist) { nearestDist = d; nearestFish = other; }
-    }
-    const gazeAngle = nearestFish ? Math.atan2(nearestFish.y - alien.y, nearestFish.x - alien.x) : (facing > 0 ? 0 : Math.PI);
-    drawAlienBody(ctx, pos.x, pos.y, radius, facing, color, gazeAngle);
-
-    // Alien-Egg hatch grace period — a soft pulsing shield ring, so a click
-    // or turret shot doing nothing to it doesn't read as broken.
-    if (alien.spawnProtectionUntilMs > state.level.elapsed) {
-      ctx.save();
-      ctx.strokeStyle = 'rgba(140, 220, 255, 0.7)';
-      ctx.lineWidth = Math.max(1, 2 * state.camera.zoom);
-      ctx.beginPath();
-      ctx.arc(pos.x, pos.y, baseRadius + 6 * state.camera.zoom, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-    }
-
-    // Per direct spec ("when mother alien fish is on screen, have a
-    // universal boss health bar at the top middle of the screen instead of
-    // over the boss's head") — the boss gets NO per-head bar at all;
-    // UI.js's updateBossHealthBar (called once per frame from render()'s
-    // own tail, alongside updateHUD) owns its dedicated top-middle DOM bar
-    // instead.
-    if (!alien.isBoss) {
-      const barW = ALIEN_HEALTH_BAR_WIDTH * state.camera.zoom;
-      const barH = ALIEN_HEALTH_BAR_HEIGHT * state.camera.zoom;
-      const barX = pos.x - barW / 2;
-      const barY = pos.y - baseRadius - barH - 8;
-      const barRadius = barH / 2;
-      ctx.save();
-      ctx.beginPath();
-      ctx.roundRect(barX, barY, barW, barH, barRadius);
-      ctx.fillStyle = 'rgba(20, 8, 8, 0.65)';
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
-      ctx.lineWidth = Math.max(0.5, 0.6 * state.camera.zoom);
-      ctx.stroke();
-      const hpFrac = Math.max(0, alien.hp / alien.maxHp);
-      if (hpFrac > 0) {
-        ctx.beginPath();
-        ctx.roundRect(barX, barY, Math.max(barH, barW * hpFrac), barH, barRadius);
-        const barGradient = ctx.createLinearGradient(barX, barY, barX, barY + barH);
-        barGradient.addColorStop(0, '#ff9a8a');
-        barGradient.addColorStop(1, '#e0392b');
-        ctx.fillStyle = barGradient;
-        ctx.fill();
-      }
-      ctx.restore();
     }
   }
 

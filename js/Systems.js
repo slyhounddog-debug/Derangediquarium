@@ -26,6 +26,8 @@ import {
   ALIEN_TIER_MIX_KEYFRAMES,
   ALIEN_WARNING_MS_1,
   ALIEN_WARNING_MS_2,
+  ALIEN_WARNING_MAX_WAVES,
+  ALIEN_WARNING_MESSAGE_2_REPEAT,
   ALIEN_WARNING_MESSAGE_1,
   ALIEN_WARNING_MESSAGE_2,
   ALIEN_FIRST_WAVE_TIP_MESSAGE,
@@ -39,6 +41,10 @@ import {
   TILE_MANUFACTURER,
   TILE_POWER_PLANT,
   AUTOSAVE_INTERVAL_MS,
+  POWER_WARNING_CHECK_INTERVAL_MS,
+  POWER_WARNING_CHANCE,
+  POWER_WARNING_NONE_MESSAGE,
+  POWER_WARNING_PARTIAL_MESSAGE,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings } from './Levels.js';
 import { getFishPurchaseCost, findCombinablePair } from './Entities.js';
@@ -353,15 +359,24 @@ function updateAlienWaves(state) {
     // still gates this 60s-mark from re-checking every tick within the same
     // wave cycle (and still resets each new wave below), but the actual
     // notification text is separately gated on a one-time tutorialFlags
-    // entry so every wave after the first stays silent at this mark.
+    // entry so every wave after the first stays silent at this mark. This is
+    // already tighter than ALIEN_WARNING_MAX_WAVES below (it never repeats
+    // past wave 1 at all), so it needs no separate wave-count check.
     if (!state.level.tutorialFlags.firstAlienWarning1Shown) {
       state.level.tutorialFlags.firstAlienWarning1Shown = true;
       pushNotification(state, ALIEN_WARNING_MESSAGE_1);
     }
   }
-  if (!state.level.alienWarning2Shown && elapsed >= nextWaveAt - ALIEN_WARNING_MS_2) {
+  // Per direct request, this 30s warning goes completely silent once
+  // ALIEN_WARNING_MAX_WAVES waves have already spawned ("remove the chat
+  // messages for upcoming alien waves after wave 3") — and waves 2/3
+  // specifically (alienWavesSpawned 1/2 at this point, since it's how many
+  // waves have already happened BEFORE the upcoming one) get a slightly
+  // reworded repeat instead of the exact wave-1 wording.
+  if (!state.level.alienWarning2Shown && elapsed >= nextWaveAt - ALIEN_WARNING_MS_2 && state.level.alienWavesSpawned < ALIEN_WARNING_MAX_WAVES) {
     state.level.alienWarning2Shown = true;
-    pushNotification(state, ALIEN_WARNING_MESSAGE_2);
+    const message = state.level.alienWavesSpawned === 0 ? ALIEN_WARNING_MESSAGE_2 : ALIEN_WARNING_MESSAGE_2_REPEAT;
+    pushNotification(state, message);
   }
 
   if (elapsed >= nextWaveAt) {
@@ -407,6 +422,18 @@ function updateAutosave(state) {
   pushNotification(state, ok ? 'Game auto-saved. 💾' : "Auto-save failed — your browser blocked it.");
 }
 
+// Occasional (not guaranteed) chat nudge while buildings are genuinely
+// power-starved, per direct request — see Config.js's POWER_WARNING_* for
+// the full mechanism. Checked on the same absolute-target-timestamp shape
+// every other periodic trigger in this file uses, so it needs no dtMs.
+function updatePowerWarnings(state) {
+  if (state.level.elapsed < state.level.nextPowerWarningCheckAtMs) return;
+  state.level.nextPowerWarningCheckAtMs += POWER_WARNING_CHECK_INTERVAL_MS;
+  if (state.level.powerEfficiency >= 1) return; // no shortage right now
+  if (Math.random() >= POWER_WARNING_CHANCE) return; // "occasionally, not every time"
+  pushNotification(state, state.level.powerEfficiency <= 0 ? POWER_WARNING_NONE_MESSAGE : POWER_WARNING_PARTIAL_MESSAGE);
+}
+
 export function updateStoryTriggers(state) {
   updateBankruptcy(state);
   updateAlienWaves(state);
@@ -416,4 +443,5 @@ export function updateStoryTriggers(state) {
   updateMergeTutorialTrigger(state);
   updateRecipeCopyTip(state);
   updateAutosave(state);
+  updatePowerWarnings(state);
 }
