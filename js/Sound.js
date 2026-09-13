@@ -350,9 +350,23 @@ function playSweep(freqFrom, freqTo, duration, { type = 'square', gain = 0.14, w
   osc.stop(end + 0.02);
 }
 
-// A quick "pew" — a Turret (any tier) firing a shot.
+// A quick "pew" — a Turret (any tier) firing a shot. Per direct request
+// ("the gain from the shooting sounds of the turrets can stack when 20
+// turrets shoot at the same time, making it super loud"), capped to at most
+// MAX_CONCURRENT_TURRET_SHOTS overlapping instances — every additional
+// simultaneous shot beyond that just plays no sound at all rather than
+// piling another oscillator's gain on top of an already-loud stack. The
+// counter releases on its own after this sound's own fixed duration, no
+// separate "sound finished" callback needed since playSweep's own envelope
+// is a known, constant length.
+const TURRET_SHOOT_DURATION_S = 0.08;
+const MAX_CONCURRENT_TURRET_SHOTS = 4;
+let activeTurretShotSounds = 0;
 export function playTurretShoot() {
-  playSweep(950, 260, 0.08, { type: 'square', gain: 0.1 });
+  if (activeTurretShotSounds >= MAX_CONCURRENT_TURRET_SHOTS) return;
+  activeTurretShotSounds++;
+  setTimeout(() => { activeTurretShotSounds = Math.max(0, activeTurretShotSounds - 1); }, TURRET_SHOOT_DURATION_S * 1000);
+  playSweep(950, 260, TURRET_SHOOT_DURATION_S, { type: 'square', gain: 0.1 });
 }
 
 // A short, sharp impact — an alien taking a hit (click damage or a landed

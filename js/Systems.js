@@ -47,7 +47,7 @@ import {
   POWER_WARNING_PARTIAL_MESSAGE,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings } from './Levels.js';
-import { getFishPurchaseCost, findCombinablePair } from './Entities.js';
+import { getFishPurchaseCost, findCombinablePair, spawnTurretTutorialWaste } from './Entities.js';
 import { hasWasteTurretPlaced, countPlacedOfType } from './Grid.js';
 import { saveGame } from './Save.js';
 
@@ -186,13 +186,16 @@ function updatePostAlienTutorial(state) {
   if (!flags.postAlienTutorialShown) return;
   if (flags.wasteDragTutorialShown) return;
   if (!hasWasteTurretPlaced(state)) return;
-  const wasteInCity = state.level.items.some((it) => it.type === 'waste' && it.y >= SEABED_FLOOR_Y);
-  if (!wasteInCity) {
-    state.level.wasteDragTutorialWaitStartMs = null;
-    return;
-  }
+  // Per direct request, this no longer waits for a real fish to have
+  // already pooped some Waste out nearby — it spawns its own deterministic
+  // one (Entities.js's spawnTurretTutorialWaste) the instant this decision
+  // fires, exactly once (guarded by wasteDragTutorialWaitStartMs still being
+  // null), then waits WASTE_DRAG_TUTORIAL_WAIT_MS more before actually
+  // starting the flow — same overall pacing as before, just no longer
+  // dependent on chance.
   if (state.level.wasteDragTutorialWaitStartMs === null) {
     state.level.wasteDragTutorialWaitStartMs = state.level.elapsed;
+    spawnTurretTutorialWaste(state);
     return;
   }
   if (state.level.elapsed - state.level.wasteDragTutorialWaitStartMs < WASTE_DRAG_TUTORIAL_WAIT_MS) return;

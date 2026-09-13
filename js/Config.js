@@ -2436,6 +2436,23 @@ export const TURRET_TUTORIAL_DELAY_MS = 1000;
 // spent their starting money.
 export const TURRET_TUTORIAL_GOLD_GRANT = 25;
 export const TURRET_TUTORIAL_GOLD_GRANT_MESSAGE = "Here's 25 gold — go place that turret.";
+// Per direct request ("the tutorial can break if there's no waste on
+// screen... produce a waste slightly left from middle in the city, and make
+// that the waste that's used for the dragging part") — both paths that lead
+// into the "drag Waste into the Turret" step (the full 'postalien' walk-
+// through's own 'place' -> 'dragwaste' transition, and the standalone
+// 'wastedrag' flow for a player who already had a Turret) now spawn this
+// exact deterministic Waste item and lock the tutorial's target onto it
+// directly (Entities.js's spawnTurretTutorialWaste), instead of hoping a
+// real fish had already pooped one out somewhere nearby — the previous
+// "wait for organic Waste to exist" approach could leave the drag step with
+// nothing to drag (a degenerate, hole-less spotlight) if none ever
+// happened to be sitting in the city yet. A few tiles left of the city's
+// own horizontal center (POST_ALIEN_TURRET_SPOT sits exactly on it) and
+// comfortably above the very bottom row that spot's own Turret occupies, so
+// there's a real, visible drag distance to cover.
+export const TURRET_TUTORIAL_WASTE_X = WORLD_W / 2 - TILE_SIZE * 4;
+export const TURRET_TUTORIAL_WASTE_Y = WORLD_H - TILE_SIZE * 5;
 export const ALIEN_INTRO_DELAY_MS = 1000; // per direct request, the cinematic first-alien intro no longer triggers the instant the alien spawns — it has to actually be alive and visibly moving on screen for this long first (Entities.js's updateAlienPortals records when it appeared; Systems.js's updateStoryTriggers checks this delay before starting the 'alienintro' guided-tutorial flow)
 export const ALIEN_FOOD_BLOCK_DURATION_MS = 1000; // per direct request ("so you don't accidentally place 4 food after killing a fish") — Food can't be placed within a just-killed alien's old click radius for this long; see Entities.js's trySpawnFood/isInAlienFoodBlockZone
 export const WASTE_DRAG_TUTORIAL_WAIT_MS = 1000; // per direct request — if the player already placed a Waste Turret before the post-alien tutorial would fire, it waits this long after Waste first appears in the city before teaching just the "drag Waste into it" step — see Systems.js's updatePostAlienTutorial

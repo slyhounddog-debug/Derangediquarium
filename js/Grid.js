@@ -885,7 +885,6 @@ export function updateBuildings(state, dtMs) {
       data.cooldownMs = Math.max(0, data.cooldownMs - dtMs * getCatalystSpeedMultiplier(state, key));
       const hasAmmo = !TURRET_AMMO_TILES.has(data.type) || data.ammo > 0;
       const hasPower = turretStats.powerCostPerSec <= 0 || state.level.powerEfficiency >= 1;
-      let firedThisTick = false;
       if (data.cooldownMs <= 0 && hasAmmo && hasPower) {
         let nearestAlien = null;
         let nearestDist = Infinity;
@@ -896,6 +895,15 @@ export function updateBuildings(state, dtMs) {
           // shots targeting something they can't hurt.
           if (entity.type !== 'alien' || entity.hp <= 0) continue;
           if (entity.spawnProtectionUntilMs > state.level.elapsed) continue;
+          // Per direct request — a target already covered by damage from
+          // shots OTHER turrets (or this same one, an earlier cycle) already
+          // have in flight isn't a valid target any more, so every turret
+          // that would otherwise also pile onto it instead looks past it to
+          // whatever real target remains (or fires at nothing this tick, if
+          // there isn't one) — see createAlien's own comment on
+          // reservedDamage and updateTurretProjectiles' release of it once a
+          // shot actually lands or fizzles.
+          if (entity.hp - (entity.reservedDamage || 0) <= 0) continue;
           const d = Math.hypot(entity.x - centerX, entity.y - centerY);
           if (d <= nearestDist) {
             nearestAlien = entity;
@@ -904,13 +912,19 @@ export function updateBuildings(state, dtMs) {
         }
         if (nearestAlien) {
           turretShots.push({ x: centerX, y: centerY, targetId: nearestAlien.id, damage: turretStats.damage });
+          nearestAlien.reservedDamage = (nearestAlien.reservedDamage || 0) + turretStats.damage;
           data.cooldownMs = 1000 / (turretStats.shotsPerSec * getTurretFireRateMultiplier(state));
           if (TURRET_AMMO_TILES.has(data.type)) data.ammo -= 1;
-          firedThisTick = true;
           playTurretShoot();
+          // A turret's own power draw is a single-tick pulse (one shot),
+          // not a sustained state a once-a-second snapshot can reliably
+          // catch — see state.level.turretPowerDemandAccumMw's own comment
+          // in Levels.js for why this accumulates the real energy of every
+          // shot instead. Waste Turret has powerCostPerShot 0, so this is a
+          // no-op for it, same as it always was demand-free.
+          if (turretStats.powerCostPerShot > 0) state.level.turretPowerDemandAccumMw += turretStats.powerCostPerShot;
         }
       }
-      data.firing = firedThisTick;
       continue;
     }
 
@@ -1058,9 +1072,28 @@ export function updateBuildings(state, dtMs) {
         // Never power-gated itself — it's the thing GENERATING power, not
         // drawing it — but a linked, non-hungry Catalyst Fish still speeds
         // it up like any other building.
-        data.progressMs += dtMs * getCatalystSpeedMultiplier(state, key);
+        const rate = getCatalystSpeedMultiplier(state, key);
+        data.progressMs += dtMs * rate;
+        // Per direct request ("powerplants should produce the EXACT same
+        // thing as electric eels — the same resource/utility pool should be
+        // used for both"): credits state.level.powerGenAccumMw
+        // CONTINUOUSLY over the whole burn, at recipe.powerOutputMw's own
+        // rate, instead of dumping the entire cycle's worth as one lump sum
+        // only once progressMs finally crosses durationMs. A recipe's own
+        // description ("Biomass -> 40mw for 20s") already reads as a
+        // sustained 40mw output for 20 seconds, not a single 800 MW-second
+        // pulse after 20 silent seconds — and since main.js's own
+        // once-a-second power sampler reads + resets this same accumulator
+        // every real second (see its own comment), the old lump-sum version
+        // meant a Power Plant contributed ZERO measurable supply for
+        // literally every second of its cycle except the one it happened to
+        // finish in, reading to the player as "does nothing." This is the
+        // exact same incremental-credit shape Entities.js's Electric Eel
+        // branch already uses (`powerGenAccumMw += 1` per distance step) —
+        // both sources now feed the identical shared accumulator the same
+        // continuous way.
+        state.level.powerGenAccumMw += recipe.powerOutputMw * (dtMs / 1000) * rate;
         if (data.progressMs >= recipe.durationMs) {
-          state.level.powerGenAccumMw += recipe.powerOutputMw;
           data.fueled = false;
           data.progressMs = 0;
         }
@@ -1081,6 +1114,18 @@ export function updateBuildings(state, dtMs) {
 // gated on state.level.powerSupply at all — see Config.js's Directional Fans
 // comment for why power draw has never actually throttled anything in this
 // codebase; this is purely the "current usage" half of the HUD readout.
+//
+// Turrets are deliberately NOT included here — a turret's power draw is a
+// single-tick pulse (one shot), not a sustained per-tick state like every
+// other building this function checks, so a plain snapshot read once a real
+// second (main.js's own power-sampling block, the only caller of this
+// function) would almost always land on a tick the turret ISN'T actively
+// firing and undercount its true demand to near zero — exactly the bug
+// behind "Electric/Advanced Turrets fire even with no electricity." Turret
+// demand is tracked separately as a running accumulator instead
+// (state.level.turretPowerDemandAccumMw, credited the instant each shot
+// actually fires — see updateBuildings' own turret-fire branch) and added
+// in by main.js alongside this function's own return value.
 export function computeCurrentPowerDemand(state) {
   let demand = 0;
   const items = state.level.items;
@@ -1096,13 +1141,6 @@ export function computeCurrentPowerDemand(state) {
         (it) => it.collectorProgressMs != null && it.collectorCenterX === centerX && it.collectorCenterY === centerY
       );
       if (activelyProcessing) demand += PROCESSOR_STATS[data.type].powerCostPerSec;
-    } else if (TURRET_TILES.has(data.type)) {
-      // Waste Turret has no power cost at all (runs on ammo instead) — see
-      // TURRET_STATS. Electric/Advanced only draw while actively engaging a
-      // target this tick (data.firing, set by updateBuildings' turret-fire
-      // branch below), same "only while actually doing something" pattern
-      // the Processor already follows above.
-      if (data.firing) demand += TURRET_STATS[data.type].powerCostPerSec;
     } else if (REFINERY_TILES.has(data.type)) {
       // Every tier — including the base (now "Electric Refinery") — only
       // draws while actively processing a locked recipe, same "only while

@@ -115,6 +115,8 @@ import {
   TURRET_PROJECTILE_HIT_RADIUS,
   PRODUCTION_BLOCKED_EFFECT_DURATION_MS,
   WASTE_MAX_ON_SCREEN,
+  TURRET_TUTORIAL_WASTE_X,
+  TURRET_TUTORIAL_WASTE_Y,
   ALIEN_RADIUS,
   ALIEN_CLICK_RADIUS_MULTIPLIER,
   ALIEN_FOOD_BLOCK_DURATION_MS,
@@ -335,6 +337,18 @@ export function createWaste(x, y) {
   };
 }
 
+// Spawns the turret guided-tutorial's own deterministic Waste item (see
+// Config.js's TURRET_TUTORIAL_WASTE_X/_Y comment) and immediately locks the
+// tutorial's drag target onto it — called from both entry points into the
+// "drag Waste into the Turret" step (main.js's 'place' -> 'dragwaste'
+// transition, and Systems.js's standalone 'wastedrag' trigger) so neither
+// one depends on a real fish having already pooped some out nearby.
+export function spawnTurretTutorialWaste(state) {
+  const item = createWaste(TURRET_TUTORIAL_WASTE_X, TURRET_TUTORIAL_WASTE_Y);
+  state.level.items.push(item);
+  state.level.wasteDragTutorialTargetId = item.id;
+}
+
 // A physical Science Bubble — falls/routes exactly like a coin (straight
 // gravity, no sway), just lighter-looking (SCIENCE_ITEM_RADIUS, smaller than
 // a bronze coin) and much heavier (ITEM_MASS_BY_TYPE.science = 9, 3x a
@@ -448,6 +462,7 @@ export function createAlien(x, y, hp, archetypeId) {
     risingToSurface: false, // Alien-Egg-hatched aliens only, and only when the egg hatched inside the seabed city — overrides all normal AI/movement in updateAlien until it clears SEABED_FLOOR_Y
     isBoss: false, // Mother Alien Fish only — see createMotherAlienFish below; drives updateAlien's minion-spawn timer, main.js's top-middle boss health bar instead of a per-alien one, and the special death sequence
     minionSpawnTimerMs: 0, // Mother Alien Fish only
+    reservedDamage: 0, // sum of damage from turret shots already fired at this alien but still in flight (not yet landed) — see Grid.js's turret-targeting search and updateTurretProjectiles below. Lets every OTHER turret see "this alien is already going to die from shots in flight" and skip it instead of piling on more, per direct request
   };
 }
 
@@ -475,6 +490,7 @@ export function createMotherAlienFish(x, y) {
     spikes: 6, bodyWidthMul: 1.2, bodyHeightMul: 1.2, glow: true,
     wanderTimer: 0, poopTimer: 0, hitFlashMs: 0, spawnProtectionUntilMs: 0, risingToSurface: false,
     isBoss: true, minionSpawnTimerMs: 0,
+    reservedDamage: 0, // see createAlien's own comment
   };
 }
 
@@ -2721,12 +2737,16 @@ function updateTurretProjectiles(state, dtMs) {
     // invulnerable (Alien-Egg-hatch grace period) alien, so a shot should
     // never actually be aimed at one in practice; still fizzle harmlessly
     // rather than apply damage if it somehow is.
-    if (target.spawnProtectionUntilMs > state.level.elapsed) return false;
+    if (target.spawnProtectionUntilMs > state.level.elapsed) {
+      target.reservedDamage = Math.max(0, (target.reservedDamage || 0) - shot.damage); // release the reservation — this shot is never landing, see createAlien's own comment
+      return false;
+    }
     const dx = target.x - shot.x;
     const dy = target.y - shot.y;
     const dist = Math.hypot(dx, dy);
     if (dist <= TURRET_PROJECTILE_HIT_RADIUS) {
       target.hp -= shot.damage;
+      target.reservedDamage = Math.max(0, (target.reservedDamage || 0) - shot.damage); // the damage is now real (applied to hp above), not just reserved/in-flight any more
       target.hitFlashMs = ALIEN_HIT_FLASH_MS; // per direct request — a hit flashes red and "bounces," read back by main.js's render
       // Only the "still alive" hit sound here — a killing blow instead gets
       // playAlienDeath from updateAlien's own death branch next tick, so a

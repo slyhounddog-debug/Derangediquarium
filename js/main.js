@@ -121,6 +121,7 @@ import {
   canSpliceFish,
   spliceFish,
   createMotherAlienFish,
+  spawnTurretTutorialWaste,
 } from './Entities.js';
 import {
   renderSeabedGrid,
@@ -1333,6 +1334,11 @@ function updateBuildDrag() {
       // turret is down, same as deselectShopSelection already does for a
       // manually re-clicked single-tier shop item.
       deselectShopSelection(state);
+      // Guarantee the very next step has something real to drag — per
+      // direct report ("the tutorial can break if there's no waste on
+      // screen"), rather than hoping a fish had already pooped one out
+      // nearby. See Entities.js's spawnTurretTutorialWaste.
+      spawnTurretTutorialWaste(state);
     }
   }
 }
@@ -1583,7 +1589,12 @@ function update(dtMs) {
   powerSampleAccumMs += dtMs;
   if (powerSampleAccumMs >= 1000) {
     powerSampleAccumMs -= 1000;
-    const demand = computeCurrentPowerDemand(state);
+    // Turret demand is tracked as its own running accumulator, not included
+    // in computeCurrentPowerDemand's own snapshot — see that function's own
+    // comment for why a once-a-second instantaneous check can't reliably
+    // catch a single-tick firing pulse the way it can a sustained state like
+    // a Fan/Processor/Refinery/Manufacturer's.
+    const demand = computeCurrentPowerDemand(state) + state.level.turretPowerDemandAccumMw;
     const rawSupply = state.level.powerGenAccumMw; // whatever Eels/Blimp-Batteries generated during the window that just closed — see Levels.js's powerGenAccumMw
     // Blimp-Battery — per direct spec ("power will need to be
     // calculated every second, and if there's excess, it can be stored...
@@ -1615,6 +1626,7 @@ function update(dtMs) {
     if (history.length > POWER_HISTORY_MAX) history.shift();
     state.level.powerEfficiency = computePowerEfficiency(effectiveSupply, demand);
     state.level.powerGenAccumMw = 0; // reset for the next window — generated MW that goes unused (and isn't stored) this second is gone, not carried forward
+    state.level.turretPowerDemandAccumMw = 0; // reset alongside it — see its own comment in Levels.js
   }
 }
 
