@@ -21,7 +21,7 @@ let elapsed = 0; // seconds, drives every sway/wobble phase below
 // width) — keeps bubbles-per-px-of-width the same as before, rather than
 // cramming the original count into a much narrower column and reading
 // 2.67x busier than intended.
-const BUBBLE_COUNT = 18;
+const BUBBLE_COUNT = 14; // cut ~20% from 18 per direct request, "reduce the amount of bubbles created by the background"
 // Per direct request, a bubble grows to full size over this many seconds
 // after it spawns, instead of just appearing at full size — `age` (seconds
 // since spawn) drives the scale in renderBubbles below.

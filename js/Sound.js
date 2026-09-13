@@ -210,6 +210,21 @@ export function playFishDeath() {
   playTone(311, 0.22, { type: 'triangle', gain: 0.12, when: 0.24 }); // Eb4
 }
 
+// A distinct, harsher death sound for a fish an alien actually finishes off
+// — per direct request ("a separate sound effect when the fish is killed by
+// an alien"), so a starved fish and an alien-killed fish don't share the
+// exact same cue. Built from a sharp noise burst (echoing playAlienHit/
+// playAlienDeath's own noise-based "impact" language, since this death is
+// itself the alien's doing) plus a lower, more sawtooth-buzzy descending
+// phrase than playFishDeath's own gentler triangle-wave one, so it reads as
+// more violent/sudden rather than a slow fade-out.
+export function playFishKilledByAlien() {
+  playNoise(0.07, { gain: 0.13 });
+  playTone(330, 0.1, { type: 'sawtooth', gain: 0.12, when: 0.02 }); // E4
+  playTone(220, 0.16, { type: 'sawtooth', gain: 0.11, when: 0.13 }); // A3
+  playTone(164.81, 0.24, { type: 'sawtooth', gain: 0.1, when: 0.26 }); // E3
+}
+
 // A bright quick double-blip, Mario-coin style — banking a coin.
 export function playCoinBank() {
   playTone(988, 0.05, { type: 'square', gain: 0.15 }); // B5
@@ -234,14 +249,34 @@ export function playUpgrade() {
   notes.forEach((freq, i) => playTone(freq, 0.09, { type: 'square', gain: 0.14, when: i * 0.07 }));
 }
 
+// A clear "denied" buzz — attempting to buy something (Food, a fish, a
+// building) without enough money. Per direct request, paired with
+// UI.js's flashMoneyInsufficient (which used to only shake the money
+// readout red with no sound at all). A short two-note descending sawtooth
+// buzz, deliberately harsher/more "error" than playProductionBlocked below
+// — this fires on a genuine failed ACTION (a purchase attempt that did
+// nothing), where that one fires on a passive production cycle quietly
+// having nowhere to put its output.
+export function playInsufficientFunds() {
+  playTone(196, 0.09, { type: 'sawtooth', gain: 0.11 }); // G3
+  playTone(146.83, 0.13, { type: 'sawtooth', gain: 0.1, when: 0.08 }); // D3
+}
+
 // A soft, muted "thud" — a fish's drop cycle completed but its resource
 // (coin or Science) was already at its active cap, so nothing was actually
 // produced. Deliberately dull and low, sliding down rather than up, so it
 // reads as "nope, capped" rather than any of this game's other "you got
-// something" blips — the one SFX in the game meant to feel like a non-event.
+// something" blips. Made noticeably more obvious per direct report/request
+// ("change it to a more obvious sound effect") — the original two-note
+// version was easy to miss under other tank noise; this keeps the same
+// descending "nope" shape but louder, with a third, lower note and a short
+// leading noise tick so it reads as a distinct event rather than blending
+// into the background.
 export function playProductionBlocked() {
-  playTone(220, 0.05, { type: 'triangle', gain: 0.09 }); // A3
-  playTone(164.81, 0.09, { type: 'triangle', gain: 0.07, when: 0.045 }); // E3
+  playNoise(0.03, { gain: 0.07 });
+  playTone(294, 0.08, { type: 'triangle', gain: 0.16, when: 0.01 }); // D4
+  playTone(220, 0.1, { type: 'triangle', gain: 0.14, when: 0.09 }); // A3
+  playTone(164.81, 0.16, { type: 'triangle', gain: 0.12, when: 0.19 }); // E3
 }
 
 // A small sparkle — a fish reaching adulthood and awarding a Tank Point.

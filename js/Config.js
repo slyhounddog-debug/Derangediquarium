@@ -257,13 +257,13 @@ export const FAN_CONE_HALF_ANGLE_DEG = 28; // total cone width = 2x this = 56° 
 // same percentage as Waste (a single force value can't put two different
 // masses at identical equilibrium points; Waste's 80% match was prioritized
 // since it was named explicitly alongside the coin figure).
-export const FAN_T2_MAX_FORCE = 260; // Rudimentary Fan — force magnitude at the emitter (see Grid.js's a = F/mass integration). Deliberately still too weak to hover a coin at all (3*88=264 > 260) — "struggles to lift a coin," unchanged.
+export const FAN_T2_MAX_FORCE = 260; // Rudimentary Fan — force magnitude at the emitter (see Grid.js's a = F/mass integration). Originally deliberately too weak to hover a coin at all when coin mass was 3 (3*88=264 > 260); after the coin-mass retune (now 2, weight 176 < 260), a coin CAN hover under this tier — see the mass-retune comment above ITEM_MASS_BY_TYPE for the current numbers.
 export const FAN_T2_MAX_RANGE = 320; // px — 10 tiles (was 3, then 5, then 6, then 7, then 9; +1 more tile per direct request, the 7th such increase this session)
 export const FAN_T2_POWER_COST = 0; // per direct request — "the rudimentary fan takes 0mw electricity"
-export const FAN_T3_MAX_FORCE = 350; // Electric Fan — cut from 520, per direct request to rebalance the middle tier now that Turbo dropped to 440 (520 would otherwise have been the STRONGEST fan, backwards); sits clearly between Rudimentary (260) and Turbo (440)
+export const FAN_T3_MAX_FORCE = 320; // Electric Fan — cut 520 -> 350, now 320 per direct request, alongside the T4 cut and mass retune below — sits between Rudimentary (260) and Turbo (400)
 export const FAN_T3_MAX_RANGE = 496; // px — 15.5 tiles (was 5.5, then 8.5, then 9.5, then 10.5, then 13.5; +2 more tiles)
 export const FAN_T3_POWER_COST = 2; // doubled from 1 per direct request ("make all the buildings take twice as much electricity as they do right now")
-export const FAN_T4_MAX_FORCE = 440; // Turbo Fan — see the hover-math comment above; was 1100 ("extreme thrust"), now a real but gentler suspension force
+export const FAN_T4_MAX_FORCE = 400; // Turbo Fan — cut 1100 -> 440, now 400 per direct request, alongside the T3 cut and mass retune above
 export const FAN_T4_MAX_RANGE = 640; // px — 20 tiles, unchanged per direct request ("the same range, but less powerful")
 export const FAN_T4_POWER_COST = 6; // doubled from 3 per direct request ("make all the buildings take twice as much electricity as they do right now")
 
@@ -360,27 +360,32 @@ export const COLLECTOR_INTAKE_RADIUS = TILE_SIZE * 0.65;
 //                                                       FOOD_MAX_FALL_SPEED
 //                                                       profile (see below),
 //                                                       not just a low mass
-//   Class 2 Ultra-Light   (waste)                     — light enough that
-//                                                       even a free
-//                                                       Rudimentary Fan
-//                                                       clears it easily
-//   Class 3 Standard      (coin)                      — cut from 3 to 1.5,
-//                                                       per direct request
-//                                                       ("reduce coin mass
-//                                                       so it sits properly
-//                                                       in Class 3 below
-//                                                       Class 4 Science
-//                                                       drops") — sinks
+//   Class 2 Ultra-Light   (waste)                     — bumped 0.5 -> 1.2 per
+//                                                       direct request (it
+//                                                       used to sit too close
+//                                                       to Food's own mass to
+//                                                       route the two apart
+//                                                       under a Fan) —
+//                                                       noticeably heavier
+//                                                       than Food now, still
+//                                                       clearly below Coin
+//   Class 3 Standard      (coin, alien_egg)           — cut 3 -> 1.5 -> 1.8,
+//                                                       now 2 per direct
+//                                                       request — sinks
 //                                                       predictably, routes
 //                                                       smoothly under a
 //                                                       standard Fan
-//   Class 4 Medium-Heavy  (science, science_green)    — denser than coins,
-//                                                       needs sustained Fan
-//                                                       coverage
-//   Class 5 Heavy         (alien_dna, biomass)         — heaviest; needs a
-//                                                       T3 Electric Fan (or
-//                                                       stronger) to move
-//                                                       any real horizontal
+//   Class 4 Medium-Heavy  (science, science_green)    — cut 9 -> 4 -> 3, now
+//                                                       2.8 per direct
+//                                                       request; denser than
+//                                                       coins, needs sustained
+//                                                       Fan coverage
+//   Class 5 Heavy         (alien_dna, biomass)         — cut 7 -> 5, now 4 per
+//                                                       direct request;
+//                                                       heaviest; needs a T3
+//                                                       Electric Fan (or
+//                                                       stronger) to move any
+//                                                       real horizontal
 //                                                       distance without a
 //                                                       Ramp
 // Classes 2-5 all share the same GRAVITY/MAX_FALL_SPEED fall profile
@@ -389,10 +394,10 @@ export const COLLECTOR_INTAKE_RADIUS = TILE_SIZE * 0.65;
 // slower, wavering fall.
 export const ITEM_MASS_BY_TYPE = {
   food: 0.3, mutagen_paste: 0.3, // Class 1 — Buoyant
-  waste: 0.5, // Class 2 — Ultra-Light (was 1)
-  coin: 1.5, alien_egg: 1.5, // Class 3 — Standard (coin was 3, halved per direct request) — the Alien Egg "weighs as much as a coin," per direct spec
-  science: 4, science_green: 4, // Class 4 — Medium-Heavy (was 9 for science — cut so Class 5 below can sit clearly above it while science stays clearly above Class 3's coin)
-  alien_dna: 7, biomass: 7, // Class 5 — Heavy
+  waste: 1.2, // Class 2 — Ultra-Light (was 1, then 0.5 — bumped again per direct request, "the waste is too close to the food in mass so you can't properly route them separately using fans")
+  coin: 2, alien_egg: 2, // Class 3 — Standard (coin was 3, then 1.5, then 1.8, now 2 per direct request) — the Alien Egg "weighs as much as a coin," per direct spec, so it moves with it
+  science: 2.8, science_green: 2.8, // Class 4 — Medium-Heavy (was 9, then 4, then 3, now 2.8 per direct request)
+  alien_dna: 4, biomass: 4, // Class 5 — Heavy (was 7, then 5, now 4 per direct request, alongside the T3/T4 Fan force cuts below)
 };
 // vx decays by this factor every tick — without damping, a single bump
 // would leave an item drifting sideways forever instead of a jostled pile
@@ -504,6 +509,7 @@ export const COIN_CLICK_RADIUS_MULTIPLIER = 1.9; // click hit-test radius is eac
 export const CHEAT_GRANT_AMOUNT = 10000; // $ granted by the M debug key
 export const CHEAT_TANK_POINTS_GRANT_AMOUNT = 20; // Tank Points also granted by the M debug key, so testing the Tank Upgrades panel doesn't require grinding fish growth
 export const CHEAT_SCIENCE_GRANT_AMOUNT = 500; // Science Bubbles also granted by the M debug key, so testing the Science Lab's tech tree doesn't require grinding an Octopus's real brew-and-collect cycle
+export const CHEAT_SCIENCE_GREEN_GRANT_AMOUNT = 500; // Green Science too, per direct request ("so I can test those things") — same flat amount as blue Science above, granted alongside it by the M debug key
 
 // Coin color + size tier by value — checked in ascending order, first match
 // wins. Entities.js's getCoinTier()/getCoinColor() do the lookup; kept here
@@ -2289,8 +2295,8 @@ export const PRODUCTION_BLOCKED_EFFECT_DURATION_MS = 800;
 // "push it, age it, cull it" pattern as alienDeathEffects/
 // productionBlockedEffects) rather than a fixed recycling pool, since each
 // one has to spawn wherever its own fish currently is.
-export const FISH_BUBBLE_INTERVAL_MIN_MS = 5000; // re-rolled after every emission (including the hunger-triggered one), so intervals never resync across fish
-export const FISH_BUBBLE_INTERVAL_MAX_MS = 20000;
+export const FISH_BUBBLE_INTERVAL_MIN_MS = 3000; // re-rolled after every emission (including the hunger-triggered one), so intervals never resync across fish. Cut from 5-20s to 3-10s per direct request, "increase the amount of bubbles from fish."
+export const FISH_BUBBLE_INTERVAL_MAX_MS = 10000;
 // Per direct spec ("a small chance after .5 seconds for a second bubble
 // with a non-identical size/direction as the first") — rolled once per
 // FIRST bubble emitted (never for the hunger-triggered one, which is
@@ -2702,6 +2708,23 @@ export const FISH_HEALTH_REGEN_DURATION_MS = 5000;
 // two can't be confused for one another even when both are on screen at once.
 export const FISH_HEALTH_BAR_WIDTH = 22;
 export const FISH_HEALTH_BAR_HEIGHT = 3.5;
+
+// ---- Fish death animation ----
+// Per direct request: a fish no longer just vanishes the instant it starves
+// or an alien finishes it off — it plays a short death animation first (see
+// Entities.js's updateDyingFish, called from updateFish once fish.dying is
+// set at either death-trigger site). It turns fully gray immediately (via
+// main.js's render passing grayed=1 while fish.dying), drifts gently upward
+// toward the tank's ceiling for FISH_DEATH_RISE_DURATION_MS, then fades out
+// over the following FISH_DEATH_FADE_DURATION_MS before the entity is
+// actually removed from state.level.entities — the rise itself continues
+// unbroken through the fade too, so the whole thing reads as one continuous
+// drift rather than a stop-then-fade.
+export const FISH_DEATH_RISE_DURATION_MS = 2500;
+export const FISH_DEATH_FADE_DURATION_MS = 1200;
+export const FISH_DEATH_TOTAL_DURATION_MS = FISH_DEATH_RISE_DURATION_MS + FISH_DEATH_FADE_DURATION_MS;
+export const FISH_DEATH_RISE_SPEED = 16; // px/sec — a slow, limp upward drift, not a swim
+export const FISH_DEATH_CEILING_MARGIN_PX = 20; // how close to the world's true top edge (y=0) it's allowed to drift, same "small margin, not flush against the glass" idea as the tank's own item-boundary clamps
 
 // Hit feedback + death animation, per direct request ("aliens flash red and
 // bounce when they take damage, which a visual animation when they get

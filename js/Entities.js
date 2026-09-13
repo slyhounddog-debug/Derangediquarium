@@ -120,6 +120,9 @@ import {
   ALIEN_FISH_DAMAGE_INTERVAL_MS,
   BOSS_FISH_DAMAGE_PER_SEC,
   FISH_HEALTH_REGEN_DURATION_MS,
+  FISH_DEATH_TOTAL_DURATION_MS,
+  FISH_DEATH_RISE_SPEED,
+  FISH_DEATH_CEILING_MARGIN_PX,
   ALIEN_DNA_RADIUS,
   ALIEN_DNA_COLOR,
   ALIEN_DNA_MAX_ON_SCREEN,
@@ -160,7 +163,7 @@ import { stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemFo
 // Sound is a fire-and-forget side effect at the moment something already
 // happened — the same pattern this file already uses for floatingTexts/
 // notifications, just for audio instead of a visual/text readout.
-import { playPurchase, playFoodPlace, playEat, playFishDeath, playCoinBank, playTankPoint, playProductionBlocked, playHunger, playAlienHit, playAlienDeath, playDispense, playGrowToMid, playGrowToAdult } from './Sound.js';
+import { playPurchase, playFoodPlace, playEat, playFishDeath, playFishKilledByAlien, playCoinBank, playTankPoint, playProductionBlocked, playHunger, playAlienHit, playAlienDeath, playDispense, playGrowToMid, playGrowToAdult } from './Sound.js';
 
 let _nextId = 1;
 function nextId() {
@@ -246,7 +249,7 @@ export function computeTheoreticalGoldPerMinute(state) {
   const dirtyIntervalMultiplier = 1 + stress * (CLEANLINESS_STRESS_MAX_INTERVAL_MULTIPLIER - 1);
   let total = 0;
   for (const fish of state.level.entities) {
-    if (fish.type !== 'fish' || fish.alienNearby) continue; // a fish fully blocked by alien proximity contributes nothing, same as a real drop attempt would
+    if (fish.type !== 'fish' || fish.alienNearby || fish.dying) continue; // a fish fully blocked by alien proximity (or already dying — see updateDyingFish) contributes nothing, same as a real drop attempt would
     const def = SPECIES[fish.speciesId];
     if (!def.behavior.includes('FEEDER')) continue; // only coin-producing species/hybrids count
     const stageDef = def.growthStages[fish.stage];
@@ -477,7 +480,7 @@ function findNearestFishWithin(entities, x, y, radius) {
   let best = null;
   let bestDistSq = radius * radius;
   for (const e of entities) {
-    if (e.type !== 'fish') continue;
+    if (e.type !== 'fish' || e.dying) continue; // a dying fish (see updateDyingFish) is already dead for gameplay purposes — not a valid chase target
     const dx = e.x - x;
     const dy = e.y - y;
     const d = dx * dx + dy * dy;
@@ -752,7 +755,7 @@ function updateAlien(alien, state, dtMs) {
   if (!stillProtected && alien.fishDamageTimerMs <= 0) {
     let dealtDamage = false;
     for (const entity of state.level.entities) {
-      if (entity.type !== 'fish' || entity.hp <= 0) continue;
+      if (entity.type !== 'fish' || entity.hp <= 0 || entity.dying) continue; // a starved fish can still have hp > 0 while it's dying (see updateDyingFish) — already dead for gameplay purposes, so it's not a valid target either
       const fishDef = SPECIES[entity.speciesId];
       const fishRadius = FISH_BASE_SIZE * fishDef.growthStages[entity.stage].scale;
       const dist = Math.hypot(entity.x - alien.x, entity.y - alien.y);
@@ -815,6 +818,9 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
     totalFeeds,
     stage,
     maxHp, // set by growth stage (baby/mid/adult) — see maxHpForStage, re-applied (with a full heal) on every stage transition in updateFish
+    dying: false, // set true the instant this fish would otherwise be removed (starved, or hp hit 0 from an alien) — see beginFishDeathAnimation/updateDyingFish. While true, every other branch in updateFish is skipped entirely; main.js's render reads it to draw the fish fully gray and fading instead of normally
+    deathElapsedMs: 0, // counts up only while dying — see updateDyingFish
+    deathFacing: 1, // frozen facing direction at the moment death began — see beginFishDeathAnimation
     hp: maxHp, // starts full; damaged by a living alien touching it (updateAlien), regenerates over FISH_HEALTH_REGEN_DURATION_MS once no aliens are alive at all (updateFish) — never regenerates while any alien is alive anywhere. main.js's render only draws a health bar while hp < maxHp, per direct request ("health bars only when they are damaged").
     dropTimer: 0,
     poopTimer: 0, // WASTE_POOP_INTERVAL_MS — a non-Scavenger fish poops out Waste directly on this timer, see updateFish
@@ -824,6 +830,7 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
     powerTextTimerMs: 0, // pure-Generator only — counts up to 1000ms before flushing powerTextAccumMw into a floating text
     researchTickIndex: 0, // pure-Researcher only — which tenth of the current brew cycle's "+0.1" progress bubbles have already fired, see updateFish's RESEARCHER branch
     hungerCriticalSfxPlayed: false, // plays playHunger() once per crossing into HUNGER_CRITICAL_THRESHOLD, reset once hunger drops back below it (e.g. after eating) — see updateFish
+    hungerSeekBubbleEmitted: false, // guaranteed mouth bubble once per crossing into HUNGER_SEEK_THRESHOLD (the first "!" stage), reset once hunger drops back below it — see updateFish
     // Mouth bubbles, per direct request — counts DOWN, re-rolled to a fresh
     // random FISH_BUBBLE_INTERVAL_MIN/MAX_MS span every time it fires
     // (including the guaranteed hunger-triggered one below), seeded to a
@@ -1168,7 +1175,7 @@ export function spawnFishCheat(state, speciesId, x, y, grown) {
 export function countLivingFishOfSpecies(state, speciesId) {
   let n = 0;
   for (const entity of state.level.entities) {
-    if (entity.type === 'fish' && entity.speciesId === speciesId) n++;
+    if (entity.type === 'fish' && entity.speciesId === speciesId && !entity.dying) n++;
   }
   return n;
 }
@@ -1214,7 +1221,7 @@ export function findFishAt(state, worldX, worldY, excludeId = null) {
   let best = null;
   let bestDist = Infinity;
   for (const entity of state.level.entities) {
-    if (entity.type !== 'fish' || entity.id === excludeId) continue;
+    if (entity.type !== 'fish' || entity.id === excludeId || entity.dying) continue; // a dying fish (see updateDyingFish) can't be dragged/toggled/merged — it's already dead, just visually fading out
     const def = SPECIES[entity.speciesId];
     const size = FISH_BASE_SIZE * def.growthStages[entity.stage].scale;
     const hitRadius = size * FISH_DRAG_HIT_RADIUS_FRACTION;
@@ -1260,7 +1267,7 @@ export function findFishForPipetteAt(state, worldX, worldY) {
 // species, Adult, and not already at the combining cap (a Tier-4 fish has
 // nothing left to combine into).
 export function isCombinableFish(state, fish) {
-  if (!fish || fish.type !== 'fish') return false;
+  if (!fish || fish.type !== 'fish' || fish.dying) return false; // a dying fish (see updateDyingFish) can't be merged — it's already dead
   if (!ECONOMY_SPECIES_IDS.includes(fish.speciesId)) return false;
   const def = SPECIES[fish.speciesId];
   if (fish.stage !== def.growthStages.length - 1) return false; // Adult only
@@ -1386,7 +1393,7 @@ export function createHybridFish(state, economyFish, utilitySpeciesId) {
 // fish can always be PICKED UP as a potential splice source; whether the
 // actual drop succeeds depends entirely on that per-pair check.
 export function isSpliceSource(state, fish) {
-  if (!fish || fish.type !== 'fish') return false;
+  if (!fish || fish.type !== 'fish' || fish.dying) return false; // a dying fish (see updateDyingFish) can't be spliced — it's already dead
   if (!UTILITY_SPECIES_IDS.includes(fish.speciesId)) return false;
   const def = SPECIES[fish.speciesId];
   return fish.stage === def.growthStages.length - 1;
@@ -1394,7 +1401,7 @@ export function isSpliceSource(state, fish) {
 
 export function canSpliceFish(state, utilityFish, targetFish) {
   if (!targetFish || !utilityFish || utilityFish.id === targetFish.id) return false;
-  if (!isSpliceSource(state, utilityFish) || targetFish.type !== 'fish') return false;
+  if (!isSpliceSource(state, utilityFish) || targetFish.type !== 'fish' || targetFish.dying) return false;
   const targetDef = SPECIES[targetFish.speciesId];
   // Splicing requires an adult target — see CLAUDE.md's Gene-Splicing note:
   // a feeder-based hybrid's carried-over coin value is read off the
@@ -2055,10 +2062,47 @@ function awardTankPoint(state, fish) {
   }
 }
 
-// Returns false if the fish should be removed (starved, or killed by an
-// alien). anyAlienAlive is computed once per tick by updateEntities (a
-// single O(entities) scan, not repeated per fish) — see its own call site.
+// Starts the death animation instead of removing the fish outright, per
+// direct request ("a death animation when the fish starves or gets killed
+// by an alien where it turns gray and floats towards the ceiling for a few
+// seconds before fading away and then deleting the entity"). The fish stays
+// in state.level.entities — updateDyingFish (below) takes over its
+// per-tick behavior entirely from here on, and main.js's render checks
+// fish.dying to draw it fully gray/fading instead of normally. Zeroing vx
+// here (vy is set by updateDyingFish itself, every tick) stops whatever
+// normal swimming motion it had at the moment of death.
+function beginFishDeathAnimation(fish) {
+  fish.dying = true;
+  fish.deathElapsedMs = 0;
+  fish.deathFacing = fish.vx >= 0 ? 1 : -1; // frozen at whichever way it was last actually facing — vx itself is zeroed right after, so main.js's render can't derive this from vx any more once dying
+  fish.vx = 0;
+}
+
+// Called instead of the rest of updateFish once fish.dying is set — a
+// slow, limp drift up toward the tank's ceiling (continuing unbroken
+// through the fade, so it reads as one continuous motion rather than
+// stopping first) for FISH_DEATH_TOTAL_DURATION_MS total, at which point
+// this returns false so updateEntities' filter actually removes it. The
+// fade itself is purely a render-side concern (main.js reads
+// fish.deathElapsedMs against FISH_DEATH_RISE_DURATION_MS/
+// FISH_DEATH_FADE_DURATION_MS) — nothing here needs to know about it.
+function updateDyingFish(fish, dtMs) {
+  fish.deathElapsedMs += dtMs;
+  fish.vy = -FISH_DEATH_RISE_SPEED;
+  fish.y = Math.max(FISH_DEATH_CEILING_MARGIN_PX, fish.y - FISH_DEATH_RISE_SPEED * (dtMs / 1000));
+  return fish.deathElapsedMs < FISH_DEATH_TOTAL_DURATION_MS;
+}
+
+// Returns false if the fish should be removed (its death animation has
+// finished playing — see updateDyingFish). anyAlienAlive is computed once
+// per tick by updateEntities (a single O(entities) scan, not repeated per
+// fish) — see its own call site.
 function updateFish(fish, state, dtMs, anyAlienAlive) {
+  // Once dying, every other branch below is skipped entirely — a fish
+  // that's already dead for gameplay purposes just animates out. See
+  // beginFishDeathAnimation/updateDyingFish above.
+  if (fish.dying) return updateDyingFish(fish, dtMs);
+
   const def = SPECIES[fish.speciesId];
   const dt = dtMs / 1000;
 
@@ -2067,12 +2111,13 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
   // elsewhere (updateAlien); this just checks the result. Checked first,
   // before anything else runs, so a fish that died from a hit landed
   // earlier this same tick (alien processed before fish in this tick's
-  // entities.filter pass) is removed immediately rather than lingering
-  // an extra frame at 0 hp.
+  // entities.filter pass) starts its death animation immediately rather
+  // than lingering an extra frame at 0 hp first.
   if (fish.hp <= 0) {
-    playFishDeath();
+    playFishKilledByAlien(); // distinct from playFishDeath (starvation) below — per direct request
     state.level.fishDiedCount += 1; // end-game stats modal only — see main.js's showGameOverModal; deliberately the same counter starvation uses, since it's "how many fish died," not "how many starved"
-    return false;
+    beginFishDeathAnimation(fish);
+    return true; // stays in state.level.entities for its death animation — see updateDyingFish
   }
 
   // Regeneration, per direct spec: a damaged fish heals back to full over
@@ -2128,7 +2173,8 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
       state.level.tutorialFlags.firstFishDied = true;
       pushStoryNotification(state, FIRST_FISH_DEATH_MESSAGE);
     }
-    return false; // starves if hunger maxes out
+    beginFishDeathAnimation(fish);
+    return true; // stays in state.level.entities for its death animation — see updateDyingFish (starves if hunger maxes out)
   }
 
   // Plays playHunger() once per crossing INTO the second, more urgent
@@ -2151,6 +2197,20 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
     }
   } else {
     fish.hungerCriticalSfxPlayed = false;
+  }
+
+  // Per direct request, also ALWAYS let out a bubble the instant a fish
+  // hits the FIRST hunger stage (HUNGER_SEEK_THRESHOLD, the "!" indicator)
+  // — same edge-triggered shape as the critical-stage bubble above, its own
+  // independent flag so both stages each guarantee exactly one bubble per
+  // crossing, not just the second stage.
+  if (fish.hunger >= HUNGER_SEEK_THRESHOLD) {
+    if (!fish.hungerSeekBubbleEmitted) {
+      fish.hungerSeekBubbleEmitted = true;
+      emitFishBubble(state, fish, def);
+    }
+  } else {
+    fish.hungerSeekBubbleEmitted = false;
   }
 
   // Mouth bubbles — a small, purely decorative bubble every 5-20 seconds

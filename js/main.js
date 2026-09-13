@@ -17,6 +17,7 @@ import {
   CHEAT_GRANT_AMOUNT,
   CHEAT_TANK_POINTS_GRANT_AMOUNT,
   CHEAT_SCIENCE_GRANT_AMOUNT,
+  CHEAT_SCIENCE_GREEN_GRANT_AMOUNT,
   SIM_DT_MS,
   MAX_FRAME_SKIP,
   SEABED_FLOOR_Y,
@@ -57,6 +58,8 @@ import {
   ALIEN_HEALTH_BAR_HEIGHT,
   FISH_HEALTH_BAR_WIDTH,
   FISH_HEALTH_BAR_HEIGHT,
+  FISH_DEATH_RISE_DURATION_MS,
+  FISH_DEATH_FADE_DURATION_MS,
   ALIEN_COUNTDOWN_START_MS,
   ALIEN_MUSIC_BATTLE_LEAD_MS,
   ALIEN_PORTAL_OPEN_MS,
@@ -495,7 +498,7 @@ function isMergeDragTutorialStepActive(state) {
 // falls through to whatever the currently selected tool's click handler
 // already does, unchanged from before this mechanic existed.
 let draggedItemId = null;
-let draggedItemType = null; // 'coin' | 'food' | 'waste' | 'science' — which item is currently held, so the waste-only city clamp below and the tutorial's ghost-Waste check both still target Waste specifically
+let draggedItemType = null; // 'coin' | 'food' | 'waste' | 'science' — which item is currently held, so the tutorial's ghost-Waste check can still target Waste specifically (no location-based clamp reads this any more — every item type can now be dragged anywhere in the tank)
 let itemDragStartSx = 0;
 let itemDragStartSy = 0;
 let itemDragMoved = false; // set once at mouseup — read (and cleared) by the click handler right after
@@ -536,11 +539,11 @@ input.mouseDownHandlers.push((sx, sy) => {
   let bestDistSq = Infinity;
   for (const item of state.level.items) {
     if (!DRAGGABLE_ITEM_TYPES.includes(item.type)) continue;
-    // Waste keeps its own pre-existing "city only" restriction (a past
-    // direct request, unrelated to this generalization) — Coin/Food/Science
-    // never had one and are draggable wherever they exist, open water
-    // included, since that's where most of their lifetime is actually spent.
-    if (item.type === 'waste' && world.y < SEABED_FLOOR_Y) continue;
+    // Every draggable item type is grabbable wherever it exists, open water
+    // or the city alike — per direct request ("there doesn't need to be any
+    // objects that can only be dragged in certain spots anymore"), removing
+    // Waste's old, narrower "city only" carve-out so every item follows the
+    // exact same rule.
     const distSq = (item.x - world.x) ** 2 + (item.y - world.y) ** 2;
     const hitRadius = item.radius * ITEM_DRAG_CLICK_RADIUS_MULTIPLIER;
     if (distSq <= hitRadius * hitRadius && distSq < bestDistSq) { best = item; bestDistSq = distSq; }
@@ -653,12 +656,13 @@ function updateItemDrag() {
   // the exact ones Entities.js's clampItemToWorldWalls/Grid.js's
   // sweepVertical already enforce for ordinary (non-dragged) physics, keeps
   // a dragged item out of both for free, with no separate screen-space
-  // check needed. Waste keeps its own additional, tighter "city only" floor
-  // (can't be dragged back up above SEABED_FLOOR_Y) on top of this.
+  // check needed. No item type gets any additional, narrower clamp on top of
+  // this any more — per direct request, Waste's old "can't be dragged back
+  // up above SEABED_FLOOR_Y" floor is gone, so every item can be dragged
+  // anywhere in the tank, city or open water alike.
   const margin = dragged.radius || 0;
-  let clampedX = Math.min(Math.max(world.x, margin), WORLD_W - margin);
-  let clampedY = Math.min(Math.max(world.y, margin), WORLD_H - margin);
-  if (draggedItemType === 'waste') clampedY = Math.max(clampedY, SEABED_FLOOR_Y);
+  const clampedX = Math.min(Math.max(world.x, margin), WORLD_W - margin);
+  const clampedY = Math.min(Math.max(world.y, margin), WORLD_H - margin);
   dragged.x = clampedX;
   dragged.y = clampedY;
   dragged.resting = false;
@@ -737,6 +741,35 @@ function isFanAimingActive() {
   return fanAimingCell != null && state.ui.selectedTool === `build:${fanAimingCell.buildingId}`;
 }
 
+// Right-click-to-redo-angle — per direct request ("fans can be right
+// clicked to redo the angle of the fan when they are already placed, so
+// they don't have to be picked up"). A separate mechanism from the
+// placement-time two-click flow above (which places a brand-new tile) —
+// this one edits an ALREADY-PLACED Fan's own buildingData entry in place,
+// live, every frame it's active, so the cone/force everyone already reads
+// straight off data.angle updates immediately with zero extra plumbing.
+// Only reachable from the Food tool (see the right-click handler below),
+// matching where the hover tooltip icon shows — Demolish already owns
+// right-click for its own tool, and a build/fish/merge tool has its own
+// unrelated right-click-free interactions.
+let fanReaimKey = null; // "row,col" of the Fan currently being re-aimed, or null
+let fanReaimOriginalAngle = 0; // reverted to on Escape-cancel — see the keydown handler
+
+// Called every tick from update() while a re-aim is active — writes the new
+// angle directly into the Fan's real buildingData entry every frame it's
+// held, so the cone/force everyone already reads off data.angle (Grid.js's
+// computeFanForce, renderFanIndicators) updates live with zero ghost/
+// preview mechanism needed. Bails cleanly (clearing fanReaimKey) if the
+// tile got demolished out from under an in-progress re-aim.
+function updateFanReaim() {
+  if (fanReaimKey == null || !input.mouse.inside || state.ui.paused) return;
+  const data = state.level.buildingData[fanReaimKey];
+  if (!data) { fanReaimKey = null; return; }
+  const [rowStr, colStr] = fanReaimKey.split(',');
+  const hoverWorld = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
+  data.angle = angleFromTileToPoint(Number(colStr), Number(rowStr), hoverWorld.x, hoverWorld.y);
+}
+
 // Per direct request: a Build or Demolish tool can't do anything in open
 // water anyway — every building still has to be placed within the seabed
 // band, and there's nothing to demolish up there — so the cursor icon,
@@ -761,6 +794,13 @@ input.clickHandlers.push((sx, sy) => {
   if (fishDragArmed) { fishDragArmed = false; return; } // this click followed a fish-combine drag gesture — don't also bank/feed/mound-click at the release point
   if (itemDragMoved) { itemDragMoved = false; return; } // this click followed a genuine item-drag gesture — don't also bank/feed/place at the release point. An unmoved press-release leaves itemDragMoved false, so a plain click on a Coin/Science item still banks it normally
   if (recipeDragMoved) { recipeDragMoved = false; return; } // this click followed a genuine Manufacturer/Power Plant recipe-copy drag — don't also open the recipe pop-up at the release point
+  // A right-click already armed a re-aim (fanReaimKey) — updateFanReaim has
+  // been live-writing the new angle into the Fan's own buildingData every
+  // tick since, so a left-click anywhere just confirms it and exits,
+  // mirroring the placement flow's own "click 2 confirms whatever angle is
+  // currently showing" behavior. Checked before everything else below so a
+  // confirm click can never also bank a coin/feed/place under it.
+  if (fanReaimKey != null) { fanReaimKey = null; return; }
   const world = screenToWorld(sx, sy, state.camera);
 
   // Alien Invasion: clicking a living alien always does ALIEN_CLICK_DAMAGE,
@@ -958,6 +998,26 @@ input.rightClickHandlers.push((sx, sy) => {
   removeTile(state, col, row);
 });
 
+// Right-click-to-redo-angle — see fanReaimKey's own comment above. Only
+// arms from the Food tool (matching the hover tooltip's own gating below)
+// and only if nothing's already being re-aimed — a second right-click
+// while one's in progress does nothing extra; a left-click is what
+// confirms it (see the click handler's own fanReaimKey check).
+input.rightClickHandlers.push((sx, sy) => {
+  if (state.ui.paused || state.level.tutorialFlow) return;
+  if (fanReaimKey != null) return;
+  if (state.ui.selectedTool !== 'food') return;
+  const world = screenToWorld(sx, sy, state.camera);
+  const { col, row } = worldToTile(world.x, world.y);
+  const tile = getTile(state.level.grid, col, row);
+  if (!FAN_BUILDING_IDS.includes(tile)) return;
+  const key = `${row},${col}`;
+  const data = state.level.buildingData[key];
+  if (!data) return;
+  fanReaimKey = key;
+  fanReaimOriginalAngle = data.angle;
+});
+
 // Build-mode drag-placement: while the left button is held and a build tool
 // is selected, place a tile under the cursor once per tile cell entered
 // (not once per physics tick) so dragging across several cells lays a row
@@ -1034,6 +1094,15 @@ input.keydownHandlers.push((e) => {
     if (isBuildingInfoMenuOpen()) { closeBuildingInfoMenu(); return; }
     if (isLabPurchaseModalOpen()) { closeLabPurchaseModal(); return; }
     if (isLabMenuOpen()) { closeLabMenu(); return; }
+    if (fanReaimKey != null) {
+      // Cancel a re-aim in progress, reverting to whatever angle the Fan
+      // had before the right-click that armed it — unlike a confirm click,
+      // which just leaves updateFanReaim's live-written angle in place.
+      const data = state.level.buildingData[fanReaimKey];
+      if (data) data.angle = fanReaimOriginalAngle;
+      fanReaimKey = null;
+      return;
+    }
     if (isFanAimingActive()) {
       fanAimingCell = null; // cancel the pending aim...
       cancelActiveTool(state); // ...and the armed Fan tool itself, back to Food — a Fan is still a "building selected" per direct request
@@ -1059,11 +1128,12 @@ input.keydownHandlers.push((e) => {
     case 'NumpadSubtract': // - — slower / pause at 0x
       state.debug.timeScaleIndex = Math.max(0, state.debug.timeScaleIndex - 1);
       break;
-    case 'KeyM': // grant $10,000, 20 Tank Points, and 500 Science, for testing the Mound/Tank Upgrades/Science Lab without grinding
+    case 'KeyM': // grant $10,000, 20 Tank Points, 500 Science, and 500 Green Science, for testing the Mound/Tank Upgrades/Science Lab without grinding
       state.level.money += CHEAT_GRANT_AMOUNT;
       state.level.tankPoints.total += CHEAT_TANK_POINTS_GRANT_AMOUNT;
       state.level.tankPoints.available += CHEAT_TANK_POINTS_GRANT_AMOUNT;
       state.level.science += CHEAT_SCIENCE_GRANT_AMOUNT;
+      state.level.scienceGreen += CHEAT_SCIENCE_GREEN_GRANT_AMOUNT; // per direct request, so Green-Science-gated Lab nodes/recipes can be tested without grinding a real Bio-Combuster/Manufacturer cycle
       break;
     case 'KeyG': { // spawn selected species at cursor; Shift+G spawns fully grown
       const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
@@ -1488,6 +1558,7 @@ function update(dtMs) {
   updateFishDrag();
   updateItemDrag();
   updateRecipeDrag();
+  updateFanReaim();
   updateStoryTriggers(state);
   state.level.elapsed += dtMs;
 
@@ -2265,7 +2336,7 @@ function render() {
     let nearestFish = null;
     let nearestDist = Infinity;
     for (const other of state.level.entities) {
-      if (other.type !== 'fish') continue;
+      if (other.type !== 'fish' || other.dying) continue; // a dying fish (see updateDyingFish) is already dead — not something a still-living alien should gaze toward
       const d = Math.hypot(other.x - alien.x, other.y - alien.y);
       if (d < nearestDist) { nearestDist = d; nearestFish = other; }
     }
@@ -2323,6 +2394,26 @@ function render() {
     const pos = worldToScreen(fish.x, fish.y, state.camera);
     if (pos.x < -60 || pos.x > canvas.width + 60 || pos.y < -60 || pos.y > canvas.height + 60) continue; // cull offscreen
     const def = SPECIES[fish.speciesId];
+
+    // Death animation — per direct request, a dying fish (starved, or
+    // killed by an alien; see Entities.js's beginFishDeathAnimation/
+    // updateDyingFish) skips every bit of normal rendering below (eye
+    // tracking, hunger sickness tint, Mutagen glow, the health bar) in
+    // favor of a plain fully-gray body that fades out over the animation's
+    // final FISH_DEATH_FADE_DURATION_MS — drawn with the same drawFish call
+    // every other fish uses (grayed=1), just wrapped in a fading
+    // globalAlpha so it's a strict subset of that function's existing
+    // rendering, not a second bespoke fish drawing.
+    if (fish.dying) {
+      const fadeElapsed = fish.deathElapsedMs - FISH_DEATH_RISE_DURATION_MS;
+      const alpha = fadeElapsed <= 0 ? 1 : Math.max(0, 1 - fadeElapsed / FISH_DEATH_FADE_DURATION_MS);
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      drawFish(ctx, pos.x, pos.y, fish.speciesId, fish.stage, fish.deathFacing, fish.tailPhase, null, fish.starTier || 1, 0, 1);
+      ctx.restore();
+      continue;
+    }
+
     const size = FISH_BASE_SIZE * def.growthStages[fish.stage].scale;
     const facing = fish.vx >= 0 ? 1 : -1;
     const isFullyGrown = fish.stage === def.growthStages.length - 1;
@@ -2719,6 +2810,34 @@ function render() {
     ctx.textAlign = 'center';
     ctx.fillText(state.ui.buildErrorText, input.mouse.x, input.mouse.y - 22);
     ctx.restore();
+  }
+
+  // Right-click-to-redo-angle hover hint — per direct request ("when you
+  // hover over a fan on the food tool, have a right click tooltip icon show
+  // up above the cursor"). Purely discoverability; the actual mechanic
+  // lives in fanReaimKey/updateFanReaim above. Hidden once a re-aim is
+  // already in progress — the cone visibly following the cursor is already
+  // enough feedback at that point.
+  if (fanReaimKey == null && hoverEffectiveTool === 'food' && input.mouse.inside && !state.ui.paused) {
+    const { col: hoverCol, row: hoverRow } = worldToTile(hoverWorld.x, hoverWorld.y);
+    const hoverTile = getTile(state.level.grid, hoverCol, hoverRow);
+    if (FAN_BUILDING_IDS.includes(hoverTile)) {
+      const bubbleY = input.mouse.y - 30;
+      ctx.save();
+      ctx.globalAlpha = 0.92;
+      ctx.fillStyle = 'rgba(20, 20, 30, 0.8)';
+      ctx.beginPath();
+      ctx.roundRect(input.mouse.x - 15, bubbleY - 13, 30, 22, 8);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+      ctx.font = '13px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('🖱️', input.mouse.x, bubbleY - 1);
+      ctx.restore();
+    }
   }
 
   // The cinematic first-alien intro's spotlight is drawn by UI.js's

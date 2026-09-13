@@ -67,7 +67,7 @@ import { getTile, worldToTile, getBuildingCost, FAN_STATS, hasAnyBuildingPlaced,
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
-import { playUpgrade, setMusicVolume, setSfxVolume, getMusicVolume, getSfxVolume, playPanelOpen, playPanelClose, triggerBossMusic } from './Sound.js';
+import { playUpgrade, setMusicVolume, setSfxVolume, getMusicVolume, getSfxVolume, playPanelOpen, playPanelClose, triggerBossMusic, playInsufficientFunds } from './Sound.js';
 import { hasSaveGame, saveGame, loadSaveGame } from './Save.js';
 
 const MOUND_MENU_GAP_PX = 12; // screen px of breathing room between the popup's bottom edge and the Mound's top edge
@@ -2548,6 +2548,7 @@ function playFlash(el, className) {
 // needs to pick between several — it always targets els.money directly.
 export function flashMoneyInsufficient(state) {
   playFlash(els.money, 'flash-spend');
+  playInsufficientFunds(); // per direct request — a failed purchase attempt now has a real "denied" sound, not just a silent shake
 }
 
 // Bright blue at 100% cleanliness, fading to olive green (WASTE_COLOR's own
