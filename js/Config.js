@@ -2170,7 +2170,12 @@ export const SCIENCE_LAB_UPGRADES = {
     requires: ['science_cap_5'],
     grants: {},
   },
-  // ---- The end-game secret: Mother Alien Fish ----
+  // ---- The end-game secret: Escape the Fish Tank (internally still
+  // "Mother Alien Fish" throughout the rest of the codebase — the boss
+  // entity/mechanic keeps that name; only this node's own display name and
+  // description changed, per direct request, same "keep the identifier,
+  // change what's shown" precedent every other rename in this project
+  // follows) ----
   // Per direct spec, a genuine mystery node — `mystery: true` (read by
   // UI.js's buildLabTree/refreshLabTree/openLabPurchaseModal) hides its own
   // name/icon/cost/description behind a plain "???" for as long as its
@@ -2179,19 +2184,20 @@ export const SCIENCE_LAB_UPGRADES = {
   // node gated behind Green Science Tech (directly or transitively —
   // power_plant_science and bio_refinery still are, though the old separate
   // recipe_green_science node this list used to also include is gone now,
-  // merged into green_science_tech itself; hybrid_catalyst_fish no longer
-  // requires green_science_tech transitively either, so it's listed here in
-  // its own right) plus
-  // Bubble Cap 50, per spec ("everything that's locked behind the green
-  // science node purchased first, and the bubble cap 50"). Buying it doesn't
-  // grant a species/building/scienceCapLevel like every other node — its
-  // `grants.triggersBossFight` is a special one-off flag UI.js's
-  // buyLabUpgrade checks for and hands off to main.js's startBossSequence
-  // instead of the normal grant-application path.
+  // merged into green_science_tech itself) plus Bubble Cap 50, per spec
+  // ("everything that's locked behind the green science node purchased
+  // first, and the bubble cap 50"). Catalyst Fish (`hybrid_catalyst_fish`)
+  // used to also be a direct requirement here — removed per a later direct
+  // request, so the boss no longer depends on that specific hybrid at all.
+  // Buying it doesn't grant a species/building/scienceCapLevel like every
+  // other node — its `grants.triggersBossFight` is a special one-off flag
+  // UI.js's buyLabUpgrade checks for and hands off to main.js's
+  // startBossSequence instead of the normal grant-application path.
   mother_alien_fish: {
-    id: 'mother_alien_fish', name: 'Mother Alien Fish', icon: '👹', mystery: true,
+    id: 'mother_alien_fish', name: 'Escape the Fish Tank', icon: '👹', mystery: true,
+    description: 'Win the game! Definitely no need to be loaded on turret power. *Glub**Glub* Thats how you wink as a fish.',
     scienceCost: 250, scienceGreenCost: 100, goldCost: 50000,
-    requires: ['green_science_tech', 'power_plant_science', 'bio_refinery', 'hybrid_catalyst_fish', 'science_cap_5'],
+    requires: ['green_science_tech', 'power_plant_science', 'bio_refinery', 'science_cap_5'],
     grants: { triggersBossFight: true },
   },
 };
@@ -2653,7 +2659,12 @@ export const ALIEN_FIRST_WAVE_TIP_MESSAGE = "Aliens incoming! Click 'em for 1 da
 // per a direct follow-up request so the reveal message posts right as the
 // music finishes fading OUT (not after the boss track has already faded
 // back in), leaving a genuine stretch of silence before the boss music
-// starts:
+// starts. Beat durations were rebalanced once more in a later follow-up
+// (silence cut, post-music wait and the white fade-in both extended) so the
+// boss track gets more real playing time before the screen turns white —
+// the shape below and every constant/comment beneath it already reflect
+// that latest pass, not the original 5s-silence/4s-post-wait/3s-white-fade
+// version:
 //   [0, BOSS_MUSIC_FADE_OUT_MS)                        — Game/Battle fade OUT
 //                                                        (Sound.js's
 //                                                        triggerBossMusic)
@@ -2679,13 +2690,13 @@ export const ALIEN_FIRST_WAVE_TIP_MESSAGE = "Aliens incoming! Click 'em for 1 da
 export const BOSS_MUSIC_FADE_OUT_MS = 3000; // "3 second fade out"
 export const BOSS_INTRO_MESSAGE_AT_MS = BOSS_MUSIC_FADE_OUT_MS; // "then the chat message" — right as the fade-out finishes, not after the boss track has already faded back in
 export const BOSS_INTRO_MESSAGE = 'Seems like something was supposed to happen...';
-export const BOSS_SILENCE_WAIT_MS = 5000; // "then a 5 second wait" — this IS the "5 seconds of silence" called out explicitly: Game/Battle have already faded to 0 and Boss hasn't started fading in yet
-export const BOSS_MUSIC_FADE_IN_START_MS = BOSS_INTRO_MESSAGE_AT_MS + BOSS_SILENCE_WAIT_MS; // 3000 + 5000 = 8000
+export const BOSS_SILENCE_WAIT_MS = 3000; // cut from 5000 per direct request ("reduce the time on the silence to 3 seconds") — Game/Battle have already faded to 0 and Boss hasn't started fading in yet
+export const BOSS_MUSIC_FADE_IN_START_MS = BOSS_INTRO_MESSAGE_AT_MS + BOSS_SILENCE_WAIT_MS; // 3000 + 3000 = 6000
 export const BOSS_MUSIC_FADE_IN_MS = 1000; // "then a 1 second song fade in"
-export const BOSS_POST_MUSIC_WAIT_MS = 4000; // "then a 4 second wait"
-export const BOSS_WHITE_FADE_IN_START_MS = BOSS_MUSIC_FADE_IN_START_MS + BOSS_MUSIC_FADE_IN_MS + BOSS_POST_MUSIC_WAIT_MS; // 8000 + 1000 + 4000 = 13000
-export const BOSS_WHITE_FADE_IN_MS = 3000; // "the screen goes white over 3 seconds" — unchanged value, still 3s
-export const BOSS_SPAWN_MS = BOSS_WHITE_FADE_IN_START_MS + BOSS_WHITE_FADE_IN_MS; // 13000 + 3000 = 16000 — "a total of 16 seconds now," matches exactly
+export const BOSS_POST_MUSIC_WAIT_MS = 5000; // raised from 4000 per direct request ("increase the wait after the fade in on the boss music to 5 seconds before the fade to white starts") — so the boss song has longer to play before the white fade-in starts
+export const BOSS_WHITE_FADE_IN_START_MS = BOSS_MUSIC_FADE_IN_START_MS + BOSS_MUSIC_FADE_IN_MS + BOSS_POST_MUSIC_WAIT_MS; // 6000 + 1000 + 5000 = 12000
+export const BOSS_WHITE_FADE_IN_MS = 4000; // raised from 3000 per direct request ("increase the time the screen fades to white... to 4 seconds, so the boss song has longer to play")
+export const BOSS_SPAWN_MS = BOSS_WHITE_FADE_IN_START_MS + BOSS_WHITE_FADE_IN_MS; // 12000 + 4000 = 16000 — total unchanged at 16s, just redistributed among the beats per this follow-up request
 // "Then the white goes away and the boss appears" — no duration was given
 // for the white clearing itself (unchanged by this pass), so this stays a
 // deliberately short, snappy reveal (much quicker than the 3s fade-in)
