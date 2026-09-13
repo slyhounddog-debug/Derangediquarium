@@ -10,7 +10,7 @@
 // fire-and-forget side effect a caller triggers at the moment something
 // already happened.
 
-import { ALIEN_MUSIC_BATTLE_LEAD_MS, BOSS_MUSIC_FADE_OUT_MS, BOSS_MUSIC_FADE_IN_MS } from './Config.js';
+import { ALIEN_MUSIC_BATTLE_LEAD_MS, BOSS_MUSIC_FADE_OUT_MS, BOSS_MUSIC_FADE_IN_START_MS, BOSS_MUSIC_FADE_IN_MS } from './Config.js';
 
 let ctx = null;
 let musicGain = null;
@@ -527,11 +527,14 @@ export function setBattleMusicActive(active) {
 }
 
 // Called once, the instant the end-game boss upgrade is purchased (main.js's
-// bossFightTriggerPending handler, right as the 15-second reveal sequence
-// itself starts). Per direct request, this is now two SEQUENTIAL fades, not
-// one simultaneous crossfade — Game/Battle fade all the way out first, and
-// only once that's fully finished does Boss start fading in.
+// bossFightTriggerPending handler, right as the 16-second reveal sequence
+// itself starts). Per direct request, Game/Battle fade all the way out
+// first, then — after a genuine stretch of silence (Config.js's
+// BOSS_SILENCE_WAIT_MS, elapsed elsewhere in main.js's own timeline; this
+// function just has to hold Boss silent for that whole span) — Boss fades in
+// on its own, not overlapping either half of the transition.
 const BOSS_MUSIC_FADE_OUT_S = BOSS_MUSIC_FADE_OUT_MS / 1000;
+const BOSS_MUSIC_FADE_IN_START_S = BOSS_MUSIC_FADE_IN_START_MS / 1000;
 const BOSS_MUSIC_FADE_IN_S = BOSS_MUSIC_FADE_IN_MS / 1000;
 export function triggerBossMusic() {
   if (bossActive) return;
@@ -547,15 +550,16 @@ export function triggerBossMusic() {
   battleTrackGain.gain.setValueAtTime(battleTrackGain.gain.value, now);
   battleTrackGain.gain.linearRampToValueAtTime(0, now + BOSS_MUSIC_FADE_OUT_S);
   // Boss starts playing right away (silently) but only actually begins
-  // ramping up once the fade-out above has fully finished — a held
-  // setValueAtTime at the transition point is what keeps it silent for that
-  // whole first stretch rather than starting to ramp immediately alongside it.
+  // ramping up once BOSS_MUSIC_FADE_IN_START_S has fully elapsed — a held
+  // setValueAtTime at that point is what keeps it silent through the
+  // fade-out AND the following silent wait, rather than starting to ramp the
+  // instant the fade-out alone finishes.
   bossMusicEl.currentTime = 0;
   bossMusicEl.play().catch(() => {});
   bossTrackGain.gain.cancelScheduledValues(now);
   bossTrackGain.gain.setValueAtTime(0, now);
-  bossTrackGain.gain.setValueAtTime(0, now + BOSS_MUSIC_FADE_OUT_S);
-  bossTrackGain.gain.linearRampToValueAtTime(1, now + BOSS_MUSIC_FADE_OUT_S + BOSS_MUSIC_FADE_IN_S);
+  bossTrackGain.gain.setValueAtTime(0, now + BOSS_MUSIC_FADE_IN_START_S);
+  bossTrackGain.gain.linearRampToValueAtTime(1, now + BOSS_MUSIC_FADE_IN_START_S + BOSS_MUSIC_FADE_IN_S);
   // Game/Battle are paused for good once their own fade-out actually
   // finishes — not immediately, which would cut them off mid-ramp. Nothing
   // left to resync once they're stopped.

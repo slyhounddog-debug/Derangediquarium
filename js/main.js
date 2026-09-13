@@ -1413,10 +1413,11 @@ function isScrolledToBottom(state) {
 function updateBossSequence(state, dtMs) {
   if (state.level.bossPhase === 'intro_wait') {
     // The Lab itself was already closed by UI.js's buyLabUpgrade the instant
-    // the purchase happened; this drives the whole 15-second reveal that
+    // the purchase happened; this drives the whole 16-second reveal that
     // follows — see Config.js's own BOSS_* comment for the full timeline
-    // this is built from (sequential music fade-out-then-fade-in, chat
-    // message, wait, white fade-in, then finally the spawn itself).
+    // this is built from (music fade-out, chat message, a real silent wait,
+    // music fade-in, another wait, white fade-in, then finally the spawn
+    // itself).
     state.level.bossIntroTimerMs += dtMs;
     if (!state.level.bossIntroMessageShown && state.level.bossIntroTimerMs >= BOSS_INTRO_MESSAGE_AT_MS) {
       state.level.bossIntroMessageShown = true;
@@ -1506,8 +1507,8 @@ function update(dtMs) {
     state.level.bossPhase = 'intro_wait';
     state.level.bossIntroTimerMs = 0;
     state.level.bossIntroMessageShown = false;
-    // Per direct request, the music fade is now part of the 15-second
-    // reveal's own timeline (its first BOSS_MUSIC_FADE_OUT_MS +
+    // Per direct request, the music fade is now part of the 16-second
+    // reveal's own timeline (its first BOSS_MUSIC_FADE_IN_START_MS +
     // BOSS_MUSIC_FADE_IN_MS) rather than snapping instantly at the moment of
     // purchase — triggered here, right as that timeline actually starts, not
     // from UI.js's buyLabUpgrade.
