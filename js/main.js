@@ -86,10 +86,13 @@ import {
   ALIEN_EGG_COLOR,
   ALIEN_EGG_RING_COLOR,
   ALIEN_EGG_HATCH_MS,
-  BOSS_INTRO_WAIT_MS,
-  BOSS_SHAKE_DURATION_MS,
-  BOSS_SHAKE_MAGNITUDE_PX,
-  BOSS_FLASH_DURATION_MS,
+  BOSS_MUSIC_FADE_MS,
+  BOSS_INTRO_MESSAGE_AT_MS,
+  BOSS_INTRO_MESSAGE,
+  BOSS_WHITE_FADE_IN_MS,
+  BOSS_WHITE_FADE_IN_START_MS,
+  BOSS_SPAWN_MS,
+  BOSS_WHITE_FADE_OUT_MS,
   BOSS_DEFEATED_MODAL_DELAY_MS,
   TURRET_TUTORIAL_GOLD_GRANT,
   TURRET_TUTORIAL_GOLD_GRANT_MESSAGE,
@@ -99,7 +102,7 @@ import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop
 import { loadLevel, LEVELS } from './Levels.js';
 import { updateStoryTriggers } from './Systems.js';
 import { updateAmbience, renderAmbience } from './Ambience.js';
-import { resumeAudio, playAlienHit, setBattleMusicActive } from './Sound.js';
+import { resumeAudio, playAlienHit, setBattleMusicActive, triggerBossMusic } from './Sound.js';
 import {
   updateEntities,
   trySpawnFood,
@@ -120,6 +123,8 @@ import {
   isSpliceSource,
   canSpliceFish,
   spliceFish,
+  canSpliceOctopusWithAlien,
+  spliceOctopusWithAlien,
   createMotherAlienFish,
   spawnTurretTutorialWaste,
 } from './Entities.js';
@@ -427,6 +432,19 @@ input.mouseUpHandlers.push((sx, sy) => {
       advanceTutorialFlow(state, 'mergefish', 'drag');
     } else if (canSpliceFish(state, dragged, target)) {
       spliceFish(state, dragged, target);
+    }
+  } else if (dragged) {
+    // Xeno Octopus's own one-off splice target is an alien, not a fish —
+    // findFishAt (fish-only) never matches it, so this only runs as a
+    // fallback once no fish target was found, reusing the same hit-test
+    // radius the click-damage loop above already uses for aliens.
+    let alienTarget = null;
+    for (const entity of state.level.entities) {
+      if (entity.type !== 'alien' || entity.hp <= 0) continue;
+      if (Math.hypot(entity.x - world.x, entity.y - world.y) <= (entity.radius ?? ALIEN_RADIUS) * ALIEN_CLICK_RADIUS_MULTIPLIER) { alienTarget = entity; break; }
+    }
+    if (alienTarget && canSpliceOctopusWithAlien(state, dragged, alienTarget)) {
+      spliceOctopusWithAlien(state, dragged, alienTarget);
     }
   }
   draggedFishId = null;
@@ -1395,15 +1413,25 @@ function isScrolledToBottom(state) {
 // advance to the next one.
 function updateBossSequence(state, dtMs) {
   if (state.level.bossPhase === 'intro_wait') {
-    // "It will close the science lab, and wait 2 seconds before the screen
-    // shakes, goes white, and spawns the Mother Alien fish" — the Lab itself
-    // was already closed by UI.js's buyLabUpgrade the instant the purchase
-    // happened; this is purely the 2-second wait, then the shake+flash+spawn
-    // all trigger together as one beat.
+    // The Lab itself was already closed by UI.js's buyLabUpgrade the instant
+    // the purchase happened; this drives the whole 10-second reveal that
+    // follows — see Config.js's own BOSS_* comment for the full timeline
+    // this is built from (music crossfade, chat message, wait, white
+    // fade-in, then finally the spawn itself).
     state.level.bossIntroTimerMs += dtMs;
-    if (state.level.bossIntroTimerMs >= BOSS_INTRO_WAIT_MS) {
-      state.level.screenShakeUntilMs = state.level.elapsed + BOSS_SHAKE_DURATION_MS;
-      state.level.screenFlashUntilMs = state.level.elapsed + BOSS_FLASH_DURATION_MS;
+    if (!state.level.bossIntroMessageShown && state.level.bossIntroTimerMs >= BOSS_INTRO_MESSAGE_AT_MS) {
+      state.level.bossIntroMessageShown = true;
+      const notifications = state.level.notifications;
+      notifications.push({ id: notifications.length + 1, text: BOSS_INTRO_MESSAGE, elapsed: state.level.elapsed });
+      if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
+    }
+    if (state.level.bossIntroTimerMs >= BOSS_SPAWN_MS) {
+      // The white fade-in (rendered live from bossIntroTimerMs while still
+      // in this phase — see render()'s own comment) has just reached full
+      // opacity — spawn the boss right as the screen is fully white, then
+      // immediately start clearing it again so the reveal reads as "the
+      // white goes away AND the boss appears" together.
+      state.level.bossWhiteFadeOutUntilMs = state.level.elapsed + BOSS_WHITE_FADE_OUT_MS;
       // Spawns high in the water column, horizontally centered — "a big ole
       // alien enemy" making its entrance where it's immediately visible
       // regardless of where the camera/player happened to be panned.
@@ -1478,6 +1506,12 @@ function update(dtMs) {
     state.ui.bossFightTriggerPending = false;
     state.level.bossPhase = 'intro_wait';
     state.level.bossIntroTimerMs = 0;
+    state.level.bossIntroMessageShown = false;
+    // Per direct request, the music crossfade is now part of the 10-second
+    // reveal's own timeline (its first BOSS_MUSIC_FADE_MS) rather than
+    // snapping instantly at the moment of purchase — triggered here, right
+    // as that timeline actually starts, not from UI.js's buyLabUpgrade.
+    triggerBossMusic();
   }
   if (state.ui.paused) return; // frozen behind the pause menu — render() still runs so the tank stays visible
   if (state.level.gameOver) return; // lost — frozen the same way, but via a separate flag so Escape still reaches the pause menu's Restart without also un-freezing a lost game (see Systems.js's updateBankruptcy)
@@ -1991,19 +2025,6 @@ function render() {
 
   ctx.fillStyle = waterBackgroundGradient(ctx, canvas.height, state.level.cleanliness);
   ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-  // Mother Alien Fish's entrance — "the screen shakes" — a small random
-  // jitter offset applied to the WHOLE scene below via ctx.translate, wound
-  // back by the matching ctx.restore() right before the HUD/debug-overlay
-  // calls at the end of this function (DOM elements, unaffected either way).
-  // Decays linearly to 0 as screenShakeUntilMs approaches, rather than
-  // cutting off abruptly.
-  ctx.save();
-  if (state.level.elapsed < state.level.screenShakeUntilMs) {
-    const remaining = (state.level.screenShakeUntilMs - state.level.elapsed) / BOSS_SHAKE_DURATION_MS;
-    const magnitude = BOSS_SHAKE_MAGNITUDE_PX * Math.max(0, Math.min(1, remaining));
-    ctx.translate((Math.random() - 0.5) * magnitude * 2, (Math.random() - 0.5) * magnitude * 2);
-  }
 
   // Ambience (bubbles/seaweed) renders immediately after the plain
   // background fill and before anything else — per direct request, it
@@ -2889,11 +2910,8 @@ function render() {
     }
   }
 
-  ctx.restore(); // matches the shake-offset ctx.save() near the top of this function
-
   // Manufacturer/Power Plant drag-to-copy-recipe ghost — a translucent
-  // building icon that follows the raw cursor (screen space, drawn after
-  // the shake-offset restore above so it never jitters with it) while a
+  // building icon that follows the raw cursor (screen space) while a
   // drag is armed, per direct request ("a ghost icon of the building will
   // go on the cursor"). Green-tinted while hovering a valid same-type
   // target, a neutral white tint otherwise.
@@ -2918,12 +2936,26 @@ function render() {
     ctx.restore();
   }
 
-  // Mother Alien Fish's entrance — "goes white" — a fading full-canvas white
-  // overlay, drawn in screen space (after the shake's own ctx.restore()
-  // above, so the flash itself doesn't jitter). Fades out linearly over its
-  // own duration rather than cutting off abruptly.
-  if (state.level.elapsed < state.level.screenFlashUntilMs) {
-    const remaining = (state.level.screenFlashUntilMs - state.level.elapsed) / BOSS_FLASH_DURATION_MS;
+  // Mother Alien Fish's reveal — the screen turning white, per direct spec.
+  // Two halves, covering the two different moments this can be visible:
+  // fading IN during the last BOSS_WHITE_FADE_IN_MS of the 'intro_wait'
+  // phase itself (computed live from bossIntroTimerMs, no separate stored
+  // timestamp needed since that phase's own clock already has everything
+  // this needs), and fading back OUT right after the boss actually spawns
+  // (bossWhiteFadeOutUntilMs, set once at that exact moment — same "fades
+  // out linearly over its own duration" shape the single old flash used).
+  if (state.level.bossPhase === 'intro_wait') {
+    const fadeInProgress = (state.level.bossIntroTimerMs - BOSS_WHITE_FADE_IN_START_MS) / BOSS_WHITE_FADE_IN_MS;
+    const alpha = Math.max(0, Math.min(1, fadeInProgress));
+    if (alpha > 0) {
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.restore();
+    }
+  } else if (state.level.elapsed < state.level.bossWhiteFadeOutUntilMs) {
+    const remaining = (state.level.bossWhiteFadeOutUntilMs - state.level.elapsed) / BOSS_WHITE_FADE_OUT_MS;
     ctx.save();
     ctx.globalAlpha = Math.max(0, Math.min(1, remaining));
     ctx.fillStyle = '#ffffff';

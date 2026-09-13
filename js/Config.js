@@ -1282,13 +1282,22 @@ export const SPECIES = {
     growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 20000, dropValue: 0, pixelsPerMW: 1 }],
     unlockedByDefault: false,
   },
-  // No `parents` field — there's no real "Alien" fish to splice from, so
-  // (like the 3 base utility species) this is unlocked straight into
-  // state.meta.speciesUnlocked by its Lab node and bought directly in the
-  // shop, not obtained via the drag-a-utility-fish splice interaction.
+  // `parents: ['octopus', 'alien_t1']` — per direct request ("you shouldn't
+  // be able to purchase it from the shop, it's strictly a hybrid"), a real
+  // hybrid now, not a directly-buyable species. This is a deliberate,
+  // narrow reuse of the `parents` field purely so the shop's existing
+  // `!s.parents` filter hides it like every other hybrid — the actual splice
+  // (Entities.js's canSpliceOctopusWithAlien/spliceOctopusWithAlien) is a
+  // bespoke, alien-aware pair of functions, NOT the standard
+  // getHybridSpeciesId/createHybridFish fish+fish pipeline (an alien entity
+  // has no speciesId/starTier for that pipeline to carry over), so this
+  // field is never actually read by that reverse lookup in practice.
+  // Obtained by dragging a grown Science Octopus onto a living Tier 1 alien
+  // that specifically hatched from an Alien Egg (Entities.js's own
+  // hatchedFromEgg flag) — an ordinary wave-spawned Tier 1 does NOT qualify.
   xeno_octopus: {
-    id: 'xeno_octopus', name: 'Xeno Octopus', tier: 4, unlockPhase: 4, cost: 100,
-    description: 'A Science Octopus that got too close to an Alien Egg. Click it to toggle Bio-Sludge mode — while on, it brews and spits out Bio-Sludge every 8 seconds instead of Science Bubbles. Still needs to be fed like any other fish.',
+    id: 'xeno_octopus', name: 'Xeno Octopus', tier: 4, unlockPhase: 4, cost: 100, parents: ['octopus', 'alien_t1'],
+    description: 'A hybrid of an Alien and a Science Octopus — not purchasable directly. Drag a grown Octopus onto a Tier 1 alien that hatched from an Alien Egg (an ordinary wave-spawned alien won\'t do) to splice them together. Click it to toggle Bio-Sludge mode — while on, it brews and spits out Bio-Sludge every 8 seconds instead of Science Bubbles. Still needs to be fed like any other fish.',
     behavior: ['RESEARCHER'], dropType: 'science_blue',
     swimSpeed: 25, lifespan: 300000, hungerRate: 0.468,
     growthStages: [
@@ -1603,11 +1612,15 @@ export const REFINERY_STATS = {
 // must be purchased before this recipe can even be selected — Grid.js's
 // updateBuildings/UI.js's recipe menu both check
 // state.meta.labUpgradesPurchased.includes(recipe.labNodeId).
-// `powerCostMultiplier`, when present, scales MANUFACTURER_STATS' own flat
-// powerCostPerSec while THIS specific recipe is actively processing — per
-// direct spec, the Alien Egg recipe "takes twice as much electricity while
-// running." Every other recipe implicitly uses 1x (Grid.js's
-// computeCurrentPowerDemand falls back to 1 when the field is absent).
+// `powerCostMultiplier`, when present, would scale a recipe's power draw
+// while it's actively processing — Grid.js's computeCurrentPowerDemand falls
+// back to 1x for any recipe that omits it, which is every recipe today. The
+// Alien Egg recipe used to set this to 2x ("takes twice as much electricity
+// while running"), back when every ingredient drew the same flat rate; per
+// direct request, now that MANUFACTURER_ITEM_POWER_COST_MW already prices
+// power per INGREDIENT type, a second, recipe-level multiplier on top of
+// that is redundant — Alien Egg (Blue Science + Food) follows the exact same
+// per-ingredient cost every other recipe already does, no special case.
 // Per direct request, all 3 of the original recipes are now named after
 // their own OUTPUT item (matching the pattern the Alien Egg recipe already
 // followed) — 'Bio-Feeder'/'Bio-Combustor'/'Bio-Pellets' were flavor names
@@ -1658,8 +1671,7 @@ export const MANUFACTURER_RECIPES = {
   alien_egg: {
     id: 'alien_egg', name: 'Alien Egg', icon: '🥚', color: '#c9a86b',
     inputs: ['science', 'food'], output: 'alien_egg', labNodeId: 'recipe_alien_egg',
-    description: 'Blue Science + Food -> Alien Egg (2x power draw)',
-    powerCostMultiplier: 2,
+    description: 'Blue Science + Food -> Alien Egg',
   },
   // Real bug fix, found during a balance/logic audit pass: Green Science had
   // NO way to be earned in actual gameplay at all — an earlier batch
@@ -2070,10 +2082,13 @@ export const SCIENCE_LAB_UPGRADES = {
   // Two more hybrids, per direct request — each gated behind a Manufacturer
   // recipe instead of a Bubble Cap tier, since both are thematically tied to
   // that production chain rather than raw research depth. Feeder Fish
-  // (Electric Eel × Suckerfish) really is spliced like the 3 above (both
-  // parents are real fish); Xeno Octopus has no real "Alien" fish to splice
-  // from, so it's a directly-purchasable species instead (no `parents`
-  // field) — the same pattern the 3 base utility species already use.
+  // (Electric Eel × Suckerfish) is spliced like the 3 hybrids above it (both
+  // parents are real fish, via the standard getHybridSpeciesId pipeline);
+  // Xeno Octopus (Octopus × a Tier 1 Alien-Egg-hatched alien) is spliced too,
+  // per a later direct request, just via its own bespoke alien-aware
+  // splice pair (Entities.js's canSpliceOctopusWithAlien/
+  // spliceOctopusWithAlien) rather than that standard fish+fish pipeline —
+  // see xeno_octopus's own SPECIES row comment for why.
   // Per direct request, locked behind just Bubble Cap 30 now (was
   // 'manufacturer' — Bubble Cap 30 already requires the Manufacturer
   // transitively, so this is a strictly later gate, not a looser one).
@@ -2624,14 +2639,44 @@ export const ALIEN_FIRST_WAVE_TIP_MESSAGE = "Aliens incoming! Click 'em for 1 da
 
 // ---- Mother Alien Fish (end-game boss) ----
 // Per direct spec — a one-time purchase in the Science Lab (see
-// SCIENCE_LAB_UPGRADES.mother_alien_fish) triggers this whole sequence:
-// close the Lab, wait BOSS_INTRO_WAIT_MS, screen-shake + flash white, then
-// spawn the boss itself (Entities.js's createMotherAlienFish). See main.js's
-// startBossSequence/updateBossSequence for the actual state machine.
-export const BOSS_INTRO_WAIT_MS = 2000; // "wait 2 seconds before the screen shakes..."
-export const BOSS_SHAKE_DURATION_MS = 900;
-export const BOSS_SHAKE_MAGNITUDE_PX = 14;
-export const BOSS_FLASH_DURATION_MS = 500; // the screen "goes white" for this long, right as the boss actually spawns
+// SCIENCE_LAB_UPGRADES.mother_alien_fish) triggers a 10-second cinematic
+// reveal before the boss itself actually appears (Entities.js's
+// createMotherAlienFish) — see main.js's updateBossSequence for the actual
+// state machine, all driven off one running state.level.bossIntroTimerMs
+// clock rather than a separate timer per beat. Per direct request, this
+// replaces the earlier, much shorter "wait 2s, shake + flash white, spawn"
+// version entirely — the screen shake is gone (not part of the new script),
+// and the flash is now a real, deliberate multi-second white fade instead of
+// a quick blink.
+//
+// Timeline (all in ms from the moment the purchase triggers it):
+//   [0, BOSS_MUSIC_FADE_MS)                        — Game/Battle fade out,
+//                                                     Boss fades in (Sound.js's
+//                                                     triggerBossMusic)
+//   BOSS_INTRO_MESSAGE_AT_MS                        — the "so that's what
+//                                                     that button does" chat
+//                                                     line posts, once
+//   [BOSS_INTRO_MESSAGE_AT_MS, BOSS_WHITE_FADE_IN_START_MS) — nothing new;
+//                                                     the "5 more seconds"
+//                                                     wait
+//   [BOSS_WHITE_FADE_IN_START_MS, BOSS_SPAWN_MS)    — screen turns white
+//   BOSS_SPAWN_MS                                   — boss spawns; white
+//                                                     immediately starts
+//                                                     fading back out over
+//                                                     BOSS_WHITE_FADE_OUT_MS
+export const BOSS_MUSIC_FADE_MS = 3000; // "have the music fade out and the boss music fade in over the first 3 seconds"
+export const BOSS_INTRO_MESSAGE_AT_MS = BOSS_MUSIC_FADE_MS; // "then add in a chat message" — right as the music crossfade finishes
+export const BOSS_INTRO_MESSAGE = 'Seems like somthing was supposed to happen...'; // per direct spec's own exact wording
+export const BOSS_MESSAGE_WAIT_MS = 5000; // "and wait 5 more seconds"
+export const BOSS_WHITE_FADE_IN_MS = 2000; // "then have the screen turn white over 2 seconds"
+export const BOSS_WHITE_FADE_IN_START_MS = BOSS_INTRO_MESSAGE_AT_MS + BOSS_MESSAGE_WAIT_MS; // 3000 + 5000 = 8000
+export const BOSS_SPAWN_MS = BOSS_WHITE_FADE_IN_START_MS + BOSS_WHITE_FADE_IN_MS; // 8000 + 2000 = 10000 — "wait 10 seconds before the boss is summoned," matches exactly
+// "Then the white goes away and the boss appears" — no duration was given
+// for the white clearing itself, so this is a deliberately short, snappy
+// reveal (much quicker than the 2s fade-in) rather than a second long fade,
+// so the boss's actual appearance reads as the payoff moment, not another
+// slow transition.
+export const BOSS_WHITE_FADE_OUT_MS = 1000;
 // "A big ole alien enemy that's 10x harder than a tier 5 alien" — applied to
 // the existing Tier 5 archetype's own hpMin/hpMax range (150-220 -> 1500-2200),
 // not a bespoke stat block, so the boss automatically stays "10x a Tier 5"

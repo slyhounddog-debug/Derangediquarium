@@ -463,6 +463,7 @@ export function createAlien(x, y, hp, archetypeId) {
     isBoss: false, // Mother Alien Fish only — see createMotherAlienFish below; drives updateAlien's minion-spawn timer, main.js's top-middle boss health bar instead of a per-alien one, and the special death sequence
     minionSpawnTimerMs: 0, // Mother Alien Fish only
     reservedDamage: 0, // sum of damage from turret shots already fired at this alien but still in flight (not yet landed) — see Grid.js's turret-targeting search and updateTurretProjectiles below. Lets every OTHER turret see "this alien is already going to die from shots in flight" and skip it instead of piling on more, per direct request
+    hatchedFromEgg: false, // set true only by updateAlienEgg's own hatch branch — distinguishes an Alien-Egg-hatched Tier 1 from an ordinary wave-spawned one. Only an alien with this flag still true AND still within its spawnProtectionUntilMs invulnerability window is eligible for the Xeno Octopus splice (see isXenoOctopusAlienTarget) or gets the "no negative effects while invulnerable" treatment in updateAlien
   };
 }
 
@@ -513,11 +514,20 @@ function findNearestFishWithin(entities, x, y, radius) {
 // Mirror of findNearestFishWithin, targeting living aliens instead — used by
 // updateFish for both the flee-bias (wander) and the coin-production-block/
 // gray-tint check.
-function findNearestAlienWithin(entities, x, y, radius) {
+// `nowMs` excludes any alien still within its own spawnProtectionUntilMs
+// invulnerability window (Alien-Egg hatchlings only) — per direct spec, a
+// still-invulnerable alien has "no negative effects at all" on nearby fish,
+// and every one of updateFish's alienNearby-driven effects (the gray tint,
+// the coin-production block, the halved hunger/production-rate effects on
+// Suckerfish/Feeder Fish/Xeno Octopus/Generators) all derive from this one
+// search, so excluding it here is what makes all of those simultaneously
+// inert while true, with no separate check needed at each of those sites.
+function findNearestAlienWithin(entities, x, y, radius, nowMs) {
   let best = null;
   let bestDistSq = radius * radius;
   for (const e of entities) {
     if (e.type !== 'alien' || e.hp <= 0) continue;
+    if (e.spawnProtectionUntilMs > nowMs) continue;
     const dx = e.x - x;
     const dy = e.y - y;
     const d = dx * dx + dy * dy;
@@ -1469,6 +1479,45 @@ export function spliceFish(state, utilityFish, targetFish) {
   return hybrid;
 }
 
+// ---- Xeno Octopus splice (Octopus + a Tier-1 Alien-Egg-hatched alien) ----
+// Per direct spec ("this fish is another hybrid of an Alien and an Octopus,
+// but only the tier 1 aliens spawned from alien eggs work for the hybrid...
+// you shouldn't be able to purchase it from the shop, it's strictly a
+// hybrid"). Every other hybrid above is fish+fish via getHybridSpeciesId/
+// createHybridFish, which assumes both sides are real SPECIES rows with a
+// speciesId/starTier/etc. to carry over — an alien entity has none of that,
+// so this is a small, parallel, alien-aware pair of functions instead of
+// forcing an alien through that fish-shaped pipeline. Xeno Octopus's own
+// SPECIES row carries `parents: ['octopus', 'alien_t1']` purely so the
+// shop's existing `!s.parents` filter hides it from direct purchase, same as
+// every real hybrid — that field is otherwise inert here (getHybridSpeciesId
+// is never called with an alien's archetypeId).
+export function canSpliceOctopusWithAlien(state, octopusFish, alien) {
+  if (!octopusFish || !alien) return false;
+  if (!isSpliceSource(state, octopusFish) || octopusFish.speciesId !== 'octopus') return false;
+  if (alien.type !== 'alien' || alien.hp <= 0) return false;
+  // "Only the tier 1 aliens spawned from alien eggs work for the hybrid" —
+  // an ordinary wave-spawned Tier 1 (same archetype, no hatchedFromEgg flag)
+  // does NOT qualify, only one that actually came from createAlienEgg's own
+  // hatch branch (see createAlien/updateAlienEgg).
+  if (alien.archetypeId !== 'alien_t1' || !alien.hatchedFromEgg) return false;
+  return state.meta.speciesUnlocked.includes('xeno_octopus');
+}
+
+export function spliceOctopusWithAlien(state, octopusFish, alien) {
+  if (!canSpliceOctopusWithAlien(state, octopusFish, alien)) return null;
+  const x = (octopusFish.x + alien.x) / 2;
+  const y = (octopusFish.y + alien.y) / 2;
+  const hybrid = createFish('xeno_octopus', x, y, state, { grown: true });
+  const idxO = state.level.entities.indexOf(octopusFish);
+  if (idxO !== -1) state.level.entities.splice(idxO, 1);
+  const idxA = state.level.entities.indexOf(alien);
+  if (idxA !== -1) state.level.entities.splice(idxA, 1);
+  state.level.entities.push(hybrid);
+  state.level.floatingTexts.push(createPickupText(x, y, 'Spliced!', TANK_POINT_COLOR));
+  return hybrid;
+}
+
 // The first pair of two fish currently on screen that could legally be
 // combined (or null) — per direct request, drives both the Merge tool's
 // grayed-out/available state (via hasAnyMergeOpportunity below) and the
@@ -1490,13 +1539,23 @@ export function findCombinablePair(state) {
 
 // Whether ANY two fish on screen could currently be combined OR spliced —
 // the Merge tool handles both interactions, so its availability has to
-// cover both, not just combining (see UI.js's isMergeToolAvailable).
+// cover both, not just combining (see UI.js's isMergeToolAvailable). Also
+// covers the Xeno Octopus's own one-off Octopus+alien splice — without this,
+// a player with a qualifying Octopus and Alien-Egg-hatched alien but no
+// other combinable/spliceable FISH pair on screen would find the Merge tool
+// permanently grayed out, making that whole hybrid completely unreachable.
 export function hasAnyMergeOpportunity(state) {
   if (findCombinablePair(state)) return true;
   const fish = state.level.entities.filter((e) => e.type === 'fish');
   for (const a of fish) {
     for (const b of fish) {
       if (a.id !== b.id && canSpliceFish(state, a, b)) return true;
+    }
+  }
+  for (const f of fish) {
+    if (f.speciesId !== 'octopus') continue;
+    for (const entity of state.level.entities) {
+      if (entity.type === 'alien' && canSpliceOctopusWithAlien(state, f, entity)) return true;
     }
   }
   return false;
@@ -1816,6 +1875,7 @@ function updateAlienEgg(item, state, dtMs) {
     const hp = Math.round(archetype.hpMin + Math.random() * (archetype.hpMax - archetype.hpMin));
     const alien = createAlien(item.x, item.y, hp, archetype.id);
     alien.spawnProtectionUntilMs = state.level.elapsed + ALIEN_EGG_HATCH_INVULN_MS;
+    alien.hatchedFromEgg = true; // per direct spec — only THIS specific alien (not an ordinary wave-spawned Tier 1) is ever eligible for the Xeno Octopus splice
     // Only needs to rise if it hatched while still inside the seabed city
     // (the Manufacturer that laid the egg is a city building) — an egg
     // dragged up into open water first just hatches there normally, no rise
@@ -2164,7 +2224,7 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
   // accumulation, halves how often the Feeder Fish/Xeno Octopus hybrids
   // produce Food/Bio-Sludge, and halves electricity production for every
   // Generator fish/hybrid — see each of those sites' own comments.
-  const nearbyAlien = findNearestAlienWithin(state.level.entities, fish.x, fish.y, ALIEN_AWARENESS_RADIUS);
+  const nearbyAlien = findNearestAlienWithin(state.level.entities, fish.x, fish.y, ALIEN_AWARENESS_RADIUS, state.level.elapsed);
   fish.alienNearby = !!(nearbyAlien && Math.hypot(nearbyAlien.x - fish.x, nearbyAlien.y - fish.y) <= ALIEN_INCOME_BLOCK_RADIUS);
   if (fish.capBlockedTintRemainingMs > 0) fish.capBlockedTintRemainingMs = Math.max(0, fish.capBlockedTintRemainingMs - dtMs);
 

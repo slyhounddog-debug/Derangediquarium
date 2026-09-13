@@ -67,7 +67,7 @@ import { getTile, worldToTile, getBuildingCost, FAN_STATS, hasAnyBuildingPlaced,
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
-import { playUpgrade, setMusicVolume, setSfxVolume, getMusicVolume, getSfxVolume, playPanelOpen, playPanelClose, triggerBossMusic, playInsufficientFunds } from './Sound.js';
+import { playUpgrade, setMusicVolume, setSfxVolume, getMusicVolume, getSfxVolume, playPanelOpen, playPanelClose, playInsufficientFunds } from './Sound.js';
 import { hasSaveGame, saveGame, loadSaveGame } from './Save.js';
 
 const MOUND_MENU_GAP_PX = 12; // screen px of breathing room between the popup's bottom edge and the Mound's top edge
@@ -1202,20 +1202,18 @@ function buyLabUpgrade(state, id) {
     state.level.upgrades.scienceCapLevel += node.grants.scienceCapLevel;
   }
   playUpgrade();
-  // Mother Alien Fish, per direct spec — "it will trigger the end boss
-  // sequence. It will close the science lab, and wait 2 seconds..." — closes
-  // the Lab itself right here (UI.js already owns closeLabMenu), then hands
-  // off to main.js via a cross-module flag (same pattern
-  // state.ui.coinCapFlashPending already established) rather than importing
-  // main.js's simulation-level startBossSequence directly from this file.
-  // The Boss music itself starts right here too, per direct request ("that
-  // music can start immediately, from the beginning") — the purchase moment
-  // itself, not the later 2-second cinematic wait main.js's own
-  // updateBossSequence still handles for the actual fish spawn.
+  // Mother Alien Fish, per direct spec — triggers the whole 10-second
+  // end-game reveal sequence. Closes the Lab itself right here (UI.js
+  // already owns closeLabMenu), then hands off to main.js via a cross-module
+  // flag (same pattern state.ui.coinCapFlashPending already established)
+  // rather than importing main.js's simulation-level updateBossSequence
+  // directly from this file — main.js's own bossFightTriggerPending handler
+  // is what actually starts the music crossfade/timeline now, per a later
+  // direct request that the fade itself be part of that 10-second reveal
+  // rather than an instant cut at the moment of purchase.
   if (node.grants.triggersBossFight) {
     closeLabMenu();
     state.ui.bossFightTriggerPending = true;
-    triggerBossMusic();
   }
   refreshLabTree(state);
   refreshShopPanel(state);

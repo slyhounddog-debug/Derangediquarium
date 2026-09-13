@@ -186,11 +186,11 @@ export function loadLevel(state, levelId) {
     // actually purchased; walks 'intro_wait' -> 'fighting' -> 'defeated' ->
     // 'gameover' in order, never backwards, never skipping a step.
     bossPhase: null,
-    bossIntroTimerMs: 0, // counts up toward BOSS_INTRO_WAIT_MS during 'intro_wait'
+    bossIntroTimerMs: 0, // counts up toward BOSS_SPAWN_MS during 'intro_wait' — drives every beat of the 10-second reveal (message, white fade-in, spawn) off this one clock, see main.js's updateBossSequence
+    bossIntroMessageShown: false, // one-shot guard so BOSS_INTRO_MESSAGE posts exactly once, at the BOSS_INTRO_MESSAGE_AT_MS threshold, not every tick past it
     bossEntityId: null, // the boss's own entity id once spawned, so main.js/UI.js can find it again for the top-middle health bar without scanning by isBoss every frame
     bossDefeatedAtMs: null, // set by Entities.js's updateAlien the instant the boss's hp hits 0; main.js's updateBossSequence reads this to start the BOSS_DEFEATED_MODAL_DELAY_MS countdown to the stats modal
-    screenShakeUntilMs: 0, // main.js's render() offsets the whole canvas by a small random jitter while elapsed < this
-    screenFlashUntilMs: 0, // main.js's render() overlays a fading-white rect while elapsed < this
+    bossWhiteFadeOutUntilMs: 0, // main.js's render() overlays a fading-white rect while elapsed < this — set once, the instant the boss actually spawns, per BOSS_WHITE_FADE_OUT_MS
     waveTimer: 0,
     elapsed: 0,
   };

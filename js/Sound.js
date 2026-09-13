@@ -10,7 +10,7 @@
 // fire-and-forget side effect a caller triggers at the moment something
 // already happened.
 
-import { ALIEN_MUSIC_BATTLE_LEAD_MS } from './Config.js';
+import { ALIEN_MUSIC_BATTLE_LEAD_MS, BOSS_MUSIC_FADE_MS } from './Config.js';
 
 let ctx = null;
 let musicGain = null;
@@ -526,30 +526,41 @@ export function setBattleMusicActive(active) {
   gameTrackGain.gain.linearRampToValueAtTime(gameTarget, now + MUSIC_CROSSFADE_S);
 }
 
-// Called once, the instant the end-game boss upgrade is purchased (UI.js's
-// buyLabUpgrade) — per direct request, starts immediately, from the
-// beginning, with no fade and no further Game/Battle involvement for the
-// rest of the session.
+// Called once, the instant the end-game boss upgrade is purchased (main.js's
+// bossFightTriggerPending handler, right as the 10-second reveal sequence
+// itself starts). Per a later direct request superseding the original "no
+// fade, starts immediately" behavior — the crossfade is now BOSS_MUSIC_FADE_MS
+// long, timed to match the first beat of that same reveal ("have the music
+// fade out and the boss music fade in over the first 3 seconds").
+const BOSS_MUSIC_FADE_S = BOSS_MUSIC_FADE_MS / 1000;
 export function triggerBossMusic() {
   if (bossActive) return;
   bossActive = true;
   if (!ctx) return; // shouldn't happen in practice — audio is unlocked well before any Lab purchase is possible
   ensureMusicTracks();
   const now = ctx.currentTime;
-  gameTrackGain.gain.cancelScheduledValues(now);
-  gameTrackGain.gain.setValueAtTime(0, now);
-  battleTrackGain.gain.cancelScheduledValues(now);
-  battleTrackGain.gain.setValueAtTime(0, now);
-  gameMusicEl.pause();
-  battleMusicEl.pause();
-  bossTrackGain.gain.value = 1;
   bossMusicEl.currentTime = 0;
+  bossTrackGain.gain.cancelScheduledValues(now);
+  bossTrackGain.gain.setValueAtTime(0, now);
+  bossTrackGain.gain.linearRampToValueAtTime(1, now + BOSS_MUSIC_FADE_S);
   bossMusicEl.play().catch(() => {});
-  // Game/Battle are paused for good at this point — nothing left to resync.
-  if (musicResyncTimer) {
-    clearInterval(musicResyncTimer);
-    musicResyncTimer = null;
-  }
+  gameTrackGain.gain.cancelScheduledValues(now);
+  gameTrackGain.gain.setValueAtTime(gameTrackGain.gain.value, now);
+  gameTrackGain.gain.linearRampToValueAtTime(0, now + BOSS_MUSIC_FADE_S);
+  battleTrackGain.gain.cancelScheduledValues(now);
+  battleTrackGain.gain.setValueAtTime(battleTrackGain.gain.value, now);
+  battleTrackGain.gain.linearRampToValueAtTime(0, now + BOSS_MUSIC_FADE_S);
+  // Game/Battle are paused for good once the fade-out actually finishes —
+  // not immediately, which would cut them off mid-ramp. Nothing left to
+  // resync once they're stopped.
+  setTimeout(() => {
+    gameMusicEl.pause();
+    battleMusicEl.pause();
+    if (musicResyncTimer) {
+      clearInterval(musicResyncTimer);
+      musicResyncTimer = null;
+    }
+  }, BOSS_MUSIC_FADE_S * 1000);
 }
 
 // Exported for completeness (e.g. a future mute toggle) — not currently

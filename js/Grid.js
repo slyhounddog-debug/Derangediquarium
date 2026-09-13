@@ -1953,7 +1953,7 @@ function renderManufacturerIngredientLights(ctx, x, y, size, data) {
 // MANUFACTURER_GHOST_FLASH_DURATION_MS of every
 // MANUFACTURER_GHOST_FLASH_INTERVAL_MS-long cycle, repeating for as long as
 // that ingredient is still missing.
-const MANUFACTURER_GHOST_FLASH_INTERVAL_MS = 4000;
+const MANUFACTURER_GHOST_FLASH_INTERVAL_MS = 2000; // halved from 4000 per direct request ("blink the needed item twice as much as it does now")
 const MANUFACTURER_GHOST_FLASH_DURATION_MS = 700;
 function renderManufacturerGhostFlash(ctx, x, y, size, zoom, data) {
   if (data.processing || data.pendingInputs.length !== 1) return;
