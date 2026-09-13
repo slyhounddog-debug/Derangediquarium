@@ -43,6 +43,7 @@ import {
   COIN_CAP_UPGRADE_COSTS,
   ELECTRICITY_GRAPH_UNLOCK_COST,
   GOLD_PER_MIN_UNLOCK_COST,
+  WAVE_COUNTDOWN_UNLOCK_COST,
   COIN_CAP_UPGRADE_MAX_LEVEL,
   WORLD_W,
   WORLD_H,
@@ -216,6 +217,7 @@ export function initUI(state) {
     cleanliness: document.getElementById('hud-cleanliness'),
     waves: document.getElementById('hud-waves'),
     goldPerMin: document.getElementById('hud-gold-per-min'),
+    waveCountdown: document.getElementById('hud-wave-countdown'),
     power: document.getElementById('hud-power'),
     powerText: document.getElementById('hud-power-text'),
     powerArrow: document.getElementById('hud-power-arrow'),
@@ -1987,7 +1989,7 @@ function createUpgradeCard(name, icon) {
   return { card, levelEl, descEl, buyBtn };
 }
 
-let tankCards = null; // { foodQuality, fishMovement, coinCapacity, electricityGraph, goldPerMin } — each { card, levelEl, descEl, buyBtn }. Splicing itself was never a purchase here — see Config.js's SCIENCE_LAB_UPGRADES' 3 flat hybrid nodes. Food Capacity retired entirely — see Config.js's FOOD_STATIONARY_TO_WASTE_MS.
+let tankCards = null; // { foodQuality, fishMovement, coinCapacity, electricityGraph, goldPerMin, waveCountdown } — each { card, levelEl, descEl, buyBtn }. Splicing itself was never a purchase here — see Config.js's SCIENCE_LAB_UPGRADES' 3 flat hybrid nodes. Food Capacity retired entirely — see Config.js's FOOD_STATIONARY_TO_WASTE_MS.
 
 function buildTankPanel(state) {
   els.tankUpgradeList.innerHTML = '';
@@ -1996,7 +1998,8 @@ function buildTankPanel(state) {
   const coinCapacity = createUpgradeCard('Coin Capacity', '🪙');
   const electricityGraph = createUpgradeCard('Electricity Graph', '📊');
   const goldPerMin = createUpgradeCard('Gold/min Stat', '📈');
-  tankCards = { foodQuality, fishMovement, coinCapacity, electricityGraph, goldPerMin };
+  const waveCountdown = createUpgradeCard('Wave Countdown', '⏱️');
+  tankCards = { foodQuality, fishMovement, coinCapacity, electricityGraph, goldPerMin, waveCountdown };
 
   foodQuality.buyBtn.addEventListener('click', () => {
     const level = state.level.upgrades.foodQuality;
@@ -2053,21 +2056,22 @@ function buildTankPanel(state) {
     playUpgrade();
     refreshTankPanel(state);
   });
+  waveCountdown.buyBtn.addEventListener('click', () => {
+    if (state.level.upgrades.waveCountdownUnlocked) return;
+    if (state.level.tankPoints.available < WAVE_COUNTDOWN_UNLOCK_COST) return;
+    state.level.tankPoints.available -= WAVE_COUNTDOWN_UNLOCK_COST;
+    state.level.upgrades.waveCountdownUnlocked = true;
+    playUpgrade();
+    refreshTankPanel(state);
+  });
 
   // Fish Merging's own card is gone entirely — per direct request, merging
   // is always available now, no Tank Upgrade purchase needed (see
-  // Entities.js's isCombinableFish). Coin Capacity kept its position at the
-  // top of the list from the reorder that used to put Fish Merging there.
-  els.tankUpgradeList.append(coinCapacity.card, electricityGraph.card, goldPerMin.card, foodQuality.card, fishMovement.card);
-
-  // Defensive Capabilities: shown per the design update's Phase 2 UI-shell
-  // scope, but locked — there's no alien system to upgrade yet (Phase 5).
-  const defensive = document.createElement('div');
-  defensive.className = 'tank-upgrade-card locked sheen-target';
-  defensive.innerHTML =
-    '<div class="tank-upgrade-name">🛡️ Defensive Capabilities</div>' +
-    '<div class="tank-upgrade-desc">Boosts click damage against invading aliens. Unlocks once alien waves do (a future update).</div>';
-  els.tankUpgradeList.appendChild(defensive);
+  // Entities.js's isCombinableFish). Reordered per direct request: Fish
+  // Movement moved up to 2nd, Food Quality to 3rd (Defensive Capabilities'
+  // old placeholder card is gone too — that scope moved into the Science
+  // Lab's own turret nodes).
+  els.tankUpgradeList.append(coinCapacity.card, fishMovement.card, foodQuality.card, electricityGraph.card, goldPerMin.card, waveCountdown.card);
 
   refreshTankPanel(state);
 }
@@ -2077,7 +2081,7 @@ function buildTankPanel(state) {
 // state can all change while the player has it open.
 function refreshTankPanel(state) {
   if (!tankCards) return;
-  const { foodQuality, fishMovement, coinCapacity, electricityGraph, goldPerMin } = tankCards;
+  const { foodQuality, fishMovement, coinCapacity, electricityGraph, goldPerMin, waveCountdown } = tankCards;
   const available = state.level.tankPoints.available;
 
   const fqLevel = state.level.upgrades.foodQuality;
@@ -2139,6 +2143,17 @@ function refreshTankPanel(state) {
   } else {
     goldPerMin.buyBtn.textContent = `Unlock — ${GOLD_PER_MIN_UNLOCK_COST} 🏆`;
     goldPerMin.buyBtn.disabled = available < GOLD_PER_MIN_UNLOCK_COST;
+  }
+
+  const wcUnlocked = state.level.upgrades.waveCountdownUnlocked;
+  waveCountdown.levelEl.textContent = wcUnlocked ? 'Unlocked' : 'Locked';
+  waveCountdown.descEl.textContent = 'Adds a live countdown to the HUD showing how long until the next alien wave arrives.';
+  if (wcUnlocked) {
+    waveCountdown.buyBtn.textContent = 'Unlocked ✓';
+    waveCountdown.buyBtn.disabled = true;
+  } else {
+    waveCountdown.buyBtn.textContent = `Unlock — ${WAVE_COUNTDOWN_UNLOCK_COST} 🏆`;
+    waveCountdown.buyBtn.disabled = available < WAVE_COUNTDOWN_UNLOCK_COST;
   }
 
   els.tankPointsDisplay.textContent = `🏆 ${available}`;
@@ -2684,12 +2699,39 @@ export function updateHUD(state) {
     els.goldPerMin.textContent = `📈 $${Math.round(computeTheoreticalGoldPerMinute(state))}/min`;
   }
 
+  // Wave Countdown — hidden until its own Tank Upgrade is bought, per direct
+  // request, same "hidden until relevant" precedent as the gold/min readout
+  // above. While a wave is still in progress (its portals haven't all opened
+  // yet, or one of its aliens is still alive) the real countdown to the NEXT
+  // wave hasn't even started (see Systems.js's updateAlienWaves), so a plain
+  // numeric countdown would be stale/misleading — shown as "in progress"
+  // instead. Same during a boss fight, when normal wave spawning is
+  // suspended entirely and alienNextWaveAtMs is meaningless.
+  const waveCountdownUnlocked = state.level.upgrades.waveCountdownUnlocked;
+  els.waveCountdown.classList.toggle('hidden', !waveCountdownUnlocked);
+  if (waveCountdownUnlocked) {
+    if (state.level.bossPhase) {
+      els.waveCountdown.textContent = '👽 Next wave: —';
+    } else if (state.level.alienWaveActive) {
+      els.waveCountdown.textContent = '👽 Wave in progress';
+    } else {
+      const secsLeft = Math.max(0, Math.ceil((state.level.alienNextWaveAtMs - state.level.elapsed) / 1000));
+      els.waveCountdown.textContent = `👽 Next wave: ${secsLeft}s`;
+    }
+  }
+
   // Electricity — only shown at all once Electric Eel is unlocked, per
   // direct request. Text only updates once a real second, matching the
   // "updates every second" request exactly, since state.level.powerHistory
   // itself only gains a new entry once a second (see main.js's update()).
   const eelUnlocked = state.meta.speciesUnlocked.includes('electric_eel');
   els.power.classList.toggle('hidden', !eelUnlocked);
+  // The dropdown arrow is a separate unlock from the mw text itself — per
+  // direct request, hidden until the Electricity Graph Tank Upgrade is
+  // bought (the click handler already no-ops without it — see els.power's
+  // own listener — this just stops the arrow from implying a working
+  // dropdown before it actually is one).
+  els.powerArrow.classList.toggle('hidden', !state.level.upgrades.electricityGraphUnlocked);
   if (eelUnlocked) {
     const history = state.level.powerHistory;
     const last = history[history.length - 1];

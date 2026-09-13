@@ -143,6 +143,9 @@ html, body {
   transition: transform 0.15s ease;
 }
 #hud-power-arrow.open { transform: rotate(180deg); }
+/* Hidden until the Electricity Graph Tank Upgrade is bought — per direct
+   request, the arrow shouldn't hint at a dropdown that doesn't work yet. */
+#hud-power-arrow.hidden { display: none; }
 #hud-power-graph {
   /* Shifted down and left from directly-below-the-pill, per direct report
      that it overlapped #hud itself. */
@@ -623,6 +626,14 @@ html, body {
   box-shadow: 0 3px 9px rgba(107, 76, 107, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.85);
 }
 #hud-science-cap.hidden { display: none; } /* only shown once the Science Octopus is unlocked, same "hidden until relevant" precedent as #hud-power/electric Eel */
+/* Real bug fix: these two toggled a .hidden class that had no matching CSS
+   rule anywhere, so #hud-waves/#hud-gold-per-min stayed visibly on screen
+   (showing a stale "Wave 0"/"$0/min") even while "hidden" — per direct
+   report of the gold/min one specifically. #hud-wave-countdown is new and
+   needs the same rule from the start. */
+#hud-waves.hidden { display: none; }
+#hud-gold-per-min.hidden { display: none; }
+#hud-wave-countdown.hidden { display: none; }
 
 /* A soft diagonal light sweep that plays across a UI element every so often
    — per direct request, applied broadly across the HUD/shop/panels (see
@@ -985,9 +996,10 @@ html, body {
 }
 .building-stat b { font-weight: 800; opacity: 1; }
 
-/* Tank Upgrades panel — three cards (Food Quality, Fish Movement, locked
-   Defensive Capabilities), each with a level readout, a description of the
-   current effect, and a Buy button. Same visual language as the shop's
+/* Tank Upgrades panel — a stack of cards (leveled ladders like Food Quality/
+   Fish Movement/Coin Capacity, plus one-time unlocks like Electricity Graph/
+   Gold-per-min/Wave Countdown), each with a level readout, a description of
+   the current effect, and a Buy button. Same visual language as the shop's
    preview/buy button, just stacked as a list instead of one big preview. */
 #tank-upgrade-list {
   display: flex; flex-direction: column; gap: 14px;

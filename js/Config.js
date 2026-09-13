@@ -940,16 +940,22 @@ export const FISH_SPEED_MULTIPLIER = 1.1;
 // still very much counts as an "active drop" the player hasn't banked yet).
 export const COIN_CAP_BY_LEVEL = [10, 25, 50, 100, 250, 500]; // index 0 = unupgraded default
 export const COIN_CAP_UPGRADE_COSTS = [1, 8, 20, 45, 80]; // Tank Points — level 1 cut from 3 to 1 per direct request, so a player can afford it off their very first-ever Tank Point (see the new Tank Point tutorial flow in UI.js); levels 2+ untouched, placeholder balance like every other economy constant here
-// Two new one-time Tank Upgrade unlocks, per direct request — same shape as
+// Three one-time Tank Upgrade unlocks, per direct request — same shape as
 // the old (now-removed) Fish Merging card: a flat cost, a boolean flag in
 // state.level.upgrades, no leveled ladder. "Electricity Graph" gates the
-// #hud-power click-to-open rolling graph popup (the mw text readout itself
-// still shows unconditionally once Electric Eel is unlocked, unaffected —
-// only the GRAPH is now hidden behind this); "Gold/min Stat" reveals a new
-// HUD readout showing the tank's live theoretical max gold/min — see
-// Entities.js's computeTheoreticalGoldPerMinute.
-export const ELECTRICITY_GRAPH_UNLOCK_COST = 3; // Tank Points
-export const GOLD_PER_MIN_UNLOCK_COST = 3; // Tank Points
+// #hud-power click-to-open rolling graph popup AND its dropdown arrow (the mw
+// text readout itself still shows unconditionally once Electric Eel is
+// unlocked, unaffected — only the graph/arrow are hidden behind this);
+// "Gold/min Stat" reveals a new HUD readout showing the tank's live
+// theoretical max gold/min — see Entities.js's computeTheoreticalGoldPerMinute
+// — and stays fully hidden (not just showing $0/min) until bought; "Wave
+// Countdown" reveals a HUD readout counting down to the next alien wave.
+// Costs deliberately uneven per direct request (2/5/3) rather than a flat
+// shared price — Electricity Graph is the cheapest since it's just a graph
+// popup, Gold/min the priciest since it's a genuinely useful always-on stat.
+export const ELECTRICITY_GRAPH_UNLOCK_COST = 2; // Tank Points
+export const GOLD_PER_MIN_UNLOCK_COST = 5; // Tank Points
+export const WAVE_COUNTDOWN_UNLOCK_COST = 3; // Tank Points
 export const COIN_CAP_UPGRADE_MAX_LEVEL = COIN_CAP_UPGRADE_COSTS.length;
 
 // Shared by both the Coin Cap and Science Cap HUD readouts (UI.js's
@@ -975,10 +981,11 @@ export const SCIENCE_CAP_BY_LEVEL = [10, 20, 30, 40, 50]; // index 0 = unupgrade
 export const SCIENCE_CAP_UPGRADE_SCIENCE_COSTS = [10, 20, 35, 60, 100]; // placeholder balance, tune once real playtesting exists; index 0 unused, see comment above
 export const SCIENCE_CAP_UPGRADE_GOLD_COSTS = [500, 1500, 3500, 7500, 15000]; // index 0 unused, see comment above
 
-// Defensive Capabilities (click damage/offense vs invading aliens) has no
-// system to upgrade yet — Phase 5 aliens don't exist. The Tank Upgrades
-// panel still shows this as a fourth card (Phase 2 UI shell scope), just
-// locked/non-interactive until then.
+// The old "Defensive Capabilities" locked placeholder card is gone from the
+// Tank Upgrades panel entirely, per direct request — click damage/turret
+// fire-rate upgrades now live in the Science Lab's own tree instead (see
+// SCIENCE_LAB_UPGRADES' turret_fire_rate_1/_2 nodes) rather than a second,
+// duplicate slot here.
 
 // ---- Shop preview canvas ----
 // The species preview in the shop draws a live, stationary adult-stage fish
@@ -1053,14 +1060,19 @@ export const SPECIES = {
     swimSpeed: 65, // -5, see FISH_MOVEMENT_UPGRADE_SPEED_BONUS
     lifespan: 240000,
     hungerRate: 0.948, // 25% slower again per direct request — was 1.264 — lowest coin value of the three, so it's the least demanding to keep fed
-    // Same "share the adult's own dropInterval, scale only the value ~2x
-    // baby-to-adult" treatment as Guppy above. Per direct request ("make
-    // coins worth ~25% more but drop ~80% as often, for all fish"),
-    // dropValue *= 1.25 and dropInterval /= 0.8, same as every other feeder.
+    // Per direct request, flat baby/mid/adult dropValue of 3/4/5 (replacing
+    // the old 0.5x/0.75x/1.0x-of-adult scaling) — a simple, easy-to-read
+    // progression rather than a computed fraction. dropInterval retuned to
+    // 16500ms (up from 11728) to land the effective $/min back in the
+    // originally-requested "about 10-19" band despite the new, slightly
+    // higher dropValues: baby ~$10.9/min, mid ~$14.5/min, adult ~$18.2/min
+    // (dropValue/dropInterval*60000) — still shared flatly across all 3
+    // stages, same "same rate as adult the whole time, only value climbs"
+    // mechanic every base feeder uses.
     growthStages: [
-      { feedsRequired: 0, scale: 0.5, dropInterval: 11728, dropValue: 1.875 }, // hatchling — half the adult value
-      { feedsRequired: 3, scale: 0.75, dropInterval: 11728, dropValue: 2.8125 }, // juvenile — three-quarters
-      { feedsRequired: 6, scale: 1.0, dropInterval: 11728, dropValue: 3.75 }, // adult — still the high-frequency coin firehose of the three, just slightly less so
+      { feedsRequired: 0, scale: 0.5, dropInterval: 16500, dropValue: 3 }, // hatchling
+      { feedsRequired: 3, scale: 0.75, dropInterval: 16500, dropValue: 4 }, // juvenile
+      { feedsRequired: 6, scale: 1.0, dropInterval: 16500, dropValue: 5 }, // adult — still the high-frequency coin firehose of the three, just slightly less so
     ],
     // 10% slower waste production than Guppy, per direct request — same
     // "÷(1-x)" convention this codebase already uses for "X% slower"
@@ -2374,6 +2386,20 @@ export const POST_ALIEN_TUTORIAL_MESSAGE = "Now that's I'm talking about. A litt
 // mix that shifts across this exact same wave-progress axis.
 export const ALIEN_WAVE_INTERVAL_MIN_MS = 180000; // 3 minutes
 export const ALIEN_WAVE_INTERVAL_MAX_MS = 300000; // 5 minutes
+// Per direct request ("the first alien encounter come 1 minute earlier"),
+// subtracted only from the very first wave's own initial countdown seed
+// (Levels.js's loadLevel) — every wave after the first still rolls the plain
+// ALIEN_WAVE_INTERVAL_MIN/MAX_MS range above, unaffected.
+export const ALIEN_FIRST_WAVE_EARLY_MS = 60000;
+// The very first wave's one alien is deliberately biased away from the right
+// portion of the water column, per direct bug report — the HUD pill cluster
+// sits fixed top-right on screen the whole game, and a portal rolled anywhere
+// in the full FISH_MIN_X..FISH_MAX_X range could land underneath it, where
+// the cinematic intro's spotlight hole would be visually correct but the
+// click itself would hit the (non-interactive) HUD element instead of ever
+// reaching the canvas below it. Clamping the first alien to the left portion
+// of the range keeps it clear of that corner regardless of its Y roll.
+export const ALIEN_FIRST_WAVE_SAFE_X_FRACTION = 0.6;
 export const ALIEN_WAVE_DIFFICULTY_RAMP_WAVES = 10;
 export const ALIEN_WAVE_COUNT_EARLY_MIN = 2;
 export const ALIEN_WAVE_COUNT_EARLY_MAX = 3;

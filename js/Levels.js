@@ -3,7 +3,7 @@
 // which species/buildings are available, win conditions, alien waves, and
 // meta rewards granted on completion.
 
-import { SPECIES_LIST, BUILDING_LIST, ALIEN_WAVE_INTERVAL_MIN_MS, ALIEN_WAVE_INTERVAL_MAX_MS } from './Config.js';
+import { SPECIES_LIST, BUILDING_LIST, ALIEN_WAVE_INTERVAL_MIN_MS, ALIEN_WAVE_INTERVAL_MAX_MS, ALIEN_FIRST_WAVE_EARLY_MS } from './Config.js';
 import { createGrid } from './Grid.js';
 
 // The very first entry in state.level.notifications, pushed at level load
@@ -81,8 +81,9 @@ export function loadLevel(state, levelId) {
     tankPoints: { total: 0, available: 0 }, // earned by Entities.js on fish adult-growth transitions, spent in UI.js's Tank Upgrades panel — see CLAUDE.md's "Tank Points & Tank Upgrades"
     upgrades: {
       foodQuality: 0, fishMovement: 0, coinCapLevel: 0, scienceCapLevel: 0,
-      electricityGraphUnlocked: false, // Tank Upgrade (ELECTRICITY_GRAPH_UNLOCK_COST) — gates #hud-power's click-to-open rolling graph popup only; the mw text readout itself is unaffected, still shown unconditionally once Electric Eel is unlocked
+      electricityGraphUnlocked: false, // Tank Upgrade (ELECTRICITY_GRAPH_UNLOCK_COST) — gates #hud-power's click-to-open rolling graph popup AND its dropdown arrow; the mw text readout itself is unaffected, still shown unconditionally once Electric Eel is unlocked
       goldPerMinUnlocked: false, // Tank Upgrade (GOLD_PER_MIN_UNLOCK_COST) — reveals the #hud-gold-per-min readout, see Entities.js's computeTheoreticalGoldPerMinute
+      waveCountdownUnlocked: false, // Tank Upgrade (WAVE_COUNTDOWN_UNLOCK_COST) — reveals the #hud-wave-countdown readout, see UI.js's updateHUD
     }, // purchased Tank Upgrade levels, 0 = not yet bought; read live by Entities.js, not baked into fish/food at creation time. Fish Merging is no longer gated by a Tank Upgrade at all — see Entities.js's isCombinableFish. coinCapLevel is a Tank Upgrade (COIN_CAP_UPGRADE_COSTS); scienceCapLevel is bought in the Science Lab instead (SCIENCE_CAP_UPGRADE_SCIENCE_COSTS/_GOLD_COSTS) but lives here alongside it since both index the same way into their own *_CAP_BY_LEVEL table. foodCapacity retired entirely — see Config.js's FOOD_STATIONARY_TO_WASTE_MS
     // One-time story/tutorial notification gates — see CLAUDE.md's "Story &
     // Tutorial Notifications". Level-scoped like everything else here, so a
@@ -149,7 +150,11 @@ export function loadLevel(state, levelId) {
     // everything else here. alienNextWaveAtMs is an absolute state.level.elapsed target,
     // not a countdown-from value. Seeded with a real random interval so the very first
     // wave doesn't always land at the exact same moment every playthrough.
-    alienNextWaveAtMs: ALIEN_WAVE_INTERVAL_MIN_MS + Math.random() * (ALIEN_WAVE_INTERVAL_MAX_MS - ALIEN_WAVE_INTERVAL_MIN_MS),
+    // ALIEN_FIRST_WAVE_EARLY_MS is subtracted here ONLY — the very first
+    // wave's own seed — per direct request that the first alien encounter
+    // come a minute earlier; every later wave rolls the plain range via
+    // Systems.js's randomWaveIntervalMs(), untouched.
+    alienNextWaveAtMs: Math.max(0, ALIEN_WAVE_INTERVAL_MIN_MS + Math.random() * (ALIEN_WAVE_INTERVAL_MAX_MS - ALIEN_WAVE_INTERVAL_MIN_MS) - ALIEN_FIRST_WAVE_EARLY_MS),
     alienWavesSpawned: 0,
     alienWaveActive: false, // true from the moment a wave spawns until every one of its portals has opened AND every alien it produced is dead — see Systems.js's updateAlienWaves; the next wave's own countdown doesn't even start until this clears
     alienWarning1Shown: false,

@@ -35,6 +35,7 @@ import {
   FISH_MAX_X,
   FISH_MIN_Y,
   SEABED_FLOOR_Y,
+  ALIEN_FIRST_WAVE_SAFE_X_FRACTION,
   TILE_MANUFACTURER,
   TILE_POWER_PLANT,
 } from './Config.js';
@@ -267,14 +268,22 @@ function spawnAlienWave(state) {
   // after the first uses the normal ramped roll. It naturally comes out
   // Tier 1 anyway (t=0 -> 100% Tier 1 weight), so no special-casing of the
   // archetype roll itself is needed here, only the count.
-  const count = state.level.alienWavesSpawned === 0
+  const isFirstWave = state.level.alienWavesSpawned === 0;
+  const count = isFirstWave
     ? 1
     : Math.max(0, Math.min(rolledCount, ALIEN_MAX_ALIVE - aliveCount));
 
   for (let i = 0; i < count; i++) {
     const archetype = rollAlienArchetype(t);
+    // The very first wave's one alien is kept out of the right portion of
+    // the water column, per direct bug report — the HUD pill cluster sits
+    // fixed top-right on screen, and a portal rolled under it would leave
+    // the cinematic intro's spotlight hole aligned over a non-interactive
+    // HUD element instead of the canvas, so a click there never lands.
+    // Every later wave still rolls the full width, unaffected.
+    const xRange = isFirstWave ? (FISH_MAX_X - FISH_MIN_X) * ALIEN_FIRST_WAVE_SAFE_X_FRACTION : (FISH_MAX_X - FISH_MIN_X);
     state.level.alienPortals.push({
-      x: FISH_MIN_X + Math.random() * (FISH_MAX_X - FISH_MIN_X),
+      x: FISH_MIN_X + Math.random() * xRange,
       // Biased toward the upper-mid water column (not down near the seabed
       // line) so a fresh portal reads as "emerging from open water," not
       // spawning right on top of the player's factory.
