@@ -24,6 +24,11 @@ import {
   MAX_FALL_SPEED,
   FOOD_GRAVITY,
   FOOD_MAX_FALL_SPEED,
+  TILE_SIZE,
+  PRODUCTION_LAUNCH_MIN_TILES,
+  PRODUCTION_LAUNCH_MAX_TILES,
+  PRODUCTION_LAUNCH_MASS_MIN,
+  PRODUCTION_LAUNCH_MASS_MAX,
   FOOD_QUALITY_SINK_SPEED_REDUCTION_PER_LEVEL,
   FOOD_SWAY_AMPLITUDE,
   FOOD_SWAY_FREQUENCY,
@@ -2769,6 +2774,22 @@ function updateFishBubbleEffects(state, dtMs) {
   });
 }
 
+// Per direct request: an item freshly ejected by a Refinery or Manufacturer
+// launches slightly upward instead of just appearing at its output point
+// with zero velocity — 1-3 tiles high depending on the item's own mass (see
+// Config.js's PRODUCTION_LAUNCH_* comment for the full rationale). Solves
+// the standard v = sqrt(2*g*h) kinematic for whichever gravity constant
+// this item type actually falls under (Food/Mutagen Paste's own gentler
+// FOOD_GRAVITY, everything else the shared GRAVITY) so the resulting rise,
+// once real per-tick gravity integration takes over immediately afterward,
+// actually reaches the intended tile height rather than an arbitrary speed.
+function applyProductionLaunch(item) {
+  const t = Math.max(0, Math.min(1, (item.mass - PRODUCTION_LAUNCH_MASS_MIN) / (PRODUCTION_LAUNCH_MASS_MAX - PRODUCTION_LAUNCH_MASS_MIN)));
+  const heightTiles = PRODUCTION_LAUNCH_MAX_TILES - t * (PRODUCTION_LAUNCH_MAX_TILES - PRODUCTION_LAUNCH_MIN_TILES);
+  const gravity = (item.type === 'food' || item.type === 'mutagen_paste') ? FOOD_GRAVITY : GRAVITY;
+  item.vy = -Math.sqrt(2 * gravity * heightTiles * TILE_SIZE);
+}
+
 export function updateEntities(state, dtMs) {
   maybeWarnBioSludgePile(state);
   updateAlienPortals(state);
@@ -2815,19 +2836,24 @@ export function updateEntities(state, dtMs) {
   // doesn't eject (same "no player-facing feedback" precedent every other
   // building-side cap check already follows, unlike a fish's own capped
   // production which does show a blocked-effect).
+  // Every item spawned in this loop is a fresh Refinery/Manufacturer output
+  // — applyProductionLaunch (above) gives each one its upward launch
+  // velocity before it's pushed, per direct request. Deliberately NOT
+  // applied to the alien_dna a killed alien drops elsewhere (that's a death
+  // drop, not a building output) even though it's the same item type/mass.
   for (const point of bioSpawnPoints) {
-    if (point.itemType === 'food') state.level.items.push(createFood(point.x, point.y));
-    else if (point.itemType === 'biomass') { if (canSpawnMoreBiomass(state)) { state.level.items.push(createBiomass(point.x, point.y)); maybeAnnounceFirstBiomass(state); } }
+    if (point.itemType === 'food') { const item = createFood(point.x, point.y); applyProductionLaunch(item); state.level.items.push(item); }
+    else if (point.itemType === 'biomass') { if (canSpawnMoreBiomass(state)) { const item = createBiomass(point.x, point.y); applyProductionLaunch(item); state.level.items.push(item); maybeAnnounceFirstBiomass(state); } }
     // The Manufacturer's Bio-Sludge recipe (Food+Waste) outputs 'alien_dna' —
     // the same item type killing an alien drops, merged per direct request
     // (see Config.js's MANUFACTURER_RECIPES.bio_sludge comment) — so it
     // shares the exact same spawn-cap check every alien-drop Bio-Sludge
     // already uses.
-    else if (point.itemType === 'alien_dna') { if (canSpawnMoreAlienDna(state)) { state.level.items.push(createAlienDna(point.x, point.y)); maybeAnnounceFirstBioSludge(state); } }
-    else if (point.itemType === 'mutagen_paste') state.level.items.push(createMutagenPaste(point.x, point.y));
-    else if (point.itemType === 'science') { if (countScienceCapacityUsed(state) < effectiveScienceCapacity(state)) state.level.items.push(createScience(point.x, point.y)); }
-    else if (point.itemType === 'science_green') { if (countScienceCapacityUsed(state) < effectiveScienceCapacity(state)) state.level.items.push(createScienceGreen(point.x, point.y)); }
-    else if (point.itemType === 'alien_egg') state.level.items.push(createAlienEgg(point.x, point.y));
+    else if (point.itemType === 'alien_dna') { if (canSpawnMoreAlienDna(state)) { const item = createAlienDna(point.x, point.y); applyProductionLaunch(item); state.level.items.push(item); maybeAnnounceFirstBioSludge(state); } }
+    else if (point.itemType === 'mutagen_paste') { const item = createMutagenPaste(point.x, point.y); applyProductionLaunch(item); state.level.items.push(item); }
+    else if (point.itemType === 'science') { if (countScienceCapacityUsed(state) < effectiveScienceCapacity(state)) { const item = createScience(point.x, point.y); applyProductionLaunch(item); state.level.items.push(item); } }
+    else if (point.itemType === 'science_green') { if (countScienceCapacityUsed(state) < effectiveScienceCapacity(state)) { const item = createScienceGreen(point.x, point.y); applyProductionLaunch(item); state.level.items.push(item); } }
+    else if (point.itemType === 'alien_egg') { const item = createAlienEgg(point.x, point.y); applyProductionLaunch(item); state.level.items.push(item); }
   }
   for (const shot of turretShots) state.level.turretProjectiles.push(createTurretProjectile(shot));
   // Runs before the entities filter loop below, same as the old direct-

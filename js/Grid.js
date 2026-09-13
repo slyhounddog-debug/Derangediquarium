@@ -1661,15 +1661,93 @@ function renderTierBadge(ctx, type, x, y, size) {
   }
 }
 
+// A large, centered glyph — BUILDING_TYPES[type]'s own `icon` field, the
+// exact same emoji the shop already shows for this building — per direct
+// request ("make each building type visually distinct... without having to
+// click on it"). Reusing the shop's own icon (rather than authoring a
+// second, separate visual language) means recognition transfers directly:
+// whatever a player already learned to associate with a building in the
+// shop is the same glyph sitting on the tile in the tank. A soft dark
+// shadow keeps it legible against every building's own (quite different)
+// fill color.
+function renderBuildingIcon(ctx, icon, x, y, size) {
+  if (!icon) return;
+  ctx.save();
+  ctx.font = `${Math.round(size * 0.6)}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
+  ctx.shadowBlur = Math.max(1, size * 0.08);
+  ctx.fillText(icon, x + size / 2, y + size / 2 + size * 0.02);
+  ctx.restore();
+}
+
+// Platform's own distinct look, per direct request ("make the platforms
+// look more like simple bricks") — replaces the generic bevel-square shape
+// every other building starts from. A real 2-row offset brick course (a
+// classic running-bond pattern, the same reason real brickwork staggers its
+// joints) drawn as mortar lines over the tile's own base fill, plus a soft
+// per-brick highlight/shadow pair for a little dimension — matching this
+// game's general "not flat" aesthetic without reusing the diagonal bevel
+// look every other building keeps.
+function renderBrickPattern(ctx, x, y, size, color) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x, y, size, size);
+  ctx.clip();
+  ctx.fillStyle = color;
+  ctx.fillRect(x, y, size, size);
+
+  const rows = 2;
+  const rowH = size / rows;
+  const bricksPerRow = 2;
+  const brickW = size / bricksPerRow;
+  const mortarWidth = Math.max(1, size * 0.045);
+
+  for (let r = 0; r < rows; r++) {
+    const rowY = y + r * rowH;
+    const offset = (r % 2 === 0) ? 0 : brickW / 2;
+    // A subtle highlight along each brick's own top edge, then a darker
+    // mortar line beneath it — this is what gives the individual bricks
+    // (not just the tile as a whole) a little raised pop.
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
+    ctx.fillRect(x, rowY, size, mortarWidth);
+    for (let bx = -brickW; bx < size + brickW; bx += brickW) {
+      const lx = x + bx + offset;
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
+      ctx.fillRect(lx - mortarWidth / 2, rowY, mortarWidth, rowH);
+    }
+  }
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
+  ctx.fillRect(x, y + size - mortarWidth, size, mortarWidth);
+  ctx.restore();
+
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
+  ctx.lineWidth = Math.max(1, size * 0.04);
+  ctx.strokeRect(x + ctx.lineWidth / 2, y + ctx.lineWidth / 2, size - ctx.lineWidth, size - ctx.lineWidth);
+}
+
 // A Processor gets a circle in its center — the point
 // stepCollectorProcessing actually draws items into while it holds them
-// (duration now varies by tier/item type — see PROCESSOR_STATS). A Fan/
-// Auto-Feeder is a plain square here (renderDirectionIndicator draws its aim
-// on top). Every other building type is a plain square too. Every tier of
-// the same family shares this exact base shape — only the fill color
-// (BUILDING_TYPES[type].color) and the corner badge (renderTierBadge above)
-// tell them apart, per direct request.
+// (duration now varies by tier/item type — see PROCESSOR_STATS); that
+// circle is itself already a distinct, functional visual (unlike anything
+// else in the game), so it doesn't also get the generic icon below layered
+// on top of it. A Fan keeps its own dedicated aim arrow + force cone,
+// rendered separately by renderFanIndicators/renderDirectionIndicator — also
+// already distinct on its own, so no icon there either (one would visually
+// compete with the arrow in the same small space). Platform gets its own
+// brick pattern above instead of this shape entirely. Every OTHER building
+// family (Refinery, Manufacturer, Power Plant, Turret) gets its own large
+// centered icon (renderBuildingIcon, above) — per direct request, since
+// those previously had nothing but a fill color telling them apart. Every
+// tier within a family still shares this exact base shape/icon — only the
+// fill color and the corner tier badge (renderTierBadge above) distinguish
+// tiers within the same family, unchanged.
 function renderTileShape(ctx, type, color, x, y, size) {
+  if (type === TILE_PLATFORM) {
+    renderBrickPattern(ctx, x, y, size, color);
+    return;
+  }
   ctx.fillStyle = color;
   ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
   ctx.beginPath();
@@ -1683,11 +1761,18 @@ function renderTileShape(ctx, type, color, x, y, size) {
     ctx.arc(x + size / 2, y + size / 2, size * COLLECTOR_CIRCLE_RADIUS_FRACTION, 0, Math.PI * 2);
     ctx.fill();
     renderTierBadge(ctx, type, x, y, size);
+  } else if (FAN_TILES.has(type)) {
+    ctx.rect(x, y, size, size);
+    ctx.fill();
+    ctx.stroke();
+    renderSquareBevel(ctx, x, y, size);
+    renderTierBadge(ctx, type, x, y, size);
   } else {
     ctx.rect(x, y, size, size);
     ctx.fill();
     ctx.stroke();
     renderSquareBevel(ctx, x, y, size);
+    renderBuildingIcon(ctx, BUILDING_TYPES[type].icon, x, y, size);
     renderTierBadge(ctx, type, x, y, size);
   }
 }

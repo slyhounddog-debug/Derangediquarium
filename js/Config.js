@@ -292,6 +292,24 @@ export const FAN_T4_POWER_COST = 6; // doubled from 3 per direct request ("make 
 // left to shove clear, so there's no pop to begin with.
 export const BUILDING_OUTPUT_PORT_OFFSET_FRACTION = 0.9; // fraction of TILE_SIZE — how far above the tile's center the fixed output point sits
 
+// Per direct request: an item ejected by a Refinery or Manufacturer now
+// launches slightly upward off the output point instead of appearing there
+// with zero velocity — "launches the object upwards slightly, like 1-3
+// tiles worth depending on the mass of the object being launched." A
+// lighter item (Food/Mutagen Paste, mass 0.3) launches the full 3 tiles;
+// the heaviest current output (Biomass/Bio-Sludge, mass 4) only launches 1
+// — everything else (Science/Green Science at 2.8, Alien Egg at 2) falls
+// linearly in between by its own mass. See Entities.js's
+// applyProductionLaunch, which solves the classic v = sqrt(2*g*h) kinematic
+// for whichever gravity constant that item type actually falls under (Food/
+// Mutagen Paste use their own gentler FOOD_GRAVITY, everything else the
+// shared GRAVITY) so the requested tile height is what actually plays out
+// once real physics takes back over, not just an arbitrary velocity number.
+export const PRODUCTION_LAUNCH_MIN_TILES = 1; // the heaviest current output (mass >= PRODUCTION_LAUNCH_MASS_MAX)
+export const PRODUCTION_LAUNCH_MAX_TILES = 3; // the lightest current output (mass <= PRODUCTION_LAUNCH_MASS_MIN)
+export const PRODUCTION_LAUNCH_MASS_MIN = 0.3; // Food/Mutagen Paste's own mass — see ITEM_MASS_BY_TYPE
+export const PRODUCTION_LAUNCH_MASS_MAX = 4; // Biomass/Bio-Sludge's own mass — see ITEM_MASS_BY_TYPE
+
 // A Collector doesn't bank an item the instant it lands any more — it visibly
 // draws it in toward the tile's center and holds it there for that tile's
 // PROCESSOR_STATS-derived duration (coin vs Science Bubble, tier-scaled —
