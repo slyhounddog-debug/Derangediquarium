@@ -31,6 +31,7 @@ import {
   ALIEN_WARNING_MESSAGE_1,
   ALIEN_WARNING_MESSAGE_2,
   ALIEN_FIRST_WAVE_TIP_MESSAGE,
+  ALIEN_FOOD_DISTRACTION_TIP_MESSAGE,
   ALIEN_PORTAL_STAGGER_MS,
   ALIEN_MAX_ALIVE,
   FISH_MIN_X,
@@ -45,6 +46,9 @@ import {
   POWER_WARNING_CHANCE,
   POWER_WARNING_NONE_MESSAGE,
   POWER_WARNING_PARTIAL_MESSAGE,
+  ACHIEVEMENT_LIST,
+  ACHIEVEMENT_CLEANLINESS_ARM_THRESHOLD,
+  ACHIEVEMENT_CLEANLINESS_COMPLETE_THRESHOLD,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings } from './Levels.js';
 import { getFishPurchaseCost, findCombinablePair, spawnTurretTutorialWaste } from './Entities.js';
@@ -350,6 +354,16 @@ function updateAlienWaves(state) {
     if (wavePortalsPending || aliensAlive) return;
     state.level.alienWaveActive = false;
     state.level.alienNextWaveAtMs = elapsed + waveIntervalMsAt(state.level.alienWavesSpawned); // the real countdown starts fresh right now, not back when the wave spawned
+    state.meta.stats.wavesSurvived += 1; // waves_survived_5/20 achievements — this exact branch IS "a wave just finished clearing"
+    // One-time tip, right as the very first wave finishes clearing (see
+    // ALIEN_FOOD_DISTRACTION_TIP_MESSAGE's own comment for why this exact
+    // moment) — alienWavesSpawned is already 1 at this point since
+    // spawnAlienWave incremented it the instant the first wave's portals
+    // were created, well before this branch could ever run.
+    if (state.level.alienWavesSpawned === 1 && !state.level.tutorialFlags.alienFoodDistractionTipShown) {
+      state.level.tutorialFlags.alienFoodDistractionTipShown = true;
+      pushNotification(state, ALIEN_FOOD_DISTRACTION_TIP_MESSAGE);
+    }
     return;
   }
 
@@ -437,6 +451,54 @@ function updatePowerWarnings(state) {
   pushNotification(state, state.level.powerEfficiency <= 0 ? POWER_WARNING_NONE_MESSAGE : POWER_WARNING_PARTIAL_MESSAGE);
 }
 
+// Achievements — per direct spec, a permanent (state.meta) reward system.
+// Three small pieces of "specific setup" tracking (Spring Cleaning's arm/
+// complete flag, the live Science-on-screen peak) live here since they don't
+// have an obviously better home elsewhere; power_deficit_60s/
+// power_surplus_60s's own streaks are tracked in main.js instead, right
+// alongside the once-a-second demand/supply numbers they need (see that
+// file's own comment). The actual "did any achievement's condition just get
+// met for the first time" check is fully generic — every entry in
+// Config.js's ACHIEVEMENT_LIST resolves to one `stats[statField] >= threshold`
+// comparison, regardless of whether that stat is a plain lifetime counter or
+// one of the specific-setup flags/peaks this function itself maintains.
+function updateAchievements(state) {
+  // Spring Cleaning: arms the moment cleanliness first drops below
+  // ACHIEVEMENT_CLEANLINESS_ARM_THRESHOLD, completes (and disarms) the
+  // moment it's back at ACHIEVEMENT_CLEANLINESS_COMPLETE_THRESHOLD or higher
+  // — both checked live off the real, already-tracked state.level.cleanliness,
+  // no separate polling needed.
+  if (state.level.cleanliness < ACHIEVEMENT_CLEANLINESS_ARM_THRESHOLD) {
+    state.level.cleanlinessRecoveryArmed = true;
+  } else if (state.level.cleanlinessRecoveryArmed && state.level.cleanliness >= ACHIEVEMENT_CLEANLINESS_COMPLETE_THRESHOLD) {
+    state.level.cleanlinessRecoveryArmed = false;
+    state.meta.stats.cleanlinessRecoveryDone = 1;
+  }
+
+  // Bubble Trouble/Bath/Apocalypse — the highest-ever simultaneous count of
+  // Science + Green Science items sitting in the tank at once. A plain O(n)
+  // scan over state.level.items is negligible at this game's normal item
+  // counts, run once per tick same as every other per-tick tracker here.
+  let scienceCount = 0;
+  for (const item of state.level.items) {
+    if (item.type === 'science' || item.type === 'science_green') scienceCount += 1;
+  }
+  if (scienceCount > state.meta.stats.sciencePeakOnScreen) state.meta.stats.sciencePeakOnScreen = scienceCount;
+
+  // The generic evaluator — every achievement not already unlocked gets a
+  // fresh check against its own stat field every tick; the moment one
+  // crosses its threshold, it's permanently unlocked (ready to be claimed in
+  // the Achievements panel — see UI.js). Cheap: ACHIEVEMENT_LIST is a fixed,
+  // short (24-entry) array, and an already-unlocked achievement is skipped
+  // immediately via the .includes check.
+  for (const achievement of ACHIEVEMENT_LIST) {
+    if (state.meta.achievementsUnlocked.includes(achievement.id)) continue;
+    if ((state.meta.stats[achievement.statField] || 0) >= achievement.threshold) {
+      state.meta.achievementsUnlocked.push(achievement.id);
+    }
+  }
+}
+
 export function updateStoryTriggers(state) {
   updateBankruptcy(state);
   updateAlienWaves(state);
@@ -447,4 +509,5 @@ export function updateStoryTriggers(state) {
   updateRecipeCopyTip(state);
   updateAutosave(state);
   updatePowerWarnings(state);
+  updateAchievements(state);
 }

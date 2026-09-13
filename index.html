@@ -14,7 +14,24 @@
 
 <div id="splash-screen"><div id="splash-title">Derangediquarium</div></div>
 
-<div id="start-overlay">
+<!-- Loading screen, per direct request ("make sure everything in the game
+     like the music is loaded before the start menu shows up") — sits above
+     everything (including #start-overlay, which starts hidden and is only
+     revealed once main.js's loading sequence actually finishes). An adult
+     Guppy (the real FishRenderer.drawFish, not a generic icon) swims across
+     the bar as it fills. -->
+<div id="loading-overlay">
+  <div id="loading-content">
+    <div id="loading-title">Derangiquarium</div>
+    <div id="loading-bar-track">
+      <div id="loading-bar-fill"></div>
+      <canvas id="loading-guppy-canvas" width="48" height="36"></canvas>
+    </div>
+    <div id="loading-status">Loading...</div>
+  </div>
+</div>
+
+<div id="start-overlay" class="hidden">
   <div id="start-modal">
     <button id="start-new-game-btn" class="pause-btn sheen-target">▶️ New Game</button>
     <button id="start-continue-btn" class="pause-btn sheen-target" disabled>💾 Continue Game</button>
@@ -275,11 +292,37 @@
     <button id="tank-collapse-btn" title="Tank Upgrades (P)">🏆</button>
     <div id="tank-panel" class="collapsed">
       <div id="tank-panel-scroll">
-        <div id="tank-header-row">
-          <div id="tank-header">Tank Upgrades</div>
-          <div id="tank-points-display" class="sheen-target">🏆 0</div>
+        <!-- Per direct request, one panel (same size/position as the old
+             Tank Upgrades panel) now switches between 3 views via these
+             tabs — Upgrades, Achievements, and Customization — each showing
+             the other two as buttons too, so any view is reachable from any
+             other. See UI.js's setTankPanelView. -->
+        <div id="tank-tabs">
+          <button id="tank-tab-upgrades" class="tank-tab-btn active" title="Tank Upgrades">🏆</button>
+          <button id="tank-tab-achievements" class="tank-tab-btn" title="Achievements">🎖️</button>
+          <button id="tank-tab-customization" class="tank-tab-btn" title="Customize">🎩</button>
         </div>
-        <div id="tank-upgrade-list"></div>
+        <div id="tank-view-upgrades">
+          <div class="tank-header-row">
+            <div class="tank-header">Tank Upgrades</div>
+            <div id="tank-points-display" class="sheen-target">🏆 0</div>
+          </div>
+          <div id="tank-upgrade-list"></div>
+        </div>
+        <div id="tank-view-achievements" class="hidden">
+          <div class="tank-header-row">
+            <div class="tank-header">Achievements</div>
+            <div id="achievement-gems-display" class="sheen-target">💎 0</div>
+          </div>
+          <div id="achievement-list"></div>
+        </div>
+        <div id="tank-view-customization" class="hidden">
+          <div class="tank-header-row">
+            <div class="tank-header">Customize</div>
+            <div id="customization-gems-display" class="sheen-target">💎 0</div>
+          </div>
+          <div id="hat-grid"></div>
+        </div>
       </div>
     </div>
   </div>

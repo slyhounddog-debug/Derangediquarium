@@ -114,6 +114,7 @@ export function loadLevel(state, levelId) {
       mergeTutorialShown: false, // gates the "switch to Merge and drag two matching Adult fish together" guided tutorial to once, ever — triggered the first time two combinable fish exist on screen simultaneously, see Systems.js's updateMergeTutorialTrigger
       recipeCopyTipShown: false, // fires a one-time chat tip about the Manufacturer/Power Plant drag-to-copy-recipe mechanic the first time 2+ of either are placed at once — see Systems.js's updateRecipeCopyTip
       firstBioSludgeShown: false, // fires a one-time chat tip the first time a Bio-Sludge (alien_dna) item is ever created — worded differently depending on whether the Refinery is already unlocked, see Entities.js's maybeAnnounceFirstBioSludge
+      alienFoodDistractionTipShown: false, // fires a one-time chat tip right after the FIRST alien wave is fully cleared, explaining that Food distracts aliens off fish — see Systems.js's updateAlienWaves
     },
     // Cinematic first-alien intro — per direct request, the very first alien
     // to ever spawn gets a dedicated teaching moment: once it's been alive
@@ -178,6 +179,16 @@ export function loadLevel(state, levelId) {
     foodPurchasedCount: 0,
     fishDiedCount: 0,
     aliensKilledCount: 0,
+    // Achievements — see Config.js's ACHIEVEMENTS and Systems.js's
+    // updateAchievements. These 3 track an in-progress "specific setup"
+    // condition transiently (reset to 0/false on restart, same as everything
+    // else in state.level) — only once one of them actually crosses its own
+    // threshold does updateAchievements write a permanent new best/flag into
+    // state.meta.stats, so a restart mid-streak loses only the in-flight
+    // attempt, never real progress already banked.
+    powerDeficitStreakMs: 0, // real-ms a continuous demand>supply streak has held, sampled once/real-second alongside the existing HUD power history
+    powerSurplusStreakMs: 0, // same, for supply >= demand*ACHIEVEMENT_POWER_SURPLUS_RATIO
+    cleanlinessRecoveryArmed: false, // set true the moment cleanliness first drops below ACHIEVEMENT_CLEANLINESS_ARM_THRESHOLD; the achievement completes (and this clears back to false) the moment it's true AND cleanliness reaches ACHIEVEMENT_CLEANLINESS_COMPLETE_THRESHOLD
     bankruptcyActive: false, // true while "no fish + can't afford anything" is CURRENTLY true, so the bailout/game-over response only fires once per fresh occurrence of that condition, not every tick it holds — see Systems.js's updateStoryTriggers
     bankruptciesTriggered: 0, // 0 = never happened, 1 = the one-time $100 bailout already used, 2+ = game over
     gameOver: false, // set true on the second bankruptcy — main.js's update() stops simulating while this is true, same as state.ui.paused, but Escape still opens the pause menu so Restart stays reachable

@@ -593,6 +593,13 @@ function updateAlien(alien, state, dtMs) {
       maybeAnnounceFirstBioSludge(state);
     }
     state.level.aliensKilledCount += 1; // end-game stats modal only — see main.js's showGameOverModal
+    state.meta.stats.alienKills += 1; // permanent mirror, for the alien_kills_10/50/200 achievements
+    // turret_kills_25 achievement — alien.lastDamageSource is stamped
+    // 'turret' by updateTurretProjectiles' own impact site (and 'click' by
+    // main.js's click-damage handler) right before applying the hit that
+    // actually finishes it off; whichever one landed the FINAL blow is what
+    // counts, not every hit along the way.
+    if (alien.lastDamageSource === 'turret') state.meta.stats.turretKills += 1;
     // The very first alien ever killed triggers the turret tutorial's own
     // cinematic setup, per direct spec ("right after they kill the first
     // alien, another one instantly spawns, and 1 second later it triggers
@@ -1099,6 +1106,7 @@ const MONEY_MILESTONE_1K_MESSAGE = '1k money? Bruh save some for the fishes';
 function bankMoney(state, amount) {
   state.level.money += amount;
   state.level.lifetimeMoneyEarned += amount;
+  state.meta.stats.moneyEarned += amount; // permanent mirror, for the money_1k/10k/100k achievements — survives a restart, unlike the level-scoped counter above
   if (!state.level.tutorialFlags.moneyMilestone1k && state.level.lifetimeMoneyEarned >= MONEY_MILESTONE_1K) {
     state.level.tutorialFlags.moneyMilestone1k = true;
     const notifications = state.level.notifications;
@@ -1114,6 +1122,7 @@ function bankMoney(state, amount) {
 function bankScience(state, amount) {
   state.level.science += amount;
   state.level.lifetimeScienceEarned += amount; // end-game stats modal only — see main.js's showGameOverModal
+  state.meta.stats.scienceBanked += amount; // science_banked_50 achievement — permanent, unlike the two level-scoped counters above
 }
 
 // Green Science's own separate reserve (state.level.scienceGreen) — mirrors
@@ -1123,6 +1132,7 @@ function bankScience(state, amount) {
 function bankScienceGreen(state, amount) {
   state.level.scienceGreen += amount;
   state.level.lifetimeScienceGreenEarned += amount; // end-game stats modal only — see main.js's showGameOverModal
+  state.meta.stats.scienceBanked += amount; // science_banked_50 counts Blue OR Green alike, per that achievement's own description
 }
 
 export function tryBankScienceAt(state, worldX, worldY) {
@@ -1472,6 +1482,7 @@ export function spliceFish(state, utilityFish, targetFish) {
   state.level.entities.push(hybrid);
 
   state.level.floatingTexts.push(createPickupText(x, y, 'Spliced!', TANK_POINT_COLOR));
+  state.meta.stats.hybridsCreated += 1; // hybrids_created_1/5 achievements
   if (!state.level.tutorialFlags.firstSplice) {
     state.level.tutorialFlags.firstSplice = true;
     pushStoryNotification(state, FIRST_SPLICE_MESSAGE);
@@ -1515,6 +1526,7 @@ export function spliceOctopusWithAlien(state, octopusFish, alien) {
   if (idxA !== -1) state.level.entities.splice(idxA, 1);
   state.level.entities.push(hybrid);
   state.level.floatingTexts.push(createPickupText(x, y, 'Spliced!', TANK_POINT_COLOR));
+  state.meta.stats.hybridsCreated += 1; // hybrids_created_1/5 achievements
   return hybrid;
 }
 
@@ -2126,6 +2138,8 @@ function awardTankPoint(state, fish) {
   const isFirst = state.level.tankPoints.total === 0;
   state.level.tankPoints.total += TANK_POINT_PER_ADULT_FISH;
   state.level.tankPoints.available += TANK_POINT_PER_ADULT_FISH;
+  state.meta.stats.tankPointsEarned += TANK_POINT_PER_ADULT_FISH; // tank_points_10/50 achievements
+  state.meta.stats.fishGrownToAdult += 1; // fish_grown_10 achievement — awardTankPoint is always called exactly once a fish reaches its final (Adult) growth stage, from both the ordinary feed path and the Mutagen Paste instant-jump path
   state.level.floatingTexts.push(createPickupText(fish.x, fish.y, '+1 Tank Point!', TANK_POINT_COLOR));
   playTankPoint();
   if (isFirst) {
@@ -2380,6 +2394,13 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
       // seek/approach behavior above.
       const onEatCooldown = isPureScavenger && fish.eatCooldownRemainingMs > 0;
       if (dist <= FISH_EAT_RADIUS && !onEatCooldown) {
+        // fish_saved_10 achievement — a fish that was already at
+        // HUNGER_CRITICAL_THRESHOLD (the "!!" urgent-hunger stage) genuinely
+        // reads as "right at the brink of starving," so successfully eating
+        // from there counts as a save. Checked BEFORE any hunger relief is
+        // applied below, off whatever the fish's real hunger was the instant
+        // it landed this bite.
+        if (fish.hunger >= HUNGER_CRITICAL_THRESHOLD) state.meta.stats.fishSaved += 1;
         const idx = state.level.items.indexOf(target);
         if (idx !== -1) state.level.items.splice(idx, 1);
         playEat();
@@ -2806,6 +2827,7 @@ function updateTurretProjectiles(state, dtMs) {
     const dist = Math.hypot(dx, dy);
     if (dist <= TURRET_PROJECTILE_HIT_RADIUS) {
       target.hp -= shot.damage;
+      target.lastDamageSource = 'turret'; // turret_kills_25 achievement — see updateAlien's own death branch, checked ONLY at the moment of an actual kill
       target.reservedDamage = Math.max(0, (target.reservedDamage || 0) - shot.damage); // the damage is now real (applied to hp above), not just reserved/in-flight any more
       target.hitFlashMs = ALIEN_HIT_FLASH_MS; // per direct request — a hit flashes red and "bounces," read back by main.js's render
       // Only the "still alive" hit sound here — a killing blow instead gets

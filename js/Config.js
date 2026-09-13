@@ -2415,6 +2415,7 @@ export const FISH_STAR_OUTER_RADIUS_RATIO = 0.09; // fraction of the fish's curr
 export const FISH_STAR_INNER_RADIUS_FRACTION = 0.45; // fraction of a star's own outer radius
 export const FISH_STAR_SPACING_RATIO = 2.4; // fraction of a star's outer radius, between star centers
 export const FISH_STAR_Y_OFFSET_RATIO = 0.55; // how far above the fish's center the star row sits, relative to size
+export const FISH_HAT_SIZE_RATIO = 0.65; // an equipped cosmetic hat's glyph size, relative to the fish's own size — see FishRenderer.js's drawFish and Config.js's HATS
 // Hit-test radius (as a fraction of the fish's current on-screen size) used
 // by main.js's drag-to-combine mousedown/mouseup and the live hover-target
 // check — generous enough to grab a fish without needing pixel precision,
@@ -2642,6 +2643,14 @@ export const ALIEN_WARNING_MESSAGE_2 = "Uh oh, I'm reading movement out there. G
 export const ALIEN_WARNING_MESSAGE_2_REPEAT = "Uh oh, I'm picking up movement again. Get your turrets ready.";
 export const ALIEN_WARNING_MAX_WAVES = 3; // no more upcoming-wave chat warnings once this many waves have already spawned
 export const ALIEN_FIRST_WAVE_TIP_MESSAGE = "Aliens incoming! Click 'em for 1 damage a pop, or let a turret handle it. While they're alive they'll poop waste and scare nearby fish off their coins, so don't dawdle.";
+// Per direct request ("add a chat message after the first alien wave
+// letting the player know the aliens can be distracted from the fish with
+// food") — posted once, right after the very first wave is fully cleared
+// (Systems.js's updateAlienWaves, the same moment alienWaveActive flips back
+// to false for the first time), since that's when the player has just
+// finished dealing with their first real encounter and is most likely to
+// actually retain a tip about handling the next one differently.
+export const ALIEN_FOOD_DISTRACTION_TIP_MESSAGE = "Psst — aliens are suckers for a free meal. Toss down some Food and watch 'em beeline for it instead of your fish.";
 
 // ---- Mother Alien Fish (end-game boss) ----
 // Per direct spec — a one-time purchase in the Science Lab (see
@@ -2772,15 +2781,20 @@ export const ALIEN_CLICK_DAMAGE = 1; // per direct request — "clicking on them
 export const ALIEN_CLICK_RADIUS_MULTIPLIER = 1.5;
 export const ALIEN_POOP_INTERVAL_MS = 8000; // was 4000 — halved again ("aliens poop out waste half as often"), same population-cap-softening rationale as every prior cut
 export const ALIEN_INCOME_BLOCK_RADIUS = 90; // px — a fish this close to a LIVING alien produces no coin on its drop timer at all, see Entities.js's updateFish
-// Per direct request ("make it so aliens will go towards food only if it's
-// close to them and eat the food") — a much tighter radius than
-// ALIEN_AWARENESS_RADIUS (which governs fish-chasing), so an alien only
-// notices/eats Food that's genuinely nearby, checked fresh every tick
-// (unlike the fish-chase bias, which only re-rolls on a wander cycle) so it
-// can react the instant Food drifts close. ALIEN_FOOD_EAT_RADIUS isn't a
+// Originally a much tighter radius than ALIEN_AWARENESS_RADIUS (fish-chasing)
+// — "make it so aliens will go towards food only if it's close to them and
+// eat the food." Raised to match ALIEN_AWARENESS_RADIUS exactly per a later
+// direct request ("make all aliens prioritize food over fish") — Entities.js's
+// updateAlien checks for nearby Food AFTER the wander-cycle's fish-chase
+// roll and unconditionally overrides whatever heading that roll picked, so
+// equalizing the two radii means food genuinely wins outright any time both
+// a fish and Food are within the same detection range, rather than only
+// within a much smaller sub-area. Checked fresh every tick (unlike the
+// fish-chase bias, which only re-rolls on a wander cycle) so an alien can
+// react the instant Food drifts into range. ALIEN_FOOD_EAT_RADIUS isn't a
 // flat constant — Entities.js's updateAlien computes it as the alien's own
 // instance radius plus FOOD_RADIUS, since alien size varies by archetype.
-export const ALIEN_FOOD_AWARENESS_RADIUS = 90;
+export const ALIEN_FOOD_AWARENESS_RADIUS = ALIEN_AWARENESS_RADIUS;
 export const ALIEN_RADIUS = 16; // px — fallback only now, same role as ALIEN_SPEED above; every real alien's own radius/color come from its archetype (ALIEN_ARCHETYPES), copied onto the instance by Entities.js's createAlien
 export const ALIEN_COLOR = '#5a2d6b'; // dark purple — fallback only, matches ALIEN_ARCHETYPES[0]'s own color (Tier 1)
 export const ALIEN_HEALTH_BAR_WIDTH = 30;
@@ -2867,3 +2881,89 @@ export const ALIEN_PORTAL_OPEN_MS = 900; // grow-in duration before the alien ac
 export const ALIEN_PORTAL_CLOSE_MS = 700; // shrink-out duration after it emerges
 export const ALIEN_PORTAL_RADIUS = 26;
 export const ALIEN_PORTAL_STAGGER_MS = 350; // gap between each alien's own portal opening, within one wave
+
+// ---- Achievements, Fishy Gems, and hats ----
+// Per direct request: a permanent (state.meta-scoped) achievement system
+// whose only reward is Fishy Gems — a currency that ONLY ever appears in the
+// Achievements/Customization panels and the end-game screen, never the main
+// HUD — spent in the Customization panel on cosmetic hats. Achievements are
+// a mix of "natural" ones (a lifetime counter that just climbs during normal
+// play — money earned, aliens killed, buildings placed, etc., tracked in
+// state.meta.stats — see Levels.js/Entities.js/Grid.js/Systems.js for each
+// counter's own increment site) and a handful that need genuine deliberate
+// setup (saving a fish right at the brink of starving, sustaining a power
+// deficit/surplus for a full continuous minute, recovering the tank's
+// cleanliness after letting it get genuinely dirty, stockpiling a lot of
+// Science on screen at once). Every achievement resolves to one generic
+// `stats[statField] >= threshold` check (Systems.js's updateAchievements),
+// even the "specific setup" ones — their own dedicated tracking logic just
+// writes into a matching stats field (a best-ever streak in ms, a one-shot
+// 0/1 flag) instead of a plain incrementing counter, so the achievement
+// table itself never needs to know which kind of stat it's reading.
+export const ACHIEVEMENT_GEM_REWARD_BY_TIER = { easy: 5, medium: 10, hard: 20 };
+
+export const ACHIEVEMENTS = {
+  money_1k: { id: 'money_1k', name: 'Pocket Change', description: 'Earn $1,000 total.', tier: 'easy', statField: 'moneyEarned', threshold: 1000 },
+  money_10k: { id: 'money_10k', name: 'Nice Little Nest Egg', description: 'Earn $10,000 total.', tier: 'medium', statField: 'moneyEarned', threshold: 10000 },
+  money_100k: { id: 'money_100k', name: 'Tank Tycoon', description: 'Earn $100,000 total.', tier: 'hard', statField: 'moneyEarned', threshold: 100000 },
+  alien_kills_10: { id: 'alien_kills_10', name: 'First Blood', description: 'Kill 10 aliens.', tier: 'easy', statField: 'alienKills', threshold: 10 },
+  alien_kills_50: { id: 'alien_kills_50', name: 'Exterminator', description: 'Kill 50 aliens.', tier: 'medium', statField: 'alienKills', threshold: 50 },
+  alien_kills_200: { id: 'alien_kills_200', name: 'Xenocide', description: 'Kill 200 aliens.', tier: 'hard', statField: 'alienKills', threshold: 200 },
+  turret_kills_25: { id: 'turret_kills_25', name: 'Automated Defense', description: 'Get 25 alien kills specifically from turrets.', tier: 'medium', statField: 'turretKills', threshold: 25 },
+  tank_points_10: { id: 'tank_points_10', name: 'Growing Up', description: 'Earn 10 Tank Points.', tier: 'easy', statField: 'tankPointsEarned', threshold: 10 },
+  tank_points_50: { id: 'tank_points_50', name: 'Fully Grown', description: 'Earn 50 Tank Points.', tier: 'medium', statField: 'tankPointsEarned', threshold: 50 },
+  buildings_placed_10: { id: 'buildings_placed_10', name: 'Handy', description: 'Place 10 buildings.', tier: 'easy', statField: 'buildingsPlaced', threshold: 10 },
+  buildings_placed_50: { id: 'buildings_placed_50', name: 'Factory Brain', description: 'Place 50 buildings.', tier: 'medium', statField: 'buildingsPlaced', threshold: 50 },
+  hybrids_created_1: { id: 'hybrids_created_1', name: 'Mad Scientist', description: 'Splice your first hybrid fish.', tier: 'easy', statField: 'hybridsCreated', threshold: 1 },
+  hybrids_created_5: { id: 'hybrids_created_5', name: 'Gene Pool', description: 'Splice 5 hybrid fish.', tier: 'medium', statField: 'hybridsCreated', threshold: 5 },
+  waves_survived_5: { id: 'waves_survived_5', name: 'Holding the Line', description: 'Survive 5 alien waves.', tier: 'easy', statField: 'wavesSurvived', threshold: 5 },
+  waves_survived_20: { id: 'waves_survived_20', name: 'Siege Breaker', description: 'Survive 20 alien waves.', tier: 'hard', statField: 'wavesSurvived', threshold: 20 },
+  fish_grown_10: { id: 'fish_grown_10', name: 'Proud Parent', description: 'Raise 10 fish to adulthood.', tier: 'easy', statField: 'fishGrownToAdult', threshold: 10 },
+  science_banked_50: { id: 'science_banked_50', name: 'Lab Assistant', description: 'Bank 50 Science Bubbles.', tier: 'medium', statField: 'scienceBanked', threshold: 50 },
+  fish_saved_10: { id: 'fish_saved_10', name: 'Lifeguard', description: 'Save 10 fish from starving by feeding them right at the brink.', tier: 'hard', statField: 'fishSaved', threshold: 10 },
+  power_deficit_60s: { id: 'power_deficit_60s', name: 'Brownout', description: 'Under-produce electricity (demand exceeding supply) for a continuous 60 seconds.', tier: 'hard', statField: 'powerDeficitStreakBestMs', threshold: 60000 },
+  power_surplus_60s: { id: 'power_surplus_60s', name: 'Overcharged', description: 'Produce at least double the electricity your grid needs, continuously, for 60 seconds.', tier: 'hard', statField: 'powerSurplusStreakBestMs', threshold: 60000 },
+  cleanliness_recovery: { id: 'cleanliness_recovery', name: 'Spring Cleaning', description: 'Clean the tank back up to 99% after letting it drop below 90%.', tier: 'medium', statField: 'cleanlinessRecoveryDone', threshold: 1 },
+  science_onscreen_10: { id: 'science_onscreen_10', name: 'Bubble Trouble', description: 'Have 10 Science Bubbles on screen at once.', tier: 'easy', statField: 'sciencePeakOnScreen', threshold: 10 },
+  science_onscreen_25: { id: 'science_onscreen_25', name: 'Bubble Bath', description: 'Have 25 Science Bubbles on screen at once.', tier: 'medium', statField: 'sciencePeakOnScreen', threshold: 25 },
+  science_onscreen_50: { id: 'science_onscreen_50', name: 'Bubble Apocalypse', description: 'Have 50 Science Bubbles on screen at once.', tier: 'hard', statField: 'sciencePeakOnScreen', threshold: 50 },
+};
+export const ACHIEVEMENT_LIST = Object.values(ACHIEVEMENTS);
+
+// 12 hats ("at least a dozen," per direct spec), each costing roughly what
+// 4-6 easy achievements or 1-3 hard achievements are worth (easy=5, so
+// 4-6 easy = 20-30 gems; hard=20, so 1-3 hard = 20-60 gems) — see each hat's
+// own gemCost below, all landing inside or near that band. Total cost across
+// all 12 (255) is deliberately a little LESS than the full 270 gems every
+// achievement combined actually pays out, per direct spec ("the amount of
+// total fishy gems to be earned [should be] just a little more than the
+// total to buy all the hats") — a 15-gem buffer, about 6%. `none` is the
+// always-available, free default (no hat) — not counted toward "a dozen
+// different hats," since it isn't really a hat.
+export const HATS = {
+  none: { id: 'none', name: 'No Hat', icon: '🚫', gemCost: 0 },
+  guppy_cap: { id: 'guppy_cap', name: "Lil' Guppy Cap", icon: '🧢', gemCost: 12 },
+  fancy_fin: { id: 'fancy_fin', name: 'Fancy Fin Top Hat', icon: '🎩', gemCost: 15 },
+  beach_bum: { id: 'beach_bum', name: 'Beach Bum Sun Hat', icon: '👒', gemCost: 18 },
+  incognito: { id: 'incognito', name: 'Incognito Disguise', icon: '🥸', gemCost: 18 },
+  turret_tech: { id: 'turret_tech', name: 'Turret Tech Helmet', icon: '🪖', gemCost: 20 },
+  bubble_scholar: { id: 'bubble_scholar', name: 'Bubble Scholar Cap', icon: '🎓', gemCost: 20 },
+  lucky_clover: { id: 'lucky_clover', name: 'Lucky Clover', icon: '🍀', gemCost: 22 },
+  star_struck: { id: 'star_struck', name: 'Star Struck', icon: '🌟', gemCost: 22 },
+  shark_fin: { id: 'shark_fin', name: 'Shark Fin', icon: '🦈', gemCost: 25 },
+  pumpkin_head: { id: 'pumpkin_head', name: 'Pumpkin Head', icon: '🎃', gemCost: 25 },
+  static_spike: { id: 'static_spike', name: 'Static Spike', icon: '⚡', gemCost: 28 },
+  tank_royalty: { id: 'tank_royalty', name: 'Tank Royalty Crown', icon: '👑', gemCost: 30 },
+};
+export const HAT_LIST = Object.values(HATS).filter((h) => h.id !== 'none');
+
+// Continuous-streak achievements (power deficit/surplus) need a live,
+// once-a-second sample of demand vs supply — reusing the exact cadence
+// main.js's own HUD power-history sampler already runs on, rather than a
+// second timer. ACHIEVEMENT_POWER_SURPLUS_RATIO is the "at least double"
+// threshold power_surplus_60s's own description names directly.
+export const ACHIEVEMENT_POWER_SURPLUS_RATIO = 2;
+// Spring Cleaning's own two thresholds, named directly in its description —
+// "drop below 90%" arms it, "back up to 99%" completes it.
+export const ACHIEVEMENT_CLEANLINESS_ARM_THRESHOLD = 90;
+export const ACHIEVEMENT_CLEANLINESS_COMPLETE_THRESHOLD = 99;

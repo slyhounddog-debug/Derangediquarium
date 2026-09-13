@@ -24,6 +24,8 @@ import {
   FISH_STAR_INNER_RADIUS_FRACTION,
   FISH_STAR_SPACING_RATIO,
   FISH_STAR_Y_OFFSET_RATIO,
+  FISH_HAT_SIZE_RATIO,
+  HATS,
 } from './Config.js';
 
 function hexToRgb(hex) {
@@ -343,7 +345,7 @@ function drawOctopusBody(ctx, x, y, size, facing, tailPhase, isFullyGrown, color
 // fish.capBlockedTintRemainingMs) — per direct request that a fish should
 // visibly read as "not producing" in both cases. Applied on top of any
 // sickness tint rather than instead of it; the two only rarely coincide.
-export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDirection, starTier = 1, sickness = 0, grayed = 0) {
+export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDirection, starTier = 1, sickness = 0, grayed = 0, hatId = 'none') {
   const def = SPECIES[speciesId];
   const scale = def.growthStages[stage].scale;
   const size = FISH_BASE_SIZE * scale;
@@ -408,6 +410,30 @@ export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDire
       for (let i = 0; i < starCount; i++) {
         drawStar(ctx, startX + i * spacing, starY, starRadius, FISH_STAR_COLOR);
       }
+    }
+  }
+
+  // Equipped cosmetic hat — per direct spec ("achievements used for
+  // unlockable hats to be added to the fish"), a global equip (the same one
+  // hat choice renders on every fish, not a per-fish assignment — a deliberate
+  // simplification given this is purely cosmetic and per-fish customization
+  // would need a whole separate UI of its own) shown as a plain emoji glyph
+  // above the head, same "items are just colored shapes, not sprites"
+  // language this game's icons already use everywhere else. Adult-only, same
+  // "only once fully grown" precedent the star-tier overlay right above
+  // already follows, and drawn just above wherever those stars would sit (so
+  // a starred AND hatted fish never overlaps the two).
+  if (isFullyGrown && hatId && hatId !== 'none') {
+    const hat = HATS[hatId];
+    if (hat) {
+      const hatSize = size * FISH_HAT_SIZE_RATIO;
+      const hatY = y - size * FISH_STAR_Y_OFFSET_RATIO - hatSize * 0.9;
+      ctx.font = `${hatSize}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(hat.icon, x, hatY);
+      ctx.textAlign = 'left'; // restore canvas defaults — every other caller in this codebase assumes these
+      ctx.textBaseline = 'alphabetic';
     }
   }
 }

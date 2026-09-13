@@ -49,6 +49,7 @@ import {
   DIAMOND_GEM_COLOR_CORE,
   DIAMOND_GEM_COLOR_EDGE,
   POWER_HISTORY_MAX,
+  ACHIEVEMENT_POWER_SURPLUS_RATIO,
   SCIENCE_CAP_BY_LEVEL,
   MOUND_MAX_TIER,
   ALIEN_CLICK_DAMAGE,
@@ -143,6 +144,8 @@ import {
   findNearestWasteTurretAndWaste,
   getRecipeBuildingKeyAt,
   getBuildingInfoKeyAt,
+  getItemDisintegrateFraction,
+  renderDisintegrateEffect,
 } from './Grid.js';
 import { isPointOnMound, crackMound, renderMound, centerCameraOnMound, isPointOnScienceLab, renderScienceLab } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
@@ -204,6 +207,21 @@ const ITEM_FLAT_COLOR_BY_TYPE = {
   // render branch below (a countdown-to-hatch ring on top of the shell
   // fill), not the generic flat-fill-plus-highlight path.
 };
+
+// Resolves a single representative color for the disintegrate effect
+// (renderDisintegrateEffect), covering every item type that can actually be
+// held by a Collector/Refinery/Manufacturer (coin/science/science_green/
+// waste/food/alien_dna/biomass) plus a defensive fallback for anything else
+// — a stipple effect only needs one flat color per item, not the full
+// two-tone gradient its normal render otherwise gets.
+function disintegrateItemColor(item) {
+  if (item.type === 'coin') return getCoinColor(item.value);
+  if (item.type === 'science') return SCIENCE_ITEM_COLOR_B;
+  if (item.type === 'science_green') return SCIENCE_GREEN_COLOR_B;
+  if (item.type === 'biomass') return BIOMASS_COLOR_CORE;
+  if (item.type === 'alien_egg') return ALIEN_EGG_COLOR;
+  return ITEM_FLAT_COLOR_BY_TYPE[item.type] || '#ffffff';
+}
 
 // Browsers refuse to let an AudioContext make sound until a real user
 // gesture — resumeAudio() also kicks off the looping background music the
@@ -282,6 +300,46 @@ const state = {
     labUpgradesPurchased: [], // ids from Config.js's SCIENCE_LAB_UPGRADES — permanent like every other meta unlock, tracked separately from what each node actually grants so UI.js's tree can check prerequisites uniformly regardless of whether a node grants a species or a building
     levelsCompleted: [],
     settings: { soundOn: true },
+    // ---- Achievements / Fishy Gems / hats — all permanent, per direct
+    // spec ("achievements used for unlockable hats"). fishyGems is the
+    // ONLY currency the Achievements/Customization panels and the end-game
+    // screen ever show — never the main HUD. achievementsUnlocked is set
+    // the instant an achievement's condition is first met (Systems.js's
+    // updateAchievements); achievementsClaimed is the subset the player has
+    // actually clicked "Claim" on (only then are the gems actually granted)
+    // — see Config.js's ACHIEVEMENTS for the full list/condition table.
+    fishyGems: 0,
+    achievementsUnlocked: [],
+    achievementsClaimed: [],
+    hatsUnlocked: ['none'], // 'none' (no hat) is always owned/free — see Config.js's HATS
+    equippedHatId: 'none', // applies globally to every fish in the tank — see FishRenderer.js's drawFish
+    // Lifetime counters/peaks/streaks every achievement's own statField
+    // reads (Config.js's ACHIEVEMENTS) — persists across a restart same as
+    // everything else in state.meta, since these represent real permanent
+    // progress, not per-playthrough state. Most are plain incrementing
+    // counters bumped at their own natural event site (see each field's
+    // comment for exactly where); the handful backing a "specific setup"
+    // achievement (the two streak-best-ms fields, cleanlinessRecoveryDone)
+    // are written by Systems.js's updateAchievements, which itself reads a
+    // transient in-progress version of the same streak from state.level
+    // (reset on restart, same as every other per-level counter) and only
+    // ever WRITES here once a new best is actually reached.
+    stats: {
+      moneyEarned: 0, // mirrors state.level.lifetimeMoneyEarned — see Entities.js's bankMoney
+      alienKills: 0, // mirrors state.level.aliensKilledCount (non-boss kills only) — see Entities.js's updateAlien
+      turretKills: 0, // subset of alienKills specifically finished off by a turret projectile, not a click — see Entities.js's updateAlien/updateTurretProjectiles
+      tankPointsEarned: 0, // see Entities.js's awardTankPoint
+      buildingsPlaced: 0, // see Grid.js's placeTile
+      hybridsCreated: 0, // see Entities.js's spliceFish/spliceOctopusWithAlien
+      wavesSurvived: 0, // see Systems.js's updateAlienWaves, the same moment alienWaveActive first flips back to false for a given wave
+      fishGrownToAdult: 0, // see Entities.js's updateFish, the same growth-stage-advance branch that already triggers the shimmer/growth SFX
+      scienceBanked: 0, // Blue OR Green Science, click-banked or Collector-routed alike — see Entities.js's bankScience/bankScienceGreen
+      fishSaved: 0, // a fish that was already at HUNGER_CRITICAL_THRESHOLD and then successfully ate — see Entities.js's updateFish
+      powerDeficitStreakBestMs: 0,
+      powerSurplusStreakBestMs: 0,
+      cleanlinessRecoveryDone: 0, // 0 or 1 — a plain one-shot flag, not a counter
+      sciencePeakOnScreen: 0, // highest-ever simultaneous count of Science + Green Science items in state.level.items
+    },
   },
   level: null, // built by loadLevel below — never construct this inline (see Levels.js)
   // zoom/viewWidth/viewHeight are fit to the water column by fitCameraZoom()
@@ -293,6 +351,7 @@ const state = {
     selectedTool: 'food', // which click-tool a canvas click performs; only 'food' exists until Phase 2 adds tile placement
     shopCollapsed: true, // shop starts tucked away — just the toggle button — so it doesn't clutter the view
     tankPanelCollapsed: true, // Tank Upgrades panel starts tucked away too — shares the shop's on-screen slot, only one is ever expanded (see UI.js's toggleShopCollapse/toggleTankPanel)
+    tankPanelView: 'upgrades', // 'upgrades' | 'achievements' | 'customization' — which of the 3 views the Tank panel currently shows, see UI.js's setTankPanelView. Persists across a collapse/expand (only Escape/tool-select closes the panel, never resets which tab was showing)
     paused: false, // pause menu open/closed (Escape); update() below skips simulating entirely while true
     // False until the player clicks "Start" on the new first-launch start
     // screen (UI.js's initStartScreen) — update() below checks this ahead of
@@ -836,6 +895,7 @@ input.clickHandlers.push((sx, sy) => {
     if (entity.spawnProtectionUntilMs > state.level.elapsed) continue;
     if (Math.hypot(entity.x - world.x, entity.y - world.y) <= (entity.radius ?? ALIEN_RADIUS) * ALIEN_CLICK_RADIUS_MULTIPLIER) {
       entity.hp -= ALIEN_CLICK_DAMAGE;
+      entity.lastDamageSource = 'click'; // turret_kills_25 achievement — see Entities.js's updateAlien death branch, checked only at the moment of an actual kill
       entity.hitFlashMs = ALIEN_HIT_FLASH_MS; // per direct request — a hit flashes red and "bounces," read back by the render loop below
       // Only the "still alive" hit sound — a killing click instead gets
       // Entities.js's playAlienDeath from updateAlien's own death branch the
@@ -1263,6 +1323,85 @@ initStartScreen(state, () => {
   // splash has actually finished fading away, per direct request.
 });
 
+// ---- Loading screen ----
+// Per direct request ("add in a loading screen with an adult guppy swimming
+// across a loading bar, to make sure everything in the game like the music
+// is loaded before the start menu shows up") — #start-overlay starts hidden
+// (see index.html) and #loading-overlay (shown by default) is what covers
+// the screen until this resolves, at which point it swaps the two.
+//
+// Sound.js's own Audio() elements for the 3 music tracks aren't created
+// until ensureMusicTracks() (itself gated behind the very first real user
+// gesture, per browser autoplay policy — see Sound.js's resumeAudio) — so
+// rather than reach into that module, this preloads its own throwaway
+// Audio() elements pointed at the exact same 3 files purely to warm the
+// browser's own HTTP cache. Simply setting .src and letting the browser
+// start fetching doesn't require a user gesture at all (only .play() does),
+// so by the time ensureMusicTracks() constructs its REAL elements later,
+// the browser serves them from cache instead of hitting the network cold.
+function preloadAudioFile(src) {
+  return new Promise((resolve) => {
+    const audio = new Audio();
+    const done = () => resolve();
+    audio.addEventListener('canplaythrough', done, { once: true });
+    // A genuinely missing/broken file (or a browser that never fires
+    // canplaythrough for some reason) shouldn't strand the player on the
+    // loading screen forever — resolve either way, same "don't block Start
+    // on a real network failure" reasoning the overall timeout below applies
+    // at a coarser level.
+    audio.addEventListener('error', done, { once: true });
+    audio.preload = 'auto';
+    audio.src = src;
+  });
+}
+
+const LOADING_SCREEN_TIMEOUT_MS = 8000; // hard ceiling — a stalled/slow network still reaches the start screen eventually, just without the preload benefit
+const loadingOverlay = document.getElementById('loading-overlay');
+const loadingBarFill = document.getElementById('loading-bar-fill');
+const loadingGuppyCanvas = document.getElementById('loading-guppy-canvas');
+const loadingStatus = document.getElementById('loading-status');
+const loadingGuppyCtx = loadingGuppyCanvas.getContext('2d');
+let loadingProgress = 0; // 0-1, read by the guppy's own animation loop below
+let loadingDone = false;
+
+function updateLoadingBar(fraction) {
+  loadingProgress = Math.max(0, Math.min(1, fraction));
+  loadingBarFill.style.width = `${loadingProgress * 100}%`;
+  loadingGuppyCanvas.style.left = `${loadingProgress * 100}%`;
+}
+
+function animateLoadingGuppy(now) {
+  if (loadingDone) return;
+  loadingGuppyCtx.clearRect(0, 0, loadingGuppyCanvas.width, loadingGuppyCanvas.height);
+  const tailPhase = (now / 220) % (Math.PI * 2); // same idle-swim rate the fish-tool ghost preview's own tail already uses
+  drawFish(loadingGuppyCtx, loadingGuppyCanvas.width / 2, loadingGuppyCanvas.height / 2, 'guppy', SPECIES.guppy.growthStages.length - 1, 1, tailPhase, { x: 1, y: 0 });
+  requestAnimationFrame(animateLoadingGuppy);
+}
+requestAnimationFrame(animateLoadingGuppy);
+
+async function runLoadingSequence() {
+  const resources = [
+    preloadAudioFile('audio/Game.mp3'),
+    preloadAudioFile('audio/Battle.mp3'),
+    preloadAudioFile('audio/Boss.mp3'),
+    document.fonts ? document.fonts.ready : Promise.resolve(),
+  ];
+  let completed = 0;
+  updateLoadingBar(0);
+  loadingStatus.textContent = 'Loading...';
+  const allLoaded = Promise.all(resources.map((p) => Promise.resolve(p).then(() => {
+    completed += 1;
+    updateLoadingBar(completed / resources.length);
+  })));
+  const timeout = new Promise((resolve) => setTimeout(resolve, LOADING_SCREEN_TIMEOUT_MS));
+  await Promise.race([allLoaded, timeout]);
+  updateLoadingBar(1);
+  loadingDone = true;
+  loadingOverlay.classList.add('hidden');
+  document.getElementById('start-overlay').classList.remove('hidden');
+}
+runLoadingSequence();
+
 // ---- Perf counters for the debug overlay ----
 let fpsCounter = 0;
 let fpsDisplay = 0;
@@ -1660,6 +1799,26 @@ function update(dtMs) {
     history.push({ demand, supply: effectiveSupply });
     if (history.length > POWER_HISTORY_MAX) history.shift();
     state.level.powerEfficiency = computePowerEfficiency(effectiveSupply, demand);
+    // power_deficit_60s / power_surplus_60s achievements — this exact
+    // once-a-second window is the only place real demand/supply numbers for
+    // "this second" actually exist, so the streak is tracked right here
+    // rather than re-deriving it from a live per-tick read (which would just
+    // see whatever partial-second accumulator hasn't been sampled yet).
+    // Deficit and surplus are mutually exclusive by definition, so only one
+    // of the two streaks can ever be growing at a time — the other resets to
+    // 0 the instant its own condition stops holding.
+    if (demand > 0 && effectiveSupply < demand) {
+      state.level.powerDeficitStreakMs += 1000;
+      state.level.powerSurplusStreakMs = 0;
+    } else if (demand > 0 && effectiveSupply >= demand * ACHIEVEMENT_POWER_SURPLUS_RATIO) {
+      state.level.powerSurplusStreakMs += 1000;
+      state.level.powerDeficitStreakMs = 0;
+    } else {
+      state.level.powerDeficitStreakMs = 0;
+      state.level.powerSurplusStreakMs = 0;
+    }
+    state.meta.stats.powerDeficitStreakBestMs = Math.max(state.meta.stats.powerDeficitStreakBestMs, state.level.powerDeficitStreakMs);
+    state.meta.stats.powerSurplusStreakBestMs = Math.max(state.meta.stats.powerSurplusStreakBestMs, state.level.powerSurplusStreakMs);
     state.level.powerGenAccumMw = 0; // reset for the next window — generated MW that goes unused (and isn't stored) this second is gone, not carried forward
     state.level.turretPowerDemandAccumMw = 0; // reset alongside it — see its own comment in Levels.js
   }
@@ -2124,6 +2283,20 @@ function render() {
     const pos = worldToScreen(item.x, item.y, state.camera);
     if (pos.x < -20 || pos.x > canvas.width + 20 || pos.y < -20 || pos.y > canvas.height + 20) continue; // cull offscreen
 
+    // Per direct request ("when collectors/processors pull in objects to
+    // process, have the object disintegrate while it's being processed...
+    // with the amount processed matching the amount disintegrated"), an item
+    // currently being held by a Collector/Refinery/Manufacturer (see
+    // Grid.js's getItemDisintegrateFraction) renders as an eroding dot
+    // pattern instead of its own normal shape — checked once, ahead of every
+    // type-specific render branch below, so it overrides all of them
+    // uniformly regardless of item type.
+    const disintegrateFraction = getItemDisintegrateFraction(state, item);
+    if (disintegrateFraction != null) {
+      renderDisintegrateEffect(ctx, pos.x, pos.y, item.radius, disintegrateItemColor(item), disintegrateFraction, item.id);
+      continue;
+    }
+
     if (item.type === 'science' || item.type === 'science_green') {
       // "Magical bubble" — a two-tone radial blend plus a bright rim ring,
       // per direct request, instead of the flat single-color fill every
@@ -2447,7 +2620,7 @@ function render() {
       const alpha = fadeElapsed <= 0 ? 1 : Math.max(0, 1 - fadeElapsed / FISH_DEATH_FADE_DURATION_MS);
       ctx.save();
       ctx.globalAlpha = alpha;
-      drawFish(ctx, pos.x, pos.y, fish.speciesId, fish.stage, fish.deathFacing, fish.tailPhase, null, fish.starTier || 1, 0, 1);
+      drawFish(ctx, pos.x, pos.y, fish.speciesId, fish.stage, fish.deathFacing, fish.tailPhase, null, fish.starTier || 1, 0, 1, state.meta.equippedHatId);
       ctx.restore();
       continue;
     }
@@ -2508,7 +2681,7 @@ function render() {
       ctx.fill();
       ctx.restore();
     }
-    drawFish(ctx, pos.x, pos.y, fish.speciesId, fish.stage, facing, fish.tailPhase, eyeDirection, fish.starTier || 1, sickness, grayed);
+    drawFish(ctx, pos.x, pos.y, fish.speciesId, fish.stage, facing, fish.tailPhase, eyeDirection, fish.starTier || 1, sickness, grayed, state.meta.equippedHatId);
 
     // A fish's health bar only ever renders while it's actually missing
     // health, per direct request — full health, no bar at all. Same

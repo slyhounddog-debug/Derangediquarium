@@ -96,6 +96,17 @@ export const TURRET_TILES = new Set([TILE_TURRET_WASTE, TILE_TURRET_ELECTRIC, TI
 // building-type-group check in this file already uses.
 const REFINERY_TILES = new Set([TILE_REFINERY, TILE_REFINERY_ELECTRIC, TILE_REFINERY_ADVANCED, TILE_REFINERY_BIO]);
 const MANUFACTURER_TILES = new Set([TILE_MANUFACTURER]);
+// Every building that "holds" an item in place while it processes (visually
+// pulled to the tile's own center and disintegrating — see
+// renderDisintegrateEffect/stepHeldItem below), per direct request ("when
+// collectors/processors pull in objects to process, have the object
+// disintegrate... add this same animation to refineries and manufacturers,
+// having them pull items into the center of them"). The Collector already
+// had its own pull-to-center hold (item.collectorProgressMs, see
+// stepCollectorProcessing above) from an earlier pass, so it's included here
+// purely for stepHeldItem's release-check/isHeld query, not given a second
+// hold mechanism of its own.
+const HOLDABLE_ITEM_TILES = new Set([...COLLECTOR_TILES, ...REFINERY_TILES, ...MANUFACTURER_TILES]);
 const POWER_PLANT_TILES = new Set([TILE_POWER_PLANT]);
 const SOLID_TILES = new Set([
   TILE_PLATFORM, TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4,
@@ -334,6 +345,7 @@ export function placeTile(state, col, row, buildingId, angle = 0) {
   if (!check.ok) return false;
   state.level.money -= getBuildingCost(state, buildingId);
   state.level.grid[row][col] = buildingId;
+  state.meta.stats.buildingsPlaced += 1; // buildings_placed_10/50 achievements
   if (FAN_TILES.has(buildingId)) {
     state.level.buildingData[buildingKey(col, row)] = { type: buildingId, angle };
   } else if (COLLECTOR_TILES.has(buildingId)) {
@@ -350,8 +362,10 @@ export function placeTile(state, col, row, buildingId, angle = 0) {
     // No `angle` — same fixed top-center output every recipe-driven building
     // shares (see updateBuildings). lockedRecipe is null while idle, else
     // 'waste_to_food' | 'dna_to_biomass' — set the instant its one input is
-    // absorbed, cleared again once that recipe's output ejects.
-    state.level.buildingData[buildingKey(col, row)] = { type: buildingId, lockedRecipe: null, progressMs: 0 };
+    // absorbed, cleared again once that recipe's output ejects. heldItemId
+    // (null while idle) is the id of whichever item is currently being
+    // pulled to center and disintegrated — see stepHeldItem/updateBuildings.
+    state.level.buildingData[buildingKey(col, row)] = { type: buildingId, lockedRecipe: null, progressMs: 0, heldItemId: null };
   } else if (MANUFACTURER_TILES.has(buildingId)) {
     // Does nothing (and draws no power) until a recipe is picked via UI.js's
     // recipe pop-up menu — recipeId stays null until then. pendingInputs is
@@ -359,13 +373,14 @@ export function placeTile(state, col, row, buildingId, angle = 0) {
     // yet THIS cycle (reset to a fresh copy of the recipe's own `inputs`
     // array every time a recipe is picked/cleared, or a full cycle
     // completes) — only one item may be absorbed/mid-process at a time (see
-    // updateBuildings), so `processing`/`currentItemType`/`progressMs`
-    // track that single in-flight item. `ghostFlashTimerMs` drives the
-    // periodic "still need this ingredient" ghost-icon flash — see
-    // renderManufacturerGhostFlash below.
+    // updateBuildings), so `processing`/`currentItemType`/`progressMs`/
+    // `heldItemId` (the id of whichever item is currently being pulled to
+    // center and disintegrated) track that single in-flight item.
+    // `ghostFlashTimerMs` drives the periodic "still need this ingredient"
+    // ghost-icon flash — see renderManufacturerGhostFlash below.
     state.level.buildingData[buildingKey(col, row)] = {
       type: buildingId, recipeId: null, pendingInputs: [], processing: false,
-      currentItemType: null, progressMs: 0, ghostFlashTimerMs: 0,
+      currentItemType: null, progressMs: 0, ghostFlashTimerMs: 0, heldItemId: null,
     };
   } else if (POWER_PLANT_TILES.has(buildingId)) {
     // Same "does nothing until a recipe is picked" rule as the Manufacturer,
@@ -439,11 +454,11 @@ export function cycleTileCheat(state, worldX, worldY) {
     // grinding real Waste first.
     state.level.buildingData[buildingKey(col, row)] = { type: next, ammo: TURRET_AMMO_TILES.has(next) ? WASTE_TURRET_MAX_AMMO : 0, cooldownMs: 0 };
   } else if (REFINERY_TILES.has(next)) {
-    state.level.buildingData[buildingKey(col, row)] = { type: next, lockedRecipe: null, progressMs: 0 };
+    state.level.buildingData[buildingKey(col, row)] = { type: next, lockedRecipe: null, progressMs: 0, heldItemId: null };
   } else if (MANUFACTURER_TILES.has(next)) {
     state.level.buildingData[buildingKey(col, row)] = {
       type: next, recipeId: null, pendingInputs: [], processing: false,
-      currentItemType: null, progressMs: 0, ghostFlashTimerMs: 0,
+      currentItemType: null, progressMs: 0, ghostFlashTimerMs: 0, heldItemId: null,
     };
   } else if (POWER_PLANT_TILES.has(next)) {
     state.level.buildingData[buildingKey(col, row)] = { type: next, recipeId: null, fueled: false, progressMs: 0 };
@@ -646,6 +661,117 @@ function stepCollectorProcessing(item, state, dt) {
   return 'processing';
 }
 
+// Generic "held by a Refinery/Manufacturer, being pulled to its center and
+// disintegrated" step, per direct request — mirrors stepCollectorProcessing's
+// own pull-to-center physics, but deliberately carries NO completion timer of
+// its own: unlike a Collector-held item (which tracks collectorProgressMs
+// directly on the ITEM, since a Collector needs nothing else), a
+// Refinery/Manufacturer already tracks its own progress on the BUILDING
+// (data.progressMs, keyed by whatever recipe/ingredient is locked in) — this
+// function's only job is to keep the item physically at the tile's center and
+// visible (so renderDisintegrateEffect has something to erode) for exactly as
+// long as updateBuildings' own Refinery/Manufacturer branch still claims it
+// (data.heldItemId === item.id). The actual splice-out-of-state.level.items
+// happens there too, the instant that branch's own progress timer completes —
+// this function never removes the item itself, only reports 'processing'
+// until it's gone. If the tile is torn down (or somehow stops claiming this
+// exact item) mid-hold, releases it back to normal physics with its real mass
+// restored, same defensive shape stepCollectorProcessing already has.
+function stepHeldItem(item, state, dt) {
+  const grid = state.level.grid;
+  const tileType = tileAt(grid, item.heldCenterX, item.heldCenterY);
+  const data = state.level.buildingData[item.heldByKey];
+  if (!data || !HOLDABLE_ITEM_TILES.has(tileType) || data.heldItemId !== item.id) {
+    item.mass = item.heldOriginalMass;
+    item.heldByKey = null;
+    return 'falling';
+  }
+  item.x += (item.heldCenterX - item.x) * COLLECTOR_PULL_STRENGTH * dt;
+  item.y += (item.heldCenterY - item.y) * COLLECTOR_PULL_STRENGTH * dt;
+  return 'processing';
+}
+
+// Single entry point main.js's item render loop calls to find out "is this
+// item currently mid-process, and how far along" — per direct request ("have
+// the object disintegrate while it's being processed... with the amount
+// processed matching the amount disintegrated"), returns a 0-1 fraction (0 =
+// untouched, 1 = fully processed) or null if the item isn't being held by
+// anything at all. Unifies both hold mechanisms this file has: a Collector
+// tracks its own progress directly on the item (collectorProgressMs/
+// collectorTargetMs, see stepCollectorProcessing), while a Refinery/
+// Manufacturer tracks it on the BUILDING instead (data.progressMs against
+// whichever recipe/ingredient duration currently applies) — this function is
+// what looks up the right one so the render side doesn't need to know which
+// building type is involved.
+export function getItemDisintegrateFraction(state, item) {
+  if (item.collectorProgressMs != null && item.collectorTargetMs > 0) {
+    return Math.max(0, Math.min(1, item.collectorProgressMs / item.collectorTargetMs));
+  }
+  if (item.heldByKey == null) return null;
+  const data = state.level.buildingData[item.heldByKey];
+  if (!data) return null;
+  if (REFINERY_TILES.has(data.type)) {
+    const stats = REFINERY_STATS[data.type];
+    const isDna = data.lockedRecipe === 'dna_to_biomass';
+    const targetMs = isDna ? stats.foodProcessMs * ALIEN_DNA_REFINERY_TIME_MULTIPLIER : stats.foodProcessMs;
+    return targetMs > 0 ? Math.max(0, Math.min(1, data.progressMs / targetMs)) : 0;
+  }
+  if (MANUFACTURER_TILES.has(data.type)) {
+    const targetMs = MANUFACTURER_ITEM_PROCESS_MS[data.currentItemType];
+    return targetMs > 0 ? Math.max(0, Math.min(1, data.progressMs / targetMs)) : 0;
+  }
+  return null;
+}
+
+// A stable (non-flickering) per-item "erosion" dot pattern, cached by item
+// id — per direct request ("deleting random pixels while it's being
+// processed"), a real per-pixel canvas manipulation (putImageData every
+// frame, for every held item) would be needlessly expensive for a purely
+// decorative effect; this fakes the same read at a fraction of the cost, the
+// same "cheap fake over a genuinely expensive per-pixel op" precedent
+// Ambience.js's seaweed blur already established. Generated ONCE per item
+// (cached, not regenerated every frame) so which speckles are still visible
+// at a given fraction stays exactly the same from frame to frame — only the
+// COUNT shown shrinks as `fraction` climbs, in the same fixed left-to-right
+// array order every time, which is what keeps the dissolve looking like
+// genuine erosion instead of random flicker.
+const disintegrateDotCache = new Map(); // itemId -> [{dx, dy, size}, ...]
+const DISINTEGRATE_DOT_COUNT = 46;
+const DISINTEGRATE_CACHE_MAX_ENTRIES = 500; // safety valve against unbounded growth over a very long session — evicts the oldest entry (Map iterates in insertion order) once exceeded, cheap enough to check every miss
+function getDisintegrateDots(itemId, radius) {
+  let dots = disintegrateDotCache.get(itemId);
+  if (dots) return dots;
+  if (disintegrateDotCache.size >= DISINTEGRATE_CACHE_MAX_ENTRIES) {
+    disintegrateDotCache.delete(disintegrateDotCache.keys().next().value);
+  }
+  dots = [];
+  for (let i = 0; i < DISINTEGRATE_DOT_COUNT; i++) {
+    // Uniform-in-circle sampling (sqrt of a uniform radius fraction), not a
+    // naive uniform (dx, dy) box-reject — otherwise dots would visibly
+    // cluster toward the center instead of spreading evenly across the disc.
+    const angle = Math.random() * Math.PI * 2;
+    const r = Math.sqrt(Math.random()) * radius * 0.92;
+    dots.push({ dx: Math.cos(angle) * r, dy: Math.sin(angle) * r, size: 1.2 + Math.random() * 1.6 });
+  }
+  disintegrateDotCache.set(itemId, dots);
+  return dots;
+}
+// Called from main.js's item render loop in place of an item's own normal
+// shape while it's mid-process. Cache entries for items that no longer exist
+// pile up slowly (one per item ever processed, a handful of numbers each) —
+// not worth actively pruning given this game's real item churn.
+export function renderDisintegrateEffect(ctx, x, y, radius, color, fraction, itemId) {
+  const dots = getDisintegrateDots(itemId, radius);
+  const visibleCount = Math.round(dots.length * (1 - fraction));
+  ctx.fillStyle = color;
+  for (let i = 0; i < visibleCount; i++) {
+    const d = dots[i];
+    ctx.beginPath();
+    ctx.arc(x + d.dx, y + d.dy, d.size, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
 // Called by Entities.js's updateFood/updateCoin/updateWaste every tick an
 // item's y has crossed SEABED_FLOOR_Y — this is the "physics for items once
 // they reach the seabed" Grid.js owns per the module split. `physics` is the
@@ -660,7 +786,8 @@ function stepCollectorProcessing(item, state, dt) {
 // the bottom" for why. The caller interprets the returned status:
 //   'falling'    — still in motion (includes rising off a fan's push), no change needed
 //   'resting'    — has support directly beneath it *this tick* (re-evaluated every tick, not a one-way flip)
-//   'processing' — being drawn into a Collector's center, not yet consumed — caller leaves it alone
+//   'processing' — being drawn into a Collector/Refinery/Manufacturer's
+//                  center, not yet consumed — caller leaves it alone
 //   'consumed'   — a Collector finished processing it; caller removes it from the array
 // There is no 'lost' status any more — per direct request, every item is
 // caught by a hard boundary (sweepVertical's own stop at WORLD_H, plus the
@@ -671,6 +798,12 @@ export function stepItemOnGrid(item, state, dt, physics) {
   const grid = state.level.grid;
 
   if (item.collectorProgressMs != null) return stepCollectorProcessing(item, state, dt);
+  // A Refinery/Manufacturer-held item never reports 'consumed' from here —
+  // updateBuildings' own Refinery/Manufacturer branch is what actually
+  // splices it out of state.level.items, the instant ITS OWN progress timer
+  // (tracked on the building, not the item) completes. See stepHeldItem's
+  // own comment for why the two mechanisms differ.
+  if (item.heldByKey != null) return stepHeldItem(item, state, dt);
 
   const fanForce = computeFanForce(state, item);
   integrateItemForces(item, dt, physics, fanForce);
@@ -942,12 +1075,24 @@ export function updateBuildings(state, dtMs) {
         // Bio-Sludge takes priority, per spec. Scanned as two separate
         // single-pass searches (not one mixed loop) specifically so it can
         // always be checked and claimed first regardless of array order.
+        // Per direct request ("have the object disintegrate while it's
+        // being processed... pull items into the center of them"), the
+        // matched item is HELD (pulled to center, visually disintegrating —
+        // see stepHeldItem/renderDisintegrateEffect) rather than spliced out
+        // immediately; the actual removal happens below, once this recipe's
+        // own progress timer completes.
         let dnaIdx = -1;
         for (let i = 0; i < items.length; i++) {
           if (items[i].type === 'alien_dna' && isTouchingBuildingTile(centerX, centerY, items[i].x, items[i].y, items[i].radius)) { dnaIdx = i; break; }
         }
         if (dnaIdx !== -1) {
-          items.splice(dnaIdx, 1);
+          const it = items[dnaIdx];
+          it.heldByKey = key;
+          it.heldCenterX = centerX;
+          it.heldCenterY = centerY;
+          it.heldOriginalMass = it.mass;
+          it.mass = COLLECTOR_PROCESSING_MASS;
+          data.heldItemId = it.id;
           data.lockedRecipe = 'dna_to_biomass';
           data.progressMs = 0;
           playIntake();
@@ -957,11 +1102,19 @@ export function updateBuildings(state, dtMs) {
             if (items[i].type === 'waste' && isTouchingBuildingTile(centerX, centerY, items[i].x, items[i].y, items[i].radius)) { wasteIdx = i; break; }
           }
           if (wasteIdx !== -1) {
-            items.splice(wasteIdx, 1);
+            const it = items[wasteIdx];
+            it.heldByKey = key;
+            it.heldCenterX = centerX;
+            it.heldCenterY = centerY;
+            it.heldOriginalMass = it.mass;
+            it.mass = COLLECTOR_PROCESSING_MASS;
+            data.heldItemId = it.id;
             // "Buildings" pushing cleanliness back up (see CLAUDE.md's
             // Cleanliness section) — the Refinery inherits this from the
             // Auto-Feeder it replaced, mirroring Entities.js's identical
-            // Suckerfish-eating case.
+            // Suckerfish-eating case. Credited on PICKUP, same as before —
+            // holding the item a while longer before actually removing it
+            // doesn't change when the tank gets credit for it.
             state.level.cleanliness = Math.min(CLEANLINESS_MAX, state.level.cleanliness + CLEANLINESS_PER_WASTE_EVENT);
             data.lockedRecipe = 'waste_to_food';
             data.progressMs = 0;
@@ -977,6 +1130,12 @@ export function updateBuildings(state, dtMs) {
         const isDna = data.lockedRecipe === 'dna_to_biomass';
         const targetMs = isDna ? stats.foodProcessMs * ALIEN_DNA_REFINERY_TIME_MULTIPLIER : stats.foodProcessMs;
         if (data.progressMs >= targetMs) {
+          // The held item (if it's still actually there — see stepHeldItem's
+          // own defensive release check) finally gets removed right here,
+          // the same instant the real output is ejected.
+          const heldIdx = items.findIndex((it) => it.id === data.heldItemId);
+          if (heldIdx !== -1) items.splice(heldIdx, 1);
+          data.heldItemId = null;
           bioSpawnPoints.push({ x: bioOutputX, y: bioOutputY, itemType: isDna ? 'biomass' : 'food' });
           playDispense();
           data.lockedRecipe = null;
@@ -1011,7 +1170,14 @@ export function updateBuildings(state, dtMs) {
           const pendingIdx = data.pendingInputs.indexOf(it.type);
           if (pendingIdx === -1) continue;
           if (isTouchingBuildingTile(centerX, centerY, it.x, it.y, it.radius)) {
-            items.splice(i, 1);
+            // Held (pulled to center, disintegrating), not spliced yet — see
+            // the identical treatment in the Refinery branch above.
+            it.heldByKey = key;
+            it.heldCenterX = centerX;
+            it.heldCenterY = centerY;
+            it.heldOriginalMass = it.mass;
+            it.mass = COLLECTOR_PROCESSING_MASS;
+            data.heldItemId = it.id;
             data.pendingInputs.splice(pendingIdx, 1);
             data.processing = true;
             data.currentItemType = it.type;
@@ -1031,6 +1197,12 @@ export function updateBuildings(state, dtMs) {
         // Per direct spec: a flat duration by ITEM TYPE, not by recipe —
         // waste 2s, food 4s, biomass 8s at base.
         if (data.progressMs >= MANUFACTURER_ITEM_PROCESS_MS[data.currentItemType]) {
+          // The held ingredient is only actually removed now, right as its
+          // own hold time finishes — see the Refinery branch's identical
+          // comment for why the removal happens here, not at absorption.
+          const heldIdx = items.findIndex((it) => it.id === data.heldItemId);
+          if (heldIdx !== -1) items.splice(heldIdx, 1);
+          data.heldItemId = null;
           data.processing = false;
           data.currentItemType = null;
           data.progressMs = 0;

@@ -60,6 +60,11 @@ import {
   TILE_TURRET_WASTE,
   WASTE_TURRET_SHOTS_PER_WASTE,
   WASTE_TURRET_MAX_WASTE,
+  ACHIEVEMENTS,
+  ACHIEVEMENT_LIST,
+  ACHIEVEMENT_GEM_REWARD_BY_TIER,
+  HATS,
+  HAT_LIST,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings, loadLevel } from './Levels.js';
 import { getFishPurchaseCost, effectiveCoinCapacity, effectiveScienceCapacity, countTankItemsByType, hasAnyMergeOpportunity, resolveMergeTutorialPair, computeTheoreticalGoldPerMinute } from './Entities.js';
@@ -311,6 +316,16 @@ export function initUI(state) {
     tankCollapseBtn: document.getElementById('tank-collapse-btn'),
     tankPointsDisplay: document.getElementById('tank-points-display'),
     tankUpgradeList: document.getElementById('tank-upgrade-list'),
+    tankTabUpgradesBtn: document.getElementById('tank-tab-upgrades'),
+    tankTabAchievementsBtn: document.getElementById('tank-tab-achievements'),
+    tankTabCustomizationBtn: document.getElementById('tank-tab-customization'),
+    tankViewUpgrades: document.getElementById('tank-view-upgrades'),
+    tankViewAchievements: document.getElementById('tank-view-achievements'),
+    tankViewCustomization: document.getElementById('tank-view-customization'),
+    achievementList: document.getElementById('achievement-list'),
+    achievementGemsDisplay: document.getElementById('achievement-gems-display'),
+    hatGrid: document.getElementById('hat-grid'),
+    customizationGemsDisplay: document.getElementById('customization-gems-display'),
     startOverlay: document.getElementById('start-overlay'),
     startNewGameBtn: document.getElementById('start-new-game-btn'),
     startContinueBtn: document.getElementById('start-continue-btn'),
@@ -476,9 +491,15 @@ export function initUI(state) {
   buildShopPanel(state);
   buildBuildPalette(state);
   buildTankPanel(state);
+  buildAchievementPanel(state);
+  buildCustomizationPanel(state);
   buildLabTree(state);
   initLabTreeDrag(state);
   scheduleSheenAll();
+
+  els.tankTabUpgradesBtn.addEventListener('click', () => setTankPanelView(state, 'upgrades'));
+  els.tankTabAchievementsBtn.addEventListener('click', () => setTankPanelView(state, 'achievements'));
+  els.tankTabCustomizationBtn.addEventListener('click', () => setTankPanelView(state, 'customization'));
 }
 
 // Closes whichever side panel (Shop or Tank Upgrades) is currently open —
@@ -544,7 +565,7 @@ export function toggleTankPanel(state) {
 function updateTankPanelCollapse(state) {
   els.tankPanel.classList.toggle('collapsed', state.ui.tankPanelCollapsed);
   els.tankCollapseBtn.classList.toggle('panel-toggle-active', !state.ui.tankPanelCollapsed);
-  if (!state.ui.tankPanelCollapsed) refreshTankPanel(state); // populate it fresh the moment it opens, not just on the next frame's updateHUD
+  if (!state.ui.tankPanelCollapsed) refreshTankPanelView(state); // populate whichever of the 3 views is currently showing, fresh the moment the panel opens, not just on the next frame's updateHUD
 }
 
 // Called by the Escape key (wired in main.js) — toggles open/closed, always
@@ -2201,6 +2222,167 @@ function refreshTankPanel(state) {
   els.tankPointsDisplay.textContent = `🏆 ${available}`;
 }
 
+// ---- Tank panel view switcher (Upgrades / Achievements / Customization) ----
+// Per direct request: one panel, same size/position as the original Tank
+// Upgrades panel, now switches between 3 views via a small tab row at the
+// top — each view also shows the other two as buttons (the tab row itself
+// is shared/always visible, so this is satisfied for free rather than
+// needing each view to duplicate its own pair of "go to the other panel"
+// buttons).
+export function setTankPanelView(state, view) {
+  state.ui.tankPanelView = view;
+  els.tankViewUpgrades.classList.toggle('hidden', view !== 'upgrades');
+  els.tankViewAchievements.classList.toggle('hidden', view !== 'achievements');
+  els.tankViewCustomization.classList.toggle('hidden', view !== 'customization');
+  els.tankTabUpgradesBtn.classList.toggle('active', view === 'upgrades');
+  els.tankTabAchievementsBtn.classList.toggle('active', view === 'achievements');
+  els.tankTabCustomizationBtn.classList.toggle('active', view === 'customization');
+  refreshTankPanelView(state);
+}
+
+// Called every frame the Tank panel is open (see updateHUD below) — refreshes
+// whichever single view is actually showing, same "don't waste work on
+// hidden content" precedent every other conditionally-visible panel in this
+// file already follows.
+function refreshTankPanelView(state) {
+  if (state.ui.tankPanelView === 'upgrades') refreshTankPanel(state);
+  else if (state.ui.tankPanelView === 'achievements') refreshAchievementPanel(state);
+  else refreshCustomizationPanel(state);
+}
+
+// ---- Achievements ----
+// Built once, like the Tank Upgrades cards above — one card per
+// Config.js's ACHIEVEMENT_LIST entry, each carrying its own Claim button.
+// `achievementCards` maps id -> { card, claimBtn }.
+let achievementCards = null;
+
+function buildAchievementPanel(state) {
+  els.achievementList.innerHTML = '';
+  achievementCards = {};
+  for (const achievement of ACHIEVEMENT_LIST) {
+    const card = document.createElement('div');
+    card.className = `achievement-card tier-${achievement.tier} sheen-target`;
+    const nameEl = document.createElement('div');
+    nameEl.className = 'achievement-name';
+    nameEl.textContent = achievement.name;
+    const descEl = document.createElement('div');
+    descEl.className = 'achievement-desc';
+    descEl.textContent = achievement.description;
+    const claimBtn = document.createElement('button');
+    claimBtn.className = 'achievement-claim-btn';
+    claimBtn.addEventListener('click', () => claimAchievement(state, achievement.id));
+    card.append(nameEl, descEl, claimBtn);
+    els.achievementList.append(card);
+    achievementCards[achievement.id] = { card, claimBtn };
+  }
+  refreshAchievementPanel(state);
+}
+
+function claimAchievement(state, id) {
+  if (!state.meta.achievementsUnlocked.includes(id)) return; // not actually earned yet — defensive, the button itself is disabled in this case
+  if (state.meta.achievementsClaimed.includes(id)) return; // already claimed — defensive, same reasoning
+  const achievement = ACHIEVEMENTS[id];
+  state.meta.achievementsClaimed.push(id);
+  state.meta.fishyGems += ACHIEVEMENT_GEM_REWARD_BY_TIER[achievement.tier];
+  playUpgrade();
+  refreshAchievementPanel(state);
+}
+
+// Re-checked every frame this view is open — an achievement can go from
+// locked to unlocked at any moment (Systems.js's updateAchievements runs
+// every tick), and Claim itself needs to react immediately.
+function refreshAchievementPanel(state) {
+  if (!achievementCards) return;
+  for (const achievement of ACHIEVEMENT_LIST) {
+    const { claimBtn, card } = achievementCards[achievement.id];
+    const unlocked = state.meta.achievementsUnlocked.includes(achievement.id);
+    const claimed = state.meta.achievementsClaimed.includes(achievement.id);
+    card.classList.toggle('claimed', claimed);
+    const reward = ACHIEVEMENT_GEM_REWARD_BY_TIER[achievement.tier];
+    if (claimed) {
+      claimBtn.textContent = 'Claimed ✓';
+      claimBtn.disabled = true;
+    } else if (unlocked) {
+      claimBtn.textContent = `Claim — ${reward} 💎`;
+      claimBtn.disabled = false;
+    } else {
+      claimBtn.textContent = `Locked — ${reward} 💎`;
+      claimBtn.disabled = true;
+    }
+  }
+  els.achievementGemsDisplay.textContent = `💎 ${state.meta.fishyGems}`;
+}
+
+// ---- Customization (hats) ----
+// Same "build once, refresh every frame it's open" shape as the achievement
+// cards above. `hatCards` maps id -> { card, buyBtn }. The always-free 'none'
+// option (Config.js's HATS.none) is prepended so un-equipping is just
+// another card, not a separate button somewhere else.
+let hatCards = null;
+
+function buildCustomizationPanel(state) {
+  els.hatGrid.innerHTML = '';
+  hatCards = {};
+  for (const hat of [HATS.none, ...HAT_LIST]) {
+    const card = document.createElement('div');
+    card.className = 'hat-card sheen-target';
+    const iconEl = document.createElement('div');
+    iconEl.className = 'hat-icon';
+    iconEl.textContent = hat.icon;
+    const nameEl = document.createElement('div');
+    nameEl.className = 'hat-name';
+    nameEl.textContent = hat.name;
+    const buyBtn = document.createElement('button');
+    buyBtn.className = 'hat-buy-btn';
+    buyBtn.addEventListener('click', () => buyOrEquipHat(state, hat.id));
+    card.append(iconEl, nameEl, buyBtn);
+    els.hatGrid.append(card);
+    hatCards[hat.id] = { card, buyBtn };
+  }
+  refreshCustomizationPanel(state);
+}
+
+function buyOrEquipHat(state, id) {
+  const owned = state.meta.hatsUnlocked.includes(id);
+  if (owned) {
+    state.meta.equippedHatId = id;
+    playUpgrade();
+    refreshCustomizationPanel(state);
+    return;
+  }
+  const hat = HATS[id];
+  if (state.meta.fishyGems < hat.gemCost) return;
+  state.meta.fishyGems -= hat.gemCost;
+  state.meta.hatsUnlocked.push(id);
+  state.meta.equippedHatId = id; // buying a hat also wears it immediately — no reason to make that a separate click
+  playUpgrade();
+  refreshCustomizationPanel(state);
+}
+
+function refreshCustomizationPanel(state) {
+  if (!hatCards) return;
+  for (const hat of [HATS.none, ...HAT_LIST]) {
+    const { card, buyBtn } = hatCards[hat.id];
+    const owned = state.meta.hatsUnlocked.includes(hat.id);
+    const equipped = state.meta.equippedHatId === hat.id;
+    card.classList.toggle('equipped', equipped);
+    if (equipped) {
+      buyBtn.textContent = 'Equipped';
+      buyBtn.disabled = true;
+      buyBtn.classList.add('equipped-btn');
+    } else if (owned) {
+      buyBtn.textContent = 'Equip';
+      buyBtn.disabled = false;
+      buyBtn.classList.remove('equipped-btn');
+    } else {
+      buyBtn.textContent = hat.gemCost > 0 ? `${hat.gemCost} 💎` : 'Free';
+      buyBtn.disabled = state.meta.fishyGems < hat.gemCost;
+      buyBtn.classList.remove('equipped-btn');
+    }
+  }
+  els.customizationGemsDisplay.textContent = `💎 ${state.meta.fishyGems}`;
+}
+
 // Per direct request: clicking an already-selected single-tier shop item
 // (a fish, or a standalone building with no other tier) a second time
 // deselects it instead of leaving it selected — defaults back to the Food
@@ -2802,7 +2984,7 @@ export function updateHUD(state) {
   if (recipeMenuOpen || recipeMenuClosing) updateRecipeMenuPosition(state);
   if (buildingInfoMenuOpen || buildingInfoMenuClosing) updateBuildingInfoMenuPosition(state);
   if (labMenuOpen) refreshLabTree(state); // no position-tracking needed any more — it's a centered modal now, not anchored to the Mound's screen position
-  if (!state.ui.tankPanelCollapsed) refreshTankPanel(state);
+  if (!state.ui.tankPanelCollapsed) refreshTankPanelView(state);
 
   if (lastMoney !== null && money !== lastMoney) {
     playFlash(els.money, money > lastMoney ? 'flash-pickup' : 'flash-spend');
@@ -3345,6 +3527,11 @@ export function updateBossHealthBar(state) {
 // forced-reflow retrigger trick every other one-shot animation in this file
 // already uses, so the browser genuinely animates from opacity 0.
 export function showGameOverModal(state) {
+  // Per direct request ("add the percentage of achievements completed on
+  // the end game screen") — "completed" reads as achievements genuinely
+  // EARNED (their condition met), not just claimed for gems, since an
+  // uncashed achievement is still a real accomplishment the player reached.
+  const achievementPct = Math.round((state.meta.achievementsUnlocked.length / ACHIEVEMENT_LIST.length) * 100);
   const rows = [
     ['💰 Total money earned', `$${Math.floor(state.level.lifetimeMoneyEarned)}`],
     ['🔬 Total Blue Science earned', String(state.level.lifetimeScienceEarned)],
@@ -3353,6 +3540,7 @@ export function showGameOverModal(state) {
     ['💀 Fish died', String(state.level.fishDiedCount)],
     ['🏆 Tank Points accumulated', String(state.level.tankPoints.total)],
     ['👽 Aliens killed', String(state.level.aliensKilledCount)],
+    ['🎖️ Achievements completed', `${achievementPct}% (${state.meta.achievementsUnlocked.length}/${ACHIEVEMENT_LIST.length})`],
   ];
   els.bossVictoryStats.innerHTML = rows.map(([label, value]) => (
     `<div class="boss-victory-stat-row"><span>${label}</span><b>${value}</b></div>`
