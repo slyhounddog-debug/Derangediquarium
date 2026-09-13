@@ -55,6 +55,8 @@ import {
   ALIEN_COLOR,
   ALIEN_HEALTH_BAR_WIDTH,
   ALIEN_HEALTH_BAR_HEIGHT,
+  FISH_HEALTH_BAR_WIDTH,
+  FISH_HEALTH_BAR_HEIGHT,
   ALIEN_COUNTDOWN_START_MS,
   ALIEN_MUSIC_BATTLE_LEAD_MS,
   ALIEN_PORTAL_OPEN_MS,
@@ -568,7 +570,27 @@ const ITEM_DRAG_VELOCITY_SAMPLE_TICKS = 6;
 function updateItemDrag() {
   if (draggedItemId == null) return;
   const dragged = state.level.items.find((item) => item.id === draggedItemId && item.type === draggedItemType);
-  if (!dragged) { draggedItemId = null; draggedItemType = null; itemDragPositionHistory = []; return; } // absorbed by a building (or otherwise removed) mid-drag
+  if (!dragged) {
+    // Absorbed by a building's own intake scan (or otherwise removed)
+    // mid-drag — the mouse button is still down at this point, so the real
+    // mouseup/click that follows is still coming. Real bug fix, per direct
+    // report ("when you drag an object into a building and let go, it
+    // shouldn't also click the building to bring up the info modal"): the
+    // normal path that sets itemDragMoved (mouseUpHandlers, below) only ever
+    // runs on a genuine mouseup with draggedItemId still non-null — since
+    // this branch clears it FIRST, that check silently no-ops and
+    // itemDragMoved is left wherever it happened to be (false, from this
+    // drag's own mousedown reset), so the click landing on the building the
+    // item just got dragged into wasn't being suppressed at all. Set it true
+    // here instead — the item reaching the building IS the drag's whole
+    // point, so the click it produces should be consumed the same way a
+    // drag ending anywhere else already is.
+    draggedItemId = null;
+    draggedItemType = null;
+    itemDragPositionHistory = [];
+    itemDragMoved = true;
+    return;
+  }
   const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
   const dtSec = SIM_DT_MS / 1000;
   // Per direct request ("when a player is dragging waste around and lets
@@ -1112,8 +1134,11 @@ input.keydownHandlers.push((e) => {
       refreshShopPanel(state);
       break;
     }
-    case 'KeyY': // force the next Alien Invasion wave to start right now, for testing without waiting out a real ALIEN_WAVE_INTERVAL_MIN/MAX_MS gap
+    case 'KeyY': // force the next Alien Invasion wave to start right now, for testing without waiting out a real ALIEN_WAVE_INTERVAL_EARLY/LATE_MS gap
       state.level.alienNextWaveAtMs = state.level.elapsed;
+      break;
+    case 'KeyC': // set the countdown to the next Alien Invasion wave to exactly 10s from now — per direct request, for testing the Wave Countdown HUD/warning notifications without waiting out a real 3.5-4.5 minute gap. Touches ONLY alienNextWaveAtMs, same minimal shape as KeyY above — doesn't touch wave size, tier mix, or the difficulty ramp (all computed fresh, from alienWavesSpawned/elapsed, at the moment the wave actually fires), and is silently overwritten by updateAlienWaves' own real scheduling if a wave is already active (the countdown genuinely hasn't started yet in that case, same as it wouldn't for a real player).
+      state.level.alienNextWaveAtMs = state.level.elapsed + 10000;
       break;
   }
 });
@@ -1198,7 +1223,31 @@ function updateBuildDrag() {
   // rather than one exact tile id so it's not brittle if the player happens
   // to place a different tier.
   if (placed && BUILDING_FAMILIES.turret.includes(buildingId)) {
+    // Checked BEFORE advanceTutorialFlow mutates tutorialFlow to the next
+    // step — real bug caught during testing: calling deselectShopSelection
+    // unconditionally on every turret placement (tutorial or not) reset
+    // state.ui.selectedTool to 'food' WHILE the mouse button was still down,
+    // ahead of the native mouseup's own "click" event — which meant that
+    // click then read as an ordinary Food-tool click landing on the
+    // freshly-placed turret, immediately popping its generic building-info
+    // modal open right on top of it. Gating this to only the tutorial's own
+    // exact step (per the original request — "after you place the turret,
+    // have it automatically clear the cursor... for the step of dragging
+    // waste into the turret") avoids that side effect on every other,
+    // perfectly ordinary turret placement a player makes outside the
+    // tutorial.
+    const isTutorialPlaceStep = state.level.tutorialFlow?.id === 'postalien' && state.level.tutorialFlow.step === 'place';
     advanceTutorialFlow(state, 'postalien', 'place');
+    if (isTutorialPlaceStep) {
+      // Per direct request — the very next step teaches dragging Waste INTO
+      // this exact turret, which reads oddly if the turret build tool is
+      // still the one armed (the player would have to click it off
+      // themselves first, or risk placing a second one by accident while
+      // trying to drag). Auto-clears back to Food the instant the tutorial
+      // turret is down, same as deselectShopSelection already does for a
+      // manually re-clicked single-tier shop item.
+      deselectShopSelection(state);
+    }
   }
 }
 
@@ -2170,6 +2219,38 @@ function render() {
       ctx.restore();
     }
     drawFish(ctx, pos.x, pos.y, fish.speciesId, fish.stage, facing, fish.tailPhase, eyeDirection, fish.starTier || 1, sickness, grayed);
+
+    // A fish's health bar only ever renders while it's actually missing
+    // health, per direct request — full health, no bar at all. Same
+    // roundRect-pill shape as an alien's own bar (see below), just smaller
+    // and green-to-red (instead of a flat red) so the two read as visually
+    // distinct even when a damaged fish and an alien share the screen.
+    if (fish.hp < fish.maxHp) {
+      const fbarW = FISH_HEALTH_BAR_WIDTH * state.camera.zoom;
+      const fbarH = FISH_HEALTH_BAR_HEIGHT * state.camera.zoom;
+      const fbarX = pos.x - fbarW / 2;
+      const fbarY = pos.y - size - fbarH - 6;
+      const fbarRadius = fbarH / 2;
+      ctx.save();
+      ctx.beginPath();
+      ctx.roundRect(fbarX, fbarY, fbarW, fbarH, fbarRadius);
+      ctx.fillStyle = 'rgba(10, 20, 10, 0.6)';
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+      ctx.lineWidth = Math.max(0.5, 0.5 * state.camera.zoom);
+      ctx.stroke();
+      const fhpFrac = Math.max(0, fish.hp / fish.maxHp);
+      if (fhpFrac > 0) {
+        ctx.beginPath();
+        ctx.roundRect(fbarX, fbarY, Math.max(fbarH, fbarW * fhpFrac), fbarH, fbarRadius);
+        const fbarGradient = ctx.createLinearGradient(fbarX, fbarY, fbarX, fbarY + fbarH);
+        fbarGradient.addColorStop(0, '#8aff9a');
+        fbarGradient.addColorStop(1, '#2fb84a');
+        ctx.fillStyle = fbarGradient;
+        ctx.fill();
+      }
+      ctx.restore();
+    }
 
     // Buffer Fish's magnet — a pulsing cyan ring while toggled on, per
     // direct spec, so it's obvious at a glance which fish are actively

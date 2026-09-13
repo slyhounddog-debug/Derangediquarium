@@ -99,6 +99,12 @@ import {
   ALIEN_CLICK_RADIUS_MULTIPLIER,
   ALIEN_FOOD_BLOCK_DURATION_MS,
   ALIEN_ARCHETYPES,
+  FISH_HEALTH_BABY,
+  FISH_HEALTH_MID,
+  FISH_HEALTH_ADULT,
+  ALIEN_FISH_DAMAGE_INTERVAL_MS,
+  BOSS_FISH_DAMAGE_PER_SEC,
+  FISH_HEALTH_REGEN_DURATION_MS,
   ALIEN_DNA_RADIUS,
   ALIEN_DNA_COLOR,
   ALIEN_DNA_MAX_ON_SCREEN,
@@ -403,6 +409,8 @@ export function createAlien(x, y, hp, archetypeId) {
     radius: archetype.radius,
     color: archetype.color,
     dnaYield: archetype.dnaYield,
+    fishDamagePerSec: archetype.fishDamagePerSec, // per direct spec — applied once per second to any fish this alien is touching, see updateAlien
+    fishDamageTimerMs: 0,
     wanderTimer: 0, // 0 so the very first tick immediately picks a heading, same as fish's own wanderTimer
     poopTimer: 0,
     hitFlashMs: 0, // counts down from ALIEN_HIT_FLASH_MS whenever damage is applied (Grid.js's Turret branch, main.js's click handler) — drives the red-flash/bounce read by main.js's render
@@ -430,6 +438,7 @@ export function createMotherAlienFish(x, y) {
     id: nextId(), type: 'alien', x, y, vx: 0, vy: 0, hp, maxHp: hp,
     archetypeId: 'mother_alien_fish', speed: BOSS_SPEED, radius: BOSS_RADIUS, color: BOSS_COLOR,
     dnaYield: 0, // no ordinary Alien DNA drop on death — see updateAlien's isBoss death branch for its own Science-burst instead
+    fishDamagePerSec: BOSS_FISH_DAMAGE_PER_SEC, fishDamageTimerMs: 0,
     wanderTimer: 0, poopTimer: 0, hitFlashMs: 0, spawnProtectionUntilMs: 0, risingToSurface: false,
     isBoss: true, minionSpawnTimerMs: 0,
   };
@@ -681,6 +690,30 @@ function updateAlien(alien, state, dtMs) {
     }
   }
 
+  // Aliens can now hurt and kill fish, per direct request — once per second
+  // (not continuously scaled by dt), to EVERY fish this alien is currently
+  // touching, at a flat rate that climbs by tier (alien.fishDamagePerSec,
+  // copied from its archetype — or BOSS_FISH_DAMAGE_PER_SEC for the Mother
+  // Alien Fish — by createAlien/createMotherAlienFish). Same hatch-grace-
+  // period exemption as the poop timer above — a still-protected Alien-Egg
+  // hatchling doesn't attack yet either. This only ever mutates a fish's own
+  // hp; the actual removal (hp <= 0) is checked at the top of that fish's
+  // own updateFish call, whether that lands later this same tick or the
+  // next one depending on entities.filter's iteration order — never here.
+  alien.fishDamageTimerMs += dtMs;
+  if (!stillProtected && alien.fishDamageTimerMs >= ALIEN_FISH_DAMAGE_INTERVAL_MS) {
+    alien.fishDamageTimerMs = 0;
+    for (const entity of state.level.entities) {
+      if (entity.type !== 'fish' || entity.hp <= 0) continue;
+      const fishDef = SPECIES[entity.speciesId];
+      const fishRadius = FISH_BASE_SIZE * fishDef.growthStages[entity.stage].scale;
+      const dist = Math.hypot(entity.x - alien.x, entity.y - alien.y);
+      if (dist <= alien.radius + fishRadius) {
+        entity.hp = Math.max(0, entity.hp - alien.fishDamagePerSec);
+      }
+    }
+  }
+
   return true;
 }
 
@@ -701,10 +734,25 @@ function effectiveSwimSpeed(def, state) {
   return (def.swimSpeed + FISH_MOVEMENT_UPGRADE_SPEED_BONUS * state.level.upgrades.fishMovement) * FISH_SPEED_MULTIPLIER;
 }
 
+// Flat by growth stage, not by species, per direct spec — stage 0 is always
+// "baby," the LAST stage is always "adult," and anything in between is
+// "mid," regardless of how many total growth stages that particular species
+// happens to have (every current species has exactly 3, but this stays
+// correct even for one that doesn't). Called on creation and again on every
+// growth-stage transition (see createFish/updateFish).
+function maxHpForStage(def, stage) {
+  const lastStage = def.growthStages.length - 1;
+  if (stage <= 0) return FISH_HEALTH_BABY;
+  if (stage >= lastStage) return FISH_HEALTH_ADULT;
+  return FISH_HEALTH_MID;
+}
+
 export function createFish(speciesId, x, y, state, { grown = false, starTier = 1, dropValueOverride = null } = {}) {
   const def = SPECIES[speciesId];
   const totalFeeds = grown ? def.growthStages[def.growthStages.length - 1].feedsRequired : 0;
   const speed = effectiveSwimSpeed(def, state);
+  const stage = stageIndexForFeeds(def, totalFeeds);
+  const maxHp = maxHpForStage(def, stage);
   return {
     id: nextId(),
     type: 'fish',
@@ -715,7 +763,9 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
     vy: (Math.random() * 2 - 1) * speed * FISH_VERTICAL_DAMPING,
     hunger: grown ? 20 : 40,
     totalFeeds,
-    stage: stageIndexForFeeds(def, totalFeeds),
+    stage,
+    maxHp, // set by growth stage (baby/mid/adult) — see maxHpForStage, re-applied (with a full heal) on every stage transition in updateFish
+    hp: maxHp, // starts full; damaged by a living alien touching it (updateAlien), regenerates over FISH_HEALTH_REGEN_DURATION_MS once no aliens are alive at all (updateFish) — never regenerates while any alien is alive anywhere. main.js's render only draws a health bar while hp < maxHp, per direct request ("health bars only when they are damaged").
     dropTimer: 0,
     poopTimer: 0, // WASTE_POOP_INTERVAL_MS — a non-Scavenger fish poops out Waste directly on this timer, see updateFish
     eatCooldownRemainingMs: 0, // Scavenger only — see updateFish's SCAVENGER eat branch; a growth-stage's dropInterval is reused as the eat cooldown
@@ -1889,10 +1939,36 @@ function awardTankPoint(state, fish) {
   }
 }
 
-// Returns false if the fish should be removed (starved).
-function updateFish(fish, state, dtMs) {
+// Returns false if the fish should be removed (starved, or killed by an
+// alien). anyAlienAlive is computed once per tick by updateEntities (a
+// single O(entities) scan, not repeated per fish) — see its own call site.
+function updateFish(fish, state, dtMs, anyAlienAlive) {
   const def = SPECIES[fish.speciesId];
   const dt = dtMs / 1000;
+
+  // Alien Invasion can now genuinely kill a fish, per direct request — a
+  // living alien touching this fish applies damage once per second
+  // elsewhere (updateAlien); this just checks the result. Checked first,
+  // before anything else runs, so a fish that died from a hit landed
+  // earlier this same tick (alien processed before fish in this tick's
+  // entities.filter pass) is removed immediately rather than lingering
+  // an extra frame at 0 hp.
+  if (fish.hp <= 0) {
+    playFishDeath();
+    state.level.fishDiedCount += 1; // end-game stats modal only — see main.js's showGameOverModal; deliberately the same counter starvation uses, since it's "how many fish died," not "how many starved"
+    return false;
+  }
+
+  // Regeneration, per direct spec: a damaged fish heals back to full over
+  // FISH_HEALTH_REGEN_DURATION_MS, but ONLY once no alien is alive anywhere
+  // in the level — flat rate (maxHp / duration), so a barely-scratched fish
+  // tops off well under the full 5 seconds while a nearly-dead one takes the
+  // whole stretch. anyAlienAlive is a hard gate, not a proximity check — a
+  // fish on the far side of the tank from the only remaining alien still
+  // doesn't regen, matching "they don't regen while aliens are alive" literally.
+  if (!anyAlienAlive && fish.hp < fish.maxHp) {
+    fish.hp = Math.min(fish.maxHp, fish.hp + (fish.maxHp / FISH_HEALTH_REGEN_DURATION_MS) * dtMs);
+  }
 
   // Alien Invasion reactions — moved to the very top of the function, per
   // direct request, so fish.alienNearby reflects THIS tick's proximity (not
@@ -2072,6 +2148,8 @@ function updateFish(fish, state, dtMs) {
             // recompute can't accidentally walk the stage back down.
             fish.totalFeeds = Math.max(fish.totalFeeds, def.growthStages[fish.stage].feedsRequired);
             fish.shimmerStartedAt = state.level.elapsed; // a real stage advance, same "shimmers when it grows" rule every other growth path follows
+            fish.maxHp = maxHpForStage(def, fish.stage); // growing up is a full heal too, same as the ordinary feed-driven path below
+            fish.hp = fish.maxHp;
             const reachedAdult = fish.stage === def.growthStages.length - 1;
             if (reachedAdult) playGrowToAdult(); else playGrowToMid();
             if (reachedAdult) awardTankPoint(state, fish);
@@ -2113,6 +2191,8 @@ function updateFish(fish, state, dtMs) {
           // Sound.js's playGrowToMid/playGrowToAdult, per direct request.
           if (fish.stage > prevStage) {
             fish.shimmerStartedAt = state.level.elapsed;
+            fish.maxHp = maxHpForStage(def, fish.stage); // growing up is a full heal too, per direct request's baby/mid/adult health table
+            fish.hp = fish.maxHp;
             if (fish.stage === def.growthStages.length - 1) playGrowToAdult(); else playGrowToMid();
           }
           if (!wasAdult && fish.stage === def.growthStages.length - 1) {
@@ -2544,8 +2624,12 @@ export function updateEntities(state, dtMs) {
 
   pendingBossMinionSpawns.length = 0; // updateAlien (below) fills this — see that array's own comment for why it can't push into state.level.entities directly
   pendingTurretTutorialAlienSpawns.length = 0;
+  // Computed once per tick (not once per fish) — whether fish should regen
+  // at all this tick. See updateFish's own comment for why this is a hard
+  // gate, not a per-fish proximity check.
+  const anyAlienAlive = state.level.entities.some((e) => e.type === 'alien' && e.hp > 0);
   state.level.entities = state.level.entities.filter((entity) => {
-    if (entity.type === 'fish') return updateFish(entity, state, dtMs);
+    if (entity.type === 'fish') return updateFish(entity, state, dtMs, anyAlienAlive);
     if (entity.type === 'alien') return updateAlien(entity, state, dtMs);
     return true;
   });

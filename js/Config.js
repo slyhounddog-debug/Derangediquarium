@@ -2372,6 +2372,13 @@ export const ALIEN_FOOD_BLOCK_DURATION_MS = 1000; // per direct request ("so you
 export const WASTE_DRAG_TUTORIAL_WAIT_MS = 1000; // per direct request — if the player already placed a Waste Turret before the post-alien tutorial would fire, it waits this long after Waste first appears in the city before teaching just the "drag Waste into it" step — see Systems.js's updatePostAlienTutorial
 export const WASTE_DRAG_GHOST_CYCLE_MS = 1400; // one full waste->turret sweep of the "drag me here" ghost animation shown during that tutorial step — see main.js's render()
 export const POST_ALIEN_TUTORIAL_MESSAGE = "Now that's I'm talking about. A little firepower never hurt no one."; // per direct request's exact wording — posted once the player finishes placing the guided Waste Turret
+
+// ---- Autosave (Save.js) ----
+// Per direct request — a background save every 5 minutes of real elapsed sim
+// time, on top of the existing manual pause-menu Save button. See
+// Systems.js's updateAutosave/Levels.js's nextAutosaveAtMs.
+export const AUTOSAVE_INTERVAL_MS = 300000; // 5 minutes
+
 // ---- Alien Invasion (Aliens.js) ----
 // A "wave" is one spawn burst — a handful of aliens emerging from portals at
 // once, after which the timer restarts for the next one. Difficulty scales
@@ -2384,13 +2391,22 @@ export const POST_ALIEN_TUTORIAL_MESSAGE = "Now that's I'm talking about. A litt
 // "Dynamic Alien Archetypes" below, which replaces it with 5 distinct
 // alien tiers, each with its own fixed stat profile, rolled via a weighted
 // mix that shifts across this exact same wave-progress axis.
-export const ALIEN_WAVE_INTERVAL_MIN_MS = 180000; // 3 minutes
-export const ALIEN_WAVE_INTERVAL_MAX_MS = 300000; // 5 minutes
-// Per direct request ("the first alien encounter come 1 minute earlier"),
-// subtracted only from the very first wave's own initial countdown seed
-// (Levels.js's loadLevel) — every wave after the first still rolls the plain
-// ALIEN_WAVE_INTERVAL_MIN/MAX_MS range above, unaffected.
-export const ALIEN_FIRST_WAVE_EARLY_MS = 60000;
+// Per direct request, the wave-to-wave gap is no longer a flat random 3-5
+// minute range — it now ramps deterministically with difficulty, same
+// ALIEN_WAVE_DIFFICULTY_RAMP_WAVES progress axis every other wave-scaling
+// number here already uses: 3.5 minutes between waves at the very start of a
+// level, stretching out to 4.5 minutes once the ramp is fully maxed out (see
+// Systems.js's waveIntervalMsAt). No more per-wave randomness on top — the
+// two anchor points ARE the exact numbers requested, not a range to roll
+// within.
+export const ALIEN_WAVE_INTERVAL_EARLY_MS = 210000; // 3.5 minutes
+export const ALIEN_WAVE_INTERVAL_LATE_MS = 270000; // 4.5 minutes
+// Per direct request (originally "1 minute earlier," then a further "30
+// seconds earlier" on top of that — 90000 total), subtracted only from the
+// very first wave's own initial countdown seed (Levels.js's loadLevel) —
+// every wave after the first still uses the plain ramped interval above,
+// unaffected.
+export const ALIEN_FIRST_WAVE_EARLY_MS = 90000;
 // The very first wave's one alien is deliberately biased away from the right
 // portion of the water column, per direct bug report — the HUD pill cluster
 // sits fixed top-right on screen the whole game, and a portal rolled anywhere
@@ -2419,12 +2435,16 @@ export const ALIEN_WAVE_COUNT_LATE_MAX = 15;
 // reads as visibly more dangerous at a glance, not just on the health bar.
 // Placeholder balance, like every other economy/combat number in this file
 // — tune once real playtesting exists.
+// fishDamagePerSec: per direct spec, each tier does progressively more
+// damage per second (once per second, not continuously — see
+// ALIEN_FISH_DAMAGE_INTERVAL_MS) to any fish it's touching — 5 for the
+// lowest tier up to 35 for the highest, evenly stepped across all 5.
 export const ALIEN_ARCHETYPES = [
-  { id: 'alien_t1', tier: 1, name: 'Alien Scout', hpMin: 20, hpMax: 30, speed: 40, dnaYield: 1, radius: 16, color: '#5a2d6b' },
-  { id: 'alien_t2', tier: 2, name: 'Alien Brute', hpMin: 40, hpMax: 55, speed: 46, dnaYield: 2, radius: 18, color: '#6b2f7a' },
-  { id: 'alien_t3', tier: 3, name: 'Alien Stalker', hpMin: 65, hpMax: 85, speed: 54, dnaYield: 4, radius: 20, color: '#83318f' },
-  { id: 'alien_t4', tier: 4, name: 'Alien Behemoth', hpMin: 95, hpMax: 130, speed: 62, dnaYield: 7, radius: 23, color: '#a13db8' },
-  { id: 'alien_t5', tier: 5, name: 'Alien Leviathan', hpMin: 150, hpMax: 220, speed: 70, dnaYield: 12, radius: 27, color: '#d94ed4' },
+  { id: 'alien_t1', tier: 1, name: 'Alien Scout', hpMin: 20, hpMax: 30, speed: 40, dnaYield: 1, radius: 16, color: '#5a2d6b', fishDamagePerSec: 5 },
+  { id: 'alien_t2', tier: 2, name: 'Alien Brute', hpMin: 40, hpMax: 55, speed: 46, dnaYield: 2, radius: 18, color: '#6b2f7a', fishDamagePerSec: 12.5 },
+  { id: 'alien_t3', tier: 3, name: 'Alien Stalker', hpMin: 65, hpMax: 85, speed: 54, dnaYield: 4, radius: 20, color: '#83318f', fishDamagePerSec: 20 },
+  { id: 'alien_t4', tier: 4, name: 'Alien Behemoth', hpMin: 95, hpMax: 130, speed: 62, dnaYield: 7, radius: 23, color: '#a13db8', fishDamagePerSec: 27.5 },
+  { id: 'alien_t5', tier: 5, name: 'Alien Leviathan', hpMin: 150, hpMax: 220, speed: 70, dnaYield: 12, radius: 27, color: '#d94ed4', fishDamagePerSec: 35 },
 ];
 // The rolling wave-mix weight curve — per direct spec's 5-phase description
 // (Early 100% T1 -> Mid-Early T1/T2 -> Mid T1/T2/T3 -> Late phases out T1,
@@ -2554,7 +2574,7 @@ export const ALIEN_CLICK_DAMAGE = 1; // per direct request — "clicking on them
 // own instance radius (alien.radius, from its archetype) now rather than a
 // flat ALIEN_RADIUS.
 export const ALIEN_CLICK_RADIUS_MULTIPLIER = 1.5;
-export const ALIEN_POOP_INTERVAL_MS = 4000; // was 2000 — doubled again per direct request, further softening the population cap's own worst-case waste-production rate (see ALIEN_MAX_ALIVE's comment)
+export const ALIEN_POOP_INTERVAL_MS = 8000; // was 4000 — halved again ("aliens poop out waste half as often"), same population-cap-softening rationale as every prior cut
 export const ALIEN_INCOME_BLOCK_RADIUS = 90; // px — a fish this close to a LIVING alien produces no coin on its drop timer at all, see Entities.js's updateFish
 // Per direct request ("make it so aliens will go towards food only if it's
 // close to them and eat the food") — a much tighter radius than
@@ -2569,6 +2589,35 @@ export const ALIEN_RADIUS = 16; // px — fallback only now, same role as ALIEN_
 export const ALIEN_COLOR = '#5a2d6b'; // dark purple — fallback only, matches ALIEN_ARCHETYPES[0]'s own color (Tier 1)
 export const ALIEN_HEALTH_BAR_WIDTH = 30;
 export const ALIEN_HEALTH_BAR_HEIGHT = 4;
+
+// ---- Fish Health (aliens can now hurt/kill fish, per direct request) ----
+// Flat by growth stage, not by species — baby/mid/adult, regardless of which
+// of the 18 SPECIES rows a fish is. Entities.js's maxHpForStage resolves any
+// species' own stage count generically (stage 0 = baby, the LAST stage =
+// adult, anything in between = mid), so this works unchanged for a 3-stage
+// base feeder/utility fish or a hybrid with a different stage count alike.
+export const FISH_HEALTH_BABY = 75;
+export const FISH_HEALTH_MID = 100;
+export const FISH_HEALTH_ADULT = 125;
+// Damage is applied once per second (not continuously scaled by dt) to every
+// fish a living, non-hatch-grace-period alien is currently touching — see
+// Entities.js's updateAlien. Each archetype's own rate lives on its
+// ALIEN_ARCHETYPES row (fishDamagePerSec); the boss isn't one of those 5
+// tiers, so it gets its own flat rate below instead.
+export const ALIEN_FISH_DAMAGE_INTERVAL_MS = 1000;
+export const BOSS_FISH_DAMAGE_PER_SEC = 50; // above Tier 5's 35, matching the boss's "far deadlier than any wave alien" flavor without a full 10x multiply (its other stats — see BOSS_SPEED's own comment — are individually hand-tuned too, not a uniform scale-up)
+// Per direct request: fish don't regenerate AT ALL while any alien is alive
+// anywhere in the level, but once the last one dies, every damaged fish
+// heals back to full over this long — a flat rate (maxHp / this duration),
+// so a barely-scratched fish tops off well under 5 seconds while a nearly-
+// dead one takes the full stretch. See Entities.js's updateFish.
+export const FISH_HEALTH_REGEN_DURATION_MS = 5000;
+// A fish's health bar only ever renders while it's actually missing health
+// (main.js's render loop) — smaller than an alien's own bar (ALIEN_HEALTH_BAR_
+// WIDTH/HEIGHT above) and a different color (green-to-red gradient) so the
+// two can't be confused for one another even when both are on screen at once.
+export const FISH_HEALTH_BAR_WIDTH = 22;
+export const FISH_HEALTH_BAR_HEIGHT = 3.5;
 
 // Hit feedback + death animation, per direct request ("aliens flash red and
 // bounce when they take damage, which a visual animation when they get

@@ -15,8 +15,8 @@ import {
   ALIEN_INTRO_DELAY_MS,
   WASTE_DRAG_TUTORIAL_WAIT_MS,
   NOTIFICATION_LOG_MAX,
-  ALIEN_WAVE_INTERVAL_MIN_MS,
-  ALIEN_WAVE_INTERVAL_MAX_MS,
+  ALIEN_WAVE_INTERVAL_EARLY_MS,
+  ALIEN_WAVE_INTERVAL_LATE_MS,
   ALIEN_WAVE_DIFFICULTY_RAMP_WAVES,
   ALIEN_WAVE_COUNT_EARLY_MIN,
   ALIEN_WAVE_COUNT_EARLY_MAX,
@@ -38,10 +38,12 @@ import {
   ALIEN_FIRST_WAVE_SAFE_X_FRACTION,
   TILE_MANUFACTURER,
   TILE_POWER_PLANT,
+  AUTOSAVE_INTERVAL_MS,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings } from './Levels.js';
 import { getFishPurchaseCost, findCombinablePair } from './Entities.js';
 import { hasWasteTurretPlaced, countPlacedOfType } from './Grid.js';
+import { saveGame } from './Save.js';
 
 const BANKRUPTCY_BAILOUT_MESSAGE =
   "Oopah, looks like someone got their CDL so they could drive the struggle bus! Here's 100 gold to get you back on your feet. I'll be expecting that back (I'm lying).";
@@ -191,8 +193,16 @@ function updatePostAlienTutorial(state) {
   state.level.tutorialFlow = { id: 'wastedrag', step: 'drag' };
 }
 
-function randomWaveIntervalMs() {
-  return ALIEN_WAVE_INTERVAL_MIN_MS + Math.random() * (ALIEN_WAVE_INTERVAL_MAX_MS - ALIEN_WAVE_INTERVAL_MIN_MS);
+// Per direct request, deterministically ramped — not randomized — from
+// ALIEN_WAVE_INTERVAL_EARLY_MS at the very start of a level up to
+// ALIEN_WAVE_INTERVAL_LATE_MS once the difficulty ramp is fully maxed out,
+// via the exact same alienDifficultyT progress axis every other wave-scaling
+// number (size, tier mix) already rides. wavesSpawned is how many waves have
+// already completed BEFORE the gap being computed — so the very first gap
+// (0 spawned) sits at t=0, purely "early."
+function waveIntervalMsAt(wavesSpawned) {
+  const t = alienDifficultyT(wavesSpawned);
+  return ALIEN_WAVE_INTERVAL_EARLY_MS + (ALIEN_WAVE_INTERVAL_LATE_MS - ALIEN_WAVE_INTERVAL_EARLY_MS) * t;
 }
 
 // Linear interpolation from the "early" range up to the "late" range across
@@ -330,7 +340,7 @@ function updateAlienWaves(state) {
     const aliensAlive = state.level.entities.some((e) => e.type === 'alien' && e.hp > 0);
     if (wavePortalsPending || aliensAlive) return;
     state.level.alienWaveActive = false;
-    state.level.alienNextWaveAtMs = elapsed + randomWaveIntervalMs(); // the real countdown starts fresh right now, not back when the wave spawned
+    state.level.alienNextWaveAtMs = elapsed + waveIntervalMsAt(state.level.alienWavesSpawned); // the real countdown starts fresh right now, not back when the wave spawned
     return;
   }
 
@@ -380,6 +390,23 @@ function updateRecipeCopyTip(state) {
 }
 
 // Called once per tick from main.js's update().
+// Fires every AUTOSAVE_INTERVAL_MS of real elapsed sim time — since this is
+// only ever reached while the sim genuinely isn't paused/game-over/boss-
+// frozen (see main.js's update(), which gates every call to
+// updateStoryTriggers on those), it self-throttles for free with no extra
+// checks needed here. Reuses the exact same Save.js saveGame() the pause
+// menu's manual Save button already calls, and posts to the notification
+// ticker the same "push a real message, don't pop a blocking modal"
+// precedent every other one-off confirmation in this game already follows
+// (see UI.js's saveGameFromPause) — worded distinctly ("auto-saved," not
+// "saved") so the player can tell the two apart in the log.
+function updateAutosave(state) {
+  if (state.level.elapsed < state.level.nextAutosaveAtMs) return;
+  state.level.nextAutosaveAtMs += AUTOSAVE_INTERVAL_MS;
+  const ok = saveGame(state);
+  pushNotification(state, ok ? 'Game auto-saved. 💾' : "Auto-save failed — your browser blocked it.");
+}
+
 export function updateStoryTriggers(state) {
   updateBankruptcy(state);
   updateAlienWaves(state);
@@ -388,4 +415,5 @@ export function updateStoryTriggers(state) {
   updatePostAlienTutorial(state);
   updateMergeTutorialTrigger(state);
   updateRecipeCopyTip(state);
+  updateAutosave(state);
 }

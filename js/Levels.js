@@ -3,7 +3,7 @@
 // which species/buildings are available, win conditions, alien waves, and
 // meta rewards granted on completion.
 
-import { SPECIES_LIST, BUILDING_LIST, ALIEN_WAVE_INTERVAL_MIN_MS, ALIEN_WAVE_INTERVAL_MAX_MS, ALIEN_FIRST_WAVE_EARLY_MS } from './Config.js';
+import { SPECIES_LIST, BUILDING_LIST, ALIEN_WAVE_INTERVAL_EARLY_MS, ALIEN_FIRST_WAVE_EARLY_MS, AUTOSAVE_INTERVAL_MS } from './Config.js';
 import { createGrid } from './Grid.js';
 
 // The very first entry in state.level.notifications, pushed at level load
@@ -148,13 +148,13 @@ export function loadLevel(state, levelId) {
     // Alien Invasion (see Config.js's ALIEN_* constants, Systems.js's updateAlienWaves,
     // Entities.js's createAlien/updateAlien) — all level-scoped/reset on restart like
     // everything else here. alienNextWaveAtMs is an absolute state.level.elapsed target,
-    // not a countdown-from value. Seeded with a real random interval so the very first
-    // wave doesn't always land at the exact same moment every playthrough.
-    // ALIEN_FIRST_WAVE_EARLY_MS is subtracted here ONLY — the very first
-    // wave's own seed — per direct request that the first alien encounter
-    // come a minute earlier; every later wave rolls the plain range via
-    // Systems.js's randomWaveIntervalMs(), untouched.
-    alienNextWaveAtMs: Math.max(0, ALIEN_WAVE_INTERVAL_MIN_MS + Math.random() * (ALIEN_WAVE_INTERVAL_MAX_MS - ALIEN_WAVE_INTERVAL_MIN_MS) - ALIEN_FIRST_WAVE_EARLY_MS),
+    // not a countdown-from value. The very first wave's own gap starts at the
+    // "early" end of the ramp (ALIEN_WAVE_INTERVAL_EARLY_MS, since 0 waves have
+    // spawned yet) minus ALIEN_FIRST_WAVE_EARLY_MS — per direct request that the
+    // very first encounter specifically comes noticeably sooner than every
+    // later wave's own (now deterministic, not random) gap.
+    alienNextWaveAtMs: Math.max(0, ALIEN_WAVE_INTERVAL_EARLY_MS - ALIEN_FIRST_WAVE_EARLY_MS),
+    nextAutosaveAtMs: AUTOSAVE_INTERVAL_MS, // Systems.js's updateAutosave — an absolute state.level.elapsed target, same shape as alienNextWaveAtMs above
     alienWavesSpawned: 0,
     alienWaveActive: false, // true from the moment a wave spawns until every one of its portals has opened AND every alien it produced is dead — see Systems.js's updateAlienWaves; the next wave's own countdown doesn't even start until this clears
     alienWarning1Shown: false,

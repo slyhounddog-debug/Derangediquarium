@@ -42,9 +42,22 @@ let bossActive = false;
 // AudioContext exists yet (a slider drag before the very first user
 // gesture that unlocks audio) — these are the source of truth, applied to
 // the real gain node once ensureContext() creates it, and re-applied
-// directly any time they change after that.
-let musicVolume = 0.05; // soft, background — should never fight the SFX for attention
-let sfxVolume = 0.22;
+// directly any time they change after that. musicVolume/sfxVolume are the
+// slider's own 0-1 FRACTION (what the slider displays, 0.5 = "50%"), not the
+// final gain — see MUSIC_VOLUME_MAX_GAIN/SFX_VOLUME_MAX_GAIN below for the
+// separate scale-down applied on top. Per direct request, both start at 50%.
+let musicVolume = 0.5;
+let sfxVolume = 0.5;
+// Per direct request ("the max loudness the music and sound effects can get
+// are 30% quieter than they are now") — a slider at 100% used to map
+// straight to gain 1.0 (the loudest this app could ever get); now it maps to
+// 0.7, so the whole achievable range (slider at 0-100%) is uniformly 30%
+// quieter than it used to be, not just the new 50%-by-default starting
+// point. Applied as a multiplier in setMusicVolume/setSfxVolume and in
+// ensureContext's own initial gain-node setup below, so both paths (a slider
+// drag, and the very first AudioContext creation) always agree.
+const MUSIC_VOLUME_MAX_GAIN = 0.7;
+const SFX_VOLUME_MAX_GAIN = 0.7;
 
 function ensureContext() {
   if (ctx) return ctx;
@@ -52,10 +65,10 @@ function ensureContext() {
   if (!AudioContextClass) return null; // no Web Audio support — every export below just silently no-ops
   ctx = new AudioContextClass();
   musicGain = ctx.createGain();
-  musicGain.gain.value = musicVolume;
+  musicGain.gain.value = musicVolume * MUSIC_VOLUME_MAX_GAIN;
   musicGain.connect(ctx.destination);
   sfxGain = ctx.createGain();
-  sfxGain.gain.value = sfxVolume;
+  sfxGain.gain.value = sfxVolume * SFX_VOLUME_MAX_GAIN;
   sfxGain.connect(ctx.destination);
   return ctx;
 }
@@ -90,11 +103,11 @@ window.addEventListener('focus', () => {
 // volume updates live while dragging, not just on release.
 export function setMusicVolume(v) {
   musicVolume = Math.max(0, Math.min(1, v));
-  if (musicGain) musicGain.gain.value = musicVolume;
+  if (musicGain) musicGain.gain.value = musicVolume * MUSIC_VOLUME_MAX_GAIN;
 }
 export function setSfxVolume(v) {
   sfxVolume = Math.max(0, Math.min(1, v));
-  if (sfxGain) sfxGain.gain.value = sfxVolume;
+  if (sfxGain) sfxGain.gain.value = sfxVolume * SFX_VOLUME_MAX_GAIN;
 }
 export function getMusicVolume() { return musicVolume; }
 export function getSfxVolume() { return sfxVolume; }
@@ -367,6 +380,45 @@ export function playDispense() {
 // from position 0 the instant it's triggered.
 const MUSIC_CROSSFADE_S = ALIEN_MUSIC_BATTLE_LEAD_MS / 1000; // matches the 3-second pre-wave window main.js starts the fade-in from, so Battle reaches full volume right as the wave actually spawns
 
+// Real bug fix, per direct report ("battle music is slightly ahead of the
+// game music"): keeping both tracks permanently playing (see the big comment
+// above) only guarantees they STAY in sync once they start in sync — and two
+// separate HTMLMediaElement.play() calls, even issued back-to-back in the
+// same synchronous startMusic() below, have no cross-element timing
+// guarantee at all. Browsers can (and do) take a slightly different amount
+// of real time to actually begin decoding/outputting each file, so the two
+// tracks can start a handful of milliseconds apart and then stay that far
+// apart forever, since looped native <audio> playback has no mechanism of
+// its own to notice or correct drift. A small periodic safety-net check —
+// comparing currentTime (wrapped to each loop's own duration, so a check
+// landing right as one track wraps back to 0 while the other hasn't quite
+// yet doesn't read as a huge, spurious drift) and snapping Battle back onto
+// Game's clock whenever they've drifted past MUSIC_RESYNC_TOLERANCE_S — self-
+// corrects regardless of the exact root cause (startup latency, or the two
+// mp3 files not encoding to bit-for-bit identical durations). Deliberately
+// treats Game as the master clock (Battle is the one that gets snapped) —
+// arbitrary, but has to pick one so the two checks in each direction can't
+// both fire and fight each other. In practice this mostly resolves silently
+// while Battle's own gain is still 0 (the player never hears the correction
+// itself), well before the first real crossfade ever makes Battle audible.
+const MUSIC_RESYNC_INTERVAL_MS = 1000;
+const MUSIC_RESYNC_TOLERANCE_S = 0.04;
+let musicResyncTimer = null;
+
+function resyncMusicTracks() {
+  if (!gameMusicEl || !battleMusicEl || gameMusicEl.paused || battleMusicEl.paused) return;
+  const duration = gameMusicEl.duration;
+  if (!duration || !isFinite(duration)) return;
+  let diff = battleMusicEl.currentTime - gameMusicEl.currentTime;
+  // Wrap into [-duration/2, duration/2] so a check landing right at a loop
+  // boundary (one track already wrapped to ~0, the other still near the end)
+  // doesn't misread a genuinely tiny, correct offset as a huge one.
+  diff = ((diff + duration / 2) % duration + duration) % duration - duration / 2;
+  if (Math.abs(diff) > MUSIC_RESYNC_TOLERANCE_S) {
+    battleMusicEl.currentTime = gameMusicEl.currentTime;
+  }
+}
+
 function ensureMusicTracks() {
   if (gameMusicEl) return;
   gameMusicEl = new Audio('audio/Game.mp3');
@@ -397,6 +449,7 @@ function startMusic() {
   gameMusicEl.play().catch(() => {});
   battleMusicEl.play().catch(() => {});
   if (bossActive) bossMusicEl.play().catch(() => {});
+  if (!musicResyncTimer) musicResyncTimer = setInterval(resyncMusicTracks, MUSIC_RESYNC_INTERVAL_MS);
 }
 
 // Called every tick from main.js with whether Battle should currently be the
@@ -443,6 +496,11 @@ export function triggerBossMusic() {
   bossTrackGain.gain.value = 1;
   bossMusicEl.currentTime = 0;
   bossMusicEl.play().catch(() => {});
+  // Game/Battle are paused for good at this point — nothing left to resync.
+  if (musicResyncTimer) {
+    clearInterval(musicResyncTimer);
+    musicResyncTimer = null;
+  }
 }
 
 // Exported for completeness (e.g. a future mute toggle) — not currently
@@ -452,4 +510,8 @@ export function stopMusic() {
   if (gameMusicEl) gameMusicEl.pause();
   if (battleMusicEl) battleMusicEl.pause();
   if (bossMusicEl) bossMusicEl.pause();
+  if (musicResyncTimer) {
+    clearInterval(musicResyncTimer);
+    musicResyncTimer = null;
+  }
 }

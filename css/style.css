@@ -216,7 +216,13 @@ html, body {
    line's hotkey actually does right now. */
 #hotkey-legend {
   position: fixed;
-  left: 14px;
+  /* Real bug fix, per direct report ("the glass splits the legend and it
+     looks unpolished") — this was left at a flat 14px while every other
+     screen-edge element (#hud, #notification-ticker, #pause-toggle-btn) had
+     already been updated to clear the glass tank walls' own live-measured
+     width (--glass-wall-left/right-width, set every frame by main.js's
+     renderTankWalls) when those were added. This one was simply missed. */
+  left: calc(14px + var(--glass-wall-left-width, 22px));
   bottom: 14px;
   z-index: 20;
   display: flex;

@@ -262,6 +262,7 @@ export function initUI(state) {
     pauseSettings: document.getElementById('pause-settings'),
     pauseResumeBtn: document.getElementById('pause-resume-btn'),
     pauseSaveBtn: document.getElementById('pause-save-btn'),
+    pauseLoadSaveBtn: document.getElementById('pause-load-save-btn'),
     pauseRestartBtn: document.getElementById('pause-restart-btn'),
     pauseSettingsBtn: document.getElementById('pause-settings-btn'),
     pauseSettingsBackBtn: document.getElementById('pause-settings-back-btn'),
@@ -418,6 +419,7 @@ export function initUI(state) {
   // handler, togglePauseMenu still does the actual work either way).
   els.pauseResumeBtn.addEventListener('click', () => closePauseMenu(state));
   els.pauseSaveBtn.addEventListener('click', () => saveGameFromPause(state));
+  els.pauseLoadSaveBtn.addEventListener('click', () => loadLastSaveFromPause(state));
   els.pauseRestartBtn.addEventListener('click', () => restartLevel(state));
   els.bossVictoryRestartBtn.addEventListener('click', () => {
     els.bossVictoryOverlay.classList.remove('visible');
@@ -1559,6 +1561,7 @@ function showPauseMain() {
 function showPauseSettings() {
   els.pauseMain.classList.add('hidden');
   els.pauseSettings.classList.remove('hidden');
+  els.pauseLoadSaveBtn.disabled = !hasSaveGame(); // re-checked every open — a save could exist now that didn't the last time this was shown
 }
 
 // True for exactly as long as the pause overlay's Settings sub-view is
@@ -1567,6 +1570,12 @@ function showPauseSettings() {
 // shared "Back"/backdrop-click handling right above so it returns to the
 // start screen instead of resuming gameplay that was never running.
 let settingsOpenedFromStartScreen = false;
+// Stashed once by initStartScreen — reused by loadLastSaveFromPause's own
+// "opened via the start screen" branch, since that's the one case where
+// loading a save also has to actually kick off gameplay (the game was never
+// running yet), and this function has no other way to reach main.js's
+// onStart callback.
+let startOnStartCallback = null;
 
 // Shared by the pause-settings Back button and a backdrop click alike (see
 // the click wiring above) — per direct request, the start screen's Settings
@@ -1590,6 +1599,7 @@ function returnFromPauseSettings(state) {
 // doesn't reach into main.js directly, same one-directional import
 // discipline every other main.js/UI.js hookup in this file already follows.
 export function initStartScreen(state, onStart) {
+  startOnStartCallback = onStart;
   // Continue Game stays visible but grayed out/disabled unless a save
   // actually exists — per direct request (was fully hidden before) — checked
   // once here at page load, not re-checked afterward (nothing can create a
@@ -1653,6 +1663,40 @@ function saveGameFromPause(state) {
     elapsed: state.level.elapsed,
   });
   if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
+}
+
+// The Settings panel's "Load Last Save" button, per direct request — reverts
+// to whatever was last saved (manually, or by the autosave timer — see
+// Systems.js's updateAutosave), replacing state.meta/state.level wholesale
+// exactly the same way the start screen's own Continue button already does
+// (see initStartScreen below), just reachable mid-game too. Handles both
+// doors this shared Settings sub-view can be opened through: mid-game (just
+// resume with the loaded state) and via the start screen (mirrors Continue —
+// hide the start screen too and actually kick off onStart(), since the game
+// was never running yet).
+function loadLastSaveFromPause(state) {
+  const saved = loadSaveGame();
+  if (!saved) {
+    const notifications = state.level.notifications;
+    notifications.push({ id: notifications.length + 1, text: "No save to load yet.", elapsed: state.level.elapsed });
+    if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
+    return;
+  }
+  state.meta = saved.meta;
+  state.level = saved.level;
+  centerCameraOnMound(state.camera); // same one-time re-center every other load-a-saved-level path already does
+  const notifications = state.level.notifications;
+  notifications.push({ id: notifications.length + 1, text: 'Loaded your last save.', elapsed: state.level.elapsed });
+  if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
+  if (settingsOpenedFromStartScreen) {
+    settingsOpenedFromStartScreen = false;
+    els.pauseOverlay.classList.add('hidden');
+    els.startOverlay.classList.add('hidden');
+    playPanelClose();
+    if (startOnStartCallback) startOnStartCallback();
+  } else {
+    closePauseMenu(state);
+  }
 }
 
 // Rebuilds state.level from scratch via the real level-load path (same one
