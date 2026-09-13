@@ -549,17 +549,29 @@ export function triggerBossMusic() {
   battleTrackGain.gain.cancelScheduledValues(now);
   battleTrackGain.gain.setValueAtTime(battleTrackGain.gain.value, now);
   battleTrackGain.gain.linearRampToValueAtTime(0, now + BOSS_MUSIC_FADE_OUT_S);
-  // Boss starts playing right away (silently) but only actually begins
-  // ramping up once BOSS_MUSIC_FADE_IN_START_S has fully elapsed — a held
-  // setValueAtTime at that point is what keeps it silent through the
-  // fade-out AND the following silent wait, rather than starting to ramp the
-  // instant the fade-out alone finishes.
-  bossMusicEl.currentTime = 0;
-  bossMusicEl.play().catch(() => {});
+  // Real bug fix, per direct report: the Boss track's own PLAYBACK (not just
+  // its gain) used to start immediately, right here at t=0 — silent, since
+  // the gain was held at 0, but still genuinely advancing through the song
+  // underneath that silence. By the time the fade-in actually became
+  // audible at BOSS_MUSIC_FADE_IN_START_S, the track itself was already that
+  // many seconds in, so what the player heard fading in was the middle of
+  // the song, not its start. Fixed by delaying the play() call itself (via
+  // setTimeout, since AudioContext scheduling only controls gain/oscillator
+  // params, not when an HTMLMediaElement's own playback begins) to land at
+  // the exact same real moment the fade-in starts, so hearing it begin IS
+  // the song actually starting from currentTime 0.
   bossTrackGain.gain.cancelScheduledValues(now);
   bossTrackGain.gain.setValueAtTime(0, now);
+  // This hold point is what keeps the gain flat at 0 through the whole
+  // silent stretch — without it, linearRampToValueAtTime would interpolate
+  // the WHOLE way from (now, 0) to the ramp's end target, i.e. gain would
+  // already be climbing gradually from t=0 instead of staying silent.
   bossTrackGain.gain.setValueAtTime(0, now + BOSS_MUSIC_FADE_IN_START_S);
   bossTrackGain.gain.linearRampToValueAtTime(1, now + BOSS_MUSIC_FADE_IN_START_S + BOSS_MUSIC_FADE_IN_S);
+  setTimeout(() => {
+    bossMusicEl.currentTime = 0;
+    bossMusicEl.play().catch(() => {});
+  }, BOSS_MUSIC_FADE_IN_START_MS);
   // Game/Battle are paused for good once their own fade-out actually
   // finishes — not immediately, which would cut them off mid-ramp. Nothing
   // left to resync once they're stopped.
