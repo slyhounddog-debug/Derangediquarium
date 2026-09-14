@@ -351,13 +351,19 @@ export function placeTile(state, col, row, buildingId, angle = 0) {
   } else if (COLLECTOR_TILES.has(buildingId)) {
     state.level.buildingData[buildingKey(col, row)] = { type: buildingId, angle };
   } else if (TURRET_TILES.has(buildingId)) {
-    // No `angle` at all — a turret auto-targets, it doesn't have a
-    // player-chosen aim. `ammo` matters for any tile in TURRET_AMMO_TILES
-    // (Waste + Electric Waste Turret — both start empty, have to be fed, see
-    // updateBuildings' turret intake scan); Advanced ignores it entirely
-    // (unlimited ammo, a power cost instead). `cooldownMs` counts down to the
-    // next shot regardless of tier — see updateBuildings' turret-fire branch.
-    state.level.buildingData[buildingKey(col, row)] = { type: buildingId, ammo: 0, cooldownMs: 0 };
+    // No player-chosen `angle` — a turret auto-targets, it doesn't have one.
+    // `aimAngle` is different: a purely visual field (renderTurretIcon's own
+    // gun arm), continuously overwritten by updateBuildings' turret branch
+    // toward whatever the nearest living alien is, every tick one exists —
+    // defaults to straight up (-PI/2) so a freshly-placed turret with no
+    // target yet still points somewhere sensible (up into the water column,
+    // where aliens actually are) instead of sideways. `ammo` matters for any
+    // tile in TURRET_AMMO_TILES (Waste + Electric Waste Turret — both start
+    // empty, have to be fed, see updateBuildings' turret intake scan);
+    // Advanced ignores it entirely (unlimited ammo, a power cost instead).
+    // `cooldownMs` counts down to the next shot regardless of tier — see
+    // updateBuildings' turret-fire branch.
+    state.level.buildingData[buildingKey(col, row)] = { type: buildingId, ammo: 0, cooldownMs: 0, aimAngle: -Math.PI / 2 };
   } else if (REFINERY_TILES.has(buildingId)) {
     // No `angle` — same fixed top-center output every recipe-driven building
     // shares (see updateBuildings). lockedRecipe is null while idle, else
@@ -452,7 +458,7 @@ export function cycleTileCheat(state, worldX, worldY) {
     // Cheat-cycled turrets start pre-loaded with max ammo (any ammo-consuming
     // tier — see TURRET_AMMO_TILES) so testing combat doesn't require
     // grinding real Waste first.
-    state.level.buildingData[buildingKey(col, row)] = { type: next, ammo: TURRET_AMMO_TILES.has(next) ? WASTE_TURRET_MAX_AMMO : 0, cooldownMs: 0 };
+    state.level.buildingData[buildingKey(col, row)] = { type: next, ammo: TURRET_AMMO_TILES.has(next) ? WASTE_TURRET_MAX_AMMO : 0, cooldownMs: 0, aimAngle: -Math.PI / 2 };
   } else if (REFINERY_TILES.has(next)) {
     state.level.buildingData[buildingKey(col, row)] = { type: next, lockedRecipe: null, progressMs: 0, heldItemId: null };
   } else if (MANUFACTURER_TILES.has(next)) {
@@ -1018,31 +1024,39 @@ export function updateBuildings(state, dtMs) {
       data.cooldownMs = Math.max(0, data.cooldownMs - dtMs * getCatalystSpeedMultiplier(state, key));
       const hasAmmo = !TURRET_AMMO_TILES.has(data.type) || data.ammo > 0;
       const hasPower = turretStats.powerCostPerSec <= 0 || state.level.powerEfficiency >= 1;
-      if (data.cooldownMs <= 0 && hasAmmo && hasPower) {
-        let nearestAlien = null;
-        let nearestDist = Infinity;
-        for (const entity of state.level.entities) {
-          // spawnProtectionUntilMs: a freshly Alien-Egg-hatched alien is
-          // invulnerable for its first ALIEN_EGG_HATCH_INVULN_MS (see
-          // Entities.js's updateAlienEgg/createAlien) — turrets don't waste
-          // shots targeting something they can't hurt.
-          if (entity.type !== 'alien' || entity.hp <= 0) continue;
-          if (entity.spawnProtectionUntilMs > state.level.elapsed) continue;
-          // Per direct request — a target already covered by damage from
-          // shots OTHER turrets (or this same one, an earlier cycle) already
-          // have in flight isn't a valid target any more, so every turret
-          // that would otherwise also pile onto it instead looks past it to
-          // whatever real target remains (or fires at nothing this tick, if
-          // there isn't one) — see createAlien's own comment on
-          // reservedDamage and updateTurretProjectiles' release of it once a
-          // shot actually lands or fizzles.
-          if (entity.hp - (entity.reservedDamage || 0) <= 0) continue;
-          const d = Math.hypot(entity.x - centerX, entity.y - centerY);
-          if (d <= nearestDist) {
-            nearestAlien = entity;
-            nearestDist = d;
-          }
+      // Found every tick regardless of the firing gate below (cooldown/ammo/
+      // power) — per direct request, the turret's own drawn arm pivots to
+      // track its live target continuously, not just at the instant it
+      // fires, so this can't be scoped inside the `if` the way it used to be
+      // when only the shot itself needed it. data.aimAngle (read by
+      // renderTurretIcon) is only ever updated when a real target exists —
+      // with none, the arm just holds whatever direction it last pointed.
+      let nearestAlien = null;
+      let nearestDist = Infinity;
+      for (const entity of state.level.entities) {
+        // spawnProtectionUntilMs: a freshly Alien-Egg-hatched alien is
+        // invulnerable for its first ALIEN_EGG_HATCH_INVULN_MS (see
+        // Entities.js's updateAlienEgg/createAlien) — turrets don't waste
+        // shots targeting something they can't hurt.
+        if (entity.type !== 'alien' || entity.hp <= 0) continue;
+        if (entity.spawnProtectionUntilMs > state.level.elapsed) continue;
+        // Per direct request — a target already covered by damage from
+        // shots OTHER turrets (or this same one, an earlier cycle) already
+        // have in flight isn't a valid target any more, so every turret
+        // that would otherwise also pile onto it instead looks past it to
+        // whatever real target remains (or fires at nothing this tick, if
+        // there isn't one) — see createAlien's own comment on
+        // reservedDamage and updateTurretProjectiles' release of it once a
+        // shot actually lands or fizzles.
+        if (entity.hp - (entity.reservedDamage || 0) <= 0) continue;
+        const d = Math.hypot(entity.x - centerX, entity.y - centerY);
+        if (d <= nearestDist) {
+          nearestAlien = entity;
+          nearestDist = d;
         }
+      }
+      if (nearestAlien) data.aimAngle = Math.atan2(nearestAlien.y - centerY, nearestAlien.x - centerX);
+      if (data.cooldownMs <= 0 && hasAmmo && hasPower) {
         if (nearestAlien) {
           turretShots.push({ x: centerX, y: centerY, targetId: nearestAlien.id, damage: turretStats.damage });
           nearestAlien.reservedDamage = (nearestAlien.reservedDamage || 0) + turretStats.damage;
@@ -1934,9 +1948,15 @@ function renderArmorPlateBase(ctx, x, y, size, color) {
   }
 }
 
-// Turret: the armor plate above, plus a raised diamond boss with a center
-// bolt — the reference's own "gun turret hub" reading.
-function renderTurretIcon(ctx, x, y, size, color) {
+// Turret: the armor plate above, a raised diamond boss, and a gun arm
+// pivoting on the center bolt — per direct request ("add an arm to the
+// center of the turret... keep the visuals as is otherwise... have the arm
+// be able to pivot towards the alien it's aiming at"). aimAngle comes from
+// the tile's own buildingData (updateBuildings' turret branch overwrites it
+// every tick toward whichever living alien is currently nearest, defaulting
+// to straight up — see placeTile's own turret init) — the one part of this
+// icon that reflects live gameplay state instead of being fixed decoration.
+function renderTurretIcon(ctx, x, y, size, color, aimAngle) {
   renderArmorPlateBase(ctx, x, y, size, color);
   const cx = x + size / 2;
   const cy = y + size / 2;
@@ -1950,13 +1970,32 @@ function renderTurretIcon(ctx, x, y, size, color) {
   ctx.lineWidth = Math.max(1, size * 0.03);
   ctx.strokeRect(-r, -r, r * 2, r * 2);
   ctx.restore();
+
+  const armLength = size * 0.42;
+  const armWidth = size * 0.13;
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(aimAngle || -Math.PI / 2);
+  ctx.fillStyle = shadeHexColor(color, -0.2);
+  ctx.fillRect(0, -armWidth / 2, armLength, armWidth);
+  ctx.strokeStyle = shadeHexColor(color, -0.5);
+  ctx.lineWidth = Math.max(1, size * 0.02);
+  ctx.strokeRect(0, -armWidth / 2, armLength, armWidth);
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+  ctx.fillRect(0, -armWidth / 2, armLength, armWidth * 0.3);
+  ctx.beginPath();
+  ctx.fillStyle = shadeHexColor(color, -0.45);
+  ctx.arc(armLength, 0, armWidth * 0.55, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+
   ctx.beginPath();
   ctx.fillStyle = shadeHexColor(color, -0.42);
-  ctx.arc(cx, cy, size * 0.07, 0, Math.PI * 2);
+  ctx.arc(cx, cy, size * 0.09, 0, Math.PI * 2);
   ctx.fill();
   ctx.beginPath();
   ctx.fillStyle = shadeHexColor(color, 0.3);
-  ctx.arc(cx - size * 0.02, cy - size * 0.02, size * 0.025, 0, Math.PI * 2);
+  ctx.arc(cx - size * 0.02, cy - size * 0.02, size * 0.03, 0, Math.PI * 2);
   ctx.fill();
 }
 
@@ -2214,7 +2253,7 @@ function renderBrickPattern(ctx, x, y, size, color) {
 // dots, the machine-active pulse, the power-shortage overlay, and the
 // Catalyst glow are all separate render passes (see the per-tile render
 // loop above) and are completely untouched by this dispatch.
-function renderTileShape(ctx, type, color, x, y, size) {
+function renderTileShape(ctx, type, color, x, y, size, data) {
   if (type === TILE_PLATFORM) {
     renderBrickPattern(ctx, x, y, size, color);
     return;
@@ -2230,7 +2269,7 @@ function renderTileShape(ctx, type, color, x, y, size) {
     ctx.stroke();
     renderTierBadge(ctx, type, x, y, size);
   } else if (TURRET_TILES.has(type)) {
-    renderTurretIcon(ctx, x, y, size, color);
+    renderTurretIcon(ctx, x, y, size, color, data && data.aimAngle);
     renderTierBadge(ctx, type, x, y, size);
   } else if (FAN_TILES.has(type)) {
     renderFanVentBase(ctx, x, y, size, color);

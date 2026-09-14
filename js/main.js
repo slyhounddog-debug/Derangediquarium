@@ -646,6 +646,7 @@ input.mouseDownHandlers.push((sx, sy) => {
   let bestDistSq = Infinity;
   for (const item of state.level.items) {
     if (!DRAGGABLE_ITEM_TYPES.includes(item.type)) continue;
+    if (item.heldByKey != null) continue; // already claimed as a building's input (mid-disintegrate) — can't be grabbed back out, see updateItemDrag's own comment
     // Every draggable item type is grabbable wherever it exists, open water
     // or the city alike — per direct request ("there doesn't need to be any
     // objects that can only be dragged in certain spots anymore"), removing
@@ -692,7 +693,22 @@ const ITEM_DRAG_VELOCITY_SAMPLE_TICKS = 6;
 function updateItemDrag() {
   if (draggedItemId == null) return;
   const dragged = state.level.items.find((item) => item.id === draggedItemId && item.type === draggedItemType);
-  if (!dragged) {
+  // Real bug fixed: a Collector/Refinery/Manufacturer/Power Plant/Turret no
+  // longer instantly splices an absorbed item out of state.level.items the
+  // way an older version did — it marks it item.heldByKey and eases it
+  // toward the tile's own center over its processing/disintegrate duration
+  // (Grid.js's stepHeldItem) instead, so it can still play its disintegrate
+  // animation in place. Since the item is STILL genuinely present in the
+  // array while held, the old `!dragged` check alone no longer caught this
+  // case — updateItemDrag kept right on snapping it back to the cursor every
+  // tick, fighting stepHeldItem's own easing and letting the player keep
+  // dragging an item around indefinitely even while it was mid-disintegrate
+  // inside a building. Per direct report ("make sure if a building takes an
+  // object as input, it stays in the building and isn't dragged around
+  // anymore"), releasing the drag the instant heldByKey is set (same as the
+  // already-gone case below) is what lets stepHeldItem's own pull actually
+  // take over.
+  if (!dragged || dragged.heldByKey != null) {
     // Absorbed by a building's own intake scan (or otherwise removed)
     // mid-drag — the mouse button is still down at this point, so the real
     // mouseup/click that follows is still coming. Real bug fix, per direct

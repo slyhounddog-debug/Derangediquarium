@@ -2902,20 +2902,60 @@ function updateFishBubbleEffects(state, dtMs) {
   });
 }
 
+// Peak rise height (px) reached by an item launched upward at speed u0
+// (px/s) under gravity g and linear drag k — the exact closed-form solution
+// of the SAME per-tick integration integrateItemForces actually runs
+// (dv/dt = -g - k*v while rising, since drag always opposes whatever
+// direction the item is currently moving, same as gravity does going up).
+// Derived by separating dh/du = -u/(g + k*u) and integrating from u0 down
+// to 0 — see Grid.js's integrateItemForces for the physics this has to
+// match exactly.
+function productionLaunchRiseHeight(u0, g, k) {
+  if (u0 <= 0) return 0;
+  return u0 / k - (g / (k * k)) * Math.log(1 + (k * u0) / g);
+}
+
+// Inverts the above — real bug fixed here, per direct report ("food goes up
+// like 1.5 tiles when it should go up 3 tiles"): the old formula
+// (v = sqrt(2*g*h), the textbook NO-drag kinematic) badly undershoots once
+// real drag is added back in on the way up, and undershoots more the higher
+// the target/the gentler the item's own gravity — exactly the "food barely
+// makes it, heavy stuff is closer to right" pattern reported. There's no
+// simple closed-form inverse of productionLaunchRiseHeight (it's
+// transcendental), so this just binary-searches for the launch speed that
+// actually reaches targetHeight under the real drag physics — a one-time,
+// 40-iteration search per production output (never per frame), converging
+// to well under a pixel of error.
+function launchSpeedForHeight(targetHeight, g, k) {
+  let lo = 0;
+  // The old undershooting formula's own estimate, generously multiplied, as
+  // a safe upper bound — the true (drag-corrected) answer is always LARGER
+  // than the no-drag estimate, never smaller, so this comfortably brackets it.
+  let hi = Math.sqrt(2 * g * targetHeight) * 4;
+  for (let i = 0; i < 40; i++) {
+    const mid = (lo + hi) / 2;
+    if (productionLaunchRiseHeight(mid, g, k) < targetHeight) lo = mid; else hi = mid;
+  }
+  return (lo + hi) / 2;
+}
+
 // Per direct request: an item freshly ejected by a Refinery or Manufacturer
 // launches slightly upward instead of just appearing at its output point
 // with zero velocity — 1-3 tiles high depending on the item's own mass (see
-// Config.js's PRODUCTION_LAUNCH_* comment for the full rationale). Solves
-// the standard v = sqrt(2*g*h) kinematic for whichever gravity constant
-// this item type actually falls under (Food/Mutagen Paste's own gentler
-// FOOD_GRAVITY, everything else the shared GRAVITY) so the resulting rise,
-// once real per-tick gravity integration takes over immediately afterward,
-// actually reaches the intended tile height rather than an arbitrary speed.
+// Config.js's PRODUCTION_LAUNCH_* comment for the full rationale), using
+// whichever gravity/drag profile this item type actually falls under
+// (Food/Mutagen Paste's own gentler FOOD_GRAVITY/FOOD_MAX_FALL_SPEED,
+// everything else the shared GRAVITY/MAX_FALL_SPEED) so the resulting rise
+// actually reaches the intended tile height once real per-tick physics
+// (gravity AND drag — see Grid.js's integrateItemForces) takes back over.
 function applyProductionLaunch(item) {
   const t = Math.max(0, Math.min(1, (item.mass - PRODUCTION_LAUNCH_MASS_MIN) / (PRODUCTION_LAUNCH_MASS_MAX - PRODUCTION_LAUNCH_MASS_MIN)));
   const heightTiles = PRODUCTION_LAUNCH_MAX_TILES - t * (PRODUCTION_LAUNCH_MAX_TILES - PRODUCTION_LAUNCH_MIN_TILES);
-  const gravity = (item.type === 'food' || item.type === 'mutagen_paste') ? FOOD_GRAVITY : GRAVITY;
-  item.vy = -Math.sqrt(2 * gravity * heightTiles * TILE_SIZE);
+  const isFoodLike = item.type === 'food' || item.type === 'mutagen_paste';
+  const gravity = isFoodLike ? FOOD_GRAVITY : GRAVITY;
+  const maxFallSpeed = isFoodLike ? FOOD_MAX_FALL_SPEED : MAX_FALL_SPEED;
+  const drag = gravity / maxFallSpeed;
+  item.vy = -launchSpeedForHeight(heightTiles * TILE_SIZE, gravity, drag);
 }
 
 export function updateEntities(state, dtMs) {
