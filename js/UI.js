@@ -281,6 +281,9 @@ export function initUI(state) {
     scrollHintArrows: document.querySelectorAll('.scroll-hint-arrow'),
     buildLegend: document.getElementById('build-legend'),
     tutorialSkipLegend: document.getElementById('tutorial-skip-legend'),
+    buildingMoveLegend: document.getElementById('building-move-legend'),
+    buildingMoveLegendLine1: document.getElementById('building-move-legend-line1'),
+    buildingMoveLegendLine2: document.getElementById('building-move-legend-line2'),
     hotkeyLegendE: document.getElementById('hotkey-legend-e'),
     hotkeyLegendQ: document.getElementById('hotkey-legend-q'),
     hotkeyLegendEsc: document.getElementById('hotkey-legend-esc'),
@@ -3194,7 +3197,29 @@ export function updateHUD(state) {
   // button's real on-screen rect instead of plain CSS relative to a shared
   // positioned ancestor. Only bothers with the (layout-reading)
   // getBoundingClientRect call on a frame either one is actually visible.
-  if (buildLegendVisible || tutorialActive) positionBottomLeftLegends();
+  // Right-click-to-move legend — replaces the old on-canvas hover tooltip
+  // (main.js used to draw a 🖱️ bubble over the cursor for Fans specifically)
+  // per direct request: "Right-click to Adjust" (Fan)/"Right-click to Move"
+  // (anything else) while just hovering a placed building with nothing else
+  // going on, or "Left-click to accept" + "Right-click to cancel" while a
+  // move (or a moved Fan's own angle-choosing step) is actually in progress.
+  // state.ui.buildingMoveHoverLabel/buildingMoveArmed are written fresh every
+  // render() frame by main.js — read-only here. Mutually exclusive with the
+  // purchase legend above (main.js only ever sets these two while the Food
+  // tool is selected, and a build:/fish: tool being armed is what makes
+  // buildLegendVisible true), so it shares the same anchor position.
+  const buildingMoveLegendVisible = !tutorialActive && (state.ui.buildingMoveArmed || state.ui.buildingMoveHoverLabel != null);
+  if (state.ui.buildingMoveArmed) {
+    els.buildingMoveLegendLine1.textContent = 'Left-click to accept';
+    els.buildingMoveLegendLine2.textContent = 'Right-click to cancel';
+    els.buildingMoveLegendLine2.classList.remove('hidden');
+  } else if (state.ui.buildingMoveHoverLabel != null) {
+    els.buildingMoveLegendLine1.textContent = state.ui.buildingMoveHoverLabel === 'adjust' ? 'Right-click to Adjust' : 'Right-click to Move';
+    els.buildingMoveLegendLine2.classList.add('hidden');
+  }
+  els.buildingMoveLegend.classList.toggle('hidden', !buildingMoveLegendVisible);
+
+  if (buildLegendVisible || tutorialActive || buildingMoveLegendVisible) positionBottomLeftLegends();
 
   // Persistent E/Q/Esc hotkey reminder, bottom-left corner — per direct
   // request, always visible (unlike the two legends above), re-worded live
@@ -3205,11 +3230,15 @@ export function updateHUD(state) {
   // opening the pause menu, "Pause Game" otherwise — using the same popup
   // checks and selectedTool/panel-collapsed reads that branch itself uses,
   // so this can never drift out of sync with what Escape actually does.
+  // buildingMoveArmed is included here too — a move/moved-Fan-aiming step
+  // never changes selectedTool away from 'food', so without this the hint
+  // would wrongly read "Pause Game" while Escape would actually cancel it.
   els.hotkeyLegendE.textContent = `E: ${state.ui.shopCollapsed ? 'Open Shop' : 'Close Shop'}`;
   els.hotkeyLegendQ.textContent = `Q: ${toolIsPurchasable ? 'Clear Cursor' : 'Pipette Tool'}`;
   const escHasSomethingToClear = !tutorialActive && (
     isMoundMenuOpen() || isRecipeMenuOpen() || isBuildingInfoMenuOpen() ||
     isLabPurchaseModalOpen() || isLabMenuOpen() ||
+    state.ui.buildingMoveArmed ||
     state.ui.selectedTool !== 'food' || !state.ui.shopCollapsed || !state.ui.tankPanelCollapsed
   );
   els.hotkeyLegendEsc.textContent = tutorialActive
@@ -3225,6 +3254,8 @@ function positionBottomLeftLegends() {
   els.buildLegend.style.bottom = bottom;
   els.tutorialSkipLegend.style.right = right;
   els.tutorialSkipLegend.style.bottom = bottom;
+  els.buildingMoveLegend.style.right = right;
+  els.buildingMoveLegend.style.bottom = bottom;
 }
 
 // A row of bouncing down-arrows nudging the player to pan the camera down,

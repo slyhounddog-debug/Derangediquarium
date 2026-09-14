@@ -319,15 +319,57 @@ export function getBuildingCost(state, buildingId) {
 
 // Returns { ok, reason } rather than a bare bool so the build-mode UI can
 // show *why* a placement is invalid (ghost preview tint, tooltip, etc).
-export function canPlaceTile(state, col, row, buildingId) {
+// `ignoreCost` skips the affordability check entirely — used by the
+// right-click-to-move mechanic (main.js's movingBuilding/pickUpBuildingForMove/
+// putDownMovedBuilding below), since relocating an already-owned building is
+// always free regardless of the player's current balance.
+export function canPlaceTile(state, col, row, buildingId, ignoreCost = false) {
   if (row < SEABED_ROW_START || row >= WORLD_TILES_H || col < 0 || col >= WORLD_TILES_W) {
     return { ok: false, reason: 'out of bounds' };
   }
   if (state.level.grid[row][col] !== TILE_EMPTY) return { ok: false, reason: 'occupied' };
   const building = BUILDING_TYPES[buildingId];
   if (!building) return { ok: false, reason: 'unknown building' };
-  if (state.level.money < getBuildingCost(state, buildingId)) return { ok: false, reason: 'cannot afford' };
+  if (!ignoreCost && state.level.money < getBuildingCost(state, buildingId)) return { ok: false, reason: 'cannot afford' };
   return { ok: true, reason: null };
+}
+
+// The "pick up" half of right-click-to-move (main.js's movingBuilding) — per
+// direct request ("make it so that all other buildings can be right
+// clicked... it creates a ghost copy of the building on the cursor"). Clears
+// the tile and its buildingData entry with no refund and no sound (unlike
+// removeTile, a genuine demolish), and hands the caller back everything
+// needed to put it down again elsewhere unchanged. Returns null if there was
+// nothing there to pick up. Deliberately does NOT need to do anything special
+// to release an item the building was mid-processing/holding — per direct
+// request ("moving any building spits out the items being processed or
+// held, if any") — clearing the buildingData entry (and the tile's own type)
+// is already exactly what stepHeldItem/stepCollectorProcessing's own
+// defensive "the tile got torn down mid-hold" fallback checks for, so
+// whatever it was holding is handed back to normal physics automatically on
+// its very next tick, the same safety net a real demolish already relies on.
+export function pickUpBuildingForMove(state, col, row) {
+  const type = getTile(state.level.grid, col, row);
+  if (type === TILE_EMPTY) return null;
+  const key = buildingKey(col, row);
+  const data = state.level.buildingData[key] || null;
+  state.level.grid[row][col] = TILE_EMPTY;
+  delete state.level.buildingData[key];
+  return { type, data };
+}
+
+// The "put down" half — places a previously-picked-up building back at a
+// (possibly new, possibly the exact same) location, completely free, with
+// its own saved buildingData carried over untouched (ammo, recipe, progress,
+// angle, etc.). Returns the same { ok, reason } shape canPlaceTile does, so
+// callers can show a real failure reason (handleBuildPlacementFailure)
+// without a placement actually happening.
+export function putDownMovedBuilding(state, col, row, buildingId, data) {
+  const check = canPlaceTile(state, col, row, buildingId, true);
+  if (!check.ok) return check;
+  state.level.grid[row][col] = buildingId;
+  if (data) state.level.buildingData[buildingKey(col, row)] = data;
+  return check;
 }
 
 // `angle` (radians, atan2 convention: 0 = +x/right, +y is down) is only
@@ -2640,9 +2682,9 @@ function renderDirectionIndicator(ctx, type, x, y, size, angle, zoom, showCone =
 // following the cursor's exact position within the tile. `showCone`
 // defaults true; main.js passes false specifically for a Fan's plain-hover
 // ghost, before a placement cell has actually been armed.
-export function renderBuildGhost(ctx, state, worldX, worldY, buildingId, angle, showCone = true) {
+export function renderBuildGhost(ctx, state, worldX, worldY, buildingId, angle, showCone = true, ignoreCost = false) {
   const { col, row } = worldToTile(worldX, worldY);
-  const check = canPlaceTile(state, col, row, buildingId);
+  const check = canPlaceTile(state, col, row, buildingId, ignoreCost);
   const screen = worldToScreen(col * TILE_SIZE, row * TILE_SIZE, state.camera);
   const size = TILE_SIZE * state.camera.zoom;
   ctx.globalAlpha = 0.45;
@@ -2652,6 +2694,35 @@ export function renderBuildGhost(ctx, state, worldX, worldY, buildingId, angle, 
   if (check.ok && FAN_TILES.has(buildingId)) {
     renderDirectionIndicator(ctx, buildingId, screen.x, screen.y, size, angle, state.camera.zoom, showCone);
   }
+}
+
+// The right-click-to-move mechanic's own ghost — per direct request, "a
+// ghost copy of the building" rather than the plain flat-colored square
+// renderBuildGhost's own new-placement ghost uses: a translucent copy of
+// the ACTUAL building's hand-drawn art (renderTileShape, the exact same
+// per-family icons a real placed tile renders with), snapped to the tile
+// grid the same way every other ghost preview already does. `ignoreCost` is
+// always true here (a move never costs money) — per direct clarification,
+// the building's own ORIGINAL tile counts as a perfectly valid destination
+// too, which falls out for free: main.js's pickUpBuildingForMove already
+// vacated it the moment the move began, so canPlaceTile sees it as
+// ordinary empty space like anywhere else. Tinted green when the hovered
+// tile is currently legal, red otherwise.
+export function renderMoveGhost(ctx, state, worldX, worldY, buildingId, buildingData) {
+  const { col, row } = worldToTile(worldX, worldY);
+  const check = canPlaceTile(state, col, row, buildingId, true);
+  const screen = worldToScreen(col * TILE_SIZE, row * TILE_SIZE, state.camera);
+  const size = TILE_SIZE * state.camera.zoom;
+  const color = BUILDING_TYPES[buildingId].color;
+  ctx.save();
+  ctx.globalAlpha = 0.6;
+  renderTileShape(ctx, buildingId, color, screen.x, screen.y, size, buildingData);
+  ctx.restore();
+  ctx.save();
+  ctx.globalAlpha = 0.4;
+  ctx.fillStyle = check.ok ? '#7cff5a' : '#ff5a5a';
+  ctx.fillRect(screen.x, screen.y, size, size);
+  ctx.restore();
 }
 
 // Angle (atan2 convention) from a tile's center to an arbitrary world point

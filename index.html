@@ -115,6 +115,19 @@
      gone. -->
 <div id="build-legend" class="hidden">Click to purchase</div>
 <div id="tutorial-skip-legend" class="hidden">(Esc) to skip tutorial</div>
+<!-- Right-click-to-move legend — same "plain top-level sibling, positioned
+     live off the Shop button" treatment as the two legends above (see their
+     own comment for why), mutually exclusive with both: shown while
+     hovering a placed building on the Food tool with nothing else going on
+     ("Right-click to Adjust"/"Right-click to Move" — line 2 hidden), or
+     while a move (or a moved Fan's own angle step) is actually in progress
+     ("Left-click to accept" / "Right-click to cancel" — both lines shown).
+     Populated live by UI.js's updateHUD from state.ui.buildingMoveHoverLabel/
+     buildingMoveArmed (main.js's render() writes those every frame). -->
+<div id="building-move-legend" class="hidden">
+  <div id="building-move-legend-line1"></div>
+  <div id="building-move-legend-line2" class="hidden"></div>
+</div>
 
 <!-- Persistent, always-on hotkey reminder, bottom-left corner — per direct
      request. Small white text, dynamically re-worded by UI.js's updateHUD

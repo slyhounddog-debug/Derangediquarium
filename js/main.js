@@ -148,6 +148,9 @@ import {
   getBuildingInfoKeyAt,
   getItemDisintegrateFraction,
   renderDisintegrateEffect,
+  pickUpBuildingForMove,
+  putDownMovedBuilding,
+  renderMoveGhost,
 } from './Grid.js';
 import { isPointOnMound, crackMound, renderMound, centerCameraOnMound, isPointOnScienceLab, renderScienceLab } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
@@ -361,6 +364,16 @@ const state = {
     // without spending gems or changing what's actually equipped. null
     // falls back to whatever's really equipped (UI.js's renderCustomizationPreview/refreshCustomizationPanel).
     customizationPreviewHatId: null,
+    // Right-click-to-move (see main.js's movingBuilding) — both written
+    // fresh every render() frame, read by UI.js's updateHUD to drive the new
+    // bottom-left legend. buildingMoveArmed: true while a move (or a moved
+    // Fan's own angle-choosing step) is actually in progress, showing "Left-
+    // click to accept"/"Right-click to cancel". buildingMoveHoverLabel:
+    // 'adjust' (Fan) | 'move' (anything else) | null, showing "Right-click
+    // to Adjust/Move" while just hovering a placed building with nothing in
+    // progress yet.
+    buildingMoveArmed: false,
+    buildingMoveHoverLabel: null,
     paused: false, // pause menu open/closed (Escape); update() below skips simulating entirely while true
     // False until the player clicks "Start" on the new first-launch start
     // screen (UI.js's initStartScreen) — update() below checks this ahead of
@@ -861,36 +874,83 @@ const FAN_BUILDING_IDS = [TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4];
 let fanAimingCell = null; // { col, row, buildingId } | null
 
 function isFanAimingActive() {
-  return fanAimingCell != null && state.ui.selectedTool === `build:${fanAimingCell.buildingId}`;
+  if (fanAimingCell == null) return false;
+  // A moved Fan's own angle step never changes selectedTool at all (it
+  // stays 'food' the whole time a move is in progress) — so unlike a
+  // genuine new placement, it can't self-heal off a "does selectedTool
+  // still match the armed build tool" check. updateBuildingMove() below is
+  // what replaces that self-healing for this case instead (auto-cancels if
+  // selectedTool ever leaves 'food').
+  if (fanAimingMoveData != null) return true;
+  return state.ui.selectedTool === `build:${fanAimingCell.buildingId}`;
 }
 
-// Right-click-to-redo-angle — per direct request ("fans can be right
-// clicked to redo the angle of the fan when they are already placed, so
-// they don't have to be picked up"). A separate mechanism from the
-// placement-time two-click flow above (which places a brand-new tile) —
-// this one edits an ALREADY-PLACED Fan's own buildingData entry in place,
-// live, every frame it's active, so the cone/force everyone already reads
-// straight off data.angle updates immediately with zero extra plumbing.
-// Only reachable from the Food tool (see the right-click handler below),
-// matching where the hover tooltip icon shows — Demolish already owns
-// right-click for its own tool, and a build/fish/merge tool has its own
-// unrelated right-click-free interactions.
-let fanReaimKey = null; // "row,col" of the Fan currently being re-aimed, or null
-let fanReaimOriginalAngle = 0; // reverted to on Escape-cancel — see the keydown handler
+// Right-click-to-move — reworked from the old Fan-only re-aim mechanic
+// (which just edited an already-placed Fan's angle in place) into a general
+// "pick up and put down" move, per direct request ("make it so that all
+// other buildings can be right clicked... it creates a ghost copy of the
+// building on the cursor that lights up when it's in a spot that the...
+// building can be moved to"). Right-clicking a placed tile immediately
+// vacates it (Grid.js's pickUpBuildingForMove) — its own OLD spot then
+// reads as a perfectly valid destination too, per direct clarification
+// ("the red hue... doesn't count for the original space... any building can
+// be right clicked and left clicked in the same place to pick it up and put
+// it down in the same place") — and follows the cursor as a translucent
+// ghost of that exact building (render()'s own draw call, below), tinted
+// green/red by whether the hovered tile is currently legal. A left-click on
+// a valid tile completes the move there for free — EXCEPT a Fan, which
+// still needs its own angle chosen afterward (see fanAimingMoveData below,
+// which threads the moved building's data through the exact same two-click
+// aiming flow a brand-new Fan placement already uses). A right-click while
+// a move is in progress cancels it, putting the building right back exactly
+// where it started with its own data (ammo, recipe, progress, angle, etc.)
+// completely untouched. Picking a building up naturally releases anything
+// it was mid-processing/holding too — per direct request ("moving any
+// building spits out the items being processed or held, if any") — with no
+// extra code needed: the moment its tile/buildingData entry is gone,
+// Grid.js's stepHeldItem/stepCollectorProcessing already detect that on
+// their own very next tick and hand the item back to normal physics, the
+// same defensive fallback that already covers a building being demolished
+// mid-hold.
+let movingBuilding = null; // { fromCol, fromRow, buildingId, data } | null
 
-// Called every tick from update() while a re-aim is active — writes the new
-// angle directly into the Fan's real buildingData entry every frame it's
-// held, so the cone/force everyone already reads off data.angle (Grid.js's
-// computeFanForce, renderFanIndicators) updates live with zero ghost/
-// preview mechanism needed. Bails cleanly (clearing fanReaimKey) if the
-// tile got demolished out from under an in-progress re-aim.
-function updateFanReaim() {
-  if (fanReaimKey == null || !input.mouse.inside || state.ui.paused) return;
-  const data = state.level.buildingData[fanReaimKey];
-  if (!data) { fanReaimKey = null; return; }
-  const [rowStr, colStr] = fanReaimKey.split(',');
-  const hoverWorld = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
-  data.angle = angleFromTileToPoint(Number(colStr), Number(rowStr), hoverWorld.x, hoverWorld.y);
+// Only non-null while the SECOND half of a moved Fan's own two-click aiming
+// flow (fanAimingCell, below) is running FOR A MOVE rather than a brand-new
+// placement — fanAimingMoveData is the Fan's own preserved buildingData
+// object (so its angle field can just be overwritten and reused instead of
+// building a fresh one), and fanAimingMoveOrigin is where to put it back if
+// that aiming step gets cancelled (Escape/right-click) — it was already
+// picked up off the grid the moment the move began, so "cancel" here means
+// restore it at its ORIGINAL tile, not just abandon the pending aim the way
+// cancelling a genuine new placement's aiming step already does.
+let fanAimingMoveData = null;
+let fanAimingMoveOrigin = null; // { fromCol, fromRow } | null
+
+// Called every tick from update() — the only thing a move genuinely needs
+// checked continuously (the ghost itself is drawn fresh every render()
+// frame straight off movingBuilding, no separate live-update needed). Its
+// one job: if the player does something that changes state.ui.selectedTool
+// away from 'food' while a move is in progress — opens the shop and picks
+// something, hits a tool hotkey, whatever — auto-cancel and put the
+// building back, the same self-healing spirit isFanAimingActive() already
+// has for its own tool check, rather than leaving a picked-up building in
+// limbo with nowhere to go.
+function updateBuildingMove() {
+  if (movingBuilding != null && state.ui.selectedTool !== 'food') {
+    putDownMovedBuilding(state, movingBuilding.fromCol, movingBuilding.fromRow, movingBuilding.buildingId, movingBuilding.data);
+    movingBuilding = null;
+  }
+  // Same self-healing for a moved Fan's own angle-choosing step — it never
+  // changes selectedTool away from 'food' itself (see isFanAimingActive's
+  // own comment), so this is what actually catches "the player did
+  // something that should cancel this" for that case, restoring the Fan at
+  // its ORIGINAL spot since it was already picked up off the grid.
+  if (fanAimingCell != null && fanAimingMoveData != null && state.ui.selectedTool !== 'food') {
+    putDownMovedBuilding(state, fanAimingMoveOrigin.fromCol, fanAimingMoveOrigin.fromRow, fanAimingCell.buildingId, fanAimingMoveData);
+    fanAimingCell = null;
+    fanAimingMoveData = null;
+    fanAimingMoveOrigin = null;
+  }
 }
 
 // Per direct request: a Build or Demolish tool can't do anything in open
@@ -928,16 +988,31 @@ input.clickHandlers.push((sx, sy) => {
     suppressTutorialTurretPlacementClick = false;
     return;
   }
-  // A right-click already armed a re-aim (fanReaimKey) — updateFanReaim has
-  // been live-writing the new angle into the Fan's own buildingData every
-  // tick since, so a left-click anywhere just confirms it and exits,
-  // mirroring the placement flow's own "click 2 confirms whatever angle is
-  // currently showing" behavior. Checked before everything else below so a
-  // confirm click can never also bank a coin/feed/place under it. Per direct
-  // request, a right-click confirms it too now (see the rightClickHandlers
-  // push below) — either button finishes the gesture.
-  if (fanReaimKey != null) { fanReaimKey = null; return; }
   const world = screenToWorld(sx, sy, state.camera);
+
+  // A right-click already picked a building up for a move — a left-click
+  // anywhere finishes the gesture, checked before everything else below so
+  // it can never also bank a coin/feed/place under it (same priority the
+  // old fan-reaim confirm already had). A Fan needs one more click (its own
+  // angle) — see fanAimingMoveData's own comment — so confirming its
+  // destination here just threads it into the existing two-click aiming
+  // flow (fanAimingCell) instead of finishing outright.
+  if (movingBuilding != null) {
+    const { col, row } = worldToTile(world.x, world.y);
+    if (FAN_BUILDING_IDS.includes(movingBuilding.buildingId)) {
+      const check = canPlaceTile(state, col, row, movingBuilding.buildingId, true);
+      if (!check.ok) { handleBuildPlacementFailure(check.reason); return; }
+      fanAimingCell = { col, row, buildingId: movingBuilding.buildingId };
+      fanAimingMoveData = movingBuilding.data;
+      fanAimingMoveOrigin = { fromCol: movingBuilding.fromCol, fromRow: movingBuilding.fromRow };
+      movingBuilding = null;
+      return;
+    }
+    const result = putDownMovedBuilding(state, col, row, movingBuilding.buildingId, movingBuilding.data);
+    if (!result.ok) { handleBuildPlacementFailure(result.reason); return; } // stay in move mode — the ghost keeps following, try again
+    movingBuilding = null;
+    return;
+  }
 
   // Alien Invasion: clicking a living alien always does ALIEN_CLICK_DAMAGE,
   // regardless of the currently selected tool — same "always works,
@@ -1041,6 +1116,24 @@ input.clickHandlers.push((sx, sy) => {
   if (isFanAimingActive()) {
     const buildingId = fanAimingCell.buildingId;
     const angle = angleFromTileToPoint(fanAimingCell.col, fanAimingCell.row, world.x, world.y);
+    // A moved Fan's own destination was already validated (ignoring cost)
+    // back when the move's first click confirmed it — this second click
+    // just writes it back down for free with its own preserved data, angle
+    // overwritten to whatever's showing now. A genuine new placement (no
+    // move in progress) is completely unchanged below.
+    if (fanAimingMoveData != null) {
+      const check = canPlaceTile(state, fanAimingCell.col, fanAimingCell.row, buildingId, true);
+      if (check.ok) {
+        fanAimingMoveData.angle = angle;
+        putDownMovedBuilding(state, fanAimingCell.col, fanAimingCell.row, buildingId, fanAimingMoveData);
+      } else {
+        handleBuildPlacementFailure(check.reason);
+      }
+      fanAimingCell = null;
+      fanAimingMoveData = null;
+      fanAimingMoveOrigin = null;
+      return;
+    }
     const confirmCheck = canPlaceTile(state, fanAimingCell.col, fanAimingCell.row, buildingId);
     if (!confirmCheck.ok) handleBuildPlacementFailure(confirmCheck.reason);
     placeTile(state, fanAimingCell.col, fanAimingCell.row, buildingId, angle);
@@ -1135,26 +1228,35 @@ input.rightClickHandlers.push((sx, sy) => {
   removeTile(state, col, row);
 });
 
-// Right-click-to-redo-angle — see fanReaimKey's own comment above. Only
-// arms from the Food tool (matching the hover tooltip's own gating below).
-// Per direct request, a SECOND right-click while a re-aim is already in
-// progress now confirms it too — the exact same "just clear fanReaimKey,
-// leaving updateFanReaim's live-written angle in place" confirm the click
-// handler's own fanReaimKey check already does for a left-click, so either
-// button can finish the gesture.
+// Right-click-to-move — see movingBuilding's own comment above. Only arms
+// from the Food tool (matching the hover legend's own gating below) —
+// Demolish already owns right-click for its own tool (the handler above),
+// and a build/fish/merge tool has its own unrelated right-click-free
+// interactions. A right-click always CANCELS first, regardless of tool,
+// whichever of the two "something's in progress" states applies — a plain
+// pick-up-in-progress (movingBuilding), or a moved Fan's own angle-choosing
+// step (fanAimingMoveData) — putting the building back at its original
+// spot with its own data completely untouched either way.
 input.rightClickHandlers.push((sx, sy) => {
   if (state.ui.paused || state.level.tutorialFlow) return;
-  if (fanReaimKey != null) { fanReaimKey = null; return; }
+  if (movingBuilding != null) {
+    putDownMovedBuilding(state, movingBuilding.fromCol, movingBuilding.fromRow, movingBuilding.buildingId, movingBuilding.data);
+    movingBuilding = null;
+    return;
+  }
+  if (isFanAimingActive() && fanAimingMoveData != null) {
+    putDownMovedBuilding(state, fanAimingMoveOrigin.fromCol, fanAimingMoveOrigin.fromRow, fanAimingCell.buildingId, fanAimingMoveData);
+    fanAimingCell = null;
+    fanAimingMoveData = null;
+    fanAimingMoveOrigin = null;
+    return;
+  }
   if (state.ui.selectedTool !== 'food') return;
   const world = screenToWorld(sx, sy, state.camera);
   const { col, row } = worldToTile(world.x, world.y);
-  const tile = getTile(state.level.grid, col, row);
-  if (!FAN_BUILDING_IDS.includes(tile)) return;
-  const key = `${row},${col}`;
-  const data = state.level.buildingData[key];
-  if (!data) return;
-  fanReaimKey = key;
-  fanReaimOriginalAngle = data.angle;
+  const picked = pickUpBuildingForMove(state, col, row);
+  if (!picked) return;
+  movingBuilding = { fromCol: col, fromRow: row, buildingId: picked.type, data: picked.data };
 });
 
 // Build-mode drag-placement: while the left button is held and a build tool
@@ -1233,16 +1335,23 @@ input.keydownHandlers.push((e) => {
     if (isBuildingInfoMenuOpen()) { closeBuildingInfoMenu(); return; }
     if (isLabPurchaseModalOpen()) { closeLabPurchaseModal(); return; }
     if (isLabMenuOpen()) { closeLabMenu(); return; }
-    if (fanReaimKey != null) {
-      // Cancel a re-aim in progress, reverting to whatever angle the Fan
-      // had before the right-click that armed it — unlike a confirm click,
-      // which just leaves updateFanReaim's live-written angle in place.
-      const data = state.level.buildingData[fanReaimKey];
-      if (data) data.angle = fanReaimOriginalAngle;
-      fanReaimKey = null;
+    if (movingBuilding != null) {
+      // Cancel a pick-up in progress — put it right back where it came from,
+      // its own data completely untouched.
+      putDownMovedBuilding(state, movingBuilding.fromCol, movingBuilding.fromRow, movingBuilding.buildingId, movingBuilding.data);
+      movingBuilding = null;
       return;
     }
     if (isFanAimingActive()) {
+      if (fanAimingMoveData != null) {
+        // This aiming step was the second half of a move, not a brand-new
+        // placement — it was already picked up off the grid, so cancelling
+        // has to put it back at its ORIGINAL spot rather than just abandon
+        // the pending aim the way a genuine new placement's cancel does.
+        putDownMovedBuilding(state, fanAimingMoveOrigin.fromCol, fanAimingMoveOrigin.fromRow, fanAimingCell.buildingId, fanAimingMoveData);
+        fanAimingMoveData = null;
+        fanAimingMoveOrigin = null;
+      }
       fanAimingCell = null; // cancel the pending aim...
       cancelActiveTool(state); // ...and the armed Fan tool itself, back to Food — a Fan is still a "building selected" per direct request
       return;
@@ -1805,7 +1914,7 @@ function update(dtMs) {
   updateFishDrag();
   updateItemDrag();
   updateRecipeDrag();
-  updateFanReaim();
+  updateBuildingMove();
   updateStoryTriggers(state);
   state.level.elapsed += dtMs;
 
@@ -2279,7 +2388,11 @@ function render() {
     const angle = angleFromTileToPoint(fanAimingCell.col, fanAimingCell.row, hoverWorld.x, hoverWorld.y);
     const cellCenterX = fanAimingCell.col * TILE_SIZE + TILE_SIZE / 2;
     const cellCenterY = fanAimingCell.row * TILE_SIZE + TILE_SIZE / 2;
-    renderBuildGhost(ctx, state, cellCenterX, cellCenterY, fanAimingCell.buildingId, angle);
+    // A moved Fan's own angle step is always free — ignoreCost here too, or
+    // the ghost would wrongly show red (unaffordable) if the player's
+    // current balance happens to be below the fan's ordinary shop cost,
+    // even though the real confirm (see the click handler) never charges it.
+    renderBuildGhost(ctx, state, cellCenterX, cellCenterY, fanAimingCell.buildingId, angle, true, fanAimingMoveData != null);
   } else if (hoverEffectiveTool.startsWith('build:') && input.mouse.inside && !state.ui.paused) {
     const world = hoverWorld;
     const buildingId = hoverEffectiveTool.slice('build:'.length);
@@ -2340,6 +2453,15 @@ function render() {
     const ghostTailPhase = (performance.now() / 300) % (Math.PI * 2);
     drawFish(ctx, screen.x, screen.y, speciesId, 0, 1, ghostTailPhase, { x: 1, y: 0 });
     ctx.globalAlpha = 1;
+  }
+
+  // Right-click-to-move ghost — a translucent copy of the actual building
+  // being moved, snapped to the tile grid, green/red by whether the hovered
+  // spot is currently legal. See movingBuilding's own comment for the full
+  // mechanic; Grid.js's renderMoveGhost does the actual drawing.
+  if (movingBuilding != null && input.mouse.inside && !state.ui.paused) {
+    const hoverWorld = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
+    renderMoveGhost(ctx, state, hoverWorld.x, hoverWorld.y, movingBuilding.buildingId, movingBuilding.data);
   }
 
   for (const item of state.level.items) {
@@ -3091,31 +3213,29 @@ function render() {
     ctx.restore();
   }
 
-  // Right-click-to-redo-angle hover hint — per direct request ("when you
-  // hover over a fan on the food tool, have a right click tooltip icon show
-  // up above the cursor"). Purely discoverability; the actual mechanic
-  // lives in fanReaimKey/updateFanReaim above. Hidden once a re-aim is
-  // already in progress — the cone visibly following the cursor is already
-  // enough feedback at that point.
-  if (fanReaimKey == null && hoverEffectiveTool === 'food' && input.mouse.inside && !state.ui.paused) {
-    const { col: hoverCol, row: hoverRow } = worldToTile(hoverWorld.x, hoverWorld.y);
-    const hoverTile = getTile(state.level.grid, hoverCol, hoverRow);
-    if (FAN_BUILDING_IDS.includes(hoverTile)) {
-      const bubbleY = input.mouse.y - 30;
-      ctx.save();
-      ctx.globalAlpha = 0.92;
-      ctx.fillStyle = 'rgba(20, 20, 30, 0.8)';
-      ctx.beginPath();
-      ctx.roundRect(input.mouse.x - 15, bubbleY - 13, 30, 22, 8);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      ctx.font = '13px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('🖱️', input.mouse.x, bubbleY - 1);
-      ctx.restore();
+  // Right-click-to-move hover hint / in-progress state — per direct request
+  // ("Remove the right click hover tooltip from the fans. Instead, anytime
+  // the cursor is over a building, add to the legend in the bottom left,
+  // 'Right-click to Adjust' or 'Right-click to Move'... If they right click
+  // the building, add... 'Left-click to accept' and 'Right-click to
+  // cancel'"). Computed here into state.ui rather than drawn on canvas —
+  // UI.js's updateHUD reads it to drive the new bottom-left legend, the same
+  // cross-module-flag pattern this file already uses for
+  // coinCapFlashPending/wasteTurretAmmoGainedPending, since UI.js can't be
+  // imported back into here without a circular dependency.
+  if (movingBuilding != null || (isFanAimingActive() && fanAimingMoveData != null)) {
+    state.ui.buildingMoveArmed = true;
+    state.ui.buildingMoveHoverLabel = null;
+  } else {
+    state.ui.buildingMoveArmed = false;
+    if (hoverEffectiveTool === 'food' && input.mouse.inside && !state.ui.paused) {
+      const { col: hoverCol, row: hoverRow } = worldToTile(hoverWorld.x, hoverWorld.y);
+      const hoverTile = getTile(state.level.grid, hoverCol, hoverRow);
+      state.ui.buildingMoveHoverLabel = hoverTile && hoverTile !== TILE_EMPTY
+        ? (FAN_BUILDING_IDS.includes(hoverTile) ? 'adjust' : 'move')
+        : null;
+    } else {
+      state.ui.buildingMoveHoverLabel = null;
     }
   }
 

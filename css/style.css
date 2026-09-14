@@ -191,7 +191,7 @@ html, body {
    updateHUD never shows both at once — the purchase legend is suppressed
    entirely while a tutorial's active), so they can safely share the exact
    same sizing/position logic. */
-#build-legend, #tutorial-skip-legend {
+#build-legend, #tutorial-skip-legend, #building-move-legend {
   position: fixed;
   padding: 9px 20px;
   background: linear-gradient(160deg, #fffdf8 0%, #ffe9f4 100%);
@@ -205,7 +205,14 @@ html, body {
   white-space: nowrap;
 }
 #build-legend { display: flex; gap: 14px; }
-#build-legend.hidden, #tutorial-skip-legend.hidden { display: none; }
+#build-legend.hidden, #tutorial-skip-legend.hidden, #building-move-legend.hidden { display: none; }
+/* #building-move-legend can show either one line (a hover hint) or two (the
+   armed accept/cancel prompt) — a plain pill with rounded ends looks wrong
+   stretched across two stacked lines, so it switches to a taller
+   rounded-rect shape only while its 2nd line is actually visible. */
+#building-move-legend { display: flex; flex-direction: column; gap: 3px; text-align: center; }
+#building-move-legend:has(#building-move-legend-line2:not(.hidden)) { border-radius: 20px; }
+#building-move-legend-line2.hidden { display: none; }
 
 /* Persistent, always-on hotkey reminder — per direct request, small white
    text in the literal bottom-left corner of the viewport (distinct from
