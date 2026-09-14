@@ -258,28 +258,90 @@ function drawLuckyClover(ctx, x, y, size, facing) {
   ctx.stroke();
 }
 
-function drawStarStruck(ctx, x, y, size, facing) {
-  ctx.strokeStyle = '#e64d8a';
-  ctx.lineWidth = Math.max(1.5, size * 0.1);
+// A classic cone party hat with a striped body and a pompom on top —
+// replaces the old "Star Struck" hat entirely, per direct request ("I don't
+// like [it] visually... swap it out for something else").
+function drawPartyHat(ctx, x, y, size, facing) {
+  const tipX = x + facing * size * 0.1;
+  const tipY = y - size * 0.9;
+  ctx.fillStyle = '#ff5f8a';
   ctx.beginPath();
-  ctx.arc(x, y + size * 0.1, size * 0.58, Math.PI * 0.95, Math.PI * 2.05);
+  ctx.moveTo(x - size * 0.4, y + size * 0.15);
+  ctx.lineTo(tipX, tipY);
+  ctx.lineTo(x + size * 0.4, y + size * 0.15);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255, 224, 102, 0.8)';
+  ctx.lineWidth = Math.max(1, size * 0.06);
+  ctx.beginPath();
+  ctx.moveTo(x - size * 0.27, y - size * 0.15);
+  ctx.lineTo(x + size * 0.27, y - size * 0.15);
   ctx.stroke();
-  drawStar(ctx, x + facing * size * 0.35, y - size * 0.35, size * 0.32, '#ffd93d');
+  ctx.beginPath();
+  ctx.moveTo(x - size * 0.14, y - size * 0.48);
+  ctx.lineTo(x + size * 0.14, y - size * 0.48);
+  ctx.stroke();
+  ctx.fillStyle = '#ffe066';
+  ctx.beginPath();
+  ctx.arc(tipX, tipY, size * 0.13, 0, Math.PI * 2);
+  ctx.fill();
 }
 
+// A genuine shark-fin silhouette — a straight leading edge sweeping up to a
+// point, then a concave (swept-back) trailing edge, with a soft ripple base
+// reading as "cutting through the water." Per direct request, this replaces
+// the old "Static Spike" hat entirely — that one "just doesn't look like [a
+// shark fin] at all."
 function drawSharkFin(ctx, x, y, size, facing) {
-  ctx.fillStyle = '#7d8a94';
+  ctx.fillStyle = 'rgba(140, 190, 220, 0.35)';
+  ctx.beginPath();
+  ctx.ellipse(x, y + size * 0.15, size * 0.48, size * 0.12, 0, 0, Math.PI * 2);
+  ctx.fill();
+  const tipX = x + facing * size * 0.05;
+  const tipY = y - size * 0.95;
+  const frontBaseX = x + facing * size * 0.3;
+  const backBaseX = x - facing * size * 0.35;
+  const baseY = y + size * 0.08;
+  ctx.fillStyle = '#67727c';
+  ctx.beginPath();
+  ctx.moveTo(frontBaseX, baseY);
+  ctx.lineTo(tipX, tipY);
+  ctx.quadraticCurveTo(x - facing * size * 0.1, y - size * 0.35, backBaseX, baseY);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.25)';
+  ctx.lineWidth = Math.max(1, size * 0.03);
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.22)';
+  ctx.beginPath();
+  ctx.moveTo(frontBaseX - facing * size * 0.06, baseY - size * 0.02);
+  ctx.lineTo(tipX, tipY + size * 0.15);
+  ctx.lineTo(x, y - size * 0.42);
+  ctx.closePath();
+  ctx.fill();
+}
+
+// This exact silhouette (a curved cone rising from a wide brim) used to be
+// named "Shark Fin," per direct report, "since that's what it actually is
+// visually" — a genuine witch's hat, not a fin at all. Kept unchanged here
+// under its correct name, just recolored to the classic black/purple
+// palette (was a plain gray) to fully commit to the new identity — a real
+// fin-shaped replacement now lives at drawSharkFin above instead.
+function drawWitchHat(ctx, x, y, size, facing) {
+  ctx.fillStyle = '#2a2430';
   ctx.beginPath();
   ctx.ellipse(x, y + size * 0.12, size * 0.5, size * 0.14, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = '#5c6870';
+  ctx.fillStyle = '#1c1822';
   ctx.beginPath();
   ctx.moveTo(x - facing * size * 0.28, y + size * 0.05);
   ctx.quadraticCurveTo(x - facing * size * 0.05, y - size * 0.75, x + facing * size * 0.22, y - size * 0.85);
   ctx.quadraticCurveTo(x + facing * size * 0.05, y - size * 0.3, x + facing * size * 0.3, y + size * 0.05);
   ctx.closePath();
   ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,0.25)';
+  ctx.fillStyle = '#7a4fc4';
+  ctx.fillRect(x - size * 0.32, y + size * 0.01, size * 0.64, size * 0.08);
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.1)';
   ctx.beginPath();
   ctx.ellipse(x, y + size * 0.6, size * 0.06, size * 0.14, 0, 0, Math.PI * 2);
   ctx.fill();
@@ -308,32 +370,6 @@ function drawPumpkinHead(ctx, x, y, size, facing) {
   }
   ctx.fillStyle = '#4a7a3a';
   ctx.fillRect(x - facing * size * 0.04, y - size * 0.78, size * 0.14, size * 0.2);
-}
-
-function drawStaticSpike(ctx, x, y, size, facing) {
-  // A thin headband to anchor it (same idea as Star Struck's own), then a
-  // genuinely bold lightning-bolt spike standing up from the crown of the
-  // head — widened/heightened from an earlier pass that read as a thin
-  // antenna rather than a mohawk-style spike, per direct report that the
-  // hats overall needed to read clearly as worn shapes, not faint icons.
-  ctx.strokeStyle = '#4a4a52';
-  ctx.lineWidth = Math.max(1.5, size * 0.1);
-  ctx.beginPath();
-  ctx.arc(x, y + size * 0.15, size * 0.42, Math.PI * 0.95, Math.PI * 2.05);
-  ctx.stroke();
-  ctx.fillStyle = '#ffe33d';
-  ctx.beginPath();
-  ctx.moveTo(x + facing * size * 0.22, y - size * 0.05);
-  ctx.lineTo(x - facing * size * 0.05, y - size * 0.5);
-  ctx.lineTo(x + facing * size * 0.13, y - size * 0.45);
-  ctx.lineTo(x - facing * size * 0.22, y - size * 1.05);
-  ctx.lineTo(x + facing * size * 0.3, y - size * 0.55);
-  ctx.lineTo(x + facing * size * 0.08, y - size * 0.5);
-  ctx.closePath();
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(0,0,0,0.35)';
-  ctx.lineWidth = Math.max(1, size * 0.03);
-  ctx.stroke();
 }
 
 function drawCrown(ctx, x, y, size, facing) {
@@ -371,10 +407,10 @@ const HAT_DRAWERS = {
   turret_tech: drawHelmet,
   bubble_scholar: drawGradCap,
   lucky_clover: drawLuckyClover,
-  star_struck: drawStarStruck,
-  shark_fin: drawSharkFin,
+  witch_hat: drawWitchHat,
   pumpkin_head: drawPumpkinHead,
-  static_spike: drawStaticSpike,
+  party_hat: drawPartyHat,
+  shark_fin: drawSharkFin,
   tank_royalty: drawCrown,
 };
 

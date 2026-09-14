@@ -2933,7 +2933,12 @@ export const ACHIEVEMENTS = {
   hybrids_created_5: { id: 'hybrids_created_5', name: 'Gene Pool', description: 'Splice 5 hybrid fish.', tier: 'medium', statField: 'hybridsCreated', threshold: 5 },
   waves_survived_5: { id: 'waves_survived_5', name: 'Holding the Line', description: 'Survive 5 alien waves.', tier: 'easy', statField: 'wavesSurvived', threshold: 5 },
   waves_survived_20: { id: 'waves_survived_20', name: 'Siege Breaker', description: 'Survive 20 alien waves.', tier: 'hard', statField: 'wavesSurvived', threshold: 20 },
-  fish_grown_10: { id: 'fish_grown_10', name: 'Proud Parent', description: 'Raise 10 fish to adulthood.', tier: 'easy', statField: 'fishGrownToAdult', threshold: 10 },
+  // Replaces the old "Proud Parent" (raise 10 fish to adulthood) per direct
+  // request — that one was functionally a duplicate of Growing Up (earn 10
+  // Tank Points), since a Tank Point is earned exactly once per fish
+  // reaching adulthood (TANK_POINT_PER_ADULT_FISH = 1 each), so the two
+  // conditions could never actually diverge from one another.
+  four_star_fish: { id: 'four_star_fish', name: 'Four-Star General', description: 'Combine a fish all the way up to 4-star.', tier: 'medium', statField: 'fourStarFishAchieved', threshold: 1 },
   science_banked_50: { id: 'science_banked_50', name: 'Lab Assistant', description: 'Bank 50 Science Bubbles.', tier: 'medium', statField: 'scienceBanked', threshold: 50 },
   fish_saved_10: { id: 'fish_saved_10', name: 'Lifeguard', description: 'Save 10 fish from starving by feeding them right at the brink.', tier: 'hard', statField: 'fishSaved', threshold: 10 },
   power_deficit_60s: { id: 'power_deficit_60s', name: 'Brownout', description: 'Under-produce electricity (demand exceeding supply) for a continuous 60 seconds.', tier: 'hard', statField: 'powerDeficitStreakBestMs', threshold: 60000 },
@@ -2945,30 +2950,41 @@ export const ACHIEVEMENTS = {
 };
 export const ACHIEVEMENT_LIST = Object.values(ACHIEVEMENTS);
 
-// 12 hats ("at least a dozen," per direct spec), each costing roughly what
-// 4-6 easy achievements or 1-3 hard achievements are worth (easy=5, so
-// 4-6 easy = 20-30 gems; hard=20, so 1-3 hard = 20-60 gems) — see each hat's
-// own gemCost below, all landing inside or near that band. Total cost across
-// all 12 (255) is deliberately a little LESS than the full 270 gems every
-// achievement combined actually pays out, per direct spec ("the amount of
-// total fishy gems to be earned [should be] just a little more than the
-// total to buy all the hats") — a 15-gem buffer, about 6%. `none` is the
-// always-available, free default (no hat) — not counted toward "a dozen
-// different hats," since it isn't really a hat.
+// 12 hats ("at least a dozen," per direct spec). Costs were reworked per a
+// later direct request ("make it so the more expensive hats are a little
+// cheaper, so they don't have such a range in cost, and so the total Fishy
+// gem cost for all of them is closer to 80% (about ~216 gems) of the total
+// fishy gems that can be earned instead of the 94% it is now") — a plain
+// linear ramp from 12 to 24 gems (a 12-gem spread, down from the original
+// 12-30/18-gem spread) across all 12 hats sums to EXACTLY 216, i.e. exactly
+// 80% of the 270 gems every achievement combined pays out (see
+// ACHIEVEMENT_GEM_REWARD_BY_TIER's own total). `none` is the always-
+// available, free default (no hat) — not counted toward "a dozen different
+// hats," since it isn't really a hat.
+//
+// Two hats were swapped out entirely per a direct visual complaint ("I
+// don't like [Static Spike/Star Struck] visually... swap the static spike
+// for an actual shark fin, the current [shark_fin] one just doesn't look
+// like it at all") — see FishRenderer.js's own comment on drawSharkFin/
+// drawWitchHat/drawPartyHat for the full story: the OLD `shark_fin` hat's
+// own drawn shape genuinely reads as a witch's hat (not a fin at all), so
+// it's renamed `witch_hat` here instead of redrawn; `shark_fin` is now a
+// brand new id with a real fin-shaped drawing, taking over Static Spike's
+// old slot in the cost ramp; `party_hat` is a new id replacing Star Struck.
 export const HATS = {
   none: { id: 'none', name: 'No Hat', icon: '🚫', gemCost: 0 },
   guppy_cap: { id: 'guppy_cap', name: "Lil' Guppy Cap", icon: '🧢', gemCost: 12 },
-  fancy_fin: { id: 'fancy_fin', name: 'Fancy Fin Top Hat', icon: '🎩', gemCost: 15 },
-  beach_bum: { id: 'beach_bum', name: 'Beach Bum Sun Hat', icon: '👒', gemCost: 18 },
-  incognito: { id: 'incognito', name: 'Incognito Disguise', icon: '🥸', gemCost: 18 },
-  turret_tech: { id: 'turret_tech', name: 'Turret Tech Helmet', icon: '🪖', gemCost: 20 },
-  bubble_scholar: { id: 'bubble_scholar', name: 'Bubble Scholar Cap', icon: '🎓', gemCost: 20 },
-  lucky_clover: { id: 'lucky_clover', name: 'Lucky Clover', icon: '🍀', gemCost: 22 },
-  star_struck: { id: 'star_struck', name: 'Star Struck', icon: '🌟', gemCost: 22 },
-  shark_fin: { id: 'shark_fin', name: 'Shark Fin', icon: '🦈', gemCost: 25 },
-  pumpkin_head: { id: 'pumpkin_head', name: 'Pumpkin Head', icon: '🎃', gemCost: 25 },
-  static_spike: { id: 'static_spike', name: 'Static Spike', icon: '⚡', gemCost: 28 },
-  tank_royalty: { id: 'tank_royalty', name: 'Tank Royalty Crown', icon: '👑', gemCost: 30 },
+  fancy_fin: { id: 'fancy_fin', name: 'Fancy Fin Top Hat', icon: '🎩', gemCost: 13 },
+  beach_bum: { id: 'beach_bum', name: 'Beach Bum Sun Hat', icon: '👒', gemCost: 14 },
+  incognito: { id: 'incognito', name: 'Incognito Disguise', icon: '🥸', gemCost: 15 },
+  turret_tech: { id: 'turret_tech', name: 'Turret Tech Helmet', icon: '🪖', gemCost: 16 },
+  bubble_scholar: { id: 'bubble_scholar', name: 'Bubble Scholar Cap', icon: '🎓', gemCost: 17 },
+  lucky_clover: { id: 'lucky_clover', name: 'Lucky Clover', icon: '🍀', gemCost: 19 },
+  witch_hat: { id: 'witch_hat', name: "Witch's Hat", icon: '🧙', gemCost: 20 },
+  pumpkin_head: { id: 'pumpkin_head', name: 'Pumpkin Head', icon: '🎃', gemCost: 21 },
+  party_hat: { id: 'party_hat', name: 'Party Hat', icon: '🎉', gemCost: 22 },
+  shark_fin: { id: 'shark_fin', name: 'Shark Fin', icon: '🦈', gemCost: 23 },
+  tank_royalty: { id: 'tank_royalty', name: 'Tank Royalty Crown', icon: '👑', gemCost: 24 },
 };
 export const HAT_LIST = Object.values(HATS).filter((h) => h.id !== 'none');
 

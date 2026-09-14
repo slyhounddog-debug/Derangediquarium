@@ -122,6 +122,7 @@ import {
   canCombineFish,
   combineFish,
   isSpliceSource,
+  isSpliceTargetCandidate,
   canSpliceFish,
   spliceFish,
   canSpliceOctopusWithAlien,
@@ -333,9 +334,9 @@ const state = {
       buildingsPlaced: 0, // see Grid.js's placeTile
       hybridsCreated: 0, // see Entities.js's spliceFish/spliceOctopusWithAlien
       wavesSurvived: 0, // see Systems.js's updateAlienWaves, the same moment alienWaveActive first flips back to false for a given wave
-      fishGrownToAdult: 0, // see Entities.js's updateFish, the same growth-stage-advance branch that already triggers the shimmer/growth SFX
       scienceBanked: 0, // Blue OR Green Science, click-banked or Collector-routed alike — see Entities.js's bankScience/bankScienceGreen
       fishSaved: 0, // a fish that was already at HUNGER_CRITICAL_THRESHOLD and then successfully ate — see Entities.js's updateFish
+      fourStarFishAchieved: 0, // 0 or 1 — a plain one-shot flag, set the instant any fish is combined all the way up to 4-star — see Entities.js's combineFish
       powerDeficitStreakBestMs: 0,
       powerSurplusStreakBestMs: 0,
       cleanlinessRecoveryDone: 0, // 0 or 1 — a plain one-shot flag, not a counter
@@ -466,11 +467,17 @@ input.mouseDownHandlers.push((sx, sy) => {
   const world = screenToWorld(sx, sy, state.camera);
   const fish = findFishAt(state, world.x, world.y);
   // A fish can be a legal drag SOURCE for either interaction — Economy Fish
-  // Combining or (Phase 4) Gene-Splicing — the two are mutually exclusive
-  // per fish (a combine source is always an economy species, a splice
-  // source is always a utility species, and neither set overlaps), so
-  // there's no ambiguity about which one mouseup below should attempt.
-  if (fish && (isCombinableFish(state, fish) || isSpliceSource(state, fish))) {
+  // Combining or (Phase 4) Gene-Splicing. Per direct bug report ("it only
+  // seems to work if I grab one of the two specifically first... fix it so
+  // I can grab either fish"), a splice pair's TARGET half (an ordinary
+  // economy/hybrid-eligible fish, not one of the 3 utility species) also
+  // needs to be pickable — isSpliceTargetCandidate is the missing other half
+  // of isSpliceSource's own check, true for whichever fish would be eligible
+  // as the RECEIVING side of some currently-unlocked splice. The mouseup
+  // handler and the hover-highlight below both already try both dragged/
+  // target orderings, so it no longer matters which half of a pair gets
+  // grabbed first.
+  if (fish && (isCombinableFish(state, fish) || isSpliceSource(state, fish) || isSpliceTargetCandidate(state, fish))) {
     draggedFishId = fish.id;
     fishDragArmed = true;
   }
@@ -491,6 +498,14 @@ input.mouseUpHandlers.push((sx, sy) => {
       advanceTutorialFlow(state, 'mergefish', 'drag');
     } else if (canSpliceFish(state, dragged, target)) {
       spliceFish(state, dragged, target);
+    } else if (canSpliceFish(state, target, dragged)) {
+      // The reverse ordering — the player grabbed the TARGET half of the
+      // pair (an ordinary economy/hybrid fish) and dropped it onto the
+      // utility fish, instead of the other way around. spliceFish always
+      // wants (state, utilityFish, targetFish) regardless of which one was
+      // actually dragged, so `target` (here, the real utility fish) goes
+      // first.
+      spliceFish(state, target, dragged);
     }
   } else if (dragged) {
     // Xeno Octopus's own one-off splice target is an alien, not a fish —
@@ -2477,7 +2492,12 @@ function render() {
       const hoverTarget = findFishAt(state, cursorWorld.x, cursorWorld.y, draggedFishId);
       if (hoverTarget) {
         combineHoverTargetId = hoverTarget.id;
-        combineHoverValid = canCombineFish(state, dragged, hoverTarget) || canSpliceFish(state, dragged, hoverTarget);
+        // Tries both splice orderings — see the mouseup handler's own
+        // identical fix above for why: whichever half of a splice pair got
+        // grabbed first, dropping it on the other half should show as valid.
+        combineHoverValid = canCombineFish(state, dragged, hoverTarget)
+          || canSpliceFish(state, dragged, hoverTarget)
+          || canSpliceFish(state, hoverTarget, dragged);
       }
     }
   }

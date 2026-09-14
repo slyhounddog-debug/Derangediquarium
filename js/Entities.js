@@ -1356,6 +1356,7 @@ export function combineFish(state, a, b) {
   state.level.floatingTexts.push(
     createPickupText(x, y, `${newTier}★ ${SPECIES[speciesId].name}!`, FISH_STAR_COLOR)
   );
+  if (newTier >= FISH_STAR_TIER_MAX) state.meta.stats.fourStarFishAchieved = 1; // four_star_fish achievement
   if (!state.level.tutorialFlags.firstCombine) {
     state.level.tutorialFlags.firstCombine = true;
     pushStoryNotification(state, FIRST_COMBINE_MESSAGE);
@@ -1458,6 +1459,31 @@ export function canSpliceFish(state, utilityFish, targetFish) {
   // way eel/suckerfish/octopus already are, so this is the one place that
   // actually needs to check, rather than a blanket "splicing exists" flag.
   return state.meta.speciesUnlocked.includes(hybridId);
+}
+
+// Real bug fix, per direct report ("it only seems to work if I grab one of
+// the two specifically first, I can't grab either fish to do the hybrid") —
+// main.js's mousedown handler only ever armed a splice-drag off
+// isSpliceSource, which is true ONLY for the utility fish half of a pair
+// (Suckerfish/Eel/Octopus). Grabbing the OTHER half first (the plain
+// economy-species/hybrid-eligible target) always failed to pick up at all,
+// so a splice only ever worked in the one direction "utility fish grabbed
+// first." This is the missing other half of that same eligibility check —
+// true for a fish that could be the TARGET of some currently-unlocked
+// splice, regardless of whether a matching utility fish happens to be
+// nearby right now (mirrors isCombinableFish's own "is this fish eligible
+// in isolation" shape, not "does a partner exist somewhere in the tank").
+// main.js's mousedown gate ORs this in alongside isCombinableFish/
+// isSpliceSource so either half of a valid pair can be picked up first.
+export function isSpliceTargetCandidate(state, fish) {
+  if (!fish || fish.type !== 'fish' || fish.dying) return false;
+  const def = SPECIES[fish.speciesId];
+  if (fish.stage !== def.growthStages.length - 1) return false; // Adult only — same requirement canSpliceFish places on the target
+  for (const utilityId of UTILITY_SPECIES_IDS) {
+    const hybridId = getHybridSpeciesId(fish.speciesId, utilityId);
+    if (hybridId && state.meta.speciesUnlocked.includes(hybridId)) return true;
+  }
+  return false;
 }
 
 const FIRST_SPLICE_MESSAGE =
@@ -2140,7 +2166,6 @@ function awardTankPoint(state, fish) {
   state.level.tankPoints.total += TANK_POINT_PER_ADULT_FISH;
   state.level.tankPoints.available += TANK_POINT_PER_ADULT_FISH;
   state.meta.stats.tankPointsEarned += TANK_POINT_PER_ADULT_FISH; // tank_points_10/50 achievements
-  state.meta.stats.fishGrownToAdult += 1; // fish_grown_10 achievement — awardTankPoint is always called exactly once a fish reaches its final (Adult) growth stage, from both the ordinary feed path and the Mutagen Paste instant-jump path
   state.level.floatingTexts.push(createPickupText(fish.x, fish.y, '+1 Tank Point!', TANK_POINT_COLOR));
   playTankPoint();
   if (isFirst) {
