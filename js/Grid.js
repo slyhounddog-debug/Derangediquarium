@@ -2060,16 +2060,25 @@ function renderCatalystGlow(ctx, x, y, size, elapsedMs) {
   ctx.restore();
 }
 
-// A gentle, subtle pulsing outline on a Refinery/Collector/Manufacturer/
-// Power Plant while it's actively processing something — per direct
-// request. Deliberately a different color and a much gentler alpha range
-// than renderCatalystGlow above (a soft white/cyan "machine humming" cue,
-// low-key enough to sit quietly on every currently-working building at
-// once without the screen turning into a light show), and a slower period
-// so it doesn't compete visually with the Catalyst Fish's own buff glow.
+// A gentle, subtle pulse on a Refinery/Collector/Manufacturer/Power Plant
+// while it's actively processing something — per direct request. Originally
+// just a pulsing border outline; per a later direct report ("increase the
+// visibility of the pulsing, so most of the building pulses instead of just
+// the border"), most of the tile's own body now pulses too — a translucent
+// fill layered on top of the tile's already-drawn icon/shape, kept low-alpha
+// enough that the icon underneath stays legible through it, with the
+// original border riding the exact same pulse for a stronger edge. Still a
+// different color and a much gentler peak alpha than renderCatalystGlow
+// above (a soft white/cyan "machine humming" cue, low-key enough to sit
+// quietly on every currently-working building at once without the screen
+// turning into a light show), and the same slower period so it doesn't
+// compete visually with the Catalyst Fish's own buff glow.
 function renderActiveMachinePulse(ctx, x, y, size, elapsedMs) {
-  const pulse = 0.25 + 0.25 * Math.sin(elapsedMs / 420);
+  const pulse = 0.25 + 0.25 * Math.sin(elapsedMs / 420); // 0-0.5, same range/period as before
   ctx.save();
+  ctx.fillStyle = '#dff6ff';
+  ctx.globalAlpha = pulse * 0.55; // a fraction of the border's own alpha — covers most of the body without burying the icon drawn underneath it
+  ctx.fillRect(x + 2, y + 2, size - 4, size - 4);
   ctx.globalAlpha = pulse;
   ctx.strokeStyle = '#dff6ff';
   ctx.lineWidth = 2;
