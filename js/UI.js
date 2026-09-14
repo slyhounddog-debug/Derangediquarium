@@ -2430,6 +2430,12 @@ function buildCustomizationPanel(state) {
   for (const hat of [HATS.none, ...HAT_LIST]) {
     const card = document.createElement('div');
     card.className = 'hat-card sheen-target';
+    // Per direct request: clicking anywhere on the card previews that hat
+    // for free (even unowned, even "No Hat"), without buying/equipping it —
+    // only the Buy/Equip button itself actually spends gems or changes the
+    // real in-tank equipped hat. The button's own listener below stops this
+    // click from also bubbling up here.
+    card.addEventListener('click', () => selectHatForPreview(state, hat.id));
     const iconEl = document.createElement('div');
     iconEl.className = 'hat-icon';
     iconEl.textContent = hat.icon;
@@ -2438,11 +2444,19 @@ function buildCustomizationPanel(state) {
     nameEl.textContent = hat.name;
     const buyBtn = document.createElement('button');
     buyBtn.className = 'hat-buy-btn';
-    buyBtn.addEventListener('click', () => buyOrEquipHat(state, hat.id));
+    buyBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      buyOrEquipHat(state, hat.id);
+    });
     card.append(iconEl, nameEl, buyBtn);
     els.hatGrid.append(card);
     hatCards[hat.id] = { card, buyBtn };
   }
+  refreshCustomizationPanel(state);
+}
+
+function selectHatForPreview(state, id) {
+  state.ui.customizationPreviewHatId = id;
   refreshCustomizationPanel(state);
 }
 
@@ -2483,13 +2497,15 @@ function renderCustomizationPreview(state) {
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   const adultStage = SPECIES.guppy.growthStages.length - 1;
-  drawFish(ctx, canvas.width / 2, canvas.height / 2, 'guppy', adultStage, 1, customizationPreviewTailPhase, { x: 1, y: 0 }, 1, 0, 0, state.meta.equippedHatId);
+  const previewedHatId = state.ui.customizationPreviewHatId ?? state.meta.equippedHatId;
+  drawFish(ctx, canvas.width / 2, canvas.height / 2, 'guppy', adultStage, 1, customizationPreviewTailPhase, { x: 1, y: 0 }, 1, 0, 0, previewedHatId);
 }
 
 function buyOrEquipHat(state, id) {
   const owned = state.meta.hatsUnlocked.includes(id);
   if (owned) {
     state.meta.equippedHatId = id;
+    state.ui.customizationPreviewHatId = id;
     playUpgrade();
     refreshCustomizationPanel(state);
     return;
@@ -2499,17 +2515,20 @@ function buyOrEquipHat(state, id) {
   state.meta.fishyGems -= hat.gemCost;
   state.meta.hatsUnlocked.push(id);
   state.meta.equippedHatId = id; // buying a hat also wears it immediately — no reason to make that a separate click
+  state.ui.customizationPreviewHatId = id;
   playUpgrade();
   refreshCustomizationPanel(state);
 }
 
 function refreshCustomizationPanel(state) {
   if (!hatCards) return;
+  const previewedHatId = state.ui.customizationPreviewHatId ?? state.meta.equippedHatId;
   for (const hat of [HATS.none, ...HAT_LIST]) {
     const { card, buyBtn } = hatCards[hat.id];
     const owned = state.meta.hatsUnlocked.includes(hat.id);
     const equipped = state.meta.equippedHatId === hat.id;
     card.classList.toggle('equipped', equipped);
+    card.classList.toggle('previewing', previewedHatId === hat.id);
     if (equipped) {
       buyBtn.textContent = 'Equipped';
       buyBtn.disabled = true;

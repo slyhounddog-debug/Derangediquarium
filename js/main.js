@@ -354,6 +354,13 @@ const state = {
     shopCollapsed: true, // shop starts tucked away — just the toggle button — so it doesn't clutter the view
     tankPanelCollapsed: true, // Tank Upgrades panel starts tucked away too — shares the shop's on-screen slot, only one is ever expanded (see UI.js's toggleShopCollapse/toggleTankPanel)
     tankPanelView: 'upgrades', // 'upgrades' | 'achievements' | 'customization' — which of the 3 views the Tank panel currently shows, see UI.js's setTankPanelView. Persists across a collapse/expand (only Escape/tool-select closes the panel, never resets which tab was showing)
+    // Which hat the Customization preview canvas is currently showing —
+    // separate from state.meta.equippedHatId (the real, in-tank choice)
+    // per direct request: clicking anywhere on a hat card except its own
+    // Buy/Equip button previews that hat for free, even one not owned yet,
+    // without spending gems or changing what's actually equipped. null
+    // falls back to whatever's really equipped (UI.js's renderCustomizationPreview/refreshCustomizationPanel).
+    customizationPreviewHatId: null,
     paused: false, // pause menu open/closed (Escape); update() below skips simulating entirely while true
     // False until the player clicks "Start" on the new first-launch start
     // screen (UI.js's initStartScreen) — update() below checks this ahead of
@@ -595,6 +602,13 @@ let draggedItemType = null; // 'coin' | 'food' | 'waste' | 'science' — which i
 let itemDragStartSx = 0;
 let itemDragStartSy = 0;
 let itemDragMoved = false; // set once at mouseup — read (and cleared) by the click handler right after
+// Set true the instant updateBuildDrag places the postalien tutorial's own
+// Waste Turret and clears selectedTool back to Food — see the click
+// handler's own check of this flag for why: that reset strips the ordinary
+// "!effectiveTool.startsWith('build:')" guard against the building-info
+// pop-up, so without this the very same click that placed the turret would
+// immediately reopen its info modal on top of it.
+let suppressTutorialTurretPlacementClick = false;
 // Short rolling history of the cursor's own raw world position while a drag
 // is active — see updateItemDrag's own comment for why release velocity is
 // now averaged over this window instead of read off a single tick's delta.
@@ -887,6 +901,17 @@ input.clickHandlers.push((sx, sy) => {
   if (fishDragArmed) { fishDragArmed = false; return; } // this click followed a fish-combine drag gesture — don't also bank/feed/mound-click at the release point
   if (itemDragMoved) { itemDragMoved = false; return; } // this click followed a genuine item-drag gesture — don't also bank/feed/place at the release point. An unmoved press-release leaves itemDragMoved false, so a plain click on a Coin/Science item still banks it normally
   if (recipeDragMoved) { recipeDragMoved = false; return; } // this click followed a genuine Manufacturer/Power Plant recipe-copy drag — don't also open the recipe pop-up at the release point
+  if (suppressTutorialTurretPlacementClick) {
+    // The same native mouseup/click that just placed the tutorial's own
+    // Waste Turret (via updateBuildDrag's drag-placement path) — per direct
+    // report, this click would otherwise ALSO open the building-info
+    // pop-up on the tile it just placed, since updateBuildDrag already reset
+    // selectedTool back to 'food' (deselecting the shop) before this click
+    // fires, which strips the "!effectiveTool.startsWith('build:')" guard
+    // below that normally protects an ordinary placement's own click.
+    suppressTutorialTurretPlacementClick = false;
+    return;
+  }
   // A right-click already armed a re-aim (fanReaimKey) — updateFanReaim has
   // been live-writing the new angle into the Fan's own buildingData every
   // tick since, so a left-click anywhere just confirms it and exits,
@@ -1507,6 +1532,11 @@ function updateBuildDrag() {
       // turret is down, same as deselectShopSelection already does for a
       // manually re-clicked single-tier shop item.
       deselectShopSelection(state);
+      // The native mouseup that follows this same mousedown-drag gesture
+      // still fires as an ordinary click a tick later — suppress it (see
+      // this flag's own comment) so it doesn't reopen the building-info
+      // pop-up on the turret this exact click just placed.
+      suppressTutorialTurretPlacementClick = true;
       // Guarantee the very next step has something real to drag — per
       // direct report ("the tutorial can break if there's no waste on
       // screen"), rather than hoping a fish had already pooped one out

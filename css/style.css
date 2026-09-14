@@ -1168,9 +1168,16 @@ html, body {
   border: 2px solid #ffffff;
   padding: 10px;
   text-align: center;
+  cursor: pointer;
   box-shadow: 0 4px 12px rgba(107, 76, 107, 0.16), inset 0 2px 0 rgba(255, 255, 255, 0.7);
 }
+/* previewing: the card whose hat the Customization preview canvas is
+   currently showing (see UI.js's selectHatForPreview) — a distinct blue
+   ring so it doesn't get confused with the pink "actually equipped" one
+   below; a card can be both at once, which is the common case. */
+.hat-card.previewing { border-color: #4fc3f7; box-shadow: 0 4px 14px rgba(79, 195, 247, 0.45), inset 0 2px 0 rgba(255, 255, 255, 0.7); }
 .hat-card.equipped { border-color: #ff5aa0; box-shadow: 0 4px 14px rgba(255, 90, 160, 0.45), inset 0 2px 0 rgba(255, 255, 255, 0.7); }
+.hat-card.equipped.previewing { border-color: #ff5aa0; box-shadow: 0 0 0 3px rgba(79, 195, 247, 0.55), 0 4px 14px rgba(255, 90, 160, 0.45), inset 0 2px 0 rgba(255, 255, 255, 0.7); }
 .hat-icon { font-size: 30px; line-height: 1; margin-bottom: 4px; }
 .hat-name { font-size: 11px; font-weight: 800; color: #c25f8f; margin-bottom: 6px; min-height: 26px; }
 .hat-buy-btn {
