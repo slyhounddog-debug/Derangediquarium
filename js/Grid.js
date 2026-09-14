@@ -1818,6 +1818,21 @@ function renderFanIndicators(ctx, state, canvasWidth, canvasHeight) {
   }
 }
 
+// Lightens (positive t) or darkens (negative t) a "#rrggbb" hex color by a
+// flat fraction of 255 per channel, clamped to a valid byte range — the one
+// small color-math helper every hand-drawn building icon below shares for
+// its own shading/highlight/rivet work (this file had no such helper before
+// building icons needed real depth beyond the flat diagonal bevel).
+function shadeHexColor(hex, t) {
+  const num = parseInt(hex.slice(1), 16);
+  const delta = Math.round(255 * t);
+  const clamp = (v) => Math.max(0, Math.min(255, v));
+  const r = clamp((num >> 16) + delta);
+  const g = clamp(((num >> 8) & 0xff) + delta);
+  const b = clamp((num & 0xff) + delta);
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
 // A diagonal highlight/shadow bevel across a square tile's own bounds — a
 // lighter top-left triangle, a darker bottom-right one — per direct request
 // that buildings "pop more and look less flat" than a single flat fill.
@@ -1865,25 +1880,278 @@ function renderTierBadge(ctx, type, x, y, size) {
   }
 }
 
-// A large, centered glyph — BUILDING_TYPES[type]'s own `icon` field, the
-// exact same emoji the shop already shows for this building — per direct
-// request ("make each building type visually distinct... without having to
-// click on it"). Reusing the shop's own icon (rather than authoring a
-// second, separate visual language) means recognition transfers directly:
-// whatever a player already learned to associate with a building in the
-// shop is the same glyph sitting on the tile in the tank. A soft dark
-// shadow keeps it legible against every building's own (quite different)
-// fill color.
-function renderBuildingIcon(ctx, icon, x, y, size) {
-  if (!icon) return;
+// ---- Hand-drawn per-family building icons ----
+// Replaces the old flat "square + a large centered shop-icon glyph" look
+// with real drawn machine shapes, per a direct reference screenshot (a
+// riveted armor-plate turret/collector housing, a vented fan blade, a
+// copper still for the Refinery, a small factory building for the
+// Manufacturer, and 3 cooling towers for the Power Plant). Deliberately
+// simplified vector approximations, not sprite-accurate reproductions —
+// "it doesn't have to be exact... simpler is ok" — built from the same
+// cheap layered-fill/stroke techniques (no ctx.filter) every other
+// decorative render in this file already uses. Each tier within a family
+// still shares its own function unchanged — only the tile's own configured
+// `color` (passed in) and the corner tier badge (renderTierBadge) tell tiers
+// apart, same as before this rework.
+
+// Shared riveted armor-plate housing — the Turret and Collector families'
+// common base look. A framed inset border plus 4 corner rivets; the caller
+// draws whatever sits in the center (Turret's own raised diamond boss,
+// Collector's existing dark "eye" circle).
+function renderArmorPlateBase(ctx, x, y, size, color) {
+  ctx.fillStyle = color;
+  ctx.fillRect(x, y, size, size);
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+  ctx.strokeRect(x, y, size, size);
+  renderSquareBevel(ctx, x, y, size);
+
+  const frame = size * 0.09;
+  ctx.strokeStyle = shadeHexColor(color, -0.32);
+  ctx.lineWidth = Math.max(1, size * 0.045);
+  ctx.strokeRect(x + frame, y + frame, size - frame * 2, size - frame * 2);
+  ctx.strokeStyle = shadeHexColor(color, 0.22);
+  ctx.lineWidth = Math.max(1, size * 0.018);
+  const inset2 = frame + ctx.lineWidth;
+  ctx.strokeRect(x + inset2, y + inset2, size - inset2 * 2, size - inset2 * 2);
+
+  const rivetR = size * 0.045;
+  const rivetInset = size * 0.16;
+  const corners = [
+    [x + rivetInset, y + rivetInset],
+    [x + size - rivetInset, y + rivetInset],
+    [x + rivetInset, y + size - rivetInset],
+    [x + size - rivetInset, y + size - rivetInset],
+  ];
+  for (const [cx, cy] of corners) {
+    ctx.beginPath();
+    ctx.fillStyle = shadeHexColor(color, -0.38);
+    ctx.arc(cx, cy, rivetR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.fillStyle = shadeHexColor(color, 0.32);
+    ctx.arc(cx - rivetR * 0.3, cy - rivetR * 0.3, rivetR * 0.4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// Turret: the armor plate above, plus a raised diamond boss with a center
+// bolt — the reference's own "gun turret hub" reading.
+function renderTurretIcon(ctx, x, y, size, color) {
+  renderArmorPlateBase(ctx, x, y, size, color);
+  const cx = x + size / 2;
+  const cy = y + size / 2;
+  const r = size * 0.26;
   ctx.save();
-  ctx.font = `${Math.round(size * 0.6)}px sans-serif`;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
-  ctx.shadowBlur = Math.max(1, size * 0.08);
-  ctx.fillText(icon, x + size / 2, y + size / 2 + size * 0.02);
+  ctx.translate(cx, cy);
+  ctx.rotate(Math.PI / 4);
+  ctx.fillStyle = shadeHexColor(color, 0.18);
+  ctx.fillRect(-r, -r, r * 2, r * 2);
+  ctx.strokeStyle = shadeHexColor(color, -0.4);
+  ctx.lineWidth = Math.max(1, size * 0.03);
+  ctx.strokeRect(-r, -r, r * 2, r * 2);
   ctx.restore();
+  ctx.beginPath();
+  ctx.fillStyle = shadeHexColor(color, -0.42);
+  ctx.arc(cx, cy, size * 0.07, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.fillStyle = shadeHexColor(color, 0.3);
+  ctx.arc(cx - size * 0.02, cy - size * 0.02, size * 0.025, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// Fan: a vented housing with a pinwheel of curved blades, framed the same
+// way the armor plate is. Purely the BASE shape a Fan tile sits on — its own
+// aim arrow and force cone (renderDirectionIndicator/renderFanIndicators)
+// still render in a completely separate pass on top of this, unchanged.
+function renderFanVentBase(ctx, x, y, size, color) {
+  ctx.fillStyle = color;
+  ctx.fillRect(x, y, size, size);
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+  ctx.strokeRect(x, y, size, size);
+  renderSquareBevel(ctx, x, y, size);
+
+  const frame = size * 0.07;
+  ctx.strokeStyle = shadeHexColor(color, -0.3);
+  ctx.lineWidth = Math.max(1, size * 0.04);
+  ctx.strokeRect(x + frame, y + frame, size - frame * 2, size - frame * 2);
+
+  const cx = x + size / 2;
+  const cy = y + size / 2;
+  const outerR = size * 0.36;
+  const innerR = size * 0.1;
+
+  ctx.beginPath();
+  ctx.fillStyle = shadeHexColor(color, -0.22);
+  ctx.arc(cx, cy, outerR, 0, Math.PI * 2);
+  ctx.fill();
+
+  const bladeCount = 6;
+  ctx.fillStyle = shadeHexColor(color, 0.35);
+  for (let i = 0; i < bladeCount; i++) {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate((i / bladeCount) * Math.PI * 2);
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.quadraticCurveTo(outerR * 0.55, -outerR * 0.35, outerR * 0.85, 0);
+    ctx.quadraticCurveTo(outerR * 0.55, outerR * 0.15, 0, 0);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  ctx.beginPath();
+  ctx.fillStyle = shadeHexColor(color, -0.42);
+  ctx.arc(cx, cy, innerR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.fillStyle = shadeHexColor(color, 0.25);
+  ctx.arc(cx - innerR * 0.25, cy - innerR * 0.25, innerR * 0.4, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// Refinery: a small copper pot-still apparatus (two connected drums with
+// conical caps, a control panel with a valve wheel) sitting on the tile's
+// own configured color as backdrop — the copper palette itself is fixed
+// regardless of tier color, since it's meant to read as "brass machinery,"
+// not a tinted panel.
+const REFINERY_COPPER = '#c9863a';
+const REFINERY_COPPER_DARK = '#8a5a24';
+const REFINERY_COPPER_LIGHT = '#e6b06a';
+function renderRefineryIcon(ctx, x, y, size, color) {
+  ctx.fillStyle = color;
+  ctx.fillRect(x, y, size, size);
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+  ctx.strokeRect(x, y, size, size);
+  renderSquareBevel(ctx, x, y, size);
+
+  const baseY = y + size * 0.86;
+  ctx.fillStyle = shadeHexColor(color, -0.28);
+  ctx.fillRect(x + size * 0.08, baseY, size * 0.84, size * 0.1);
+
+  const drawStill = (cx, bodyW, bodyH, headH) => {
+    const bodyX = cx - bodyW / 2;
+    const bodyTop = baseY - bodyH;
+    ctx.fillStyle = REFINERY_COPPER;
+    ctx.fillRect(bodyX, bodyTop, bodyW, bodyH);
+    ctx.strokeStyle = REFINERY_COPPER_DARK;
+    ctx.lineWidth = Math.max(1, size * 0.015);
+    ctx.strokeRect(bodyX, bodyTop, bodyW, bodyH);
+    ctx.beginPath();
+    ctx.moveTo(bodyX, bodyTop);
+    ctx.lineTo(cx, bodyTop - headH);
+    ctx.lineTo(bodyX + bodyW, bodyTop);
+    ctx.closePath();
+    ctx.fillStyle = REFINERY_COPPER_LIGHT;
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+    ctx.fillRect(bodyX + bodyW * 0.15, bodyTop, bodyW * 0.16, bodyH);
+    return { bodyTop, bodyX, bodyW };
+  };
+
+  const leftStill = drawStill(x + size * 0.34, size * 0.24, size * 0.36, size * 0.15);
+  const rightStill = drawStill(x + size * 0.68, size * 0.17, size * 0.24, size * 0.1);
+
+  ctx.strokeStyle = REFINERY_COPPER_DARK;
+  ctx.lineWidth = Math.max(1, size * 0.035);
+  ctx.beginPath();
+  ctx.moveTo(leftStill.bodyX + leftStill.bodyW, leftStill.bodyTop + leftStill.bodyW * 0.35);
+  ctx.lineTo(rightStill.bodyX, rightStill.bodyTop + rightStill.bodyW * 0.35);
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.strokeStyle = REFINERY_COPPER_DARK;
+  ctx.lineWidth = Math.max(1, size * 0.02);
+  ctx.arc(x + size * 0.2, baseY + size * 0.05, size * 0.045, 0, Math.PI * 2);
+  ctx.stroke();
+}
+
+// Manufacturer: a small factory building — a slanted roof, a chimney, and a
+// couple of window/door details — on the tile's own configured color.
+function renderManufacturerIcon(ctx, x, y, size, color) {
+  ctx.fillStyle = color;
+  ctx.fillRect(x, y, size, size);
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+  ctx.strokeRect(x, y, size, size);
+  renderSquareBevel(ctx, x, y, size);
+
+  const wallColor = shadeHexColor(color, 0.18);
+  const roofColor = shadeHexColor(color, -0.38);
+  const chimneyColor = shadeHexColor(color, -0.22);
+
+  ctx.fillStyle = chimneyColor;
+  ctx.fillRect(x + size * 0.24, y + size * 0.14, size * 0.14, size * 0.36);
+  ctx.strokeStyle = shadeHexColor(color, -0.48);
+  ctx.lineWidth = Math.max(1, size * 0.015);
+  ctx.strokeRect(x + size * 0.24, y + size * 0.14, size * 0.14, size * 0.36);
+
+  const buildingX = x + size * 0.18;
+  const buildingY = y + size * 0.46;
+  const buildingW = size * 0.68;
+  const buildingH = size * 0.4;
+  ctx.fillStyle = wallColor;
+  ctx.fillRect(buildingX, buildingY, buildingW, buildingH);
+  ctx.strokeStyle = shadeHexColor(color, -0.32);
+  ctx.strokeRect(buildingX, buildingY, buildingW, buildingH);
+
+  ctx.beginPath();
+  ctx.moveTo(buildingX - size * 0.03, buildingY);
+  ctx.lineTo(buildingX + buildingW * 0.4, buildingY - size * 0.12);
+  ctx.lineTo(buildingX + buildingW + size * 0.03, buildingY);
+  ctx.closePath();
+  ctx.fillStyle = roofColor;
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.fillStyle = shadeHexColor(color, -0.38);
+  ctx.fillRect(buildingX + buildingW * 0.15, buildingY + buildingH * 0.35, buildingW * 0.18, buildingH * 0.4);
+  ctx.fillRect(buildingX + buildingW * 0.62, buildingY + buildingH * 0.35, buildingW * 0.18, buildingH * 0.4);
+}
+
+// Power Plant: 3 rounded-top cooling towers of varying height, joined by a
+// base pipe, on the tile's own configured color.
+function renderPowerPlantIcon(ctx, x, y, size, color) {
+  ctx.fillStyle = color;
+  ctx.fillRect(x, y, size, size);
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+  ctx.strokeRect(x, y, size, size);
+  renderSquareBevel(ctx, x, y, size);
+
+  const towerColor = shadeHexColor(color, 0.2);
+  const towerDark = shadeHexColor(color, -0.32);
+  const towerCount = 3;
+  const towerW = size * 0.18;
+  const gap = size * 0.06;
+  const totalW = towerCount * towerW + (towerCount - 1) * gap;
+  const startX = x + (size - totalW) / 2;
+  const baseY = y + size * 0.82;
+
+  for (let i = 0; i < towerCount; i++) {
+    const tx = startX + i * (towerW + gap);
+    const th = size * (0.34 + (i === 1 ? 0.13 : 0)); // middle tower slightly taller
+    const ty = baseY - th;
+    ctx.fillStyle = towerColor;
+    ctx.fillRect(tx, ty, towerW, th);
+    ctx.strokeStyle = towerDark;
+    ctx.lineWidth = Math.max(1, size * 0.015);
+    ctx.strokeRect(tx, ty, towerW, th);
+    ctx.beginPath();
+    ctx.ellipse(tx + towerW / 2, ty, towerW / 2, towerW * 0.25, 0, 0, Math.PI * 2);
+    ctx.fillStyle = shadeHexColor(color, 0.35);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+    ctx.fillRect(tx + towerW * 0.15, ty + towerW * 0.3, towerW * 0.2, th * 0.6);
+  }
+
+  ctx.strokeStyle = towerDark;
+  ctx.lineWidth = Math.max(1, size * 0.03);
+  ctx.beginPath();
+  ctx.moveTo(startX + towerW / 2, baseY);
+  ctx.lineTo(startX + totalW - towerW / 2, baseY);
+  ctx.stroke();
 }
 
 // Platform's own distinct look, per direct request ("make the platforms
@@ -1931,52 +2199,57 @@ function renderBrickPattern(ctx, x, y, size, color) {
   ctx.strokeRect(x + ctx.lineWidth / 2, y + ctx.lineWidth / 2, size - ctx.lineWidth, size - ctx.lineWidth);
 }
 
-// A Processor gets a circle in its center — the point
-// stepCollectorProcessing actually draws items into while it holds them
-// (duration now varies by tier/item type — see PROCESSOR_STATS); that
-// circle is itself already a distinct, functional visual (unlike anything
-// else in the game), so it doesn't also get the generic icon below layered
-// on top of it. A Fan keeps its own dedicated aim arrow + force cone,
-// rendered separately by renderFanIndicators/renderDirectionIndicator — also
-// already distinct on its own, so no icon there either (one would visually
-// compete with the arrow in the same small space). Platform gets its own
-// brick pattern above instead of this shape entirely. Every OTHER building
-// family (Refinery, Manufacturer, Power Plant, Turret) gets its own large
-// centered icon (renderBuildingIcon, above) — per direct request, since
-// those previously had nothing but a fill color telling them apart. Every
-// tier within a family still shares this exact base shape/icon — only the
-// fill color and the corner tier badge (renderTierBadge above) distinguish
-// tiers within the same family, unchanged.
+// Dispatches to each family's own hand-drawn icon function above — per
+// direct request, replacing the old flat-square-plus-shop-icon-glyph look
+// (which needed a click to tell buildings apart) with a real drawn machine
+// shape per family. Platform keeps its own brick pattern; the Collector's
+// existing center circle (the real point stepCollectorProcessing draws held
+// items into) now sits on top of the shared armor-plate housing it shares
+// with Turret, instead of a plain square; the Fan's own vent-blade base
+// still sits fully underneath its own separately-rendered aim arrow/force
+// cone (renderFanIndicators/renderDirectionIndicator), unchanged. Every tier
+// within a family still shares its own function unchanged — only the tile's
+// own configured `color` and the corner tier badge (renderTierBadge) tell
+// tiers apart, same as before this rework. The progress/ammo/ingredient
+// dots, the machine-active pulse, the power-shortage overlay, and the
+// Catalyst glow are all separate render passes (see the per-tile render
+// loop above) and are completely untouched by this dispatch.
 function renderTileShape(ctx, type, color, x, y, size) {
   if (type === TILE_PLATFORM) {
     renderBrickPattern(ctx, x, y, size, color);
     return;
   }
-  ctx.fillStyle = color;
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
-  ctx.beginPath();
   if (COLLECTOR_TILES.has(type)) {
-    ctx.rect(x, y, size, size);
-    ctx.fill();
-    ctx.stroke();
-    renderSquareBevel(ctx, x, y, size);
+    renderArmorPlateBase(ctx, x, y, size, color);
     ctx.beginPath();
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
     ctx.arc(x + size / 2, y + size / 2, size * COLLECTOR_CIRCLE_RADIUS_FRACTION, 0, Math.PI * 2);
     ctx.fill();
+    ctx.strokeStyle = shadeHexColor(color, -0.4);
+    ctx.lineWidth = Math.max(1, size * 0.03);
+    ctx.stroke();
+    renderTierBadge(ctx, type, x, y, size);
+  } else if (TURRET_TILES.has(type)) {
+    renderTurretIcon(ctx, x, y, size, color);
     renderTierBadge(ctx, type, x, y, size);
   } else if (FAN_TILES.has(type)) {
-    ctx.rect(x, y, size, size);
-    ctx.fill();
-    ctx.stroke();
-    renderSquareBevel(ctx, x, y, size);
+    renderFanVentBase(ctx, x, y, size, color);
     renderTierBadge(ctx, type, x, y, size);
+  } else if (REFINERY_TILES.has(type)) {
+    renderRefineryIcon(ctx, x, y, size, color);
+    renderTierBadge(ctx, type, x, y, size);
+  } else if (type === TILE_MANUFACTURER) {
+    renderManufacturerIcon(ctx, x, y, size, color);
+  } else if (type === TILE_POWER_PLANT) {
+    renderPowerPlantIcon(ctx, x, y, size, color);
   } else {
+    ctx.fillStyle = color;
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+    ctx.beginPath();
     ctx.rect(x, y, size, size);
     ctx.fill();
     ctx.stroke();
     renderSquareBevel(ctx, x, y, size);
-    renderBuildingIcon(ctx, BUILDING_TYPES[type].icon, x, y, size);
     renderTierBadge(ctx, type, x, y, size);
   }
 }
