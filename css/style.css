@@ -599,6 +599,16 @@ html, body {
 }
 #start-tank-backdrop.hidden { display: none; }
 
+/* #tank-back-btn is the .modal-mode-only replacement for the normal 3-tab
+   row — per direct request ("removing the tabs to switch between menus
+   that you don't have access to yet, and replace those tab buttons with a
+   Back button"), since Tank Upgrades genuinely isn't reachable before a
+   game has started. Hidden by default (in-game use); swapped with #tank-tabs
+   only while .modal-mode is present — see UI.js's openTankPanelFromStartScreen. */
+#tank-back-btn { display: none; margin-bottom: 12px; }
+#tank-panel.modal-mode #tank-tabs { display: none; }
+#tank-panel.modal-mode #tank-back-btn { display: block; }
+
 /* The actual scrolling now happens on an INNER wrapper, inset from the
    card's own edges, rather than on #shop-panel/#tank-panel directly — per
    direct report, a scrollbar that spans the full height of an element that

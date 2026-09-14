@@ -2425,7 +2425,6 @@ export const FISH_STAR_OUTER_RADIUS_RATIO = 0.09; // fraction of the fish's curr
 export const FISH_STAR_INNER_RADIUS_FRACTION = 0.45; // fraction of a star's own outer radius
 export const FISH_STAR_SPACING_RATIO = 2.4; // fraction of a star's outer radius, between star centers
 export const FISH_STAR_Y_OFFSET_RATIO = 0.55; // how far above the fish's center the star row sits, relative to size
-export const FISH_HAT_SIZE_RATIO = 0.65; // an equipped cosmetic hat's glyph size, relative to the fish's own size — see FishRenderer.js's drawFish and Config.js's HATS
 // Hit-test radius (as a fraction of the fish's current on-screen size) used
 // by main.js's drag-to-combine mousedown/mouseup and the live hover-target
 // check — generous enough to grab a fish without needing pixel precision,

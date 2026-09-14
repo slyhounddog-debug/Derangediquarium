@@ -307,12 +307,17 @@
              Tank Upgrades panel) now switches between 3 views via these
              tabs — Upgrades, Achievements, and Customization — each showing
              the other two as buttons too, so any view is reachable from any
-             other. See UI.js's setTankPanelView. -->
+             other. See UI.js's setTankPanelView. When this same panel is
+             opened from the start screen instead (before a game exists),
+             Tank Upgrades isn't reachable yet — #tank-tabs is hidden and
+             #tank-back-btn (a plain Back button returning to the start
+             screen) shows in its place instead, per a later direct request. -->
         <div id="tank-tabs">
           <button id="tank-tab-upgrades" class="tank-tab-btn active" title="Tank Upgrades">🏆</button>
           <button id="tank-tab-achievements" class="tank-tab-btn" title="Achievements">🎖️</button>
           <button id="tank-tab-customization" class="tank-tab-btn" title="Customize">🎩</button>
         </div>
+        <button id="tank-back-btn" class="pause-btn sheen-target">← Back</button>
         <div id="tank-view-upgrades">
           <div class="tank-header-row">
             <div class="tank-header">Tank Upgrades</div>

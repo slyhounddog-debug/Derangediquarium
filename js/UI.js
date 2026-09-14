@@ -372,6 +372,7 @@ export function initUI(state) {
     startAchievementsBtn: document.getElementById('start-achievements-btn'),
     startCustomizationBtn: document.getElementById('start-customization-btn'),
     startTankBackdrop: document.getElementById('start-tank-backdrop'),
+    tankBackBtn: document.getElementById('tank-back-btn'),
     startOverlay: document.getElementById('start-overlay'),
     startNewGameBtn: document.getElementById('start-new-game-btn'),
     startContinueBtn: document.getElementById('start-continue-btn'),
@@ -1727,16 +1728,22 @@ export function initStartScreen(state, onStart) {
     maybeBounceAchievementTabFirstOpen(state);
     playPanelOpen();
   };
-  els.startAchievementsBtn.addEventListener('click', () => openTankPanelFromStartScreen('achievements'));
-  els.startCustomizationBtn.addEventListener('click', () => openTankPanelFromStartScreen('customization'));
-  els.startTankBackdrop.addEventListener('click', () => {
+  const closeTankPanelToStartScreen = () => {
     state.ui.tankPanelCollapsed = true;
     updateTankPanelCollapse(state);
     els.tankPanel.classList.remove('modal-mode');
     els.startTankBackdrop.classList.add('hidden');
     els.tankAnchor.appendChild(els.tankPanel); // back to its normal anchored home for in-game use
     playPanelClose();
-  });
+  };
+  els.startAchievementsBtn.addEventListener('click', () => openTankPanelFromStartScreen('achievements'));
+  els.startCustomizationBtn.addEventListener('click', () => openTankPanelFromStartScreen('customization'));
+  els.startTankBackdrop.addEventListener('click', closeTankPanelToStartScreen);
+  // Per direct request ("removing the tabs to switch between menus that you
+  // don't have access to yet, and replace those tab buttons with a Back
+  // button") — #tank-back-btn (shown only while .modal-mode is present, see
+  // style.css) does exactly what clicking the backdrop already does.
+  els.tankBackBtn.addEventListener('click', closeTankPanelToStartScreen);
   els.startSettingsBtn.addEventListener('click', () => {
     // Deliberately does NOT hide #start-overlay — #pause-overlay layers on
     // top of it instead (see its own z-index comment), so the start

@@ -24,8 +24,6 @@ import {
   FISH_STAR_INNER_RADIUS_FRACTION,
   FISH_STAR_SPACING_RATIO,
   FISH_STAR_Y_OFFSET_RATIO,
-  FISH_HAT_SIZE_RATIO,
-  HATS,
 } from './Config.js';
 
 function hexToRgb(hex) {
@@ -97,6 +95,292 @@ function drawStar(ctx, cx, cy, outerRadius, color) {
   ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
   ctx.lineWidth = 1;
   ctx.stroke();
+}
+
+// ---- Equipped cosmetic hats ----
+// Per direct report ("right now it looks like icons floating above their
+// heads... rework all of them so they are wearables, not icons, and so they
+// sit correctly on the fish's head, and so they mirror left/right depending
+// on the way the fish is looking") — every hat below is real drawn vector
+// geometry (arcs/ellipses/paths), not a text glyph, anchored so its own base
+// sits ON the (x, y) head point drawFish computes per body shape (see that
+// function's own headX/headY/headSize comment) rather than floating well
+// above it. `facing` is the same +1/-1 convention every body-shape function
+// in this file already uses — every x-offset that should flip when the fish
+// turns around is written as `facing * <offset>`, exactly like the eye/tail
+// positions above, rather than a ctx.scale() transform (this file has never
+// used one, and mixing the two conventions would be an easy way to
+// accidentally double-flip something).
+function drawGuppyCap(ctx, x, y, size, facing) {
+  // A rounded ball-cap dome plus a brim poking out over the eye, in the
+  // direction the fish is actually facing — the one detail that makes a cap
+  // specifically (not just a beanie) read correctly when mirrored.
+  ctx.fillStyle = '#3f6fd1';
+  ctx.beginPath();
+  ctx.arc(x, y, size * 0.62, Math.PI, 0, false);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#2f56ab';
+  ctx.beginPath();
+  ctx.ellipse(x + facing * size * 0.55, y + size * 0.02, size * 0.32, size * 0.12, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.25)';
+  ctx.beginPath();
+  ctx.arc(x - facing * size * 0.2, y - size * 0.35, size * 0.16, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawTopHat(ctx, x, y, size, facing) {
+  ctx.fillStyle = '#2a2a33';
+  ctx.beginPath();
+  ctx.ellipse(x, y + size * 0.14, size * 0.6, size * 0.14, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillRect(x - size * 0.34, y - size * 0.75, size * 0.68, size * 0.9);
+  ctx.beginPath();
+  ctx.ellipse(x, y - size * 0.75, size * 0.34, size * 0.09, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#c0392b';
+  ctx.fillRect(x - size * 0.34, y - size * 0.1, size * 0.68, size * 0.12);
+  ctx.fillStyle = 'rgba(255,255,255,0.15)';
+  ctx.fillRect(x - facing * size * 0.28, y - size * 0.7, size * 0.1, size * 0.75);
+}
+
+function drawSunHat(ctx, x, y, size, facing) {
+  ctx.fillStyle = '#e8c987';
+  ctx.beginPath();
+  ctx.ellipse(x, y + size * 0.1, size * 0.85, size * 0.2, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#dcb96f';
+  ctx.beginPath();
+  ctx.ellipse(x, y - size * 0.18, size * 0.42, size * 0.32, 0, Math.PI, 0, false);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#e26d5a';
+  ctx.fillRect(x - size * 0.42, y - size * 0.02, size * 0.84, size * 0.09);
+}
+
+function drawIncognito(ctx, x, y, size, facing) {
+  // Deliberately sits LOWER than a normal hat (roughly at eye height, not
+  // the top of the head) — a disguise's whole point is covering the face,
+  // not the crown of the head. Glasses + a big nose + a mustache, drawn
+  // straddling the eye's own real position.
+  const gy = y + size * 0.55;
+  ctx.strokeStyle = '#1a1a1a';
+  ctx.lineWidth = Math.max(1.5, size * 0.09);
+  ctx.beginPath();
+  ctx.arc(x - facing * size * 0.32, gy, size * 0.26, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(x + facing * size * 0.32, gy, size * 0.26, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x - facing * size * 0.06, gy);
+  ctx.lineTo(x + facing * size * 0.06, gy);
+  ctx.stroke();
+  ctx.fillStyle = '#d68a5c';
+  ctx.beginPath();
+  ctx.ellipse(x, gy + size * 0.22, size * 0.16, size * 0.13, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#3a2417';
+  ctx.beginPath();
+  ctx.ellipse(x - size * 0.22, gy + size * 0.42, size * 0.16, size * 0.09, -0.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.ellipse(x + size * 0.22, gy + size * 0.42, size * 0.16, size * 0.09, 0.2, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawHelmet(ctx, x, y, size, facing) {
+  ctx.fillStyle = '#5c6b3f';
+  ctx.beginPath();
+  ctx.ellipse(x, y, size * 0.6, size * 0.48, 0, Math.PI, 0, false);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#48542f';
+  ctx.beginPath();
+  ctx.ellipse(x, y + size * 0.08, size * 0.65, size * 0.15, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.2)';
+  ctx.beginPath();
+  ctx.arc(x - facing * size * 0.2, y - size * 0.2, size * 0.14, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#2f3620';
+  ctx.lineWidth = Math.max(1, size * 0.05);
+  ctx.beginPath();
+  ctx.moveTo(x - facing * size * 0.5, y + size * 0.15);
+  ctx.quadraticCurveTo(x - facing * size * 0.55, y + size * 0.55, x - facing * size * 0.35, y + size * 0.7);
+  ctx.stroke();
+}
+
+function drawGradCap(ctx, x, y, size, facing) {
+  ctx.fillStyle = '#1c1c22';
+  ctx.beginPath();
+  ctx.ellipse(x, y + size * 0.1, size * 0.34, size * 0.16, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.moveTo(x, y - size * 0.42);
+  ctx.lineTo(x + size * 0.62, y - size * 0.06);
+  ctx.lineTo(x, y + size * 0.3);
+  ctx.lineTo(x - size * 0.62, y - size * 0.06);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#e6c84d';
+  ctx.beginPath();
+  ctx.arc(x, y - size * 0.06, size * 0.06, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = '#e6c84d';
+  ctx.lineWidth = Math.max(1, size * 0.05);
+  const tasselX = x + facing * size * 0.55;
+  ctx.beginPath();
+  ctx.moveTo(x, y - size * 0.06);
+  ctx.lineTo(tasselX, y + size * 0.1);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(tasselX, y + size * 0.22, size * 0.07, 0, Math.PI * 2);
+  ctx.fillStyle = '#e6c84d';
+  ctx.fill();
+}
+
+function drawLuckyClover(ctx, x, y, size, facing) {
+  ctx.fillStyle = '#3fae5a';
+  const r = size * 0.24;
+  const lobes = [[-1, -1], [1, -1], [-1, 0.5], [1, 0.5]];
+  for (const [lx, ly] of lobes) {
+    ctx.beginPath();
+    ctx.arc(x + lx * r * 0.9, y + ly * r * 0.55 - size * 0.15, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.strokeStyle = '#2f8a45';
+  ctx.lineWidth = Math.max(1, size * 0.06);
+  ctx.beginPath();
+  ctx.moveTo(x, y - size * 0.1);
+  ctx.quadraticCurveTo(x + facing * size * 0.1, y + size * 0.3, x + facing * size * 0.05, y + size * 0.55);
+  ctx.stroke();
+}
+
+function drawStarStruck(ctx, x, y, size, facing) {
+  ctx.strokeStyle = '#e64d8a';
+  ctx.lineWidth = Math.max(1.5, size * 0.1);
+  ctx.beginPath();
+  ctx.arc(x, y + size * 0.1, size * 0.58, Math.PI * 0.95, Math.PI * 2.05);
+  ctx.stroke();
+  drawStar(ctx, x + facing * size * 0.35, y - size * 0.35, size * 0.32, '#ffd93d');
+}
+
+function drawSharkFin(ctx, x, y, size, facing) {
+  ctx.fillStyle = '#7d8a94';
+  ctx.beginPath();
+  ctx.ellipse(x, y + size * 0.12, size * 0.5, size * 0.14, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#5c6870';
+  ctx.beginPath();
+  ctx.moveTo(x - facing * size * 0.28, y + size * 0.05);
+  ctx.quadraticCurveTo(x - facing * size * 0.05, y - size * 0.75, x + facing * size * 0.22, y - size * 0.85);
+  ctx.quadraticCurveTo(x + facing * size * 0.05, y - size * 0.3, x + facing * size * 0.3, y + size * 0.05);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.25)';
+  ctx.beginPath();
+  ctx.ellipse(x, y + size * 0.6, size * 0.06, size * 0.14, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawPumpkinHead(ctx, x, y, size, facing) {
+  // A deliberately deeper, more saturated pumpkin-orange than any fish body
+  // color in this game (see FISH_COLORS), plus a bold dark outline — per
+  // direct report, an earlier, lighter orange nearly matched Guppy's own
+  // body color and the hat all but disappeared against it.
+  ctx.fillStyle = '#d9540f';
+  ctx.beginPath();
+  ctx.arc(x, y, size * 0.62, Math.PI, 0, false);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = '#7a2f08';
+  ctx.lineWidth = Math.max(1.5, size * 0.06);
+  ctx.stroke();
+  ctx.strokeStyle = '#a83f0c';
+  ctx.lineWidth = Math.max(1, size * 0.045);
+  for (let i = -2; i <= 2; i++) {
+    ctx.beginPath();
+    ctx.moveTo(x + i * size * 0.2, y);
+    ctx.quadraticCurveTo(x + i * size * 0.2 * 0.7, y - size * 0.55, x + i * size * 0.05, y - size * 0.6);
+    ctx.stroke();
+  }
+  ctx.fillStyle = '#4a7a3a';
+  ctx.fillRect(x - facing * size * 0.04, y - size * 0.78, size * 0.14, size * 0.2);
+}
+
+function drawStaticSpike(ctx, x, y, size, facing) {
+  // A thin headband to anchor it (same idea as Star Struck's own), then a
+  // genuinely bold lightning-bolt spike standing up from the crown of the
+  // head — widened/heightened from an earlier pass that read as a thin
+  // antenna rather than a mohawk-style spike, per direct report that the
+  // hats overall needed to read clearly as worn shapes, not faint icons.
+  ctx.strokeStyle = '#4a4a52';
+  ctx.lineWidth = Math.max(1.5, size * 0.1);
+  ctx.beginPath();
+  ctx.arc(x, y + size * 0.15, size * 0.42, Math.PI * 0.95, Math.PI * 2.05);
+  ctx.stroke();
+  ctx.fillStyle = '#ffe33d';
+  ctx.beginPath();
+  ctx.moveTo(x + facing * size * 0.22, y - size * 0.05);
+  ctx.lineTo(x - facing * size * 0.05, y - size * 0.5);
+  ctx.lineTo(x + facing * size * 0.13, y - size * 0.45);
+  ctx.lineTo(x - facing * size * 0.22, y - size * 1.05);
+  ctx.lineTo(x + facing * size * 0.3, y - size * 0.55);
+  ctx.lineTo(x + facing * size * 0.08, y - size * 0.5);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0,0,0,0.35)';
+  ctx.lineWidth = Math.max(1, size * 0.03);
+  ctx.stroke();
+}
+
+function drawCrown(ctx, x, y, size, facing) {
+  ctx.fillStyle = '#f2c53d';
+  ctx.fillRect(x - size * 0.55, y - size * 0.05, size * 1.1, size * 0.28);
+  ctx.beginPath();
+  ctx.moveTo(x - size * 0.55, y - size * 0.05);
+  ctx.lineTo(x - size * 0.55, y - size * 0.4);
+  ctx.lineTo(x - size * 0.28, y - size * 0.1);
+  ctx.lineTo(x, y - size * 0.55);
+  ctx.lineTo(x + size * 0.28, y - size * 0.1);
+  ctx.lineTo(x + size * 0.55, y - size * 0.4);
+  ctx.lineTo(x + size * 0.55, y - size * 0.05);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#c0392b';
+  ctx.beginPath();
+  ctx.arc(x, y - size * 0.42, size * 0.09, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#3d6fd4';
+  ctx.beginPath();
+  ctx.arc(x + facing * size * 0.28, y - size * 0.16, size * 0.07, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.4)';
+  ctx.beginPath();
+  ctx.arc(x - facing * size * 0.3, y + size * 0.06, size * 0.05, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+const HAT_DRAWERS = {
+  guppy_cap: drawGuppyCap,
+  fancy_fin: drawTopHat,
+  beach_bum: drawSunHat,
+  incognito: drawIncognito,
+  turret_tech: drawHelmet,
+  bubble_scholar: drawGradCap,
+  lucky_clover: drawLuckyClover,
+  star_struck: drawStarStruck,
+  shark_fin: drawSharkFin,
+  pumpkin_head: drawPumpkinHead,
+  static_spike: drawStaticSpike,
+  tank_royalty: drawCrown,
+};
+
+function drawHat(ctx, hatId, x, y, size, facing) {
+  const drawer = HAT_DRAWERS[hatId];
+  if (drawer) drawer(ctx, x, y, size, facing);
 }
 
 // Draws one fish centered at (x, y) in whatever coordinate space the caller
@@ -375,12 +659,43 @@ export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDire
   // through the same 3-stage ladder as the base feeders now) they render via
   // the plain drawStandardBody instead, just tinted their own species color,
   // "so it looks like the [base] fish, but with the utility fish colors."
+  // headX/headY/headSize anchor exactly where a worn hat should sit on THIS
+  // particular body shape — computed per-branch below, since "the top of the
+  // head" means something very different for a long undulating Eel than for
+  // an Octopus (whose head is already explicitly separate from its body) than
+  // for the plain oval every other species uses. See drawHat's own comment
+  // for how these three numbers get used.
+  let headX = x, headY = y, headSize = size * 0.5;
   if (isFullyGrown && speciesId === 'electric_eel') {
     drawEelBody(ctx, x, y, size, facing, tailPhase, isFullyGrown, color, eyeDirection);
+    // Mirrors drawEelBody's own head-point math exactly (the last point in
+    // its points[] array) — riding the SAME undulation wave its eye already
+    // does, so a worn hat visibly follows the swimming motion instead of
+    // reading as glued to a fixed screen position.
+    const length = size * 1.5;
+    const segments = 7;
+    const t = 1; // head end
+    const headPx = x - facing * length * (0.5 - t);
+    const headWave = Math.sin(tailPhase - t * 3.2) * size * 0.22 * (1 - t * 0.3);
+    const headWidth = size * (0.1 + t * 0.16);
+    headX = headPx + facing * headWidth * 0.1;
+    headY = y + headWave - headWidth * 1.4;
+    headSize = headWidth * 2.1;
   } else if (isFullyGrown && speciesId === 'octopus') {
     drawOctopusBody(ctx, x, y, size, facing, tailPhase, isFullyGrown, color, eyeDirection);
+    // drawOctopusBody's own head is already a distinct, separate circle
+    // (unlike every other shape) — reuse its exact headY/headRadius rather
+    // than approximating.
+    const octHeadY = y - size * 0.22;
+    const octHeadRadius = size * 0.42;
+    headX = x + facing * octHeadRadius * 0.1;
+    headY = octHeadY - octHeadRadius * 0.7;
+    headSize = octHeadRadius * 1.5;
   } else if (isFullyGrown && speciesId === 'suckerfish') {
     drawSuckerfishBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGrown, color, eyeDirection);
+    headX = x + facing * size * 0.15;
+    headY = y - size * 0.42;
+    headSize = size * 0.6;
   } else {
     // A hybrid's own body SHAPE follows whichever base feeder it was spliced
     // from (def.parents' second entry, per the [utilityId, economyId]
@@ -393,6 +708,10 @@ export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDire
     const shapeSourceId = def.parents ? def.parents[1] : speciesId;
     const bodyShape = shapeSourceId === 'dartfin' ? 'slim' : shapeSourceId === 'blimpfish' ? 'round' : 'normal';
     drawStandardBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGrown, color, eyeDirection, bodyShape);
+    const stdShape = BODY_SHAPE_RATIOS[bodyShape] || BODY_SHAPE_RATIOS.normal;
+    headX = x + facing * size * stdShape.bodyW * 0.15;
+    headY = y - size * stdShape.bodyH * 0.85;
+    headSize = size * stdShape.bodyW * 0.85;
   }
 
   // Economy Fish Combining tier overlay — only ever nonzero on an adult fish
@@ -417,23 +736,13 @@ export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDire
   // unlockable hats to be added to the fish"), a global equip (the same one
   // hat choice renders on every fish, not a per-fish assignment — a deliberate
   // simplification given this is purely cosmetic and per-fish customization
-  // would need a whole separate UI of its own) shown as a plain emoji glyph
-  // above the head, same "items are just colored shapes, not sprites"
-  // language this game's icons already use everywhere else. Adult-only, same
-  // "only once fully grown" precedent the star-tier overlay right above
-  // already follows, and drawn just above wherever those stars would sit (so
-  // a starred AND hatted fish never overlaps the two).
+  // would need a whole separate UI of its own). Per a later direct report
+  // ("right now it looks like icons floating above their heads... rework all
+  // of them so they are wearables"), this is now real drawn vector shapes
+  // sitting ON the headX/headY/headSize anchor computed above (not a flat
+  // emoji glyph floating well above it) — see drawHat below. Adult-only,
+  // same "only once fully grown" precedent the star-tier overlay uses.
   if (isFullyGrown && hatId && hatId !== 'none') {
-    const hat = HATS[hatId];
-    if (hat) {
-      const hatSize = size * FISH_HAT_SIZE_RATIO;
-      const hatY = y - size * FISH_STAR_Y_OFFSET_RATIO - hatSize * 0.9;
-      ctx.font = `${hatSize}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(hat.icon, x, hatY);
-      ctx.textAlign = 'left'; // restore canvas defaults — every other caller in this codebase assumes these
-      ctx.textBaseline = 'alphabetic';
-    }
+    drawHat(ctx, hatId, headX, headY, headSize, facing);
   }
 }
