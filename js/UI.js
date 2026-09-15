@@ -65,6 +65,15 @@ import {
   ACHIEVEMENT_GEM_REWARD_BY_TIER,
   HATS,
   HAT_LIST,
+  SCIENCE_ITEM_COLOR_A,
+  SCIENCE_ITEM_COLOR_B,
+  SCIENCE_GREEN_COLOR_A,
+  SCIENCE_GREEN_COLOR_B,
+  BIOMASS_COLOR,
+  BIOMASS_COLOR_CORE,
+  ALIEN_EGG_COLOR,
+  ALIEN_EGG_RING_COLOR,
+  MUTAGEN_PASTE_COLOR,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings, loadLevel } from './Levels.js';
 import { getFishPurchaseCost, effectiveCoinCapacity, effectiveScienceCapacity, countTankItemsByType, hasAnyMergeOpportunity, resolveMergeTutorialPair, computeTheoreticalGoldPerMinute } from './Entities.js';
@@ -1203,19 +1212,19 @@ function buildLabTree(state) {
     btn.dataset.nodeId = node.id;
     const nameEl = document.createElement('div');
     nameEl.className = 'lab-node-name';
-    // A building-granting node gets a small real rendering of that
-    // building's actual look, built once here (never recreated —
-    // refreshLabTree below only ever touches nameTextEl's own text content,
-    // since it runs every frame the Lab is open and redrawing a canvas that
-    // often would be pure waste). Anything else keeps its plain emoji.
-    const grantedBuildingId = node.grants && node.grants.buildings && node.grants.buildings[0];
+    // A node granting a building/species, or one that's really a
+    // Manufacturer/Power Plant recipe unlock, gets a small real rendering of
+    // that building/fish/item's actual look, built once here (never
+    // recreated — refreshLabTree below only ever touches nameTextEl's own
+    // text content, since it runs every frame the Lab is open and redrawing
+    // a canvas that often would be pure waste). Anything else (Turret Fire
+    // Rate, a Bubble Cap step, the mystery node) keeps its plain emoji —
+    // see buildingIconOrEmojiElement's own comment for the exact rule.
+    const iconEl = buildingIconOrEmojiElement(node, LAB_NODE_ICON_CANVAS_SIZE);
     let iconCanvas = null;
-    if (grantedBuildingId) {
-      iconCanvas = document.createElement('canvas');
+    if (iconEl.tagName === 'CANVAS') {
+      iconCanvas = iconEl;
       iconCanvas.className = 'lab-node-building-icon';
-      iconCanvas.width = LAB_NODE_ICON_CANVAS_SIZE;
-      iconCanvas.height = LAB_NODE_ICON_CANVAS_SIZE;
-      drawBuildingIconCanvas(iconCanvas, grantedBuildingId);
       nameEl.appendChild(iconCanvas);
     }
     const nameTextEl = document.createElement('span');
@@ -1998,15 +2007,141 @@ function drawBuildingIconCanvas(canvas, buildingId) {
   renderTileShape(ctx, buildingId, BUILDING_TYPES[buildingId].color, 0, 0, canvas.width);
 }
 
-// Shared by the Lab tree's own node icon and its purchase modal — a node
-// granting a building shows a small real rendering of that building's
-// actual look (drawBuildingIconCanvas) instead of its flat emoji; anything
-// else (a species/tech/pure-prerequisite node) keeps its own emoji exactly
-// as before. A node's own `icon` field is left completely untouched either
-// way — this only changes what gets DRAWN from it.
+// A small, static canvas rendering of a fish species' real look (an Adult,
+// facing right, no idle animation — matching drawBuildingIconCanvas's own
+// "one static frame" choice) — per direct request ("replace the rest of
+// the stuff in the science lab with the actual Fish/Objects that it
+// unlocks"). Reuses FishRenderer.js's real drawFish, the same function the
+// Customization preview/shop preview already animate.
+function drawFishIconCanvas(canvas, speciesId) {
+  const def = SPECIES[speciesId];
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (!def) return;
+  const c = canvas.width / 2;
+  const adultStage = def.growthStages.length - 1;
+  drawFish(ctx, c, c, speciesId, adultStage, 1, 0, { x: 1, y: 0 });
+}
+
+// Same idea for a physical item — reused wherever a Science Lab node's own
+// unlock is really a Manufacturer/Power Plant recipe (see
+// itemTypeForRecipeNode below) rather than a species or building. Mirrors
+// main.js's own per-item render branches (the two-tone Science/Green-
+// Science/Biomass gradients, the Alien Egg's shell-plus-ring), just as one
+// static frame instead of a live, animated item — duplicated rather than
+// imported since main.js can't be imported from here (it already imports
+// FROM UI.js) and this is the one other module that needs it.
+function drawItemIconCanvas(canvas, itemType) {
+  const ctx = canvas.getContext('2d');
+  const size = canvas.width;
+  ctx.clearRect(0, 0, size, size);
+  const cx = size / 2;
+  const cy = size / 2;
+  const r = size * 0.42;
+  if (itemType === 'science' || itemType === 'science_green') {
+    const colorA = itemType === 'science_green' ? SCIENCE_GREEN_COLOR_A : SCIENCE_ITEM_COLOR_A;
+    const colorB = itemType === 'science_green' ? SCIENCE_GREEN_COLOR_B : SCIENCE_ITEM_COLOR_B;
+    const gradient = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.3, r * 0.1, cx, cy, r);
+    gradient.addColorStop(0, colorB);
+    gradient.addColorStop(1, colorA);
+    ctx.beginPath();
+    ctx.fillStyle = gradient;
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
+    ctx.beginPath();
+    ctx.arc(cx - r * 0.3, cy - r * 0.3, r * 0.28, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+  if (itemType === 'biomass') {
+    const gradient = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.3, r * 0.1, cx, cy, r);
+    gradient.addColorStop(0, BIOMASS_COLOR_CORE);
+    gradient.addColorStop(1, BIOMASS_COLOR);
+    ctx.beginPath();
+    ctx.fillStyle = gradient;
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+    ctx.beginPath();
+    ctx.arc(cx - r * 0.3, cy - r * 0.3, r * 0.26, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+  if (itemType === 'alien_egg') {
+    ctx.beginPath();
+    ctx.fillStyle = ALIEN_EGG_COLOR;
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.22)';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.strokeStyle = ALIEN_EGG_RING_COLOR;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(cx, cy, r + 2, -Math.PI / 2, Math.PI); // a static partial ring, not a live hatch countdown
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+    ctx.beginPath();
+    ctx.arc(cx - r * 0.32, cy - r * 0.32, r * 0.28, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+  // Generic flat-fill-plus-rim-and-highlight path — covers Mutagen Paste
+  // (the one remaining recipe-output item type) and anything else not
+  // specially handled above.
+  const flatColor = itemType === 'mutagen_paste' ? MUTAGEN_PASTE_COLOR : '#cccccc';
+  ctx.beginPath();
+  ctx.fillStyle = flatColor;
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.22)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+  ctx.beginPath();
+  ctx.arc(cx - r * 0.3, cy - r * 0.3, r * 0.24, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// A Science Lab node granting nothing structural of its own (grants: {})
+// can still be "really" a Manufacturer/Power Plant recipe unlock — matched
+// by the same labNodeId lookup openLabPurchaseModal's own description text
+// already uses. Manufacturer recipes have a real `output` item; a Power
+// Plant recipe has no output item at all (it credits power directly), so
+// its own fuel `inputs[0]` — the one physical thing that recipe actually
+// revolves around — stands in for it instead.
+function itemTypeForRecipeNode(nodeId) {
+  const manuRecipe = MANUFACTURER_RECIPE_LIST.find((r) => r.labNodeId === nodeId);
+  if (manuRecipe) return manuRecipe.output;
+  const ppRecipe = POWER_PLANT_RECIPE_LIST.find((r) => r.labNodeId === nodeId);
+  if (ppRecipe) return ppRecipe.inputs[0];
+  return null;
+}
+
+// Shared by the Lab tree's own node icon and its purchase modal — per
+// direct request ("replace the rest of the stuff in the science lab with
+// the actual Fish/Objects that it unlocks, leaving only emojis on things
+// that aren't in the game, like turret fire rate and bubble caps"): a node
+// granting a building shows that building's real look, a node granting a
+// species shows that fish's real look, a node that's really a Manufacturer/
+// Power Plant recipe unlock shows that recipe's own physical item — and
+// anything else (a pure numeric modifier like Turret Fire Rate, an abstract
+// capacity step like a Bubble Cap, the end-game mystery node) keeps its own
+// emoji exactly as before, since none of those correspond to anything
+// actually placeable/ownable in the tank. A node's own `icon` field is left
+// completely untouched either way — this only changes what gets DRAWN.
 function buildingIconOrEmojiElement(node, size) {
   const buildingId = node.grants && node.grants.buildings && node.grants.buildings[0];
-  if (!buildingId) {
+  const speciesId = node.grants && node.grants.species && node.grants.species[0];
+  const itemType = !buildingId && !speciesId ? itemTypeForRecipeNode(node.id) : null;
+  if (!buildingId && !speciesId && !itemType) {
     const span = document.createElement('span');
     span.textContent = node.icon;
     return span;
@@ -2014,7 +2149,9 @@ function buildingIconOrEmojiElement(node, size) {
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
-  drawBuildingIconCanvas(canvas, buildingId);
+  if (buildingId) drawBuildingIconCanvas(canvas, buildingId);
+  else if (speciesId) drawFishIconCanvas(canvas, speciesId);
+  else drawItemIconCanvas(canvas, itemType);
   return canvas;
 }
 
@@ -2829,6 +2966,12 @@ function stopPreviewAnimation() {
   }
 }
 
+// A square fully inscribed in a circle can be at most the circle's own
+// diameter / sqrt(2) ≈ 0.707x it before its corners start poking out — see
+// renderPreviewCanvas's own comment. Comfortably under that with a bit of
+// breathing room.
+const SHOP_PREVIEW_BUILDING_ART_SCALE = 0.66;
+
 function renderPreviewCanvas() {
   const ctx = els.previewCanvas.getContext('2d');
   const c = SHOP_PREVIEW_CANVAS_SIZE / 2;
@@ -2840,16 +2983,25 @@ function renderPreviewCanvas() {
     drawFish(ctx, c, c, def.id, adultStage, previewFacing, previewTailPhase, eyeDirection);
   } else if (currentPreviewBuilding) {
     // The real hand-drawn per-family building art (Grid.js's
-    // renderTileShape — the exact same shape a placed tile renders with),
-    // clipped to the canvas's own circular crop, instead of a flat color
-    // swatch plus emoji — per direct request ("make all the icons for the
-    // buildings... match the actual look of a placed building, instead of
-    // emojis"). Static (no idle animation), same as the swatch it replaces.
+    // renderTileShape — the exact same shape a placed tile renders with)
+    // instead of a flat color swatch plus emoji — per direct request. Real
+    // bug fixed, per direct follow-up report ("a lot of it is cut off by
+    // the circle"): drawing the art at the FULL canvas size clipped it hard
+    // against the circular crop, since a square whose SIDE equals the
+    // circle's diameter has its own corners sitting well outside the circle
+    // (a square fully inscribed in a circle can be at most the circle's
+    // diameter / sqrt(2) ≈ 0.707x it). The circle is filled with the
+    // building's own color FIRST, so shrinking the actual art to fit
+    // entirely inside it doesn't leave a mismatched gap in the corners.
     ctx.save();
     ctx.beginPath();
     ctx.arc(c, c, c, 0, Math.PI * 2);
     ctx.clip();
-    renderTileShape(ctx, currentPreviewBuilding.id, currentPreviewBuilding.color, 0, 0, SHOP_PREVIEW_CANVAS_SIZE);
+    ctx.fillStyle = currentPreviewBuilding.color;
+    ctx.fillRect(0, 0, SHOP_PREVIEW_CANVAS_SIZE, SHOP_PREVIEW_CANVAS_SIZE);
+    const artSize = SHOP_PREVIEW_CANVAS_SIZE * SHOP_PREVIEW_BUILDING_ART_SCALE;
+    const artOffset = (SHOP_PREVIEW_CANVAS_SIZE - artSize) / 2;
+    renderTileShape(ctx, currentPreviewBuilding.id, currentPreviewBuilding.color, artOffset, artOffset, artSize);
     ctx.restore();
   }
 }
