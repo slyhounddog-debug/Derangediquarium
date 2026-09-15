@@ -334,25 +334,63 @@ export function canPlaceTile(state, col, row, buildingId, ignoreCost = false) {
   return { ok: true, reason: null };
 }
 
+// Real bug fixed, per direct report: a moved Refinery/Manufacturer/Power
+// Plant used to carry its ENTIRE buildingData object forward untouched,
+// including whatever it was mid-processing — data.progressMs sitting
+// partway to completion, and data.heldItemId/lockedRecipe still pointing at
+// the exact item that had just been physically released back into normal
+// physics (see pickUpBuildingForMove below). Once progressMs finished
+// counting up at the NEW location, updateBuildings still tried to "finish"
+// that same item id and spawn its output — even though the real item was by
+// then floating somewhere completely unrelated, not touching the building
+// at all — making it silently vanish from the world for no visible reason.
+// Per direct spec ("the building should reset any processing/held items
+// completely... the only thing preserved is the recipe when moving a
+// building"), a move now resets every in-progress field back to the exact
+// same fresh/idle shape placeTile itself would give a brand-new tile of
+// that type, carrying over ONLY the player's own chosen recipeId (there's
+// nothing to choose again if it already had one). A Fan/Collector's own
+// data (`{ type, angle }`) has no processing state to reset in the first
+// place, and a Turret's `ammo`/`cooldownMs` are already-banked resource
+// state, not a reference to any specific held item — both pass through
+// completely untouched.
+function resetBuildingProcessingState(type, data) {
+  if (!data) return null;
+  if (MANUFACTURER_TILES.has(type)) {
+    const recipe = MANUFACTURER_RECIPES[data.recipeId];
+    return {
+      type, recipeId: data.recipeId, pendingInputs: recipe ? [...recipe.inputs] : [],
+      processing: false, currentItemType: null, progressMs: 0, ghostFlashTimerMs: 0, heldItemId: null,
+    };
+  }
+  if (POWER_PLANT_TILES.has(type)) {
+    return { type, recipeId: data.recipeId, fueled: false, progressMs: 0 };
+  }
+  if (REFINERY_TILES.has(type)) {
+    return { type, lockedRecipe: null, progressMs: 0, heldItemId: null };
+  }
+  return data;
+}
+
 // The "pick up" half of right-click-to-move (main.js's movingBuilding) — per
 // direct request ("make it so that all other buildings can be right
 // clicked... it creates a ghost copy of the building on the cursor"). Clears
 // the tile and its buildingData entry with no refund and no sound (unlike
-// removeTile, a genuine demolish), and hands the caller back everything
-// needed to put it down again elsewhere unchanged. Returns null if there was
-// nothing there to pick up. Deliberately does NOT need to do anything special
-// to release an item the building was mid-processing/holding — per direct
-// request ("moving any building spits out the items being processed or
-// held, if any") — clearing the buildingData entry (and the tile's own type)
-// is already exactly what stepHeldItem/stepCollectorProcessing's own
-// defensive "the tile got torn down mid-hold" fallback checks for, so
-// whatever it was holding is handed back to normal physics automatically on
-// its very next tick, the same safety net a real demolish already relies on.
+// removeTile, a genuine demolish), resets any in-progress processing state
+// (see resetBuildingProcessingState above), and hands the caller back
+// everything needed to put it down again elsewhere. Returns null if there
+// was nothing there to pick up. Releasing an item the building was
+// mid-processing/holding back to normal physics needs no extra code here at
+// all — per direct request ("moving any building spits out the items being
+// processed or held, if any") — clearing the buildingData entry (and the
+// tile's own type) is already exactly what stepHeldItem/
+// stepCollectorProcessing's own defensive "the tile got torn down mid-hold"
+// fallback checks for, the same safety net a real demolish already relies on.
 export function pickUpBuildingForMove(state, col, row) {
   const type = getTile(state.level.grid, col, row);
   if (type === TILE_EMPTY) return null;
   const key = buildingKey(col, row);
-  const data = state.level.buildingData[key] || null;
+  const data = resetBuildingProcessingState(type, state.level.buildingData[key] || null);
   state.level.grid[row][col] = TILE_EMPTY;
   delete state.level.buildingData[key];
   return { type, data };
@@ -360,10 +398,12 @@ export function pickUpBuildingForMove(state, col, row) {
 
 // The "put down" half — places a previously-picked-up building back at a
 // (possibly new, possibly the exact same) location, completely free, with
-// its own saved buildingData carried over untouched (ammo, recipe, progress,
-// angle, etc.). Returns the same { ok, reason } shape canPlaceTile does, so
-// callers can show a real failure reason (handleBuildPlacementFailure)
-// without a placement actually happening.
+// whatever data pickUpBuildingForMove handed back (already stripped of any
+// in-progress processing state by resetBuildingProcessingState above — a
+// Fan/Collector's angle and a Turret's ammo/cooldown are real exceptions,
+// carried over exactly as-is). Returns the same { ok, reason } shape
+// canPlaceTile does, so callers can show a real failure reason
+// (handleBuildPlacementFailure) without a placement actually happening.
 export function putDownMovedBuilding(state, col, row, buildingId, data) {
   const check = canPlaceTile(state, col, row, buildingId, true);
   if (!check.ok) return check;

@@ -659,7 +659,15 @@ input.mouseDownHandlers.push((sx, sy) => {
   let bestDistSq = Infinity;
   for (const item of state.level.items) {
     if (!DRAGGABLE_ITEM_TYPES.includes(item.type)) continue;
-    if (item.heldByKey != null) continue; // already claimed as a building's input (mid-disintegrate) — can't be grabbed back out, see updateItemDrag's own comment
+    // Already claimed as a building's input (mid-disintegrate) — per direct
+    // report, can't be grabbed at all while that's happening, not even a
+    // Collector-held coin/Science Bubble (which tracks its own hold via
+    // item.collectorProgressMs, a completely different field from
+    // heldByKey — checking both via the same predicate the render loop
+    // already uses for the disintegrate effect itself is what makes this
+    // catch both mechanisms uniformly). The only way to get it back is to
+    // move the building holding it — see updateItemDrag's own comment.
+    if (getItemDisintegrateFraction(state, item) != null) continue;
     // Every draggable item type is grabbable wherever it exists, open water
     // or the city alike — per direct request ("there doesn't need to be any
     // objects that can only be dragged in certain spots anymore"), removing
@@ -708,20 +716,23 @@ function updateItemDrag() {
   const dragged = state.level.items.find((item) => item.id === draggedItemId && item.type === draggedItemType);
   // Real bug fixed: a Collector/Refinery/Manufacturer/Power Plant/Turret no
   // longer instantly splices an absorbed item out of state.level.items the
-  // way an older version did — it marks it item.heldByKey and eases it
-  // toward the tile's own center over its processing/disintegrate duration
-  // (Grid.js's stepHeldItem) instead, so it can still play its disintegrate
-  // animation in place. Since the item is STILL genuinely present in the
-  // array while held, the old `!dragged` check alone no longer caught this
-  // case — updateItemDrag kept right on snapping it back to the cursor every
-  // tick, fighting stepHeldItem's own easing and letting the player keep
-  // dragging an item around indefinitely even while it was mid-disintegrate
-  // inside a building. Per direct report ("make sure if a building takes an
-  // object as input, it stays in the building and isn't dragged around
-  // anymore"), releasing the drag the instant heldByKey is set (same as the
-  // already-gone case below) is what lets stepHeldItem's own pull actually
-  // take over.
-  if (!dragged || dragged.heldByKey != null) {
+  // way an older version did — it marks it as held (a Collector via
+  // item.collectorProgressMs, everything else via item.heldByKey) and eases
+  // it toward the tile's own center over its processing/disintegrate
+  // duration (Grid.js's stepCollectorProcessing/stepHeldItem) instead, so it
+  // can still play its disintegrate animation in place. Since the item is
+  // STILL genuinely present in the array while held, the old `!dragged`
+  // check alone didn't catch this case — updateItemDrag kept right on
+  // snapping it back to the cursor every tick, fighting the building's own
+  // easing and letting the player keep dragging an item around indefinitely
+  // even while it was mid-disintegrate. getItemDisintegrateFraction is the
+  // one shared predicate that already recognizes BOTH hold mechanisms (it's
+  // what the render loop uses to decide whether to draw the erosion effect
+  // at all) — releasing the drag the instant it stops returning null (same
+  // as the already-gone case below) is what lets the building's own pull
+  // actually take over, and the mousedown handler's own matching check is
+  // what stops the item being grabbed back out at all once it's claimed.
+  if (!dragged || getItemDisintegrateFraction(state, dragged) != null) {
     // Absorbed by a building's own intake scan (or otherwise removed)
     // mid-drag — the mouse button is still down at this point, so the real
     // mouseup/click that follows is still coming. Real bug fix, per direct
@@ -903,15 +914,25 @@ function isFanAimingActive() {
 // which threads the moved building's data through the exact same two-click
 // aiming flow a brand-new Fan placement already uses). A right-click while
 // a move is in progress cancels it, putting the building right back exactly
-// where it started with its own data (ammo, recipe, progress, angle, etc.)
-// completely untouched. Picking a building up naturally releases anything
-// it was mid-processing/holding too — per direct request ("moving any
-// building spits out the items being processed or held, if any") — with no
-// extra code needed: the moment its tile/buildingData entry is gone,
-// Grid.js's stepHeldItem/stepCollectorProcessing already detect that on
-// their own very next tick and hand the item back to normal physics, the
-// same defensive fallback that already covers a building being demolished
-// mid-hold.
+// where it started. Per direct spec, picking a building up resets any
+// in-progress processing state completely (Grid.js's
+// resetBuildingProcessingState) — the only thing carried over for a
+// Manufacturer/Power Plant is the player's own chosen recipe; a Fan/
+// Collector's angle and a Turret's ammo/cooldown, having nothing to do with
+// a specific held item, pass through untouched either way. Picking a
+// building up also naturally releases anything it was mid-processing/
+// holding back into the world — per direct request ("moving any building
+// spits out the items being processed or held, if any") — with no extra
+// code needed for THAT part: the moment its tile/buildingData entry is
+// gone, Grid.js's stepHeldItem/stepCollectorProcessing already detect that
+// on their own very next tick and hand the item back to normal physics
+// completely independently of the item, unaware the building even still
+// exists elsewhere now — the same defensive fallback that already covers a
+// building being demolished mid-hold — resetBuildingProcessingState above
+// is the real bug fix on top of it: without it, the building's own
+// progress/heldItemId kept pointing at that same, now-elsewhere item, which
+// could later cause it to vanish for no visible reason once that stale
+// timer ran out.
 let movingBuilding = null; // { fromCol, fromRow, buildingId, data } | null
 
 // Only non-null while the SECOND half of a moved Fan's own two-click aiming
