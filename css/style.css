@@ -871,6 +871,14 @@ html, body {
   box-shadow: 0 3px 8px rgba(107, 76, 107, 0.2), inset 0 2px 0 rgba(255, 255, 255, 0.55), inset 0 -3px 6px rgba(0, 0, 0, 0.12);
 }
 .tool-btn-build.selected { opacity: 1; }
+/* The real hand-drawn building-art canvas (UI.js's drawBuildingIconCanvas,
+   Grid.js's renderTileShape) that replaced the old flat emoji glyph inside
+   every shop building slot, per direct request. display:block avoids the
+   small inline-baseline gap a bare <canvas> would otherwise leave under
+   the button's own flex-centering; a touch of rounding softens its square
+   corners to sit a little more naturally inside the button's own 16px
+   radius without clipping the art itself. */
+.tool-btn-building-icon { display: block; border-radius: 6px; pointer-events: none; }
 .building-icon-price {
   position: absolute; bottom: -8px; left: 50%;
   transform: translateX(-50%);
@@ -1753,6 +1761,13 @@ html, body {
   box-shadow: 0 3px 8px rgba(53, 145, 97, 0.3), inset 0 2px 0 rgba(255, 255, 255, 0.5);
 }
 .lab-node-name { font-size: calc(13px * var(--lab-zoom, 1)); font-weight: 800; color: #6b4c6b; }
+/* The real building-art canvas (UI.js's drawBuildingIconCanvas) that
+   replaces a building-granting node's flat emoji, per direct request —
+   sits inline just before the node's own name text. Doesn't scale with the
+   tree's own --lab-zoom the way the text beside it does (a canvas's pixel
+   dimensions are plain JS attributes, not CSS) — a minor, acceptable
+   trade-off rather than re-rendering it on every zoom step. */
+.lab-node-building-icon { display: inline-block; vertical-align: middle; margin-right: 4px; border-radius: 4px; }
 .lab-node.purchased .lab-node-name { color: #1f4a34; }
 .lab-node-cost { font-size: calc(11px * var(--lab-zoom, 1)); font-weight: 700; opacity: 0.75; margin-top: 3px; }
 

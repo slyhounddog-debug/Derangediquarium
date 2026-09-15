@@ -2335,7 +2335,14 @@ function renderBrickPattern(ctx, x, y, size, color) {
 // dots, the machine-active pulse, the power-shortage overlay, and the
 // Catalyst glow are all separate render passes (see the per-tile render
 // loop above) and are completely untouched by this dispatch.
-function renderTileShape(ctx, type, color, x, y, size, data) {
+//
+// Exported (not just used internally) because it's a pure function of its
+// own arguments — no `state` needed anywhere in it or anything it calls —
+// so UI.js also calls it directly to draw a real, tiny preview of a
+// building's actual look wherever the shop/Lab used to show a flat emoji
+// instead (per direct request), with `data` simply omitted there (only
+// Turret's own aim-arm angle reads it, defaulting to straight up).
+export function renderTileShape(ctx, type, color, x, y, size, data) {
   if (type === TILE_PLATFORM) {
     renderBrickPattern(ctx, x, y, size, color);
     return;

@@ -103,7 +103,7 @@ import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop
 import { loadLevel, LEVELS } from './Levels.js';
 import { updateStoryTriggers } from './Systems.js';
 import { updateAmbience, renderAmbience } from './Ambience.js';
-import { resumeAudio, playAlienHit, setBattleMusicActive, triggerBossMusic } from './Sound.js';
+import { resumeAudio, startGameMusic, playAlienHit, setBattleMusicActive, triggerBossMusic } from './Sound.js';
 import {
   updateEntities,
   trySpawnFood,
@@ -1503,6 +1503,7 @@ initUI(state);
 // direct request now waits for this instead.
 initStartScreen(state, () => {
   state.ui.gameStarted = true;
+  startGameMusic(); // per direct request — only Start/Continue (both funnel through this one callback) should ever start the music, not Settings/Help
   triggerSplash();
   scheduleShopButtonReminder(state); // per direct request — bounces the shop toggle until it's opened for the first time
   // Game-start guided tutorial (Shop -> Guppy -> buy your first fish) no

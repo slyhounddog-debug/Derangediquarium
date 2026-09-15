@@ -112,11 +112,30 @@ export function setSfxVolume(v) {
 export function getMusicVolume() { return musicVolume; }
 export function getSfxVolume() { return sfxVolume; }
 
-// Called from main.js on the very first pointerdown/keydown — browsers
-// refuse to run an AudioContext (or play an <audio> element routed through
-// one) until a real user gesture, and this is also what starts the Game and
-// Battle tracks playing for the first time (see startMusic below).
+// Called from main.js on the very first pointerdown/keydown anywhere on the
+// page — browsers refuse to run an AudioContext at all until a real user
+// gesture, so this exists purely to unlock it early (a silent no-op if
+// nothing's scheduled to play yet). Per direct request, this deliberately
+// does NOT start the Game/Battle music itself any more — clicking Settings
+// or Help on the start screen used to count as "the first gesture" and
+// start the music before the player had even pressed Start. Starting the
+// actual music is startGameMusic's own job now, called only from the real
+// Start/Continue buttons (see main.js's initStartScreen callback).
 export function resumeAudio() {
+  const audioCtx = ensureContext();
+  if (!audioCtx) return;
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+}
+
+// Called specifically when the player presses Start or Continue on the
+// start screen — the one and only thing that should ever start the Game/
+// Battle music loop. Still resumes the context itself too (harmless if
+// resumeAudio already did, and covers the case where THIS is the very
+// first gesture the page has seen at all, since a button click is a real
+// user gesture in its own right). musicStarted guards startMusic() itself
+// so a repeat call (Continue after an earlier Start, however that'd happen)
+// is a safe no-op.
+export function startGameMusic() {
   const audioCtx = ensureContext();
   if (!audioCtx) return;
   if (audioCtx.state === 'suspended') audioCtx.resume();
@@ -171,7 +190,7 @@ function playNoise(duration, { gain = 0.15, when = 0, destination = null } = {})
 }
 
 // ---- SFX ----
-// A cheerful two-note ascending blip — fish and building purchases alike.
+// A cheerful two-note ascending blip — buying a fish.
 export function playPurchase() {
   playTone(523.25, 0.08, { type: 'square', gain: 0.16 }); // C5
   playTone(783.99, 0.1, { type: 'square', gain: 0.16, when: 0.07 }); // G5
@@ -231,10 +250,18 @@ export function playCoinBank() {
   playTone(1318.5, 0.14, { type: 'square', gain: 0.15, when: 0.05 }); // E6
 }
 
-// A solid low "thunk" — placing a building.
+// A solid ascending "thunk" — placing a building. Reworked per direct
+// report ("sounds negative... change it to sound like a good thing instead
+// of a bad thing happened") — the original version descended in pitch (G3
+// then D3), which read as deflating, the opposite of the intended "purchase
+// confirmed" feel. Keeps the same low, chunky square-wave mechanical
+// character (still distinct from playPurchase's own brighter, higher fish
+// blip) but climbs up a fourth instead of dropping a fifth — the same
+// "rising pitch reads as a good outcome" language playPurchase/playUpgrade
+// already use elsewhere in this file.
 export function playBuildPlace() {
-  playTone(196, 0.09, { type: 'square', gain: 0.14 }); // G3
-  playTone(147, 0.1, { type: 'square', gain: 0.1, when: 0.05 }); // D3
+  playTone(196, 0.08, { type: 'square', gain: 0.13 }); // G3
+  playTone(261.63, 0.12, { type: 'square', gain: 0.15, when: 0.06 }); // C4
 }
 
 // A short crunch — demolishing a building.

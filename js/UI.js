@@ -68,7 +68,7 @@ import {
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings, loadLevel } from './Levels.js';
 import { getFishPurchaseCost, effectiveCoinCapacity, effectiveScienceCapacity, countTankItemsByType, hasAnyMergeOpportunity, resolveMergeTutorialPair, computeTheoreticalGoldPerMinute } from './Entities.js';
-import { getTile, worldToTile, getBuildingCost, FAN_STATS, hasAnyBuildingPlaced, findNearestWasteTurretAndWaste, getRecipeBuildingKeyAt } from './Grid.js';
+import { getTile, worldToTile, getBuildingCost, FAN_STATS, hasAnyBuildingPlaced, findNearestWasteTurretAndWaste, getRecipeBuildingKeyAt, renderTileShape } from './Grid.js';
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
@@ -1203,7 +1203,23 @@ function buildLabTree(state) {
     btn.dataset.nodeId = node.id;
     const nameEl = document.createElement('div');
     nameEl.className = 'lab-node-name';
-    nameEl.textContent = `${node.icon} ${node.name}`;
+    // A building-granting node gets a small real rendering of that
+    // building's actual look, built once here (never recreated —
+    // refreshLabTree below only ever touches nameTextEl's own text content,
+    // since it runs every frame the Lab is open and redrawing a canvas that
+    // often would be pure waste). Anything else keeps its plain emoji.
+    const grantedBuildingId = node.grants && node.grants.buildings && node.grants.buildings[0];
+    let iconCanvas = null;
+    if (grantedBuildingId) {
+      iconCanvas = document.createElement('canvas');
+      iconCanvas.className = 'lab-node-building-icon';
+      iconCanvas.width = LAB_NODE_ICON_CANVAS_SIZE;
+      iconCanvas.height = LAB_NODE_ICON_CANVAS_SIZE;
+      drawBuildingIconCanvas(iconCanvas, grantedBuildingId);
+      nameEl.appendChild(iconCanvas);
+    }
+    const nameTextEl = document.createElement('span');
+    nameEl.appendChild(nameTextEl);
     const costEl = document.createElement('div');
     costEl.className = 'lab-node-cost';
     btn.append(nameEl, costEl);
@@ -1218,7 +1234,7 @@ function buildLabTree(state) {
     // relationship reads at a glance without opening the purchase modal.
     btn.addEventListener('mouseenter', () => { labHoveredNodeId = node.id; });
     btn.addEventListener('mouseleave', () => { labHoveredNodeId = null; });
-    labNodeButtons[node.id] = { btn, nameEl, costEl };
+    labNodeButtons[node.id] = { btn, nameEl, nameTextEl, iconCanvas, costEl };
     columns[labNodeDepthMemo[node.id]].appendChild(btn);
   }
   refreshLabTree(state);
@@ -1325,7 +1341,10 @@ function openLabPurchaseModal(state, id) {
     playPanelOpen();
     return;
   }
-  els.labPurchaseIcon.textContent = node.icon;
+  // Per direct request, a node granting a building shows a small real
+  // rendering of that building's actual look instead of its flat emoji.
+  els.labPurchaseIcon.textContent = '';
+  els.labPurchaseIcon.appendChild(buildingIconOrEmojiElement(node, LAB_PURCHASE_ICON_CANVAS_SIZE));
   els.labPurchaseName.textContent = node.name;
   els.labPurchaseCost.textContent = labNodeCostText(node);
   refreshLabPurchaseButton(state);
@@ -1532,7 +1551,7 @@ function refreshLabTree(state) {
   // once, see labNodeHasEnoughScience's own comment.
   els.labScienceReadout.textContent = `🔬 ${state.level.science} · 🟢 ${state.level.scienceGreen} · 💰 $${Math.floor(state.level.money)}`;
   for (const node of SCIENCE_LAB_UPGRADE_LIST) {
-    const { btn, nameEl, costEl } = labNodeButtons[node.id];
+    const { btn, nameTextEl, iconCanvas, costEl } = labNodeButtons[node.id];
     const purchased = state.meta.labUpgradesPurchased.includes(node.id);
     const prereqsMet = node.requires.every((r) => state.meta.labUpgradesPurchased.includes(r));
     const affordable = labNodeHasEnoughScience(state, node) && state.level.money >= node.goldCost;
@@ -1554,7 +1573,8 @@ function refreshLabTree(state) {
     // purchase modal — reads live every frame, same as everything else here,
     // so it reveals itself the instant the last prerequisite is bought.
     const isHiddenMystery = node.mystery && !prereqsMet;
-    nameEl.textContent = isHiddenMystery ? '❓ ???' : `${node.icon} ${node.name}`;
+    if (iconCanvas) iconCanvas.style.display = isHiddenMystery ? 'none' : '';
+    nameTextEl.textContent = isHiddenMystery ? '❓ ???' : (iconCanvas ? node.name : `${node.icon} ${node.name}`);
     if (purchased) costEl.textContent = 'Unlocked ✓';
     else if (isHiddenMystery) costEl.textContent = '???';
     else if (!prereqsMet) costEl.textContent = 'Locked';
@@ -1961,6 +1981,43 @@ let familyButtons = {};
 // slot — same live-refresh purpose as speciesPriceTags below.
 let buildingPriceTags = {};
 
+// A small canvas rendering of a building's REAL hand-drawn look (Grid.js's
+// renderTileShape — the exact same per-family art a placed tile renders
+// with), per direct request ("make all the icons for the buildings in the
+// shop, shop window, and science lab match the actual look of a placed
+// building, instead of emojis"). Shared by every shop/Lab icon slot below —
+// a plain, static draw (no animation needed, unlike the fish preview),
+// re-run only when the icon actually needs to change (a tier cycle, or
+// once at creation for anything that never changes tier).
+const BUILDING_ICON_CANVAS_SIZE = 46;
+const LAB_NODE_ICON_CANVAS_SIZE = 20;
+const LAB_PURCHASE_ICON_CANVAS_SIZE = 34;
+function drawBuildingIconCanvas(canvas, buildingId) {
+  const ctx = canvas.getContext('2d');
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  renderTileShape(ctx, buildingId, BUILDING_TYPES[buildingId].color, 0, 0, canvas.width);
+}
+
+// Shared by the Lab tree's own node icon and its purchase modal — a node
+// granting a building shows a small real rendering of that building's
+// actual look (drawBuildingIconCanvas) instead of its flat emoji; anything
+// else (a species/tech/pure-prerequisite node) keeps its own emoji exactly
+// as before. A node's own `icon` field is left completely untouched either
+// way — this only changes what gets DRAWN from it.
+function buildingIconOrEmojiElement(node, size) {
+  const buildingId = node.grants && node.grants.buildings && node.grants.buildings[0];
+  if (!buildingId) {
+    const span = document.createElement('span');
+    span.textContent = node.icon;
+    return span;
+  }
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  drawBuildingIconCanvas(canvas, buildingId);
+  return canvas;
+}
+
 // Syncs one family slot's icon/title/price/dataset.tool/dots to whichever
 // tier familySelectedTier currently has it on. Called both right after a
 // click (select or cycle) and every frame the shop is open (so its price
@@ -1973,7 +2030,7 @@ function refreshFamilyButton(state, familyId) {
   f.btn.title = building.name;
   f.btn.dataset.tool = `build:${currentId}`;
   f.btn.style.setProperty('--tile-color', building.color);
-  f.iconSpan.textContent = building.icon;
+  drawBuildingIconCanvas(f.iconCanvas, currentId);
   f.priceTag.textContent = `$${getBuildingCost(state, currentId)}`;
   f.dotsWrap.innerHTML = '';
   for (const id of f.memberIds) {
@@ -1989,12 +2046,15 @@ function buildFamilyButton(state, familyId, memberIds) {
   const dotsWrap = document.createElement('div');
   dotsWrap.className = 'tool-btn-family-dots';
   btn.appendChild(dotsWrap);
-  const iconSpan = document.createElement('span');
-  btn.appendChild(iconSpan);
+  const iconCanvas = document.createElement('canvas');
+  iconCanvas.className = 'tool-btn-building-icon';
+  iconCanvas.width = BUILDING_ICON_CANVAS_SIZE;
+  iconCanvas.height = BUILDING_ICON_CANVAS_SIZE;
+  btn.appendChild(iconCanvas);
   const priceTag = document.createElement('span');
   priceTag.className = 'building-icon-price';
   btn.appendChild(priceTag);
-  familyButtons[familyId] = { btn, iconSpan, priceTag, dotsWrap, memberIds };
+  familyButtons[familyId] = { btn, iconCanvas, priceTag, dotsWrap, memberIds };
 
   btn.addEventListener('click', () => {
     const currentId = familySelectedTier[familyId];
@@ -2032,7 +2092,12 @@ function buildSingleBuildingButton(state, building) {
   const btn = document.createElement('button');
   btn.className = 'tool-btn tool-btn-build sheen-target';
   btn.title = building.name;
-  btn.textContent = building.icon;
+  const iconCanvas = document.createElement('canvas');
+  iconCanvas.className = 'tool-btn-building-icon';
+  iconCanvas.width = BUILDING_ICON_CANVAS_SIZE;
+  iconCanvas.height = BUILDING_ICON_CANVAS_SIZE;
+  btn.appendChild(iconCanvas);
+  drawBuildingIconCanvas(iconCanvas, building.id); // single-tier — never needs a refresh, drawn once here
   btn.dataset.tool = `build:${building.id}`;
   btn.style.setProperty('--tile-color', building.color);
   const priceTag = document.createElement('span');
@@ -2774,18 +2839,18 @@ function renderPreviewCanvas() {
     const eyeDirection = { x: previewFacing, y: 0 }; // looks ahead in whichever direction it's "swimming"
     drawFish(ctx, c, c, def.id, adultStage, previewFacing, previewTailPhase, eyeDirection);
   } else if (currentPreviewBuilding) {
-    // A static tile swatch (no idle animation) — matches the canvas's own
-    // circular crop rather than a mismatched square peeking out past it.
-    ctx.fillStyle = currentPreviewBuilding.color;
+    // The real hand-drawn per-family building art (Grid.js's
+    // renderTileShape — the exact same shape a placed tile renders with),
+    // clipped to the canvas's own circular crop, instead of a flat color
+    // swatch plus emoji — per direct request ("make all the icons for the
+    // buildings... match the actual look of a placed building, instead of
+    // emojis"). Static (no idle animation), same as the swatch it replaces.
+    ctx.save();
     ctx.beginPath();
     ctx.arc(c, c, c, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.font = `${Math.round(SHOP_PREVIEW_CANVAS_SIZE * 0.5)}px sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillText(currentPreviewBuilding.icon, c, c + 1);
-    ctx.textAlign = 'start';
-    ctx.textBaseline = 'alphabetic';
+    ctx.clip();
+    renderTileShape(ctx, currentPreviewBuilding.id, currentPreviewBuilding.color, 0, 0, SHOP_PREVIEW_CANVAS_SIZE);
+    ctx.restore();
   }
 }
 
