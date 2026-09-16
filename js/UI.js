@@ -77,7 +77,11 @@ import {
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings, loadLevel } from './Levels.js';
 import { getFishPurchaseCost, effectiveCoinCapacity, effectiveScienceCapacity, countTankItemsByType, hasAnyMergeOpportunity, resolveMergeTutorialPair, computeTheoreticalGoldPerMinute } from './Entities.js';
-import { getTile, worldToTile, getBuildingCost, FAN_STATS, hasAnyBuildingPlaced, findNearestWasteTurretAndWaste, getRecipeBuildingKeyAt, renderTileShape } from './Grid.js';
+import {
+  getTile, worldToTile, getBuildingCost, FAN_STATS, hasAnyBuildingPlaced,
+  findNearestWasteTurretAndWaste, getRecipeBuildingKeyAt, renderTileShape,
+  getBuildingCurrentPowerDraw, getBuildingUptimeFraction,
+} from './Grid.js';
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
@@ -121,6 +125,7 @@ let labMenuOpen = false;
 let labMenuClosing = false;
 let labMenuCloseTimer = null;
 let labZoom = 1; // current --lab-zoom scale factor — see openLabMenu/setLabZoom
+let labFilterCategory = 'all'; // 'all' | 'buildings' | 'recipes' | 'fish' | 'other' — see labNodeCategory/applyLabFilter
 // Per direct request, the Lab remembers exactly where you left it —
 // labTreeHasBeenOpened gates the one-time-only initial centering (see
 // openLabMenu), and the saved* trio is written by closeLabMenu and restored
@@ -296,6 +301,7 @@ export function initUI(state) {
     hotkeyLegendE: document.getElementById('hotkey-legend-e'),
     hotkeyLegendQ: document.getElementById('hotkey-legend-q'),
     hotkeyLegendEsc: document.getElementById('hotkey-legend-esc'),
+    hotkeyLegendUndo: document.getElementById('hotkey-legend-undo'),
     tutorialOverlay: document.getElementById('tutorial-overlay'),
     tutorialText: document.getElementById('tutorial-text'),
     powerGraphCanvas: document.getElementById('hud-power-graph-canvas'),
@@ -313,6 +319,7 @@ export function initUI(state) {
     toolFoodBtn: document.getElementById('tool-food-btn'),
     toolDemolishBtn: document.getElementById('tool-demolish-btn'),
     toolMergeBtn: document.getElementById('tool-merge-btn'),
+    toolBlueprintBtn: document.getElementById('tool-blueprint-btn'),
     buildToolGrid: document.getElementById('build-tool-grid'),
     pauseOverlay: document.getElementById('pause-overlay'),
     pauseMenu: document.getElementById('pause-menu'),
@@ -348,9 +355,11 @@ export function initUI(state) {
     buildingInfoName: document.getElementById('building-info-name'),
     buildingInfoDesc: document.getElementById('building-info-desc'),
     buildingInfoStats: document.getElementById('building-info-stats'),
+    buildingInfoLiveStats: document.getElementById('building-info-live-stats'),
     labOverlay: document.getElementById('lab-overlay'),
     labModal: document.getElementById('lab-modal'),
     labScienceReadout: document.getElementById('lab-science-readout'),
+    labFilterButtons: document.querySelectorAll('.lab-filter-btn'),
     labZoomInBtn: document.getElementById('lab-zoom-in-btn'),
     labZoomOutBtn: document.getElementById('lab-zoom-out-btn'),
     labCloseBtn: document.getElementById('lab-close-btn'),
@@ -425,6 +434,17 @@ export function initUI(state) {
   els.labZoomInBtn.addEventListener('click', () => setLabZoom(state, labZoom + LAB_ZOOM_STEP));
   els.labZoomOutBtn.addEventListener('click', () => setLabZoom(state, labZoom - LAB_ZOOM_STEP));
 
+  // Filter buttons (No Filter/Buildings/Recipes/Fish/Other) — per direct
+  // request, darkens every node NOT matching the chosen category. See
+  // labNodeCategory/applyLabFilter below.
+  els.labFilterButtons.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      labFilterCategory = btn.dataset.filter;
+      els.labFilterButtons.forEach((b) => b.classList.toggle('selected', b === btn));
+      applyLabFilter();
+    });
+  });
+
   // Purchase confirmation modal, per direct request — clicking a lab node no
   // longer spends anything directly (see buildLabTree below), it opens this
   // instead; Confirm is the only path left that actually calls
@@ -472,6 +492,12 @@ export function initUI(state) {
     selectTool(state, 'merge');
     advanceTutorialFlow(state, 'mergefish', 'switch');
   });
+  // Blueprint ("Stamp") — the 4th bottom-tool-bar tool, per direct request:
+  // click-and-drag a box over a built area to copy it, then click again to
+  // paste that whole layout elsewhere. All the actual drag-select/paste
+  // mechanics live in main.js (mouse handlers, module-local clipboard state)
+  // — this button just arms the tool, same as every other one here.
+  els.toolBlueprintBtn.addEventListener('click', () => selectTool(state, 'blueprint'));
 
   els.shopCollapseBtn.addEventListener('click', () => {
     toggleShopCollapse(state);
@@ -818,6 +844,33 @@ function refreshBuildingInfoMenu(state) {
   els.buildingInfoName.textContent = def.name;
   els.buildingInfoDesc.textContent = def.description;
   els.buildingInfoStats.innerHTML = buildingStatsHtml(type);
+  refreshBuildingInfoLiveStats(state);
+}
+
+// Live power draw + rolling 3-minute uptime — per direct request
+// ("efficiency/energy readout on click on building... for players
+// optimizing layouts"). Unlike the rest of this pop-up's content (built
+// once on open — see refreshBuildingInfoMenu's own comment), these two
+// numbers change continuously while the tile is open, so they're refreshed
+// every frame from updateHUD instead, mirroring the recipe menu's own
+// "lighter per-frame check" pattern rather than rebuilding the whole popup.
+function refreshBuildingInfoLiveStats(state) {
+  if (!buildingInfoTileKey) return;
+  const data = state.level.buildingData[buildingInfoTileKey];
+  if (!data) { els.buildingInfoLiveStats.innerHTML = ''; return; }
+  const [row, col] = buildingInfoTileKey.split(',').map(Number);
+  const centerX = col * TILE_SIZE + TILE_SIZE / 2;
+  const centerY = row * TILE_SIZE + TILE_SIZE / 2;
+  const draw = getBuildingCurrentPowerDraw(state, data.type, data, centerX, centerY);
+  const uptimeFraction = getBuildingUptimeFraction(data);
+  let powerLine;
+  if (draw < 0) powerLine = `⚡ Generating <b>${-draw}mw</b>`;
+  else if (draw > 0) powerLine = `⚡ Consuming <b>${draw}mw</b>`;
+  else powerLine = `⚡ <b>Idle</b> (0mw)`;
+  const uptimeLine = uptimeFraction === null
+    ? '⏱️ Uptime: <b>warming up...</b>'
+    : `⏱️ Uptime (3 min): <b>${Math.round(uptimeFraction * 100)}%</b>`;
+  els.buildingInfoLiveStats.innerHTML = `<div class="building-stat">${powerLine}</div><div class="building-stat">${uptimeLine}</div>`;
 }
 
 // Tracks the clicked tile's live on-screen position so the popup stays
@@ -1210,6 +1263,7 @@ function buildLabTree(state) {
     const btn = document.createElement('button');
     btn.className = 'lab-node sheen-target';
     btn.dataset.nodeId = node.id;
+    btn.dataset.category = labNodeCategory(node); // see applyLabFilter — the No Filter/Buildings/Recipes/Fish/Other buttons
     const nameEl = document.createElement('div');
     nameEl.className = 'lab-node-name';
     // A node granting a building/species, or one that's really a
@@ -1246,6 +1300,7 @@ function buildLabTree(state) {
     labNodeButtons[node.id] = { btn, nameEl, nameTextEl, iconCanvas, costEl };
     columns[labNodeDepthMemo[node.id]].appendChild(btn);
   }
+  applyLabFilter();
   refreshLabTree(state);
 }
 
@@ -1930,7 +1985,7 @@ export function cancelActiveTool(state) {
   const tool = state.ui.selectedTool;
   if (tool.startsWith('build:') || tool.startsWith('fish:')) {
     deselectShopSelection(state);
-  } else if (tool === 'demolish' || tool === 'merge') {
+  } else if (tool === 'demolish' || tool === 'merge' || tool === 'blueprint') {
     state.ui.selectedTool = 'food';
     updateToolbar(state);
   }
@@ -1961,9 +2016,11 @@ function updateToolbar(state) {
   const foodSelected = state.ui.selectedTool === 'food';
   const demolishSelected = state.ui.selectedTool === 'demolish';
   const mergeSelected = state.ui.selectedTool === 'merge';
+  const blueprintSelected = state.ui.selectedTool === 'blueprint';
   els.toolFoodBtn.classList.toggle('selected', foodSelected);
   els.toolDemolishBtn.classList.toggle('selected', demolishSelected);
   els.toolMergeBtn.classList.toggle('selected', mergeSelected);
+  els.toolBlueprintBtn.classList.toggle('selected', blueprintSelected);
 
   // Descriptive text lives on each button's own native `title` hover
   // tooltip now, not a separate always-visible shop line — per direct
@@ -2123,6 +2180,30 @@ function itemTypeForRecipeNode(nodeId) {
   const ppRecipe = POWER_PLANT_RECIPE_LIST.find((r) => r.labNodeId === nodeId);
   if (ppRecipe) return ppRecipe.inputs[0];
   return null;
+}
+
+// One of 'buildings' | 'recipes' | 'fish' | 'other' — per direct request
+// ("filter icon buttons... No filter, Buildings, Recipes, Fish, Other").
+// Reuses the exact same grants/itemTypeForRecipeNode checks
+// buildingIconOrEmojiElement already resolves each node's real icon with,
+// so the filter categories can never disagree with what a node's own icon
+// actually shows.
+function labNodeCategory(node) {
+  if (node.grants && node.grants.buildings && node.grants.buildings.length) return 'buildings';
+  if (node.grants && node.grants.species && node.grants.species.length) return 'fish';
+  if (itemTypeForRecipeNode(node.id)) return 'recipes';
+  return 'other'; // Turret Fire Rate, every Bubble Cap step, Fish Scaling, the end-game mystery node — nothing placeable/ownable to categorize as
+}
+
+// Dims every node not matching labFilterCategory ('all' shows everything) —
+// called on a filter click and once after buildLabTree rebuilds the node
+// buttons.
+function applyLabFilter() {
+  for (const id in labNodeButtons) {
+    const { btn } = labNodeButtons[id];
+    const matches = labFilterCategory === 'all' || btn.dataset.category === labFilterCategory;
+    btn.classList.toggle('lab-node-dimmed', !matches);
+  }
 }
 
 // Shared by the Lab tree's own node icon and its purchase modal — per
@@ -2785,6 +2866,7 @@ export function deselectShopSelection(state) {
 function selectSpeciesForPreview(state, species) {
   state.debug.selectedSpecies = species.id; // keeps the G debug key in sync with what's being previewed
   state.ui.selectedTool = `fish:${species.id}`;
+  state.ui.lastArmedTool = state.ui.selectedTool; // Q hotkey's "reselect last building/fish" fallback — see main.js's KeyQ handler
   currentPreviewSpecies = species;
   currentPreviewBuilding = null;
   els.previewEmpty.classList.add('hidden');
@@ -2841,6 +2923,7 @@ function selectBuildingForPreview(state, building) {
   refreshPreviewInfo(state);
   renderPreviewCanvas();
   state.ui.selectedTool = `build:${building.id}`;
+  state.ui.lastArmedTool = state.ui.selectedTool; // Q hotkey's "reselect last building/fish" fallback — see main.js's KeyQ handler
   updateToolbar(state);
 }
 
@@ -3371,6 +3454,8 @@ export function updateHUD(state) {
   // the popup if the underlying tile gets demolished out from under it.
   if (recipeMenuOpen && !state.level.buildingData[recipeMenuTileKey]) closeRecipeMenu();
   if (recipeMenuOpen || recipeMenuClosing) updateRecipeMenuPosition(state);
+  if (buildingInfoMenuOpen && !state.level.buildingData[buildingInfoTileKey]) closeBuildingInfoMenu(); // the tile it's showing got demolished (or moved) out from under it
+  if (buildingInfoMenuOpen) refreshBuildingInfoLiveStats(state);
   if (buildingInfoMenuOpen || buildingInfoMenuClosing) updateBuildingInfoMenuPosition(state);
   if (labMenuOpen) refreshLabTree(state); // no position-tracking needed any more — it's a centered modal now, not anchored to the Mound's screen position
   if (!state.ui.tankPanelCollapsed) refreshTankPanelView(state);
@@ -3451,7 +3536,17 @@ export function updateHUD(state) {
   // never changes selectedTool away from 'food', so without this the hint
   // would wrongly read "Pause Game" while Escape would actually cancel it.
   els.hotkeyLegendE.textContent = `E: ${state.ui.shopCollapsed ? 'Open Shop' : 'Close Shop'}`;
-  els.hotkeyLegendQ.textContent = `Q: ${toolIsPurchasable ? 'Clear Cursor' : 'Pipette Tool'}`;
+  // Q always tries the Pipette first (whatever's directly under the cursor)
+  // now, regardless of whether a tool's already armed — per direct request,
+  // it no longer just clears the cursor when hovering nothing; it reselects
+  // whichever building/fish was last armed instead (see main.js's KeyQ
+  // handler and state.ui.lastArmedTool).
+  els.hotkeyLegendQ.textContent = 'Q: Pipette Tool';
+  // Ctrl+Z — shown only while there's actually something to undo (main.js
+  // writes state.ui.undoAvailable/undoLabel every time its own undo stack
+  // changes — see that file's pushUndoEntry/performUndo).
+  els.hotkeyLegendUndo.classList.toggle('hidden', !state.ui.undoAvailable);
+  if (state.ui.undoAvailable) els.hotkeyLegendUndo.textContent = `Ctrl+Z: ${state.ui.undoLabel}`;
   const escHasSomethingToClear = !tutorialActive && (
     isMoundMenuOpen() || isRecipeMenuOpen() || isBuildingInfoMenuOpen() ||
     isLabPurchaseModalOpen() || isLabMenuOpen() ||

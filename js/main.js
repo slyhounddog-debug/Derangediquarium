@@ -151,6 +151,9 @@ import {
   pickUpBuildingForMove,
   putDownMovedBuilding,
   renderMoveGhost,
+  captureBlueprint,
+  renderBlueprintGhost,
+  placeBlueprint,
 } from './Grid.js';
 import { isPointOnMound, crackMound, renderMound, centerCameraOnMound, isPointOnScienceLab, renderScienceLab } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
@@ -354,6 +357,9 @@ const state = {
   camera: { x: 0, y: 0, zoom: 1, viewWidth: 0, viewHeight: 0 },
   ui: {
     selectedTool: 'food', // which click-tool a canvas click performs; only 'food' exists until Phase 2 adds tile placement
+    lastArmedTool: null, // the last 'build:<id>'/'fish:<id>' tool armed (UI.js's selectSpeciesForPreview/selectBuildingForPreview) — the Q hotkey's "reselect last building/fish" fallback, see main.js's KeyQ handler
+    undoAvailable: false, // whether main.js's Ctrl+Z undo stack currently has anything to undo — written by pushUndoEntry/performUndo, read by UI.js's bottom-left hotkey legend
+    undoLabel: null, // 'Undo Place' | 'Undo Move' | 'Undo Sell' | null — what Ctrl+Z would currently do, shown in that same legend line
     shopCollapsed: true, // shop starts tucked away — just the toggle button — so it doesn't clutter the view
     tankPanelCollapsed: true, // Tank Upgrades panel starts tucked away too — shares the shop's on-screen slot, only one is ever expanded (see UI.js's toggleShopCollapse/toggleTankPanel)
     tankPanelView: 'upgrades', // 'upgrades' | 'achievements' | 'customization' — which of the 3 views the Tank panel currently shows, see UI.js's setTankPanelView. Persists across a collapse/expand (only Escape/tool-select closes the panel, never resets which tab was showing)
@@ -871,6 +877,44 @@ function updateRecipeDrag() {
   recipeDragHoverKey = hoverData && hoverData.type === recipeDragType && hoverKey !== recipeDragSourceKey ? hoverKey : null;
 }
 
+// Blueprint tool ("Stamp") — a 4th persistent bottom-tool-bar tool (hotkey
+// 4), per direct request: click-and-drag a box over a built area to copy
+// every building inside it, then click again to paste that whole layout
+// somewhere else. Two module-local phases, mirroring the shape of the
+// recipe-drag mechanic just above: while `blueprintClipboard` is null, a
+// mousedown-drag-mouseup gesture draws a selection box and captures it
+// (Grid.js's captureBlueprint); once it's non-null, the whole stamp follows
+// the cursor as a tinted multi-cell ghost (render()'s own draw call below)
+// until a plain click commits it (Grid.js's placeBlueprint) or a right-
+// click/Escape cancels it back to an empty clipboard, ready to draw a new
+// box — the tool itself stays selected either way.
+let blueprintDragStartCol = null; // tile col of the drag-select box's first corner, or null while not drag-selecting
+let blueprintDragStartRow = null;
+let blueprintClipboard = null; // captured cells (see Grid.js's captureBlueprint) | null — non-null means "armed, ready to paste"
+let blueprintJustCaptured = false; // suppresses the native click that follows the same mouseup a capture just consumed
+
+input.mouseDownHandlers.push((sx, sy) => {
+  if (state.ui.paused || state.ui.selectedTool !== 'blueprint' || blueprintClipboard != null) return;
+  const world = screenToWorld(sx, sy, state.camera);
+  if (world.y < SEABED_FLOOR_Y) return; // nothing to select above the seabed
+  const { col, row } = worldToTile(world.x, world.y);
+  blueprintDragStartCol = col;
+  blueprintDragStartRow = row;
+});
+
+input.mouseUpHandlers.push((sx, sy) => {
+  if (blueprintDragStartCol == null) return;
+  const world = screenToWorld(sx, sy, state.camera);
+  const { col, row } = worldToTile(world.x, world.y);
+  const cells = captureBlueprint(state, blueprintDragStartCol, blueprintDragStartRow, col, row);
+  blueprintDragStartCol = null;
+  blueprintDragStartRow = null;
+  if (cells.length > 0) {
+    blueprintClipboard = cells;
+    blueprintJustCaptured = true; // the native click that follows this same mouseup shouldn't also try to paste at the release point
+  }
+});
+
 // Fan placement is a two-click flow, not a single click: click 1 arms
 // aiming at a valid cell (the tile isn't placed yet), then the ghost
 // rotates live with the cursor from that cell's fixed position until click
@@ -933,6 +977,71 @@ function isFanAimingActive() {
 // progress/heldItemId kept pointing at that same, now-elsewhere item, which
 // could later cause it to vanish for no visible reason once that stale
 // timer ran out.
+// Ctrl+Z undo (place/move/sell) — per direct request ("cheap insurance
+// against misclicks"). Module-local, not part of `state` — undo history
+// doesn't need to survive a save/load round-trip, same precedent
+// draggedItemId/recipeDragSourceKey etc. already follow. A 'demolish'
+// entry's own snapshot is deep-cloned via a JSON round-trip (safe, since
+// buildingData is already required to be JSON-serializable — see
+// CLAUDE.md's State Shape rules) so a later live mutation of the real
+// tile can't retroactively corrupt the stored undo entry.
+const UNDO_STACK_MAX = 20;
+let undoStack = [];
+
+function undoActionLabel(type) {
+  if (type === 'place') return 'Undo Place';
+  if (type === 'move') return 'Undo Move';
+  if (type === 'demolish') return 'Undo Sell';
+  return 'Undo';
+}
+
+function pushUndoEntry(entry) {
+  undoStack.push(entry);
+  if (undoStack.length > UNDO_STACK_MAX) undoStack.shift();
+  state.ui.undoAvailable = true;
+  state.ui.undoLabel = undoActionLabel(entry.type);
+}
+
+// Reverses whatever the most recent recorded action was. A move/demolish
+// undo can legitimately fail (the destination/original tile got built on
+// again in the meantime) — silently no-ops rather than crashing or
+// clobbering whatever's there now, the same "just don't complete it"
+// fallback canPlaceTile-gated actions elsewhere already use.
+function performUndo() {
+  const entry = undoStack.pop();
+  state.ui.undoAvailable = undoStack.length > 0;
+  state.ui.undoLabel = state.ui.undoAvailable ? undoActionLabel(undoStack[undoStack.length - 1].type) : null;
+  if (!entry) return;
+  if (entry.type === 'place') {
+    removeTile(state, entry.col, entry.row);
+  } else if (entry.type === 'move') {
+    const picked = pickUpBuildingForMove(state, entry.toCol, entry.toRow);
+    if (picked) {
+      const result = putDownMovedBuilding(state, entry.fromCol, entry.fromRow, picked.type, picked.data);
+      if (!result.ok) putDownMovedBuilding(state, entry.toCol, entry.toRow, picked.type, picked.data); // couldn't go back — put it right back where undo found it rather than losing it
+    }
+  } else if (entry.type === 'demolish') {
+    const result = putDownMovedBuilding(state, entry.col, entry.row, entry.buildingId, entry.data);
+    if (result.ok) state.level.money = Math.max(0, state.level.money - entry.refund);
+  }
+}
+
+// Demolishes a tile the same way the Demolish tool always has, but first
+// snapshots it (type/instance-data/the exact refund actually paid) so
+// performUndo can restore it later — every real player-triggered removal
+// (the click handler's single-click Demolish, and updateDemolishDrag's own
+// click-and-drag removal) routes through this instead of calling
+// Grid.js's removeTile directly.
+function recordAndRemoveTile(col, row) {
+  const existingType = getTile(state.level.grid, col, row);
+  if (!existingType || existingType === TILE_EMPTY) { removeTile(state, col, row); return; }
+  const existingData = state.level.buildingData[`${row},${col}`];
+  const clonedData = existingData ? JSON.parse(JSON.stringify(existingData)) : null;
+  const moneyBefore = state.level.money;
+  const removed = removeTile(state, col, row);
+  if (removed) pushUndoEntry({ type: 'demolish', col, row, buildingId: existingType, data: clonedData, refund: state.level.money - moneyBefore });
+}
+
 let movingBuilding = null; // { fromCol, fromRow, buildingId, data } | null
 
 // Only non-null while the SECOND half of a moved Fan's own two-click aiming
@@ -990,7 +1099,7 @@ function updateBuildingMove() {
 // other.
 function effectiveToolAt(worldY) {
   const rawTool = state.ui.selectedTool;
-  if (worldY < SEABED_FLOOR_Y && (rawTool.startsWith('build:') || rawTool === 'demolish')) return 'food';
+  if (worldY < SEABED_FLOOR_Y && (rawTool.startsWith('build:') || rawTool === 'demolish' || rawTool === 'blueprint')) return 'food';
   return rawTool;
 }
 
@@ -998,6 +1107,7 @@ input.clickHandlers.push((sx, sy) => {
   if (fishDragArmed) { fishDragArmed = false; return; } // this click followed a fish-combine drag gesture — don't also bank/feed/mound-click at the release point
   if (itemDragMoved) { itemDragMoved = false; return; } // this click followed a genuine item-drag gesture — don't also bank/feed/place at the release point. An unmoved press-release leaves itemDragMoved false, so a plain click on a Coin/Science item still banks it normally
   if (recipeDragMoved) { recipeDragMoved = false; return; } // this click followed a genuine Manufacturer/Power Plant recipe-copy drag — don't also open the recipe pop-up at the release point
+  if (blueprintJustCaptured) { blueprintJustCaptured = false; return; } // this click is the tail end of the mouseup that just captured a Blueprint selection — don't also try to paste it at that same point
   if (suppressTutorialTurretPlacementClick) {
     // The same native mouseup/click that just placed the tutorial's own
     // Waste Turret (via updateBuildDrag's drag-placement path) — per direct
@@ -1031,7 +1141,26 @@ input.clickHandlers.push((sx, sy) => {
     }
     const result = putDownMovedBuilding(state, col, row, movingBuilding.buildingId, movingBuilding.data);
     if (!result.ok) { handleBuildPlacementFailure(result.reason); return; } // stay in move mode — the ghost keeps following, try again
+    if (movingBuilding.fromCol !== col || movingBuilding.fromRow !== row) {
+      pushUndoEntry({ type: 'move', fromCol: movingBuilding.fromCol, fromRow: movingBuilding.fromRow, toCol: col, toRow: row });
+    }
     movingBuilding = null;
+    return;
+  }
+
+  // Blueprint stamp — a captured selection is armed and follows the cursor
+  // (render()'s own draw call below); a plain click commits it, placing
+  // every captured cell that's both empty and affordable at its own real
+  // (cost-charged) price, silently skipping any cell that isn't — see
+  // Grid.js's placeBlueprint. One Ctrl+Z undo entry per building actually
+  // placed, same as any other individual purchase. The clipboard clears
+  // after commit, ready for a fresh drag-select — the tool itself stays
+  // selected.
+  if (blueprintClipboard != null) {
+    const { col, row } = worldToTile(world.x, world.y);
+    const placedCells = placeBlueprint(state, col, row, blueprintClipboard);
+    for (const p of placedCells) pushUndoEntry({ type: 'place', col: p.col, row: p.row, buildingId: p.buildingId });
+    blueprintClipboard = null;
     return;
   }
 
@@ -1147,6 +1276,9 @@ input.clickHandlers.push((sx, sy) => {
       if (check.ok) {
         fanAimingMoveData.angle = angle;
         putDownMovedBuilding(state, fanAimingCell.col, fanAimingCell.row, buildingId, fanAimingMoveData);
+        if (fanAimingMoveOrigin.fromCol !== fanAimingCell.col || fanAimingMoveOrigin.fromRow !== fanAimingCell.row) {
+          pushUndoEntry({ type: 'move', fromCol: fanAimingMoveOrigin.fromCol, fromRow: fanAimingMoveOrigin.fromRow, toCol: fanAimingCell.col, toRow: fanAimingCell.row });
+        }
       } else {
         handleBuildPlacementFailure(check.reason);
       }
@@ -1157,7 +1289,9 @@ input.clickHandlers.push((sx, sy) => {
     }
     const confirmCheck = canPlaceTile(state, fanAimingCell.col, fanAimingCell.row, buildingId);
     if (!confirmCheck.ok) handleBuildPlacementFailure(confirmCheck.reason);
-    placeTile(state, fanAimingCell.col, fanAimingCell.row, buildingId, angle);
+    if (placeTile(state, fanAimingCell.col, fanAimingCell.row, buildingId, angle)) {
+      pushUndoEntry({ type: 'place', col: fanAimingCell.col, row: fanAimingCell.row, buildingId });
+    }
     fanAimingCell = null;
     return;
   }
@@ -1182,7 +1316,7 @@ input.clickHandlers.push((sx, sy) => {
 
   if (effectiveTool === 'demolish') {
     const { col, row } = worldToTile(world.x, world.y);
-    removeTile(state, col, row);
+    recordAndRemoveTile(col, row);
     return;
   }
 
@@ -1246,7 +1380,17 @@ input.rightClickHandlers.push((sx, sy) => {
   if (state.ui.selectedTool !== 'demolish') return;
   const world = screenToWorld(sx, sy, state.camera);
   const { col, row } = worldToTile(world.x, world.y);
-  removeTile(state, col, row);
+  recordAndRemoveTile(col, row);
+});
+
+// Blueprint tool: right-click cancels an in-progress selection (drag) or an
+// already-captured clipboard armed for pasting — back to a clean slate,
+// ready for a new drag-select, without leaving the tool itself.
+input.rightClickHandlers.push(() => {
+  if (state.ui.paused) return;
+  blueprintDragStartCol = null;
+  blueprintDragStartRow = null;
+  blueprintClipboard = null;
 });
 
 // Right-click-to-move — see movingBuilding's own comment above. Only arms
@@ -1356,6 +1500,14 @@ input.keydownHandlers.push((e) => {
     if (isBuildingInfoMenuOpen()) { closeBuildingInfoMenu(); return; }
     if (isLabPurchaseModalOpen()) { closeLabPurchaseModal(); return; }
     if (isLabMenuOpen()) { closeLabMenu(); return; }
+    if (blueprintClipboard != null || blueprintDragStartCol != null) {
+      // Cancel an in-progress Blueprint selection/paste back to a clean
+      // slate — the tool itself stays selected, same as a right-click does.
+      blueprintDragStartCol = null;
+      blueprintDragStartRow = null;
+      blueprintClipboard = null;
+      return;
+    }
     if (movingBuilding != null) {
       // Cancel a pick-up in progress — put it right back where it came from,
       // its own data completely untouched.
@@ -1434,29 +1586,43 @@ input.keydownHandlers.push((e) => {
     case 'Digit3': // Merge
       selectTool(state, 'merge');
       break;
+    case 'Digit4': // Blueprint ("Stamp") — see blueprintClipboard's own comment above
+      selectTool(state, 'blueprint');
+      break;
+    case 'KeyZ': // Ctrl+Z — undo the last building place/move/sell
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        performUndo();
+      }
+      break;
     case 'KeyE': // toggle-collapse the shop panel — moved off KeyQ per direct request, freeing Q up for the Pipette Tool below
       toggleShopCollapse(state);
       break;
-    case 'KeyQ': { // Pipette Tool ("Smart Copy") / Clear Cursor — per direct request
-      const rawTool = state.ui.selectedTool;
-      if (rawTool.startsWith('build:') || rawTool.startsWith('fish:')) {
-        // Clear Cursor: something's already armed — drop it back to Food,
-        // exactly like re-clicking an already-selected shop icon does.
-        deselectShopSelection(state);
+    case 'KeyQ': { // Pipette Tool / "last used" fallback — per direct request
+      // Always tries the Pipette first now, regardless of whether a tool's
+      // already armed (the old "clear cursor if something's already
+      // selected" branch is gone) — hovering a fish or a placed building
+      // arms exactly that, same as before. Fish checked first (their own
+      // hit radius, matching the shimmer effect's size, is usually the
+      // larger/more forgiving target); a building tile is checked only if
+      // no fish qualified. If NEITHER is under the cursor, it reselects
+      // whichever building/fish tool was last armed (state.ui.lastArmedTool,
+      // written by UI.js's selectSpeciesForPreview/selectBuildingForPreview)
+      // instead of doing nothing — per direct request, "if you're not
+      // hovering over a building or fish when you press Q, it selects the
+      // last selected building or fish."
+      const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
+      const fish = findFishForPipetteAt(state, world.x, world.y);
+      if (fish) {
+        pipetteSelectSpecies(state, fish.speciesId);
       } else {
-        // Pipette Tool: nothing's armed (Food/Demolish/Merge selected) —
-        // look at whatever's directly under the cursor and arm THAT instead.
-        // Fish checked first (their own hit radius, matching the shimmer
-        // effect's size, is usually the larger/more forgiving target); a
-        // building tile is checked only if no fish qualified.
-        const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
-        const fish = findFishForPipetteAt(state, world.x, world.y);
-        if (fish) {
-          pipetteSelectSpecies(state, fish.speciesId);
-        } else {
-          const { col, row } = worldToTile(world.x, world.y);
-          const tileType = getTile(state.level.grid, col, row);
-          if (tileType && tileType !== TILE_EMPTY) pipetteSelectBuilding(state, tileType);
+        const { col, row } = worldToTile(world.x, world.y);
+        const tileType = getTile(state.level.grid, col, row);
+        if (tileType && tileType !== TILE_EMPTY) {
+          pipetteSelectBuilding(state, tileType);
+        } else if (state.ui.lastArmedTool) {
+          if (state.ui.lastArmedTool.startsWith('fish:')) pipetteSelectSpecies(state, state.ui.lastArmedTool.slice('fish:'.length));
+          else if (state.ui.lastArmedTool.startsWith('build:')) pipetteSelectBuilding(state, state.ui.lastArmedTool.slice('build:'.length));
         }
       }
       break;
@@ -1648,6 +1814,7 @@ function updateBuildDrag() {
   const check = canPlaceTile(state, col, row, buildingId);
   if (!check.ok) handleBuildPlacementFailure(check.reason);
   const placed = placeTile(state, col, row, buildingId, angle);
+  if (placed) pushUndoEntry({ type: 'place', col, row, buildingId });
   // Post-alien guided tutorial's final step — any successful Turret
   // placement (the family's currently-armed tier, forced to the base Waste
   // Turret when this step's own icon was selected — see UI.js's
@@ -1707,7 +1874,7 @@ function updateDemolishDrag() {
   const cellKey = `${col},${row}`;
   if (cellKey === lastDemolishCell) return;
   lastDemolishCell = cellKey;
-  removeTile(state, col, row);
+  recordAndRemoveTile(col, row);
 }
 
 // Runs every tick a combine-drag is active (after updateEntities, so this
@@ -2484,6 +2651,33 @@ function render() {
   if (movingBuilding != null && input.mouse.inside && !state.ui.paused) {
     const hoverWorld = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
     renderMoveGhost(ctx, state, hoverWorld.x, hoverWorld.y, movingBuilding.buildingId, movingBuilding.data);
+  }
+
+  // Blueprint tool — a live selection-box outline while dragging out an
+  // area to copy, or (once captured) the whole stamp following the cursor
+  // as a tinted multi-cell ghost. See blueprintClipboard's own comment.
+  if (blueprintDragStartCol != null && input.mouseDown) {
+    const startScreen = worldToScreen(blueprintDragStartCol * TILE_SIZE, blueprintDragStartRow * TILE_SIZE, state.camera);
+    const curWorld = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
+    const { col: curCol, row: curRow } = worldToTile(curWorld.x, curWorld.y);
+    const endScreen = worldToScreen((curCol + 1) * TILE_SIZE, (curRow + 1) * TILE_SIZE, state.camera);
+    const bx = Math.min(startScreen.x, endScreen.x);
+    const by = Math.min(startScreen.y, endScreen.y);
+    const bw = Math.abs(endScreen.x - startScreen.x);
+    const bh = Math.abs(endScreen.y - startScreen.y);
+    ctx.save();
+    ctx.strokeStyle = '#7cff5a';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.strokeRect(bx, by, bw, bh);
+    ctx.fillStyle = 'rgba(124, 255, 90, 0.12)';
+    ctx.fillRect(bx, by, bw, bh);
+    ctx.restore();
+  }
+  if (blueprintClipboard != null && input.mouse.inside && !state.ui.paused) {
+    const hoverWorld = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
+    const { col: baseCol, row: baseRow } = worldToTile(hoverWorld.x, hoverWorld.y);
+    renderBlueprintGhost(ctx, state, baseCol, baseRow, blueprintClipboard);
   }
 
   for (const item of state.level.items) {

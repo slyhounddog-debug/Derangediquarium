@@ -143,6 +143,7 @@
   <div id="hotkey-legend-e">E: Open Shop</div>
   <div id="hotkey-legend-q">Q: Pipette Tool</div>
   <div id="hotkey-legend-esc">Esc: Pause Game</div>
+  <div id="hotkey-legend-undo" class="hidden">Ctrl+Z: Undo</div>
 </div>
 
 <div id="alien-countdown" class="hidden">👽 Wave <span id="alien-countdown-wave">1</span> incoming: <span id="alien-countdown-seconds">10</span>s</div>
@@ -205,6 +206,7 @@
       </div>
       <div id="building-info-desc"></div>
       <div id="building-info-stats"></div>
+      <div id="building-info-live-stats"></div>
     </div>
   </div>
 </div>
@@ -218,7 +220,14 @@
         <button id="lab-zoom-out-btn" class="pause-btn" title="Zoom out">−</button>
         <button id="lab-zoom-in-btn" class="pause-btn" title="Zoom in">+</button>
       </div>
-      <button id="lab-close-btn" class="pause-btn">Close</button>
+      <button id="lab-close-btn" class="lab-close-x-btn" title="Close">✕</button>
+    </div>
+    <div id="lab-filter-row">
+      <button class="lab-filter-btn selected" data-filter="all">No Filter</button>
+      <button class="lab-filter-btn" data-filter="buildings">Buildings</button>
+      <button class="lab-filter-btn" data-filter="recipes">Recipes</button>
+      <button class="lab-filter-btn" data-filter="fish">Fish</button>
+      <button class="lab-filter-btn" data-filter="other">Other</button>
     </div>
     <div id="lab-tree-wrap">
       <canvas id="lab-tree-canvas"></canvas>
@@ -310,6 +319,7 @@
     </button>
     <button id="tool-demolish-btn" class="tool-btn sheen-target tool-btn-emoji" title="Demolish — select this, then click a building to remove it for a full refund (2)">🔨</button>
     <button id="tool-merge-btn" class="tool-btn sheen-target tool-btn-emoji" title="Merge — select this, then drag one Adult fish onto a matching one to combine or splice it (3)">🧤</button>
+    <button id="tool-blueprint-btn" class="tool-btn sheen-target tool-btn-emoji" title="Blueprint — drag a box over built buildings to copy them, then click to paste that layout elsewhere (4)">📐</button>
   </div>
 
   <div id="tank-anchor">

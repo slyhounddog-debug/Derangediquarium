@@ -1620,6 +1620,12 @@ html, body {
 #building-info-name { font-size: 15px; font-weight: 800; color: #c25f8f; }
 #building-info-desc { font-size: 12px; line-height: 1.4; opacity: 0.85; margin-bottom: 8px; }
 #building-info-stats { display: flex; flex-wrap: wrap; gap: 4px 8px; }
+/* Live power/uptime readout, per direct request ("efficiency/energy readout
+   on click on building... for players optimizing layouts") — a second row
+   below the static stats above, refreshed every frame the pop-up is open
+   (see UI.js's refreshBuildingInfoLiveStats) since these two numbers keep
+   changing while it's sitting there open, unlike everything above it. */
+#building-info-live-stats { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 6px; padding-top: 6px; border-top: 1px dashed rgba(107, 76, 107, 0.25); }
 
 /* Science Lab: a real branching tech tree now, per direct request — a
    centered dimmed-backdrop modal (same pattern #pause-overlay already
@@ -1637,6 +1643,19 @@ html, body {
 #lab-modal {
   width: 680px;
   max-width: 92vw;
+  /* Real bug fix, per direct report ("the science lab window grow/shrink
+     when zooming in/out... keep the science lab the same size, just zoom
+     the rest of it") — this used to carry only `max-height`, no `height`,
+     which left this flex column's own size entirely auto/content-driven:
+     #lab-tree-wrap's `flex: 1` had no real budget to fill without an
+     explicit height on its parent, so its own rendered size (and this
+     modal's overall height with it) tracked whatever the zoomed tree
+     content's own natural size happened to be instead of staying fixed and
+     letting #lab-tree-wrap's `overflow: hidden` clip it. An explicit height
+     (still capped by max-height on short viewports) gives the flex column a
+     real fixed budget, so the tree wrap now genuinely clips a zoomed-in
+     tree instead of the whole window growing to fit it. */
+  height: 640px;
   max-height: 86vh;
   background: linear-gradient(165deg, #fffaf3 0%, #ffe4f2 100%);
   color: #6b4c6b;
@@ -1680,7 +1699,52 @@ html, body {
   width: 32px; height: 32px; padding: 0; margin-bottom: 0;
   font-size: 18px; font-weight: 800; line-height: 1;
 }
-#lab-close-btn { flex: none; width: auto; padding: 9px 16px; margin-bottom: 0; }
+/* A plain circular red X, matching this game's other circular icon buttons
+   (#lab-zoom-controls' own +/-, the shop/tank toggle buttons) — replacing
+   the old text "Close" button, per direct request. */
+#lab-close-btn.lab-close-x-btn {
+  flex: none; width: 32px; height: 32px; padding: 0; margin-bottom: 0;
+  border-radius: 50%;
+  background: linear-gradient(160deg, #ff9a9a 0%, #ff5a5a 100%);
+  color: #ffffff;
+  border: 2px solid #ffffff;
+  font-size: 15px; font-weight: 800; line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 3px 9px rgba(255, 90, 90, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  display: flex; align-items: center; justify-content: center;
+}
+#lab-close-btn.lab-close-x-btn:hover { filter: brightness(1.08); }
+
+/* Filter buttons — per direct request ("Filter icon buttons... No filter,
+   Buildings, Recipes, Fish, Other. That darkens all other nodes... except
+   the chosen type"). Categorized in UI.js's labNodeCategory and stamped
+   onto each node button as data-category when the tree is built. */
+#lab-filter-row {
+  display: flex; flex-wrap: wrap; gap: 6px;
+  margin-bottom: 10px;
+}
+.lab-filter-btn {
+  flex: none;
+  font-family: inherit;
+  font-size: 11px; font-weight: 800;
+  color: #6b4c6b;
+  background: linear-gradient(160deg, #fffdf8 0%, #ffe9f4 100%);
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  padding: 5px 12px;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(107, 76, 107, 0.15);
+}
+.lab-filter-btn.selected {
+  background: linear-gradient(160deg, #ffb3d9 0%, #ff8fc7 100%);
+  color: #ffffff;
+  box-shadow: 0 3px 9px rgba(255, 90, 170, 0.35);
+}
+/* A node not matching the active filter dims heavily, per direct request
+   ("darkens all other nodes in the science lab a lot except for the chosen
+   type") — grayscale on top of the opacity drop so it also reads as
+   visually "off," not just faded. */
+.lab-node.lab-node-dimmed { opacity: 0.22; filter: grayscale(0.6); }
 
 /* Click-and-drag panning instead of scrolling, per direct request — the
    tree grew too large (the Gene-Splicing hybrid sub-tree) for scrollbars/

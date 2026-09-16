@@ -39,6 +39,8 @@ import {
   POWER_PLANT_RECIPES,
   POWER_PLANT_STATS,
   PROCESS_DOTS_COUNT,
+  BUILDING_UPTIME_SAMPLE_INTERVAL_MS,
+  BUILDING_UPTIME_SAMPLE_COUNT,
   HUNGER_SEEK_THRESHOLD,
   CATALYST_BUFF_MULTIPLIER,
   CATALYST_BUFF_MULTIPLIER_MUTAGEN,
@@ -509,6 +511,79 @@ export function removeTile(state, col, row) {
   if (building) state.level.money += Math.floor(liveCost * TILE_REFUND_FRACTION);
   playDemolish();
   return true;
+}
+
+// ---- Blueprint tool ("Stamp") — per direct request: click-and-drag a box
+// over a built area to copy every building inside it, then paste that whole
+// layout somewhere else in one click. Deliberately a LAYOUT copy, not an
+// instance copy — captureBlueprint records only each cell's building type
+// and (for a Fan specifically) its own aim angle, relative to the
+// selection box's own top-left corner; every other building's in-progress
+// state (a Manufacturer's recipe, a Turret's ammo) is NOT carried over,
+// since pasting a stamp is a genuine fresh purchase per building, the exact
+// opposite design choice the free right-click MOVE mechanic makes for the
+// SAME instance.
+export function captureBlueprint(state, colA, rowA, colB, rowB) {
+  const minCol = Math.min(colA, colB);
+  const maxCol = Math.max(colA, colB);
+  const minRow = Math.min(rowA, rowB);
+  const maxRow = Math.max(rowA, rowB);
+  const cells = [];
+  for (let row = minRow; row <= maxRow; row++) {
+    for (let col = minCol; col <= maxCol; col++) {
+      const type = getTile(state.level.grid, col, row);
+      if (!type || type === TILE_EMPTY) continue;
+      const data = state.level.buildingData[buildingKey(col, row)];
+      cells.push({ dCol: col - minCol, dRow: row - minRow, buildingId: type, angle: (data && data.angle) || 0 });
+    }
+  }
+  return cells;
+}
+
+// Renders every captured cell as a translucent ghost anchored at
+// (baseCol, baseRow) — each cell tinted green/red by its OWN real,
+// cost-checked canPlaceTile result (not ignoreCost, unlike the single-
+// building move ghost) since pasting a stamp is a real purchase per
+// building, not a free relocation.
+export function renderBlueprintGhost(ctx, state, baseCol, baseRow, cells) {
+  for (const cell of cells) {
+    const col = baseCol + cell.dCol;
+    const row = baseRow + cell.dRow;
+    const check = canPlaceTile(state, col, row, cell.buildingId);
+    const screen = worldToScreen(col * TILE_SIZE, row * TILE_SIZE, state.camera);
+    const size = TILE_SIZE * state.camera.zoom;
+    const color = BUILDING_TYPES[cell.buildingId].color;
+    ctx.save();
+    ctx.globalAlpha = 0.6;
+    renderTileShape(ctx, cell.buildingId, color, screen.x, screen.y, size, { angle: cell.angle });
+    ctx.restore();
+    ctx.save();
+    ctx.globalAlpha = 0.4;
+    ctx.fillStyle = check.ok ? '#7cff5a' : '#ff5a5a';
+    ctx.fillRect(screen.x, screen.y, size, size);
+    ctx.restore();
+  }
+}
+
+// Commits a blueprint stamp at (baseCol, baseRow) — places every captured
+// cell that's both empty and affordable (a real purchase per building, see
+// captureBlueprint's own comment), silently skipping any cell that isn't —
+// per direct spec, "for placement where there are no overlapping
+// buildings." Returns the list of cells actually placed so main.js can
+// push one Ctrl+Z undo entry per real placement, same as any other
+// individual building purchase.
+export function placeBlueprint(state, baseCol, baseRow, cells) {
+  const placedCells = [];
+  for (const cell of cells) {
+    const col = baseCol + cell.dCol;
+    const row = baseRow + cell.dRow;
+    const check = canPlaceTile(state, col, row, cell.buildingId);
+    if (!check.ok) continue;
+    if (placeTile(state, col, row, cell.buildingId, cell.angle)) {
+      placedCells.push({ col, row, buildingId: cell.buildingId });
+    }
+  }
+  return placedCells;
 }
 
 // T debug key — cycles the tile under the cursor through every building type
@@ -999,6 +1074,22 @@ export function updateBuildings(state, dtMs) {
     const centerX = col * TILE_SIZE + TILE_SIZE / 2;
     const centerY = row * TILE_SIZE + TILE_SIZE / 2;
 
+    // Rolling 3-minute uptime tracking, per direct request ("efficiency
+    // based on a rolling 3 minutes... for players optimizing layouts") —
+    // read from the tile's OWN state as it stood at the top of this tick
+    // (before any of the branches below mutate it), which lags the exact
+    // instant something starts/stops by at most one tick — negligible
+    // against a 5-second sample granularity. Skipped for Platform (no
+    // meaningful "uptime" concept) and anything without a real
+    // active/idle distinction.
+    if (
+      COLLECTOR_TILES.has(data.type) || REFINERY_TILES.has(data.type) ||
+      MANUFACTURER_TILES.has(data.type) || POWER_PLANT_TILES.has(data.type) ||
+      TURRET_TILES.has(data.type) || FAN_TILES.has(data.type)
+    ) {
+      updateBuildingUptimeTracking(state, data.type, data, centerX, centerY, dtMs);
+    }
+
     if (COLLECTOR_TILES.has(data.type)) {
       // Only one item processes at a time per Collector tile — skip the scan
       // entirely if this tile already has one mid-hold, so a second item
@@ -1370,6 +1461,73 @@ export function updateBuildings(state, dtMs) {
     }
   }
   return { foodSpawnPoints, wasteSpawnPoints, turretShots, bioSpawnPoints };
+}
+
+// Whether a tile is genuinely "doing work" this tick, for uptime tracking —
+// deliberately the same signal (or a close analogue of it) every other
+// active/idle check elsewhere in this file already uses, so "uptime" can't
+// silently disagree with what the process dots/active-machine pulse/power-
+// shortage overlay already consider "on." A Fan has no idle state at all
+// (it draws its full force/cost unconditionally the entire time it's
+// placed), so it's always counted active; a Turret's own draw is bursty
+// (see computeCurrentPowerDemand's own comment on why it's excluded from
+// that function) — "active" here means genuinely ready to fire (cooldown
+// elapsed, ammo in hand), not the instantaneous tick a shot happens to go
+// out on, which would otherwise read as near-0% uptime even for a turret
+// that's constantly busy.
+function isBuildingActiveForUptime(state, type, data, centerX, centerY) {
+  if (FAN_TILES.has(type)) return true;
+  if (COLLECTOR_TILES.has(type)) {
+    return state.level.items.some(
+      (it) => it.collectorProgressMs != null && it.collectorCenterX === centerX && it.collectorCenterY === centerY
+    );
+  }
+  if (REFINERY_TILES.has(type)) return data.lockedRecipe !== null;
+  if (MANUFACTURER_TILES.has(type)) return !!data.processing;
+  if (POWER_PLANT_TILES.has(type)) return !!data.fueled && data.recipeId !== null;
+  if (TURRET_TILES.has(type)) {
+    const hasAmmo = !TURRET_AMMO_TILES.has(type) || data.ammo > 0;
+    return data.cooldownMs <= 0 && hasAmmo;
+  }
+  return false;
+}
+
+// Accumulates active-time within the current BUILDING_UPTIME_SAMPLE_
+// INTERVAL_MS window, pushing one fraction (0-1) into a fixed-length
+// circular buffer every time that window elapses — a real rolling window,
+// not an exponential decay approximation, per direct request ("efficiency
+// based on a rolling 3 minutes"). Lazily initializes its own tracking
+// fields the first time it sees a tile (rather than needing every placeTile/
+// cycleTileCheat branch updated to pre-seed them) — safe since a plain
+// `data.uptimeSamples === undefined` check can never collide with a
+// genuine save/load round-trip (JSON has no way to represent `undefined` in
+// the first place, so a loaded save's field is always either a real array
+// or simply absent, both of which this check already treats as "needs
+// initializing").
+function updateBuildingUptimeTracking(state, type, data, centerX, centerY, dtMs) {
+  if (data.uptimeSamples === undefined) {
+    data.uptimeSamples = [];
+    data.uptimeSampleTimerMs = 0;
+    data.uptimeActiveMs = 0;
+  }
+  if (isBuildingActiveForUptime(state, type, data, centerX, centerY)) data.uptimeActiveMs += dtMs;
+  data.uptimeSampleTimerMs += dtMs;
+  if (data.uptimeSampleTimerMs >= BUILDING_UPTIME_SAMPLE_INTERVAL_MS) {
+    data.uptimeSamples.push(data.uptimeActiveMs / data.uptimeSampleTimerMs);
+    if (data.uptimeSamples.length > BUILDING_UPTIME_SAMPLE_COUNT) data.uptimeSamples.shift();
+    data.uptimeSampleTimerMs = 0;
+    data.uptimeActiveMs = 0;
+  }
+}
+
+// Exported for UI.js's building-info pop-up — the average of whatever
+// samples have accumulated so far (not necessarily a full 3 minutes' worth
+// yet on a freshly-placed building), or null if none exist at all (shown as
+// "still warming up" rather than a misleading 0%).
+export function getBuildingUptimeFraction(data) {
+  if (!data || !data.uptimeSamples || data.uptimeSamples.length === 0) return null;
+  const sum = data.uptimeSamples.reduce((a, b) => a + b, 0);
+  return sum / data.uptimeSamples.length;
 }
 
 // Live, moment-to-moment sum of every currently-DRAWING power-consuming
@@ -1769,7 +1927,24 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
         if (data && MANUFACTURER_TILES.has(type) && !data.processing) {
           renderManufacturerIdleBadge(ctx, screen.x, screen.y, size, camera.zoom);
         }
-        if (getBuildingPowerCost(type, data) > 0) {
+        // A stalled-building status glyph, per direct request ("a small
+        // status glyph over buildings that are stalled... visible from a
+        // zoomed-out view instead of only on hover") — a Refinery with
+        // nothing locked in (idle, waiting for Waste/Bio-Sludge to touch
+        // it), a Power Plant with no recipe picked, and an ammo-tier Turret
+        // that's run dry. The Manufacturer's own equivalent (above) already
+        // shipped earlier under a different name; these three round out the
+        // exact examples named in the request.
+        if (data && REFINERY_TILES.has(type) && data.lockedRecipe === null) {
+          renderStalledBadge(ctx, screen.x, screen.y, size, camera.zoom, '⏳');
+        }
+        if (data && POWER_PLANT_TILES.has(type) && data.recipeId === null) {
+          renderStalledBadge(ctx, screen.x, screen.y, size, camera.zoom, '⏳');
+        }
+        if (data && TURRET_AMMO_TILES.has(type) && data.ammo <= 0) {
+          renderStalledBadge(ctx, screen.x, screen.y, size, camera.zoom, '🗑️');
+        }
+        if (getBuildingCurrentPowerDraw(state, type, data, col * TILE_SIZE + TILE_SIZE / 2, row * TILE_SIZE + TILE_SIZE / 2) > 0) {
           renderPowerShortageOverlay(ctx, screen.x, screen.y, size, camera.zoom, state.level.powerEfficiency, state.level.elapsed);
         }
       }
@@ -2552,12 +2727,15 @@ function renderManufacturerGhostFlash(ctx, x, y, size, zoom, data) {
   ctx.restore();
 }
 
-// A small "not drawing power" badge in the Manufacturer's bottom-right
-// corner — a dark circle, a dim lightning bolt, and a red slash through it,
-// same visual language renderPowerShortageOverlay's own stalled badge
-// already established (crossed lightning = "not running"), just scoped to
-// this ONE tile's own instantaneous draw rather than grid-wide supply.
-function renderManufacturerIdleBadge(ctx, x, y, size, zoom) {
+// A small "something needs your attention" badge in a tile's bottom-right
+// corner — a dark circle, a dim glyph, and a red slash through it — per
+// direct request ("a small status glyph over buildings that are stalled...
+// so problems are visible from a zoomed-out view instead of only on
+// hover"). Generalized from the Manufacturer's own original "not drawing
+// power" badge (see renderManufacturerIdleBadge below, its one remaining
+// caller) into a shared renderer any stalled-building check can reuse with
+// its own glyph.
+function renderStalledBadge(ctx, x, y, size, zoom, glyph) {
   const r = Math.max(2, size * 0.14);
   const cx = x + size * 0.84;
   const cy = y + size * 0.84;
@@ -2573,7 +2751,7 @@ function renderManufacturerIdleBadge(ctx, x, y, size, zoom) {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#d8d8d8';
-  ctx.fillText('⚡', cx, cy);
+  ctx.fillText(glyph, cx, cy);
   ctx.strokeStyle = '#ff5a5a';
   ctx.lineWidth = Math.max(1, 1.3 * zoom);
   ctx.beginPath();
@@ -2581,6 +2759,15 @@ function renderManufacturerIdleBadge(ctx, x, y, size, zoom) {
   ctx.lineTo(cx + r * 0.6, cy - r * 0.6);
   ctx.stroke();
   ctx.restore();
+}
+
+// The Manufacturer's own original stalled badge (crossed lightning bolt =
+// "not drawing power AT ALL right now") — kept as its own named wrapper
+// since its one call site already reads by this name; every other stalled-
+// building check below calls renderStalledBadge directly with its own
+// glyph instead.
+function renderManufacturerIdleBadge(ctx, x, y, size, zoom) {
+  renderStalledBadge(ctx, x, y, size, zoom, '⚡');
 }
 
 // 5 dots on the Waste Turret — one per stored Waste unit, per direct
@@ -2607,23 +2794,60 @@ function renderTurretAmmoDots(ctx, x, y, size, ammo, zoom) {
   }
 }
 
-// A tile's own power draw rate RIGHT NOW, regardless of building type — 0
-// for a free tier, a non-power building, or (for the Manufacturer
-// specifically) one that isn't actively processing an ingredient this tick.
-// Shared by the render overlay below and anywhere else that just needs
-// "does this specific tile cost power at all." `data` is only actually read
-// for the Manufacturer's own per-item rate — every other lookup is a flat,
-// data-independent constant.
-function getBuildingPowerCost(type, data) {
-  if (FAN_STATS[type]) return FAN_STATS[type].powerCost;
-  if (PROCESSOR_STATS[type]) return PROCESSOR_STATS[type].powerCostPerSec;
-  if (REFINERY_STATS[type]) return REFINERY_STATS[type].powerCostPerSec;
-  if (TURRET_STATS[type]) return TURRET_STATS[type].powerCostPerSec;
-  if (MANUFACTURER_TILES.has(type)) {
-    return data && data.processing ? MANUFACTURER_ITEM_POWER_COST_MW[data.currentItemType] || 0 : 0;
+// A tile's own power draw RIGHT NOW — not merely what its TYPE is
+// configured to cost — per direct report ("buildings should only show the
+// low/no power indicator if it is currently using electricity... reserve
+// that indicator for buildings that are actively trying to draw power").
+// The old version of this function returned a flat per-type constant
+// regardless of whether the building was doing anything at all that tick,
+// so an idle Collector/Refinery with nothing to process (or a Manufacturer
+// with no recipe picked) showed the shortage overlay any time the grid
+// itself was short, even though it wasn't drawing — or trying to draw — a
+// single watt at that moment. Mirrors computeCurrentPowerDemand's own
+// per-type "is this genuinely drawing" conditions exactly (a Fan is the one
+// type with no idle state — see that function's own reasoning — so it
+// always counts), so the render overlay below and computeCurrentPowerDemand
+// can never disagree about what's actually pulling from the grid. Exported
+// — UI.js's building-info pop-up reads this exact live number for its own
+// "Consuming Xmw" readout, so that surface can't drift from this one either.
+export function getBuildingCurrentPowerDraw(state, type, data, centerX, centerY) {
+  if (FAN_TILES.has(type)) return FAN_STATS[type].powerCost;
+  if (COLLECTOR_TILES.has(type)) {
+    const activelyProcessing = state.level.items.some(
+      (it) => it.collectorProgressMs != null && it.collectorCenterX === centerX && it.collectorCenterY === centerY
+    );
+    return activelyProcessing ? PROCESSOR_STATS[type].powerCostPerSec : 0;
   }
-  // POWER_PLANT_STATS has no powerCostPerSec field at all (it's a generator,
-  // never a consumer) — falls through to the 0 default below.
+  if (REFINERY_TILES.has(type)) return data && data.lockedRecipe !== null ? REFINERY_STATS[type].powerCostPerSec : 0;
+  if (MANUFACTURER_TILES.has(type)) {
+    if (!data || !data.processing) return 0;
+    const recipe = MANUFACTURER_RECIPES[data.recipeId];
+    const multiplier = (recipe && recipe.powerCostMultiplier) || 1;
+    return (MANUFACTURER_ITEM_POWER_COST_MW[data.currentItemType] || 0) * multiplier;
+  }
+  if (TURRET_TILES.has(type)) {
+    const stats = TURRET_STATS[type];
+    if (!stats || stats.powerCostPerSec <= 0) return 0;
+    // Bursty, not continuous — see computeCurrentPowerDemand's own comment
+    // on why a turret's real demand is tracked as a running accumulator
+    // instead of a per-tick snapshot. "Actively trying to draw power" here
+    // means genuinely ready to fire (cooldown elapsed, ammo in hand) and
+    // only blocked by the power gate itself — not idly waiting on its own
+    // cooldown or simply out of ammo. Deliberately doesn't re-run the
+    // nearest-alien search updateBuildings' own fire branch does (an
+    // expensive scan this render pass shouldn't repeat per tile every
+    // frame) — "ready to fire" is close enough to "trying."
+    const hasAmmo = !TURRET_AMMO_TILES.has(type) || (data && data.ammo > 0);
+    return data && data.cooldownMs <= 0 && hasAmmo ? stats.powerCostPerSec : 0;
+  }
+  if (POWER_PLANT_TILES.has(type)) {
+    // A generator, not a consumer — negative means "currently generating,"
+    // distinct from 0 (idle/no recipe), so a caller that only cares about
+    // consumption (e.g. the shortage overlay's own `> 0` check) naturally
+    // ignores it.
+    if (!data || !data.fueled || data.recipeId === null) return 0;
+    return -(POWER_PLANT_RECIPES[data.recipeId].powerOutputMw);
+  }
   return 0;
 }
 

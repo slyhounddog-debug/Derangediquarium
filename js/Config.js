@@ -1480,7 +1480,7 @@ export const BUILDING_FAMILIES = {
 // state.level.buildingData wasteAccumMs field) is removed entirely, not just
 // zeroed. coinMs set to the exact requested 9/6/4 seconds across the 3 tiers.
 // The base tier (now "Electric Collector") draws 3mw while collecting, per
-// direct request — computeCurrentPowerDemand/getBuildingPowerCost's own
+// direct request — computeCurrentPowerDemand/getBuildingCurrentPowerDraw's own
 // `stats.powerCostPerSec > 0` checks already generically gate every tier on
 // "is it actually processing right now," so this needed no code changes,
 // just a nonzero value here.
@@ -1751,9 +1751,9 @@ export const POWER_PLANT_RECIPES = {
 export const POWER_PLANT_RECIPE_LIST = Object.values(POWER_PLANT_RECIPES);
 // A GENERATOR, not a consumer — never appears in computeCurrentPowerDemand
 // at all (same as the Electric Eel fish doesn't), so there's no
-// powerCostPerSec field here; kept as an object purely so Grid.js's
-// getBuildingPowerCost can uniformly check `POWER_PLANT_STATS[type]` without
-// a special case.
+// powerCostPerSec field here; Grid.js's getBuildingCurrentPowerDraw returns
+// a NEGATIVE number for a Power Plant instead (currently generating), so it
+// never gets counted as demand by anything that only checks `> 0`.
 export const POWER_PLANT_STATS = {
   [TILE_POWER_PLANT]: {},
 };
@@ -1767,6 +1767,14 @@ export const POWER_PLANT_STATS = {
 // as that fuel is consumed (top dot off at 20% used, ..., bottom dot off at
 // 80%+ used) — see Grid.js's renderProcessDots.
 export const PROCESS_DOTS_COUNT = 4;
+
+// ---- Building uptime tracking (Grid.js's updateBuildings) ----
+// A rolling 3-minute (180000ms) window, sampled every BUILDING_UPTIME_
+// SAMPLE_INTERVAL_MS (5s) into a fixed-length circular buffer of per-window
+// active-fractions — per direct request, shown on a building's own info
+// pop-up as "Uptime (3 min): N%". 36 samples * 5000ms = 180000ms exactly.
+export const BUILDING_UPTIME_SAMPLE_INTERVAL_MS = 5000;
+export const BUILDING_UPTIME_SAMPLE_COUNT = 36;
 
 // ---- Tier Progression & The Mound (Phase 2) ----
 // See CLAUDE.md's "Tier Progression & The Mound" section for the full
