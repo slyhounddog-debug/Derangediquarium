@@ -268,6 +268,21 @@ function maybeBounceAchievementTabFirstOpen(state) {
   playFlash(els.tankTabAchievementsBtn, 'bounce-play');
 }
 
+// This module's own local notification-push helper — same duplicated-inline
+// "push+cap" pattern every other module already has its own copy of (see
+// CLAUDE.md's Rolling Notification Log section), factored into one place
+// here purely because UI.js has several call sites for it, unlike a module
+// with just one or two. Per direct request, skips a push that would exactly
+// repeat the most recent entry, so nothing spams the log back-to-back while
+// nothing else is happening (a later repeat, with something else logged in
+// between, is still fine).
+function pushUiNotification(state, text) {
+  const notifications = state.level.notifications;
+  if (notifications.length > 0 && notifications[notifications.length - 1].text === text) return;
+  notifications.push({ id: notifications.length + 1, text, elapsed: state.level.elapsed });
+  if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
+}
+
 export function initUI(state) {
   els = {
     hud: document.getElementById('hud'),
@@ -475,9 +490,7 @@ export function initUI(state) {
     // CLAUDE.md's "Story & Tutorial Notifications".
     if (!notificationLogExpanded && !state.level.tutorialFlags.firstChatClosed) {
       state.level.tutorialFlags.firstChatClosed = true;
-      const notifications = state.level.notifications;
-      notifications.push({ id: notifications.length + 1, text: FOUND_THE_CHAT_MESSAGE, elapsed: state.level.elapsed });
-      if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
+      pushUiNotification(state, FOUND_THE_CHAT_MESSAGE);
     }
   });
 
@@ -1861,13 +1874,7 @@ export function initStartScreen(state, onStart) {
 // game already follows.
 function saveGameFromPause(state) {
   const ok = saveGame(state);
-  const notifications = state.level.notifications;
-  notifications.push({
-    id: notifications.length + 1,
-    text: ok ? 'Game saved.' : "Couldn't save — your browser blocked it.",
-    elapsed: state.level.elapsed,
-  });
-  if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
+  pushUiNotification(state, ok ? 'Game saved.' : "Couldn't save — your browser blocked it.");
 }
 
 // The Settings panel's "Load Last Save" button, per direct request — reverts
@@ -1882,17 +1889,13 @@ function saveGameFromPause(state) {
 function loadLastSaveFromPause(state) {
   const saved = loadSaveGame();
   if (!saved) {
-    const notifications = state.level.notifications;
-    notifications.push({ id: notifications.length + 1, text: "No save to load yet.", elapsed: state.level.elapsed });
-    if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
+    pushUiNotification(state, "No save to load yet.");
     return;
   }
   state.meta = saved.meta;
   state.level = saved.level;
   centerCameraOnMound(state.camera); // same one-time re-center every other load-a-saved-level path already does
-  const notifications = state.level.notifications;
-  notifications.push({ id: notifications.length + 1, text: 'Loaded your last save.', elapsed: state.level.elapsed });
-  if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
+  pushUiNotification(state, 'Loaded your last save.');
   if (settingsOpenedFromStartScreen) {
     settingsOpenedFromStartScreen = false;
     els.pauseOverlay.classList.add('hidden');
@@ -2942,9 +2945,18 @@ function buildingStatsHtml(buildingId) {
   if (p) {
     // The Waste-per-N-seconds stat is gone entirely, per direct request —
     // the Collector no longer produces any Waste byproduct on any tier.
+    // Power now depends on what's actually being collected (a coin costs
+    // HALF as much as Science on the power-costing tiers, per direct
+    // request) — shown as a plain min-max range, same convention the
+    // Manufacturer's own per-ingredient power spread already uses; a flat
+    // single number (the base Collector's 0) still reads correctly since
+    // both ends of the range are identical.
+    const powerRange = p.powerCostPerSecCoin === p.powerCostPerSecScience
+      ? `${p.powerCostPerSecCoin}`
+      : `${p.powerCostPerSecCoin}-${p.powerCostPerSecScience}`;
     return (
-      `<div class="building-stat">⏱️ Coin <b>${p.coinMs / 1000}s</b> · 🔬 Sci <b>${p.scienceMs / 1000}s</b></div>` +
-      `<div class="building-stat">⚡ <b>${p.powerCostPerSec}</b> mw/s</div>`
+      `<div class="building-stat">⏱️ Coin <b>${p.coinMs / 1000}s</b> · 🔬 <b>${p.scienceMs / 1000}s</b> · 🟢 <b>${p.scienceGreenMs / 1000}s</b></div>` +
+      `<div class="building-stat">⚡ <b>${powerRange}</b> mw/s</div>`
     );
   }
   const f = FAN_STATS[buildingId];
@@ -3329,13 +3341,7 @@ export function updateHUD(state) {
   // Notification Log section) rather than a shared helper.
   if (coinCapWarningActive && !state.level.tutorialFlags.firstCoinCapWarningShown) {
     state.level.tutorialFlags.firstCoinCapWarningShown = true;
-    const notifications = state.level.notifications;
-    notifications.push({
-      id: notifications.length + 1,
-      text: `Pick up those coins, you can only have ${coinCapMax} on screen at once`,
-      elapsed: state.level.elapsed,
-    });
-    if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
+    pushUiNotification(state, `Pick up those coins, you can only have ${coinCapMax} on screen at once`);
   }
   if (lastCoinCapCount !== null && coinCapCount > lastCoinCapCount) {
     playFlash(els.coinCap, 'flash-spend');
@@ -3536,12 +3542,12 @@ export function updateHUD(state) {
   // never changes selectedTool away from 'food', so without this the hint
   // would wrongly read "Pause Game" while Escape would actually cancel it.
   els.hotkeyLegendE.textContent = `E: ${state.ui.shopCollapsed ? 'Open Shop' : 'Close Shop'}`;
-  // Q always tries the Pipette first (whatever's directly under the cursor)
-  // now, regardless of whether a tool's already armed — per direct request,
-  // it no longer just clears the cursor when hovering nothing; it reselects
-  // whichever building/fish was last armed instead (see main.js's KeyQ
-  // handler and state.ui.lastArmedTool).
-  els.hotkeyLegendQ.textContent = 'Q: Pipette Tool';
+  // Q is a genuine toggle, per direct request — Clear Cursor while a build:/
+  // fish: tool is already armed ("something is being held"), otherwise
+  // Pipette/reselect-last (see main.js's KeyQ handler and
+  // state.ui.lastArmedTool) — `toolIsPurchasable` (already computed above)
+  // is exactly that same "something armed" condition.
+  els.hotkeyLegendQ.textContent = toolIsPurchasable ? 'Q: Clear Cursor' : 'Q: Pipette/ Last-used Tool';
   // Ctrl+Z — shown only while there's actually something to undo (main.js
   // writes state.ui.undoAvailable/undoLabel every time its own undo stack
   // changes — see that file's pushUndoEntry/performUndo).
@@ -3827,9 +3833,7 @@ function onTutorialFlowComplete(state, id) {
     // "isFirst" bookkeeping this isn't part of).
     state.level.tankPoints.total += 1;
     state.level.tankPoints.available += 1;
-    const notifications = state.level.notifications;
-    notifications.push({ id: notifications.length + 1, text: "Here's an extra tank point, don't spend it all in one place", elapsed: state.level.elapsed });
-    if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
+    pushUiNotification(state, "Here's an extra tank point, don't spend it all in one place");
   } else if (id === 'postalien' || id === 'wastedrag') {
     // Same closing line for both — 'wastedrag' is teaching the exact same
     // "you've got a Turret, now feed it" lesson, just entered from the
@@ -3840,9 +3844,7 @@ function onTutorialFlowComplete(state, id) {
     // Systems.js's updatePostAlienTutorial for why this is tracked
     // separately from postAlienTutorialShown).
     state.level.tutorialFlags.wasteDragTutorialShown = true;
-    const notifications = state.level.notifications;
-    notifications.push({ id: notifications.length + 1, text: POST_ALIEN_TUTORIAL_MESSAGE, elapsed: state.level.elapsed });
-    if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
+    pushUiNotification(state, POST_ALIEN_TUTORIAL_MESSAGE);
   }
 }
 

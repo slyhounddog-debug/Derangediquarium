@@ -64,6 +64,11 @@ const GAME_OVER_MESSAGE =
 
 function pushNotification(state, text) {
   const notifications = state.level.notifications;
+  // Per direct request — skip a push that would exactly repeat the most
+  // recent entry (this is the module a periodic re-check, like the power-
+  // shortage nudge, would otherwise spam through every check interval while
+  // the same condition just sits there unresolved).
+  if (notifications.length > 0 && notifications[notifications.length - 1].text === text) return;
   notifications.push({ id: notifications.length + 1, text, elapsed: state.level.elapsed });
   if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
 }

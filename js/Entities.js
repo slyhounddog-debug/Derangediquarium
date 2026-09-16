@@ -1110,9 +1110,7 @@ function bankMoney(state, amount) {
   state.meta.stats.moneyEarned += amount; // permanent mirror, for the money_1k/10k/100k achievements — survives a restart, unlike the level-scoped counter above
   if (!state.level.tutorialFlags.moneyMilestone1k && state.level.lifetimeMoneyEarned >= MONEY_MILESTONE_1K) {
     state.level.tutorialFlags.moneyMilestone1k = true;
-    const notifications = state.level.notifications;
-    notifications.push({ id: notifications.length + 1, text: MONEY_MILESTONE_1K_MESSAGE, elapsed: state.level.elapsed });
-    if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
+    pushStoryNotification(state, MONEY_MILESTONE_1K_MESSAGE);
   }
 }
 
@@ -1136,47 +1134,15 @@ function bankScienceGreen(state, amount) {
   state.meta.stats.scienceBanked += amount; // science_banked_50 counts Blue OR Green alike, per that achievement's own description
 }
 
-export function tryBankScienceAt(state, worldX, worldY) {
-  const items = state.level.items;
-  for (let i = items.length - 1; i >= 0; i--) {
-    const item = items[i];
-    if (item.type !== 'science') continue;
-    const dx = item.x - worldX;
-    const dy = item.y - worldY;
-    const clickRadius = item.radius * COIN_CLICK_RADIUS_MULTIPLIER;
-    if (dx * dx + dy * dy <= clickRadius * clickRadius) {
-      bankScience(state, 1);
-      state.level.floatingTexts.push(createPickupText(item.x, item.y, '+1 🔬', SCIENCE_COLOR));
-      items.splice(i, 1);
-      return true;
-    }
-  }
-  return false;
-}
-
-// Mirrors tryBankScienceAt exactly, for a green Science Bubble — per spec,
-// green Science "must be routed into a Collector to increment green
-// science storage," but nothing prohibits a plain click either, and every
-// other physical resource in this game supports both, so this stays
-// consistent with tryBankScienceAt rather than special-casing green Science
-// as click-only-blocked.
-export function tryBankScienceGreenAt(state, worldX, worldY) {
-  const items = state.level.items;
-  for (let i = items.length - 1; i >= 0; i--) {
-    const item = items[i];
-    if (item.type !== 'science_green') continue;
-    const dx = item.x - worldX;
-    const dy = item.y - worldY;
-    const clickRadius = item.radius * COIN_CLICK_RADIUS_MULTIPLIER;
-    if (dx * dx + dy * dy <= clickRadius * clickRadius) {
-      bankScienceGreen(state, 1);
-      state.level.floatingTexts.push(createPickupText(item.x, item.y, '+1 🔬', SCIENCE_GREEN_COLOR));
-      items.splice(i, 1);
-      return true;
-    }
-  }
-  return false;
-}
+// tryBankScienceAt/tryBankScienceGreenAt (click-to-bank a Science/Green
+// Science Bubble directly, mirroring tryBankCoinAt) are removed entirely,
+// per direct request ("blue and green science cannot be clicked to be
+// collected, it has to be processed by a collector") — bankScience/
+// bankScienceGreen above are still very much alive, just now only ever
+// called from a Collector finishing a hold (see updateScience/
+// updateScienceGreen's own 'consumed' branch), never from a click. A
+// Science item can still be dragged by hand (the universal item-drag
+// mechanic) into a Collector, or left to drift into one on its own.
 
 export function tryBankCoinAt(state, worldX, worldY) {
   const items = state.level.items;
@@ -2081,6 +2047,13 @@ const FIRST_FISH_DEATH_MESSAGE =
 // either writer for the pattern."
 function pushStoryNotification(state, text) {
   const notifications = state.level.notifications;
+  // Per direct request ("no duplicates messages back to back... if there's
+  // other messages in between, that's fine") — only skips a push whose text
+  // exactly matches the MOST RECENT entry, so a genuinely repeated warning
+  // (e.g. a power shortage nudge) can't spam the log 20 times in a row while
+  // nothing else is happening, but the same line is free to reappear later
+  // once something else has been logged in between.
+  if (notifications.length > 0 && notifications[notifications.length - 1].text === text) return;
   notifications.push({ id: notifications.length + 1, text, elapsed: state.level.elapsed });
   if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
 }

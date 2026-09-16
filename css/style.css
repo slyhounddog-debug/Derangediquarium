@@ -858,6 +858,21 @@ html, body {
 .tool-icon { display: block; border-radius: 50%; }
 .tool-icon-food { width: 22px; height: 22px; background: #ffb238; box-shadow: 0 0 0 5px rgba(255, 178, 56, 0.3); } /* matches Config.js's FOOD_COLOR — was a green too close to Waste's own color to tell apart at a glance */
 .tool-btn-emoji { font-size: 26px; } /* the Demolish button's 🔨 — was a plain colored circle, per direct request for an actual hammer/trashcan icon */
+/* A small sheet of blue blueprint paper — a fine white grid on a deep blue
+   ground, per direct request ("make the blueprint on the toolbar look like
+   a blue paper blueprint") — rectangular (border-radius overridden down
+   from .tool-icon's own circular default), not an emoji, matching this
+   game's existing preference for a real hand-crafted look over a generic
+   glyph wherever one fits (see Grid.js's own per-building canvas icons). */
+.tool-icon-blueprint {
+  width: 22px; height: 22px;
+  border-radius: 4px;
+  background-color: #1a4a7a;
+  background-image:
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.55) 0 1px, transparent 1px 6px),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.55) 0 1px, transparent 1px 6px);
+  box-shadow: 0 0 0 5px rgba(26, 74, 122, 0.3), inset 0 0 0 1px rgba(255, 255, 255, 0.65);
+}
 
 #build-tool-grid {
   display: contents;

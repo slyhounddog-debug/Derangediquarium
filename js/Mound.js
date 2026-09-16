@@ -57,21 +57,24 @@ export function centerCameraOnMound(camera) {
 const MOUND_TEASE_MESSAGE = `You throw $${MOUND_TEASE_COST} at a suspicious lump of dirt. Nothing happens. Absolutely nothing. You have been scammed by a rock.`;
 
 // Per direct request, the Mound is a short on-ramp now, not the game's
-// whole arc — it only ever grants Electric Eel/Electric Collector/Electric
-// Refinery (Tier 2, renamed per BUILDING_TYPES' own comment — these are the
-// buildings' NEW base-tier display names, not their old "Collector"/
-// "Refinery" ones) before shattering outright at MOUND_MAX_TIER (3) into
+// whole arc — it only ever grants Electric Eel/Collector/Electric Refinery
+// (Tier 2, see BUILDING_TYPES' own comment on each one's display name)
+// before shattering outright at MOUND_MAX_TIER (3) into
 // the Science Lab, where the REAL progression (Suckerfish, Science Octopus,
 // every Advanced/Bio building) lives from then on. See SCIENCE_LAB_UPGRADES
 // in Config.js.
 const TIER_CRACK_MESSAGES = {
-  2: 'Another crack spreads wider. An Electric Collector and an Electric Refinery tumble out, closely followed by an Electric Eel that looks personally offended by the mess.',
+  2: 'Another crack spreads wider. A Collector and an Electric Refinery tumble out, closely followed by an Electric Eel that looks personally offended by the mess.',
   3: 'The mound stops cracking and just gives up, shattering completely. Underneath: a Science Lab that has apparently been there the whole time, humming with unfinished research. Everything from here on out is going to cost Science.',
 };
 
 function pushNotification(state, text) {
-  state.level.notifications.push({ id: state.level.notifications.length + 1, text, elapsed: state.level.elapsed });
-  if (state.level.notifications.length > NOTIFICATION_LOG_MAX) state.level.notifications.shift();
+  const notifications = state.level.notifications;
+  // Per direct request — skip a push that would exactly repeat the most
+  // recent entry, so nothing spams the log back-to-back.
+  if (notifications.length > 0 && notifications[notifications.length - 1].text === text) return;
+  notifications.push({ id: notifications.length + 1, text, elapsed: state.level.elapsed });
+  if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
 }
 
 // Two steps sit across the first real tier, per direct request (the old
@@ -79,7 +82,7 @@ function pushNotification(state, text) {
 // Fan is free from level start now, see Config.js's BUILDING_TYPES):
 // (1) the Tier 1.5 "tease" (MOUND_TEASE_COST, a pure joke — does nothing),
 // then (2) the real Tier 1->2 crack (MOUND_CRACK_COST[1], grants the
-// Electric Collector + Electric Refinery + Electric Eel). The real Tier
+// Collector + Electric Refinery + Electric Eel). The real Tier
 // 2->3 crack (MOUND_CRACK_COST[2]) follows directly after that.
 export function getMoundNextCost(state) {
   const tier = state.level.tier;

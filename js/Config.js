@@ -1363,19 +1363,20 @@ export const BUILDING_TYPES = {
     description: 'Solid floor. Items land and rest on top — cheap, optional item routing.',
     color: '#dba36f', unlockedByDefault: true, // available from level start, unchanged — no longer load-bearing for whether anything ELSE can be placed, though (see canPlaceTile's own comment)
   },
-  // Renamed per direct request — the base tier now draws real power (see
-  // PROCESSOR_STATS[TILE_COLLECTOR].powerCostPerSec), so "Electric" fits it
-  // better than the old bare "Collector"; the two tiers above it each
-  // shifted up one name to make room (old Electric -> Advanced, old
-  // Advanced -> Bio). Base cost raised 12 -> 40 per direct request.
+  // Renamed back to plain "Collector" per direct request, now that the base
+  // tier draws no power at all again (see PROCESSOR_STATS[TILE_COLLECTOR] —
+  // powerCostPerSecCoin/Science both 0) — an earlier pass had renamed this
+  // "Electric Collector" specifically because it drew power; the two tiers
+  // above it keep their own already-established names (Advanced/Bio
+  // Collector) unchanged. Base cost unchanged at 40.
   [TILE_COLLECTOR]: {
-    id: TILE_COLLECTOR, name: 'Electric Collector', icon: '🧲', cost: 40,
-    description: 'Auto-banks coins and Science touching it. Draws 3mw while collecting.',
+    id: TILE_COLLECTOR, name: 'Collector', icon: '🧲', cost: 40,
+    description: 'Auto-banks coins and Science touching it. Draws no power.',
     color: '#8fe0b8', unlockedByDefault: false,
   },
   [TILE_COLLECTOR_ELECTRIC]: {
     id: TILE_COLLECTOR_ELECTRIC, name: 'Advanced Collector', icon: '🧲', cost: 60,
-    description: 'Faster than the Electric Collector. Draws power while holding an item.',
+    description: 'Faster than the base Collector. Costs less power on a coin than on Science.',
     color: '#5fb8ff', unlockedByDefault: false,
   },
   [TILE_COLLECTOR_ADVANCED]: {
@@ -1468,26 +1469,32 @@ export const BUILDING_FAMILIES = {
 };
 
 // ---- Processor (Collector) tiers ----
-// coinMs/scienceMs are how long a single held coin/Science item takes to
-// fully process — Grid.js's updateBuildings/beginCollectorProcessing read
-// these by the placed tile's own type. powerCostPerSec is drawn only while
-// the tile is actively processing something, not while idle/empty, and not
-// gated on actual power availability, same not-yet-power-gated precedent
-// every other Electric building in this codebase already follows.
+// coinMs/scienceMs are how long a single held coin/Blue-Science item takes
+// to fully process — Grid.js's updateBuildings/beginCollectorProcessing
+// read these by the placed tile's own type. scienceGreenMs is Green
+// Science's OWN, separately-tuned duration, per direct request ("green
+// science takes 30 seconds for the base collector... 20 seconds for the
+// advanced... 12 seconds for the bio collector") — it used to just share
+// scienceMs; now every tier gets its own explicit value instead.
+// powerCostPerSecCoin/powerCostPerSecScience are drawn only while the tile
+// is actively processing that exact kind of item, never while idle/empty,
+// and not gated on actual power availability, same not-yet-power-gated
+// precedent every other Electric building in this codebase already
+// follows — split into two rates per direct request ("the advanced and bio
+// collector take half as much energy when collecting coins"), so the
+// shop/Lab preview shows a real min-max range (10-20mw/s, 20-40mw/s) rather
+// than one flat number. The base tier (plain "Collector" again — see
+// BUILDING_TYPES' own comment on the rename) draws NO power at all any
+// more, on either kind of item, per direct request.
 // The Collector no longer produces Waste at all, on any tier — per direct
 // request, it's now a pure banking convenience with no dirty-automation
 // downside; the old wasteEveryMs background clock (and its
 // state.level.buildingData wasteAccumMs field) is removed entirely, not just
 // zeroed. coinMs set to the exact requested 9/6/4 seconds across the 3 tiers.
-// The base tier (now "Electric Collector") draws 3mw while collecting, per
-// direct request — computeCurrentPowerDemand/getBuildingCurrentPowerDraw's own
-// `stats.powerCostPerSec > 0` checks already generically gate every tier on
-// "is it actually processing right now," so this needed no code changes,
-// just a nonzero value here.
 export const PROCESSOR_STATS = {
-  [TILE_COLLECTOR]: { coinMs: 9000, scienceMs: 20000, powerCostPerSec: 3 },
-  [TILE_COLLECTOR_ELECTRIC]: { coinMs: 6000, scienceMs: 15000, powerCostPerSec: 20 },
-  [TILE_COLLECTOR_ADVANCED]: { coinMs: 4000, scienceMs: 9000, powerCostPerSec: 40 },
+  [TILE_COLLECTOR]: { coinMs: 9000, scienceMs: 20000, scienceGreenMs: 30000, powerCostPerSecCoin: 0, powerCostPerSecScience: 0 },
+  [TILE_COLLECTOR_ELECTRIC]: { coinMs: 6000, scienceMs: 15000, scienceGreenMs: 20000, powerCostPerSecCoin: 10, powerCostPerSecScience: 20 },
+  [TILE_COLLECTOR_ADVANCED]: { coinMs: 4000, scienceMs: 9000, scienceGreenMs: 12000, powerCostPerSecCoin: 20, powerCostPerSecScience: 40 },
 };
 
 // ---- Turrets (Alien Invasion) ----

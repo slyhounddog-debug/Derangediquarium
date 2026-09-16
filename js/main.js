@@ -109,8 +109,6 @@ import {
   trySpawnFood,
   trySpawnPurchasedFish,
   tryBankCoinAt,
-  tryBankScienceAt,
-  tryBankScienceGreenAt,
   spawnFishCheat,
   getCoinColor,
   getCoinTier,
@@ -603,9 +601,10 @@ function isMergeDragTutorialStepActive(state) {
 // is gone and clear the drag, same as updateFishDrag already does for a
 // fish that starves mid-drag.
 //
-// Coin and Science are ALSO click-bankable (tryBankCoinAt/tryBankScienceAt,
-// fired from the click handler below) — a plain click (no real drag) has to
-// keep banking them normally, while a genuine drag-and-release must NOT
+// A Coin is ALSO click-bankable (tryBankCoinAt, fired from the click
+// handler below) — Science/Green Science lost this per direct request (they
+// can only be banked via a Collector now) — a plain click (no real drag) has
+// to keep banking a coin normally, while a genuine drag-and-release must NOT
 // also bank/place something at the drop point. Resolved by a minimum
 // move-distance check (ITEM_DRAG_MOVE_THRESHOLD_PX) rather than always
 // suppressing the click the way the fish-drag/old waste-drag unconditionally
@@ -988,6 +987,18 @@ function isFanAimingActive() {
 const UNDO_STACK_MAX = 20;
 let undoStack = [];
 
+// main.js's own local notification-push helper (this file's two remaining
+// direct call sites, both one-time flag-gated messages) — same duplicated-
+// inline "push+cap" pattern every other module already has its own copy of
+// (see CLAUDE.md's Rolling Notification Log section). Per direct request,
+// skips a push that would exactly repeat the most recent entry.
+function pushMainNotification(state, text) {
+  const notifications = state.level.notifications;
+  if (notifications.length > 0 && notifications[notifications.length - 1].text === text) return;
+  notifications.push({ id: notifications.length + 1, text, elapsed: state.level.elapsed });
+  if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
+}
+
 function undoActionLabel(type) {
   if (type === 'place') return 'Undo Place';
   if (type === 'move') return 'Undo Move';
@@ -1320,16 +1331,19 @@ input.clickHandlers.push((sx, sy) => {
     return;
   }
 
-  // Per direct request: a coin or Science Bubble sitting in front of (i.e.
-  // overlapping) the Mound/Science Lab's own click area gets the click
-  // consumed on IT first — the Mound is ignored entirely that click, not
-  // just deprioritized — so banking something isn't ever mistaken for a
-  // Mound-menu-open because it happened to be resting in the wrong spot.
-  // Checked ahead of the Mound/Lab hit-tests below (previously the other
-  // way around).
+  // Per direct request: a coin sitting in front of (i.e. overlapping) the
+  // Mound/Science Lab's own click area gets the click consumed on IT first
+  // — the Mound is ignored entirely that click, not just deprioritized —
+  // so banking a coin isn't ever mistaken for a Mound-menu-open because it
+  // happened to be resting in the wrong spot. Checked ahead of the Mound/
+  // Lab hit-tests below (previously the other way around). Science/Green
+  // Science are no longer click-bankable at all, per direct request ("blue
+  // and green science cannot be clicked to be collected, it has to be
+  // processed by a collector") — tryBankScienceAt/tryBankScienceGreenAt are
+  // gone from this handler entirely; a Science item can still be dragged
+  // (the universal item-drag mechanic) into a Collector by hand, or left to
+  // drift into one on its own via a Fan.
   if (tryBankCoinAt(state, world.x, world.y)) return; // clicking a coin always banks it, regardless of selected tool
-  if (tryBankScienceAt(state, world.x, world.y)) return; // same for a Science Bubble
-  if (tryBankScienceGreenAt(state, world.x, world.y)) return; // same for a Green Science Bubble
   if (isPointOnMound(state, world.x, world.y)) { openMoundMenu(state); return; } // opens the "Throw money at it" popup — see UI.js
   if (isPointOnScienceLab(state, world.x, world.y)) { openLabMenu(state); return; } // Phase 4 — the Mound's replacement once it's fully shattered
   // A placed Manufacturer/Power Plant opens its recipe pop-up menu on click
@@ -1598,31 +1612,36 @@ input.keydownHandlers.push((e) => {
     case 'KeyE': // toggle-collapse the shop panel — moved off KeyQ per direct request, freeing Q up for the Pipette Tool below
       toggleShopCollapse(state);
       break;
-    case 'KeyQ': { // Pipette Tool / "last used" fallback — per direct request
-      // Always tries the Pipette first now, regardless of whether a tool's
-      // already armed (the old "clear cursor if something's already
-      // selected" branch is gone) — hovering a fish or a placed building
-      // arms exactly that, same as before. Fish checked first (their own
-      // hit radius, matching the shimmer effect's size, is usually the
-      // larger/more forgiving target); a building tile is checked only if
-      // no fish qualified. If NEITHER is under the cursor, it reselects
-      // whichever building/fish tool was last armed (state.ui.lastArmedTool,
-      // written by UI.js's selectSpeciesForPreview/selectBuildingForPreview)
-      // instead of doing nothing — per direct request, "if you're not
-      // hovering over a building or fish when you press Q, it selects the
-      // last selected building or fish."
-      const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
-      const fish = findFishForPipetteAt(state, world.x, world.y);
-      if (fish) {
-        pipetteSelectSpecies(state, fish.speciesId);
+    case 'KeyQ': { // Pipette Tool / "last used" fallback, / Clear Cursor — per direct request
+      // Per direct request, Q is a genuine toggle again: press it over and
+      // over to clear the cursor, reselect the last thing, clear again,
+      // reselect again... A build:/fish: tool already armed ("something is
+      // being held") clears straight back to Food, matching the "Clear
+      // Cursor" legend wording; with NOTHING armed, it Pipettes whatever's
+      // directly under the cursor (fish checked first — their own hit
+      // radius, matching the shimmer effect's size, is usually the larger/
+      // more forgiving target — then a placed building), falling back to
+      // reselecting whichever build:/fish: tool was last armed
+      // (state.ui.lastArmedTool, written by UI.js's selectSpeciesForPreview/
+      // selectBuildingForPreview) if nothing qualifies under the cursor
+      // either.
+      const rawTool = state.ui.selectedTool;
+      if (rawTool.startsWith('build:') || rawTool.startsWith('fish:')) {
+        deselectShopSelection(state);
       } else {
-        const { col, row } = worldToTile(world.x, world.y);
-        const tileType = getTile(state.level.grid, col, row);
-        if (tileType && tileType !== TILE_EMPTY) {
-          pipetteSelectBuilding(state, tileType);
-        } else if (state.ui.lastArmedTool) {
-          if (state.ui.lastArmedTool.startsWith('fish:')) pipetteSelectSpecies(state, state.ui.lastArmedTool.slice('fish:'.length));
-          else if (state.ui.lastArmedTool.startsWith('build:')) pipetteSelectBuilding(state, state.ui.lastArmedTool.slice('build:'.length));
+        const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
+        const fish = findFishForPipetteAt(state, world.x, world.y);
+        if (fish) {
+          pipetteSelectSpecies(state, fish.speciesId);
+        } else {
+          const { col, row } = worldToTile(world.x, world.y);
+          const tileType = getTile(state.level.grid, col, row);
+          if (tileType && tileType !== TILE_EMPTY) {
+            pipetteSelectBuilding(state, tileType);
+          } else if (state.ui.lastArmedTool) {
+            if (state.ui.lastArmedTool.startsWith('fish:')) pipetteSelectSpecies(state, state.ui.lastArmedTool.slice('fish:'.length));
+            else if (state.ui.lastArmedTool.startsWith('build:')) pipetteSelectBuilding(state, state.ui.lastArmedTool.slice('build:'.length));
+          }
         }
       }
       break;
@@ -1921,9 +1940,7 @@ function updateBossSequence(state, dtMs) {
     state.level.bossIntroTimerMs += dtMs;
     if (!state.level.bossIntroMessageShown && state.level.bossIntroTimerMs >= BOSS_INTRO_MESSAGE_AT_MS) {
       state.level.bossIntroMessageShown = true;
-      const notifications = state.level.notifications;
-      notifications.push({ id: notifications.length + 1, text: BOSS_INTRO_MESSAGE, elapsed: state.level.elapsed });
-      if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
+      pushMainNotification(state, BOSS_INTRO_MESSAGE);
     }
     if (state.level.bossIntroTimerMs >= BOSS_SPAWN_MS) {
       // The white fade-in (rendered live from bossIntroTimerMs while still
@@ -2076,9 +2093,7 @@ function update(dtMs) {
       // this whole branch only ever fires once, on the 'scroll' -> 'place'
       // transition itself.
       state.level.money += TURRET_TUTORIAL_GOLD_GRANT;
-      const notifications = state.level.notifications;
-      notifications.push({ id: notifications.length + 1, text: TURRET_TUTORIAL_GOLD_GRANT_MESSAGE, elapsed: state.level.elapsed });
-      if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
+      pushMainNotification(state, TURRET_TUTORIAL_GOLD_GRANT_MESSAGE);
     }
     // The "drag Waste into the Turret" step needs the WHOLE simulation
     // running normally, not just camera/build-drag like every other step's

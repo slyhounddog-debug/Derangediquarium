@@ -84,6 +84,11 @@ const FIRST_FAN_PLACED_MESSAGE = 'fancy fan....oooo you fancy';
 
 function pushGridNotification(state, text) {
   const notifications = state.level.notifications;
+  // Per direct request — never push the exact same text as the immediately
+  // preceding entry, so nothing spams the log 20 times in a row while
+  // nothing else is happening (a later repeat, with something else logged
+  // in between, is still fine).
+  if (notifications.length > 0 && notifications[notifications.length - 1].text === text) return;
   notifications.push({ id: notifications.length + 1, text, elapsed: state.level.elapsed });
   if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
 }
@@ -802,11 +807,13 @@ function stepCollectorProcessing(item, state, dt) {
   }
   item.x += (item.collectorCenterX - item.x) * COLLECTOR_PULL_STRENGTH * dt;
   item.y += (item.collectorCenterY - item.y) * COLLECTOR_PULL_STRENGTH * dt;
-  // A free base Collector (powerCostPerSec 0) always finishes at full speed;
-  // an Electric/Advanced tier's progress genuinely stalls at 0% grid
+  // A free base Collector (both power rates 0) always finishes at full
+  // speed; an Advanced/Bio tier's progress genuinely stalls at 0% grid
   // efficiency instead of just running slower forever — matches "buildings
   // using electricity should stop working" once supply can't cover demand.
-  const appliedEfficiency = PROCESSOR_STATS[tileType].powerCostPerSec > 0 ? state.level.powerEfficiency : 1;
+  // Which rate applies depends on what's actually being held right now —
+  // see getCollectorPowerCostForItem's own comment.
+  const appliedEfficiency = getCollectorPowerCostForItem(PROCESSOR_STATS[tileType], item.type) > 0 ? state.level.powerEfficiency : 1;
   // A linked, non-hungry Catalyst Fish speeds this exact tile up — see
   // getCatalystSpeedMultiplier's own comment. The key is derived from the
   // item's own stored collector center, since this runs per-ITEM (called
@@ -1021,6 +1028,18 @@ function isTouchingBuildingTile(centerX, centerY, itemX, itemY, itemRadius) {
   return Math.hypot(dx, dy) <= itemRadius + TOUCH_EPSILON_PX;
 }
 
+// A Collector's power draw depends on WHAT it's currently holding, not just
+// which tier it is — per direct request ("the advanced and bio collector
+// take half as much energy when collecting coins"), Blue and Green Science
+// both draw the tile's own full `powerCostPerSecScience` rate, a coin draws
+// the (on the power-costing tiers, exactly half) `powerCostPerSecCoin` rate.
+// Shared by stepCollectorProcessing (the efficiency-gate check),
+// computeCurrentPowerDemand, and getBuildingCurrentPowerDraw so the three
+// can never disagree about which rate applies.
+function getCollectorPowerCostForItem(stats, itemType) {
+  return (itemType === 'science' || itemType === 'science_green') ? stats.powerCostPerSecScience : stats.powerCostPerSecCoin;
+}
+
 // Starts the same pull-to-center hold stepCollectorProcessing eases through
 // every tick — previously only ever kicked off by a top-landing event
 // (handleLanding); now triggered by updateBuildings' intake scan below
@@ -1030,11 +1049,15 @@ function beginCollectorProcessing(item, centerX, centerY, tileType) {
   item.collectorCenterX = centerX;
   item.collectorCenterY = centerY;
   item.collectorProgressMs = 0;
-  // A coin and a Science Bubble take different amounts of time on the same
-  // tile, and that time shrinks per tier — see Config.js's PROCESSOR_STATS.
-  // Green Science shares blue's own scienceMs (see the intake scan above).
+  // A coin, a Blue Science Bubble, and a Green Science Bubble all take
+  // different amounts of time on the same tile, and each shrinks
+  // independently per tier — see Config.js's PROCESSOR_STATS. Green Science
+  // used to just share Blue's own scienceMs; per direct request it now has
+  // its own explicit, separately-tuned scienceGreenMs.
   const stats = PROCESSOR_STATS[tileType];
-  item.collectorTargetMs = (item.type === 'science' || item.type === 'science_green') ? stats.scienceMs : stats.coinMs;
+  item.collectorTargetMs = item.type === 'science_green' ? stats.scienceGreenMs
+    : item.type === 'science' ? stats.scienceMs
+    : stats.coinMs;
   item.collectorOriginalMass = item.mass;
   item.mass = COLLECTOR_PROCESSING_MASS; // barely budges if something else piles into it mid-process — see Config.js's comment
 }
@@ -1563,10 +1586,10 @@ export function computeCurrentPowerDemand(state) {
       const [row, col] = key.split(',').map(Number);
       const centerX = col * TILE_SIZE + TILE_SIZE / 2;
       const centerY = row * TILE_SIZE + TILE_SIZE / 2;
-      const activelyProcessing = items.some(
+      const activeItem = items.find(
         (it) => it.collectorProgressMs != null && it.collectorCenterX === centerX && it.collectorCenterY === centerY
       );
-      if (activelyProcessing) demand += PROCESSOR_STATS[data.type].powerCostPerSec;
+      if (activeItem) demand += getCollectorPowerCostForItem(PROCESSOR_STATS[data.type], activeItem.type);
     } else if (REFINERY_TILES.has(data.type)) {
       // Every tier — including the base (now "Electric Refinery") — only
       // draws while actively processing a locked recipe, same "only while
@@ -2813,10 +2836,10 @@ function renderTurretAmmoDots(ctx, x, y, size, ammo, zoom) {
 export function getBuildingCurrentPowerDraw(state, type, data, centerX, centerY) {
   if (FAN_TILES.has(type)) return FAN_STATS[type].powerCost;
   if (COLLECTOR_TILES.has(type)) {
-    const activelyProcessing = state.level.items.some(
+    const activeItem = state.level.items.find(
       (it) => it.collectorProgressMs != null && it.collectorCenterX === centerX && it.collectorCenterY === centerY
     );
-    return activelyProcessing ? PROCESSOR_STATS[type].powerCostPerSec : 0;
+    return activeItem ? getCollectorPowerCostForItem(PROCESSOR_STATS[type], activeItem.type) : 0;
   }
   if (REFINERY_TILES.has(type)) return data && data.lockedRecipe !== null ? REFINERY_STATS[type].powerCostPerSec : 0;
   if (MANUFACTURER_TILES.has(type)) {
