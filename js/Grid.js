@@ -591,6 +591,36 @@ export function placeBlueprint(state, baseCol, baseRow, cells) {
   return placedCells;
 }
 
+// Live total cost of pasting a captured stamp at (baseCol, baseRow) — per
+// direct request, shown as a cost bubble while the stamp follows the
+// cursor. Mirrors placeBlueprint's own skip rule exactly (a cell
+// canPlaceTile would reject — occupied, out of bounds — costs nothing and
+// isn't counted, same as it silently isn't placed), and mirrors
+// getBuildingCost's own compounding formula, but tracks a hypothetical
+// extra count per building type AS IT WALKS THE LIST — placeBlueprint
+// places cells one at a time, so a stamp with several of the exact same
+// building genuinely costs more for the 2nd/3rd/... one than the live grid
+// count alone would suggest, since each successive placement raises the
+// next one's own live cost the same way placing them one at a time by hand
+// would.
+export function computeBlueprintCost(state, baseCol, baseRow, cells) {
+  let total = 0;
+  const extraCounts = {};
+  for (const cell of cells) {
+    const col = baseCol + cell.dCol;
+    const row = baseRow + cell.dRow;
+    if (!canPlaceTile(state, col, row, cell.buildingId).ok) continue;
+    const building = BUILDING_TYPES[cell.buildingId];
+    if (!building) continue;
+    if (cell.buildingId === TILE_PLATFORM) { total += PLATFORM_FLAT_COST; continue; }
+    const extra = extraCounts[cell.buildingId] || 0;
+    const n = countPlacedOfType(state.level.grid, cell.buildingId) + extra;
+    total += Math.ceil(building.cost * Math.pow(buildingCostGrowthRate(building.cost), n));
+    extraCounts[cell.buildingId] = extra + 1;
+  }
+  return total;
+}
+
 // T debug key — cycles the tile under the cursor through every building type
 // (plus empty) for free, ignoring cost/occupancy/anchoring. Fans default to
 // pointing straight up (toward the water column) since that's the most

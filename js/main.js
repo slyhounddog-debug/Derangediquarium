@@ -152,6 +152,7 @@ import {
   captureBlueprint,
   renderBlueprintGhost,
   placeBlueprint,
+  computeBlueprintCost,
 } from './Grid.js';
 import { isPointOnMound, crackMound, renderMound, centerCameraOnMound, isPointOnScienceLab, renderScienceLab } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
@@ -356,6 +357,7 @@ const state = {
   ui: {
     selectedTool: 'food', // which click-tool a canvas click performs; only 'food' exists until Phase 2 adds tile placement
     lastArmedTool: null, // the last 'build:<id>'/'fish:<id>' tool armed (UI.js's selectSpeciesForPreview/selectBuildingForPreview) — the Q hotkey's "reselect last building/fish" fallback, see main.js's KeyQ handler
+    blueprintCost: null, // live total $ cost of the currently-armed Blueprint stamp, written fresh every render() frame, null while no stamp is armed — read by UI.js's updateHUD for the bottom-left cost bubble
     undoAvailable: false, // whether main.js's Ctrl+Z undo stack currently has anything to undo — written by pushUndoEntry/performUndo, read by UI.js's bottom-left hotkey legend
     undoLabel: null, // 'Undo Place' | 'Undo Move' | 'Undo Sell' | null — what Ctrl+Z would currently do, shown in that same legend line
     shopCollapsed: true, // shop starts tucked away — just the toggle button — so it doesn't clutter the view
@@ -2693,6 +2695,17 @@ function render() {
     const hoverWorld = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
     const { col: baseCol, row: baseRow } = worldToTile(hoverWorld.x, hoverWorld.y);
     renderBlueprintGhost(ctx, state, baseCol, baseRow, blueprintClipboard);
+    // Live cost bubble, per direct request — read by UI.js's updateHUD,
+    // which shows it in the same bottom-left bubble a build:/fish: tool's
+    // own "Click to purchase" legend already uses (the two are mutually
+    // exclusive, so sharing it needs no extra UI). Recomputed every frame
+    // since it depends on exactly where the stamp is currently hovering —
+    // Grid.js's computeBlueprintCost already skips any cell that would be
+    // rejected (occupied/out of bounds), matching what a real paste would
+    // actually charge.
+    state.ui.blueprintCost = computeBlueprintCost(state, baseCol, baseRow, blueprintClipboard);
+  } else {
+    state.ui.blueprintCost = null;
   }
 
   for (const item of state.level.items) {

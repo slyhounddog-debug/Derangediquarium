@@ -3479,20 +3479,32 @@ export function updateHUD(state) {
   updateAlienCountdown(state);
   updateScrollHint(state);
   updateTutorialOverlay(state);
-  // Purchase legend — now ONLY ever says "Click to purchase", per direct
-  // request — shown while a building OR a fish is armed (state.ui.
-  // selectedTool starts with 'build:'/'fish:'). The "(Esc) to cancel" half
-  // that used to live here moved into the persistent bottom-left
-  // #hotkey-legend below as a dynamic Esc line instead, since Escape's own
-  // job doubles as opening the pause menu now that the dedicated pause
-  // button is gone — a single Esc line covering both meanings reads better
-  // than two separate "(Esc) to ___" hints in different corners. Suppressed
-  // during a guided tutorial, same as before (the skip legend covers that
-  // case instead). The Merge tool no longer shows this legend at all — it
-  // was only ever showing the now-removed "(Esc) to cancel" half here.
+  // Purchase legend — says "Click to purchase" while a building OR a fish
+  // is armed (state.ui.selectedTool starts with 'build:'/'fish:'). The
+  // "(Esc) to cancel" half that used to live here moved into the persistent
+  // bottom-left #hotkey-legend below as a dynamic Esc line instead, since
+  // Escape's own job doubles as opening the pause menu now that the
+  // dedicated pause button is gone — a single Esc line covering both
+  // meanings reads better than two separate "(Esc) to ___" hints in
+  // different corners. Suppressed during a guided tutorial, same as before
+  // (the skip legend covers that case instead). The Merge tool no longer
+  // shows this legend at all — it was only ever showing the now-removed
+  // "(Esc) to cancel" half here.
+  //
+  // Also doubles as a live cost bubble for the Blueprint tool, per direct
+  // request ("have a cost bubble appear to the left of the shop where it
+  // would normally say 'Click to purchase' showing the cost of the whole
+  // blueprint") — main.js writes state.ui.blueprintCost fresh every render()
+  // frame (the same cross-module-flag pattern buildingMoveArmed/
+  // buildingMoveHoverLabel below already use) whenever a captured stamp is
+  // following the cursor, null otherwise; this shares the exact same bubble
+  // rather than a second one, since the two states (a build:/fish: tool
+  // armed vs. a Blueprint stamp armed) are already mutually exclusive.
   const tutorialActive = !!state.level.tutorialFlow;
   const toolIsPurchasable = state.ui.selectedTool.startsWith('build:') || state.ui.selectedTool.startsWith('fish:');
-  const buildLegendVisible = !tutorialActive && toolIsPurchasable;
+  const blueprintCostVisible = state.ui.blueprintCost != null;
+  const buildLegendVisible = !tutorialActive && (toolIsPurchasable || blueprintCostVisible);
+  els.buildLegend.textContent = blueprintCostVisible ? `Cost: $${state.ui.blueprintCost}` : 'Click to purchase';
   els.buildLegend.classList.toggle('hidden', !buildLegendVisible);
   // Tutorial-skip legend — "(Esc) to skip tutorial" — shown for the whole
   // duration of any guided tutorial flow, per direct request; main.js's
