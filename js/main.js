@@ -112,6 +112,7 @@ import {
   spawnFishCheat,
   getCoinColor,
   getCoinTier,
+  createPickupText,
   getFishPurchaseCost,
   findFishAt,
   findFishForPipetteAt,
@@ -496,7 +497,7 @@ input.mouseDownHandlers.push((sx, sy) => {
   // Combining/splicing now requires the dedicated Merge tool (🧤) to be
   // selected first — per direct request, this no longer fires just because
   // a mousedown happened to land on an eligible fish while some other tool
-  // was active (Food, a building, Demolish). See UI.js's tool-merge-btn.
+  // was active (Food, a building, Blueprint). See UI.js's tool-merge-btn.
   if (state.ui.selectedTool !== 'merge') return;
   const world = screenToWorld(sx, sy, state.camera);
   const fish = findFishAt(state, world.x, world.y);
@@ -661,8 +662,8 @@ input.mouseDownHandlers.push((sx, sy) => {
   const world = screenToWorld(sx, sy, state.camera);
   // Per direct request ("objects can't be dragged when a building or fish
   // is selected for purchasing... you have to be on the food cursor tool to
-  // drag objects") — reuses the same effectiveToolAt a build/demolish tool
-  // already gets silently reinterpreted as Food through while hovering open
+  // drag objects") — reuses the same effectiveToolAt a build tool already
+  // gets silently reinterpreted as Food through while hovering open
   // water, so this stays consistent with that existing behavior rather than
   // introducing a second, slightly different notion of "which tool is this
   // really." Fish/Merge are NOT given that same open-water carve-out by
@@ -854,7 +855,7 @@ let recipeDragHoverKey = null; // whichever same-type building the cursor is cur
 input.mouseDownHandlers.push((sx, sy) => {
   if (state.ui.paused) return;
   const world = screenToWorld(sx, sy, state.camera);
-  if (effectiveToolAt(world.y) === 'demolish') return; // don't fight with Demolish's own drag-remove on the same press
+  if (input.keysDown.has('KeyD') && state.ui.selectedTool === 'food') return; // don't fight with the D-hotkey's own drag-delete on the same press
   const key = getRecipeBuildingKeyAt(state, world.x, world.y);
   if (!key) return;
   recipeDragSourceKey = key;
@@ -910,7 +911,7 @@ let platformFilterDragHoverKey = null; // whichever other Platform tile the curs
 input.mouseDownHandlers.push((sx, sy) => {
   if (state.ui.paused) return;
   const world = screenToWorld(sx, sy, state.camera);
-  if (effectiveToolAt(world.y) === 'demolish') return; // don't fight with Demolish's own drag-remove on the same press
+  if (input.keysDown.has('KeyD') && state.ui.selectedTool === 'food') return; // don't fight with the D-hotkey's own drag-delete on the same press
   const key = getPlatformFilterKeyAt(state, world.x, world.y);
   if (!key) return;
   platformFilterDragSourceKey = key;
@@ -984,7 +985,7 @@ input.mouseUpHandlers.push((sx, sy) => {
 });
 
 // Called every tick, unconditionally (even during a guided tutorial, same
-// as updateBuildDrag/updateDemolishDrag right above its own call site) —
+// as updateBuildDrag/updateKeyDDelete right above its own call site) —
 // the moment the Blueprint tool isn't the one currently selected, whatever
 // was captured/in-progress is gone, rather than a stale clipboard staying
 // silently paste-able (and its ghost still following the cursor) in the
@@ -1123,12 +1124,18 @@ function performUndo() {
   }
 }
 
-// Demolishes a tile the same way the Demolish tool always has, but first
-// snapshots it (type/instance-data/the exact refund actually paid) so
-// performUndo can restore it later — every real player-triggered removal
-// (the click handler's single-click Demolish, and updateDemolishDrag's own
-// click-and-drag removal) routes through this instead of calling
-// Grid.js's removeTile directly.
+// Deletes a placed tile via a full refund, the same way removal always has,
+// but first snapshots it (type/instance-data/the exact refund actually
+// paid) so performUndo can restore it later, and posts a floating "+$xx"
+// over it, same as picking up a coin — per direct request ("give a full
+// refund, and have the floating '+$xx' show up, like when you pick up a
+// coin"). Every real player-triggered deletion (updateKeyDDelete's own
+// single-press-or-hold-and-drag mechanic, below) routes through this
+// instead of calling Grid.js's removeTile directly — the internal undo-entry
+// `type` string stays 'demolish' (an old name for this exact action, kept
+// stable as a plain identifier the same way this project keeps other
+// internal ids across a rename) even though there's no standalone Demolish
+// tool left to name it after.
 function recordAndRemoveTile(col, row) {
   const existingType = getTile(state.level.grid, col, row);
   if (!existingType || existingType === TILE_EMPTY) { removeTile(state, col, row); return; }
@@ -1136,7 +1143,12 @@ function recordAndRemoveTile(col, row) {
   const clonedData = existingData ? JSON.parse(JSON.stringify(existingData)) : null;
   const moneyBefore = state.level.money;
   const removed = removeTile(state, col, row);
-  if (removed) pushUndoEntry({ type: 'demolish', col, row, buildingId: existingType, data: clonedData, refund: state.level.money - moneyBefore });
+  if (!removed) return;
+  const refund = state.level.money - moneyBefore;
+  pushUndoEntry({ type: 'demolish', col, row, buildingId: existingType, data: clonedData, refund });
+  const worldX = col * TILE_SIZE + TILE_SIZE / 2;
+  const worldY = row * TILE_SIZE + TILE_SIZE / 2;
+  state.level.floatingTexts.push(createPickupText(worldX, worldY, `+$${refund}`, getCoinColor(refund)));
 }
 
 let movingBuilding = null; // { fromCol, fromRow, buildingId, data } | null
@@ -1180,23 +1192,25 @@ function updateBuildingMove() {
   }
 }
 
-// Per direct request: a Build or Demolish tool can't do anything in open
+// Per direct request: a Build or Blueprint tool can't do anything in open
 // water anyway — every building still has to be placed within the seabed
-// band, and there's nothing to demolish up there — so the cursor icon,
-// ghost preview, and click behavior all default back to Food while hovering
-// open water with one of those two tools selected. Crucially,
-// state.ui.selectedTool itself is NEVER changed by this — only what a
-// click/hover DOES is reinterpreted — so a building stays armed exactly as
-// selected the moment the cursor comes back down to the seabed, no need to
-// reselect it in the shop. Fish
+// band — so the cursor icon, ghost preview, and click behavior all default
+// back to Food while hovering open water with one of those two tools
+// selected. Crucially, state.ui.selectedTool itself is NEVER changed by
+// this — only what a click/hover DOES is reinterpreted — so a building
+// stays armed exactly as selected the moment the cursor comes back down to
+// the seabed, no need to reselect it in the shop. Fish
 // and Merge are deliberately excluded, since both are genuinely used in
 // open water and should stay exactly as selected everywhere. Shared by the
 // click handler, updateBuildDrag, the cursor icon, and the ghost-preview
 // render branch below, so all four can never drift out of sync with each
-// other.
+// other. The old standalone Demolish tool used to be listed here too —
+// removed along with the tool itself, folded into the Food tool's own
+// D-hotkey delete (updateKeyDDelete), which needs no such carve-out since
+// there's simply nothing to delete above the seabed band anyway.
 function effectiveToolAt(worldY) {
   const rawTool = state.ui.selectedTool;
-  if (worldY < SEABED_FLOOR_Y && (rawTool.startsWith('build:') || rawTool === 'demolish' || rawTool === 'blueprint')) return 'food';
+  if (worldY < SEABED_FLOOR_Y && (rawTool.startsWith('build:') || rawTool === 'blueprint')) return 'food';
   return rawTool;
 }
 
@@ -1265,8 +1279,8 @@ input.clickHandlers.push((sx, sy) => {
   // Alien Invasion: clicking a living alien always does ALIEN_CLICK_DAMAGE,
   // regardless of the currently selected tool — same "always works,
   // whatever's selected" precedent coin-banking (below) already has.
-  // Checked first so it can't be shadowed by a build/demolish tool's own
-  // early-return branches.
+  // Checked first so it can't be shadowed by a build tool's own early-return
+  // branches.
   for (const entity of state.level.entities) {
     // spawnProtectionUntilMs: a freshly Alien-Egg-hatched alien is
     // invulnerable to clicks too during its grace period — see
@@ -1394,9 +1408,9 @@ input.clickHandlers.push((sx, sy) => {
     return;
   }
 
-  // Per direct request, a Build/Demolish tool defaults to Food while the
-  // click lands in open water — see effectiveToolAt's own comment. Every
-  // branch below reads this instead of state.ui.selectedTool directly.
+  // Per direct request, a Build tool defaults to Food while the click lands
+  // in open water — see effectiveToolAt's own comment. Every branch below
+  // reads this instead of state.ui.selectedTool directly.
   const effectiveTool = effectiveToolAt(world.y);
 
   if (effectiveTool.startsWith('build:')) {
@@ -1410,12 +1424,6 @@ input.clickHandlers.push((sx, sy) => {
       else handleBuildPlacementFailure(check.reason);
       return; // either way, a fan-tool click never falls through to mound/coin/food
     }
-  }
-
-  if (effectiveTool === 'demolish') {
-    const { col, row } = worldToTile(world.x, world.y);
-    recordAndRemoveTile(col, row);
-    return;
   }
 
   // Per direct request: a coin sitting in front of (i.e. overlapping) the
@@ -1435,9 +1443,8 @@ input.clickHandlers.push((sx, sy) => {
   if (isPointOnScienceLab(state, world.x, world.y)) { openLabMenu(state); return; } // Phase 4 — the Mound's replacement once it's fully shattered
   // A placed Manufacturer/Power Plant opens its recipe pop-up menu on click
   // — per direct spec, works regardless of the currently selected tool
-  // (same as the Mound/Lab above), except Demolish (already returned above)
-  // and a genuine drag gesture (already returned at the top of this
-  // handler).
+  // (same as the Mound/Lab above), except a genuine drag gesture (already
+  // returned at the top of this handler).
   const recipeBuildingKey = getRecipeBuildingKeyAt(state, world.x, world.y);
   if (recipeBuildingKey) { openRecipeMenu(state, recipeBuildingKey); return; }
   // Every OTHER placed building opens a generic read-only info pop-up
@@ -1478,18 +1485,6 @@ input.clickHandlers.push((sx, sy) => {
   // click for those building types.
 });
 
-// Demolishing now requires the Demolish tool to be selected (see UI.js's
-// tool-demolish-btn) — right-click alone no longer removes tiles
-// unconditionally the way it used to. Kept as a convenience alias for
-// left-click while that tool is active, not a separate always-on shortcut.
-input.rightClickHandlers.push((sx, sy) => {
-  if (state.ui.paused) return;
-  if (state.ui.selectedTool !== 'demolish') return;
-  const world = screenToWorld(sx, sy, state.camera);
-  const { col, row } = worldToTile(world.x, world.y);
-  recordAndRemoveTile(col, row);
-});
-
 // Blueprint tool: right-click cancels an in-progress selection (drag) or an
 // already-captured clipboard armed for pasting — back to a clean slate,
 // ready for a new drag-select, without leaving the tool itself.
@@ -1501,9 +1496,8 @@ input.rightClickHandlers.push(() => {
 });
 
 // Right-click-to-move — see movingBuilding's own comment above. Only arms
-// from the Food tool (matching the hover legend's own gating below) —
-// Demolish already owns right-click for its own tool (the handler above),
-// and a build/fish/merge tool has its own unrelated right-click-free
+// from the Food tool (matching the hover legend's own gating below) — a
+// build/fish/merge tool has its own unrelated right-click-free
 // interactions. A right-click always CANCELS first, regardless of tool,
 // whichever of the two "something's in progress" states applies — a plain
 // pick-up-in-progress (movingBuilding), or a moved Fan's own angle-choosing
@@ -1537,14 +1531,20 @@ input.rightClickHandlers.push((sx, sy) => {
 // without re-spending money on a cell it's already sitting over.
 let lastBuildCell = null;
 
-// Demolish-mode drag-removal — per direct request ("click and drag over
-// multiple buildings to delete them quickly, so you don't have to click each
-// one"), mirrors updateBuildDrag's own "once per newly-entered cell, not
-// once per physics tick" shape exactly, just calling removeTile instead of
-// placeTile. removeTile is already a safe no-op on an empty cell (returns
-// false, no refund/sound — see Grid.js), so this doesn't need its own
-// occupancy check before calling it.
-let lastDemolishCell = null;
+// D-hotkey delete, including hold-and-drag — per direct request ("remove
+// the demolish tool... have it built into the food cursor tool via the D
+// hotkey... make it so that you can hold D and drag over multiple
+// buildings to delete them all via drag-to-delete just like drag-to-
+// place"). Mirrors updateBuildDrag's own "once per newly-entered cell, not
+// once per physics tick" shape exactly — see updateKeyDDelete below — just
+// gated on input.keysDown.has('KeyD') instead of a selected tool/held mouse
+// button, so a single tap deletes whatever's under the cursor that instant
+// (the very first "newly-entered cell" the moment KeyD becomes held) and
+// holding it while moving the mouse sweeps across more. removeTile is
+// already a safe no-op on an empty cell (returns false, no refund/sound/
+// floating-text — see Grid.js and recordAndRemoveTile above), so this
+// doesn't need its own occupancy check before calling it.
+let lastKeyDDeleteCell = null;
 
 // Per direct request: any failed building-placement attempt shows a small
 // red reason above the cursor ("Can't afford"). Shared by every placement-
@@ -1611,7 +1611,7 @@ input.keydownHandlers.push((e) => {
   if (e.code === 'Escape') {
     // Escape's job: close whatever popup is on top (or the Shop/Tank
     // Upgrades panel, if one's open), and cancel an armed build/fish/
-    // demolish/merge tool back to Food. Per direct request, if NONE of that
+    // merge/blueprint tool back to Food. Per direct request, if NONE of that
     // applies — no popup open, no panel open, Food already selected — it
     // toggles the pause menu instead. The dedicated pause-menu button
     // (#pause-toggle-btn) was removed per a later direct request — Escape is
@@ -1700,11 +1700,8 @@ input.keydownHandlers.push((e) => {
     case 'KeyK': // clear all items
       state.level.items = [];
       break;
-    case 'Digit1': // Food — matches the fixed bottom tool-bar's own 1/2/3 hotkeys
+    case 'Digit1': // Food — matches the fixed bottom tool-bar's own hotkeys. Digit2 (Demolish) is deliberately gone, not renumbered — that tool was removed entirely, folded into Food's own D-hotkey delete (updateKeyDDelete)
       selectTool(state, 'food');
-      break;
-    case 'Digit2': // Demolish
-      selectTool(state, 'demolish');
       break;
     case 'Digit3': // Merge
       selectTool(state, 'merge');
@@ -2021,20 +2018,29 @@ function updateBuildDrag() {
   }
 }
 
-// Demolish-mode drag-removal — see lastDemolishCell's own comment above.
-function updateDemolishDrag() {
-  if (!input.mouseDown) {
-    lastDemolishCell = null;
+// D-hotkey delete, including hold-and-drag — see lastKeyDDeleteCell's own
+// comment above. Per direct request ("built into the food cursor tool via
+// the D hotkey"), this is specifically a Food-tool ability, not a global
+// modifier that works no matter what else is selected — checked against the
+// raw selectedTool, not effectiveToolAt, since a build/blueprint tool is
+// only ever reinterpreted as Food over OPEN water (see effectiveToolAt's
+// own comment) and deletion only ever applies on the seabed anyway, where
+// an armed build tool stays exactly itself. Matches updateCanvasCursor's
+// own hammer-cursor swap and render()'s own D-held ghost-tint preview,
+// which both gate on the same condition.
+function updateKeyDDelete() {
+  if (!input.keysDown.has('KeyD') || state.ui.selectedTool !== 'food') {
+    lastKeyDDeleteCell = null;
     return;
   }
-  if (draggedFishId != null || draggedItemId != null) return; // a fish-combine or item drag is in progress — don't also demolish under it
+  if (draggedFishId != null || draggedItemId != null) return; // a fish-combine or item drag is in progress — don't also delete under it
   if (!input.mouse.inside) return;
   const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
-  if (effectiveToolAt(world.y) !== 'demolish') return;
+  if (world.y < SEABED_FLOOR_Y) return; // nothing to delete above the seabed
   const { col, row } = worldToTile(world.x, world.y);
   const cellKey = `${col},${row}`;
-  if (cellKey === lastDemolishCell) return;
-  lastDemolishCell = cellKey;
+  if (cellKey === lastKeyDDeleteCell) return;
+  lastKeyDDeleteCell = cellKey;
   recordAndRemoveTile(col, row);
 }
 
@@ -2214,7 +2220,7 @@ function update(dtMs) {
 
   updateCamera(state.camera, input, canvas, dtMs);
   updateBuildDrag();
-  updateDemolishDrag();
+  updateKeyDDelete();
   updateBlueprintToolGate();
   // Guided tutorial flows (see UI.js's TUTORIAL_FLOWS) freeze everything
   // else below — fish AI, coin/waste production, aliens, elapsed time —
@@ -2634,8 +2640,9 @@ function drawAlienBody(ctx, x, y, radius, facing, color, gazeAngle, spikes = 3, 
   ctx.restore();
 }
 
-// Cursor changes to match the active tool — a hammer for Demolish, a glove
-// for the new Merge tool — per direct request. Built as a small inline SVG
+// Cursor changes to match the active tool — a hammer while the D hotkey is
+// held down (see updateCanvasCursor's own check), a glove for the Merge
+// tool — per direct request. Built as a small inline SVG
 // data-URI cursor (an emoji rendered onto a tiny canvas-less SVG) rather
 // than a real cursor image asset, same "no external file, generate it"
 // spirit as this project's synthesized audio. Only ever written to the DOM
@@ -2660,8 +2667,10 @@ const CURSOR_BY_TOOL = {
   // 32x32 copy of this exact glyph/font-size (a small offscreen-canvas pixel
   // scan for the topmost non-transparent pixel, then nudged a few px down
   // into the solid head shape) — it sits at the top of the hammer's head,
-  // not its very tip corner.
-  demolish: emojiCursorCss('🔨', 13, 8),
+  // not its very tip corner. Keyed 'delete' rather than a tool name — the
+  // old standalone Demolish tool is gone, this fires off the D hotkey being
+  // held instead (see updateCanvasCursor).
+  delete: emojiCursorCss('🔨', 13, 8),
   // Real bug fixed, per direct report ("the center of the cursor is way too
   // far to the bottom left of the glove icon... I have to click in the top
   // right corner of the fish for it to work"). The default hotspot (4, 26)
@@ -2683,7 +2692,14 @@ let lastCursorTool = null;
 function updateCanvasCursor() {
   const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
   const effectiveTool = effectiveToolAt(world.y);
-  const cursorKey = CURSOR_BY_TOOL[effectiveTool] ? effectiveTool : 'default';
+  // Per direct request ("built into the food cursor tool via the D
+  // hotkey") — holding D on the Food tool swaps the cursor to the same
+  // hammer glyph the old standalone Demolish tool used, matching
+  // updateKeyDDelete's own exact activation condition (Food tool + D held +
+  // over the seabed, where there's actually something to delete).
+  const cursorKey = input.keysDown.has('KeyD') && effectiveTool === 'food' && world.y >= SEABED_FLOOR_Y
+    ? 'delete'
+    : (CURSOR_BY_TOOL[effectiveTool] ? effectiveTool : 'default');
   if (cursorKey === lastCursorTool) return;
   lastCursorTool = cursorKey;
   canvas.style.cursor = CURSOR_BY_TOOL[cursorKey] || '';
@@ -2719,8 +2735,8 @@ function render() {
   renderTankWalls(ctx, state, canvas.width);
 
   // Shared by every ghost-preview branch below, and — via effectiveToolAt —
-  // what makes a Build/Demolish tool's ghost simply not show at all while
-  // hovering open water (no branch below ever matches 'food', so the chain
+  // what makes a Build tool's ghost simply not show at all while hovering
+  // open water (no branch below ever matches 'food', so the chain
   // falls through with nothing drawn, exactly matching the plain Food
   // tool's own "just the cursor, no ghost" look — see effectiveToolAt's
   // own comment for the full rationale).
@@ -2755,13 +2771,17 @@ function render() {
     // around while trying to choose the fan location") no cone shows until
     // the location itself is actually confirmed.
     renderBuildGhost(ctx, state, world.x, world.y, buildingId, angle, false);
-  } else if (hoverEffectiveTool === 'demolish' && input.mouse.inside && !state.ui.paused) {
+  } else if (hoverEffectiveTool === 'food' && input.keysDown.has('KeyD') && input.mouse.inside && !state.ui.paused) {
     // Ghost-mode preview of whatever's under the cursor, plus the refund
     // it'll pay out — TILE_REFUND_FRACTION is 1.0 (a full refund) per
-    // direct request, since removal now requires deliberately picking this
-    // tool rather than being an always-available right-click. Refund is read
-    // off the tile's current live/dynamic cost (getBuildingCost), matching
-    // what removeTile actually pays out — see Grid.js's comment there.
+    // direct request. Shown while holding D on the Food tool (the old
+    // standalone Demolish tool used to show this on plain hover, no key
+    // needed — now that deletion is a held-key action rather than a
+    // separately-selected tool, this only appears while D is actually held,
+    // matching updateKeyDDelete's own exact activation condition). Refund is
+    // read off the tile's current live/dynamic cost (getBuildingCost),
+    // matching what removeTile actually pays out — see Grid.js's comment
+    // there.
     const world = hoverWorld;
     const { col, row } = worldToTile(world.x, world.y);
     const tile = getTile(state.level.grid, col, row);

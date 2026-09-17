@@ -108,25 +108,30 @@
      isn't static CSS — #bottom-bar-row centers itself, so its width
      depends on live content), instead of the old `position: absolute`
      relative to #shop-anchor. -->
-<!-- Per direct request, this legend now only ever says "Click to purchase"
-     — the "(Esc) to cancel" half moved into the persistent bottom-left
-     #hotkey-legend below (as a dynamic Esc line), since Escape's own job
-     doubles as the pause-menu hotkey now that the dedicated pause button is
-     gone. -->
-<div id="build-legend" class="hidden">Click to purchase</div>
+<!-- Per direct request, this legend shows the live "Cost: $N" for whatever
+     build:/fish: tool is armed (or the currently-captured Blueprint stamp's
+     own total) — UI.js's updateHUD overwrites this text every frame, this
+     is just the pre-JS placeholder. The "(Esc) to cancel" half moved into
+     the persistent bottom-left #hotkey-legend below (as a dynamic Esc
+     line), since Escape's own job doubles as the pause-menu hotkey now
+     that the dedicated pause button is gone. -->
+<div id="build-legend" class="hidden"></div>
 <div id="tutorial-skip-legend" class="hidden">(Esc) to skip tutorial</div>
 <!-- Right-click-to-move legend — same "plain top-level sibling, positioned
      live off the Shop button" treatment as the two legends above (see their
      own comment for why), mutually exclusive with both: shown while
      hovering a placed building on the Food tool with nothing else going on
-     ("Right-click to Adjust"/"Right-click to Move" — line 2 hidden), or
-     while a move (or a moved Fan's own angle step) is actually in progress
-     ("Left-click to accept" / "Right-click to cancel" — both lines shown).
+     ("Right-click to Adjust"/"Right-click to Move", plus "(R) to Rotate"
+     for a Platform and/or "(D) to Delete" for anything — lines 2/3 hidden
+     otherwise), or while a move (or a moved Fan's own angle step) is
+     actually in progress ("Left-click to accept" / "Right-click to
+     cancel" — line 3 always hidden then, deleting mid-move isn't a thing).
      Populated live by UI.js's updateHUD from state.ui.buildingMoveHoverLabel/
      buildingMoveArmed (main.js's render() writes those every frame). -->
 <div id="building-move-legend" class="hidden">
   <div id="building-move-legend-line1"></div>
   <div id="building-move-legend-line2" class="hidden"></div>
+  <div id="building-move-legend-line3" class="hidden"></div>
 </div>
 
 <!-- Persistent, always-on hotkey reminder, bottom-left corner — per direct
@@ -325,10 +330,9 @@
   </div>
 
   <div id="bottom-tool-bar">
-    <button id="tool-food-btn" class="tool-btn sheen-target" title="Food — $3 (1)">
+    <button id="tool-food-btn" class="tool-btn sheen-target" title="Food — $3 (1) — hover a building and press D (or hold D and drag) to delete it for a full refund">
       <span class="tool-icon tool-icon-food"></span>
     </button>
-    <button id="tool-demolish-btn" class="tool-btn sheen-target tool-btn-emoji" title="Demolish — select this, then click a building to remove it for a full refund (2)">🔨</button>
     <button id="tool-merge-btn" class="tool-btn sheen-target tool-btn-emoji" title="Merge — select this, then drag one Adult fish onto a matching one to combine or splice it (3)">🧤</button>
     <button id="tool-blueprint-btn" class="tool-btn sheen-target" title="Blueprint — drag a box over built buildings to copy them, then click to paste that layout elsewhere (4)">
       <span class="tool-icon tool-icon-blueprint"></span>

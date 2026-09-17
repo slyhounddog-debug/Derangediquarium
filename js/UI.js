@@ -73,12 +73,16 @@ import {
   ALIEN_EGG_COLOR,
   ALIEN_EGG_RING_COLOR,
   MUTAGEN_PASTE_COLOR,
+  FOOD_COLOR,
+  WASTE_COLOR,
+  ALIEN_DNA_COLOR,
+  COIN_TIERS,
   PLATFORM_FILTER_ITEM_TYPES,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings, loadLevel } from './Levels.js';
 import { getFishPurchaseCost, effectiveCoinCapacity, effectiveScienceCapacity, countTankItemsByType, hasAnyMergeOpportunity, resolveMergeTutorialPair, computeTheoreticalGoldPerMinute } from './Entities.js';
 import {
-  getTile, worldToTile, getBuildingCost, FAN_STATS, hasAnyBuildingPlaced,
+  getTile, worldToTile, getBuildingCost, FAN_STATS,
   findNearestWasteTurretAndWaste, getRecipeBuildingKeyAt, renderTileShape,
   getBuildingCurrentPowerDraw, getBuildingUptimeFraction,
 } from './Grid.js';
@@ -314,6 +318,7 @@ export function initUI(state) {
     buildingMoveLegend: document.getElementById('building-move-legend'),
     buildingMoveLegendLine1: document.getElementById('building-move-legend-line1'),
     buildingMoveLegendLine2: document.getElementById('building-move-legend-line2'),
+    buildingMoveLegendLine3: document.getElementById('building-move-legend-line3'),
     hotkeyLegendE: document.getElementById('hotkey-legend-e'),
     hotkeyLegendQ: document.getElementById('hotkey-legend-q'),
     hotkeyLegendEsc: document.getElementById('hotkey-legend-esc'),
@@ -333,7 +338,6 @@ export function initUI(state) {
     previewStats: document.getElementById('shop-preview-stats'),
     previewHint: document.getElementById('shop-preview-hint'),
     toolFoodBtn: document.getElementById('tool-food-btn'),
-    toolDemolishBtn: document.getElementById('tool-demolish-btn'),
     toolMergeBtn: document.getElementById('tool-merge-btn'),
     toolBlueprintBtn: document.getElementById('tool-blueprint-btn'),
     buildToolGrid: document.getElementById('build-tool-grid'),
@@ -505,7 +509,6 @@ export function initUI(state) {
   });
 
   els.toolFoodBtn.addEventListener('click', () => selectTool(state, 'food'));
-  els.toolDemolishBtn.addEventListener('click', () => selectTool(state, 'demolish'));
   // Merge tool (🧤) — combining/splicing fish now requires this to be
   // selected first, per direct request, instead of firing on any mousedown
   // that happened to land on an eligible fish regardless of tool. Also the
@@ -975,9 +978,18 @@ function refreshPlatformFilterMenu(state) {
     const isListed = data.filterItems.includes(itemDef.id);
     const btn = document.createElement('button');
     btn.className = 'platform-filter-item' + (isListed ? ' pass' : ' block');
-    const icon = document.createElement('div');
+    // Real item art instead of the plain emoji — per direct request ("change
+    // the filter icons in the filter modal to match the actual object in
+    // the game rather than use emojis") — same drawItemIconCanvas every
+    // Science Lab item-recipe node already uses for its own real-art icon.
+    // The emoji is still meaningfully used, as this button's own hover
+    // tooltip.
+    const icon = document.createElement('canvas');
     icon.className = 'platform-filter-item-icon';
-    icon.textContent = itemDef.icon;
+    icon.width = PLATFORM_FILTER_ICON_CANVAS_SIZE;
+    icon.height = PLATFORM_FILTER_ICON_CANVAS_SIZE;
+    drawItemIconCanvas(icon, itemDef.id);
+    btn.title = `${itemDef.icon} ${itemDef.label}`;
     const label = document.createElement('div');
     label.className = 'platform-filter-item-label';
     label.textContent = itemDef.label;
@@ -2068,40 +2080,35 @@ function restartLevel(state) {
   state.ui.replaySplashPending = true;
 }
 
-// Highlights whichever single shop selection is active — Food, Demolish, a
-// species, or a building (family-grouped ones included). All of these live
-// off the exact same state.ui.selectedTool string now, so setting it
-// anywhere (a species click, a building click, a family cycle) implicitly
-// deselects whatever else was previously armed — per direct request that
-// only one shop selection should ever be active at a time, not a building
-// AND a fish simultaneously. Food/Demolish also get their own small
-// tooltip (a one-liner, no separate window needed); species/buildings show
-// their info in the shared shop-preview window instead (see
-// selectSpeciesForPreview/selectBuildingForPreview).
+// Highlights whichever single shop selection is active — Food, a species, or
+// a building (family-grouped ones included). All of these live off the
+// exact same state.ui.selectedTool string now, so setting it anywhere (a
+// species click, a building click, a family cycle) implicitly deselects
+// whatever else was previously armed — per direct request that only one
+// shop selection should ever be active at a time, not a building AND a fish
+// simultaneously. Food also gets its own small tooltip (a one-liner, no
+// separate window needed); species/buildings show their info in the shared
+// shop-preview window instead (see selectSpeciesForPreview/
+// selectBuildingForPreview).
 // Shared by the bottom tool-bar's own click handlers above and main.js's
 // 1/2/3 hotkeys (see main.js's keydownHandlers) — one place that actually
 // sets the tool so both paths stay in sync.
-// Per direct request: Demolish is meaningless with nothing built yet, and
-// Merge is meaningless until either combining or splicing is actually
-// unlocked — both stay grayed out (and genuinely unusable, not just dimmed)
-// until then. Also unavailable for the entire duration of any guided
-// tutorial flow — per direct report, a stray Demolish/Merge selection
-// mid-flow (there's nothing stopping a click from reaching the bottom
-// tool-bar during a noSpotlight step like the post-alien flow's "scroll,"
-// which hides the whole overlay) could strand the player on the wrong tool
-// with no way for a later step's own click to ever succeed. Exported so
-// main.js's 1/2/3 hotkeys can check before calling selectTool at all.
-export function isDemolishToolAvailable(state) {
-  return hasAnyBuildingPlaced(state) && !state.level.tutorialFlow;
-}
+// Demolish used to live here too (its own standalone tool, grayed out with
+// nothing built yet) — per direct request it's gone entirely now, folded
+// into the Food tool's own D-hotkey delete (main.js's updateKeyDDelete),
+// which needs no availability gate of its own since it's just a no-op
+// wherever there's nothing to delete under the cursor.
 // Per direct request, merging is always available now (no Tank Upgrade
 // gate any more) — the Merge tool instead grays out based on live board
 // state: is there actually a combinable or spliceable pair on screen right
 // now (Entities.js's hasAnyMergeOpportunity)? Blocked during any OTHER
-// guided tutorial (same reasoning as isDemolishToolAvailable — a stray
-// selection mid-flow could strand a later step), but NOT during the
-// first-time merge tutorial's own flow, which needs to select this exact
-// tool as its whole first step.
+// guided tutorial flow — per direct report, a stray Merge selection
+// mid-flow (there's nothing stopping a click from reaching the bottom
+// tool-bar during a noSpotlight step like the post-alien flow's "scroll,"
+// which hides the whole overlay) could strand the player on the wrong tool
+// with no way for a later step's own click to ever succeed — but NOT during
+// the first-time merge tutorial's own flow, which needs to select this
+// exact tool as its whole first step.
 export function isMergeToolAvailable(state) {
   const flow = state.level.tutorialFlow;
   const blockedByOtherTutorial = flow && flow.id !== 'mergefish';
@@ -2109,15 +2116,14 @@ export function isMergeToolAvailable(state) {
 }
 
 export function selectTool(state, tool) {
-  if (tool === 'demolish' && !isDemolishToolAvailable(state)) return;
   if (tool === 'merge' && !isMergeToolAvailable(state)) return;
   state.ui.selectedTool = tool;
-  closeSidePanels(state); // per direct request — picking a bottom-tool-bar tool (Food/Demolish/Merge) closes the Shop/Tank Upgrades panel if it's open
+  closeSidePanels(state); // per direct request — picking a bottom-tool-bar tool (Food/Merge/Blueprint) closes the Shop/Tank Upgrades panel if it's open
   updateToolbar(state);
 }
 
 // Called by the Escape key (main.js): cancels an actively-armed build/fish/
-// demolish/merge tool and defaults back to Food. A no-op while Food is
+// merge/blueprint tool and defaults back to Food. A no-op while Food is
 // already selected. Building AND fish selection both reuse
 // deselectShopSelection so the preview window clears too, exactly like
 // clicking the same shop icon a second time already does — fish selection
@@ -2125,33 +2131,25 @@ export function selectTool(state, tool) {
 // dedicated pause-menu button was removed), which meant Escape's own "(Esc)
 // to cancel" legend was actually a lie while a fish was armed; fixed as part
 // of making the new bottom-left Esc hotkey legend (see updateHUD) honest for
-// every tool it claims to clear. Demolish/Merge have no preview to clear,
+// every tool it claims to clear. Merge/Blueprint have no preview to clear,
 // just the tool itself.
 export function cancelActiveTool(state) {
   const tool = state.ui.selectedTool;
   if (tool.startsWith('build:') || tool.startsWith('fish:')) {
     deselectShopSelection(state);
-  } else if (tool === 'demolish' || tool === 'merge' || tool === 'blueprint') {
+  } else if (tool === 'merge' || tool === 'blueprint') {
     state.ui.selectedTool = 'food';
     updateToolbar(state);
   }
 }
 
 function updateToolbar(state) {
-  // Grayed-out + genuinely disabled until there's something to demolish /
-  // merge or splice — re-checked every frame (called from updateHUD) so a
-  // building placed/removed or the board's mergeable fish changes takes
-  // effect immediately, not just the next time a tool happens to be picked.
-  // Resolved BEFORE reading state.ui.selectedTool below, so if the
-  // currently-selected tool just became unavailable (e.g. the last building
-  // was demolished while Demolish was still selected), the fallback to Food
-  // is reflected consistently in every class toggle that follows, not just
-  // the build/shop grids.
-  const demolishAvailable = isDemolishToolAvailable(state);
+  // Grayed-out + genuinely disabled until there's something to merge or
+  // splice — re-checked every frame (called from updateHUD) so the board's
+  // mergeable fish changing takes effect immediately, not just the next
+  // time the tool happens to be picked.
   const mergeAvailable = isMergeToolAvailable(state);
-  els.toolDemolishBtn.disabled = !demolishAvailable;
   els.toolMergeBtn.disabled = !mergeAvailable;
-  if (state.ui.selectedTool === 'demolish' && !demolishAvailable) state.ui.selectedTool = 'food';
   // Merge deliberately does NOT auto-revert to Food the moment it becomes
   // unavailable — per direct request ("don't force the player off the tool
   // if they merge the last mergeable fish"). The button above still reads
@@ -2160,21 +2158,22 @@ function updateToolbar(state) {
   // to Adult, say), rather than making the player reselect it.
 
   const foodSelected = state.ui.selectedTool === 'food';
-  const demolishSelected = state.ui.selectedTool === 'demolish';
   const mergeSelected = state.ui.selectedTool === 'merge';
   const blueprintSelected = state.ui.selectedTool === 'blueprint';
   els.toolFoodBtn.classList.toggle('selected', foodSelected);
-  els.toolDemolishBtn.classList.toggle('selected', demolishSelected);
   els.toolMergeBtn.classList.toggle('selected', mergeSelected);
   els.toolBlueprintBtn.classList.toggle('selected', blueprintSelected);
 
   // Descriptive text lives on each button's own native `title` hover
   // tooltip now, not a separate always-visible shop line — per direct
   // request ("remove any text from the shop for the tools, and move those
-  // to a tool hovertip"). Demolish/Merge's titles are static (set once in
-  // index.html); only Food's needs to stay JS-driven since FOOD_COST could
-  // in principle change.
-  els.toolFoodBtn.title = `Food — $${FOOD_COST} (1)`;
+  // to a tool hovertip"). Merge's title is static (set once in index.html);
+  // Food's needs to stay JS-driven since FOOD_COST could in principle
+  // change — also mentions the D-hotkey delete mechanic now folded into
+  // this tool (see main.js's updateKeyDDelete), per direct request
+  // ("Remove the demolish tool... have it built into the food cursor tool
+  // via the D hotkey").
+  els.toolFoodBtn.title = `Food — $${FOOD_COST} (1) — hover a building and press D (or hold D and drag) to delete it for a full refund`;
 
   for (const btn of els.buildToolGrid.children) {
     btn.classList.toggle('selected', state.ui.selectedTool === btn.dataset.tool);
@@ -2204,6 +2203,7 @@ let buildingPriceTags = {};
 const BUILDING_ICON_CANVAS_SIZE = 46;
 const LAB_NODE_ICON_CANVAS_SIZE = 20;
 const LAB_PURCHASE_ICON_CANVAS_SIZE = 34;
+const PLATFORM_FILTER_ICON_CANVAS_SIZE = 26;
 function drawBuildingIconCanvas(canvas, buildingId) {
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -2226,14 +2226,33 @@ function drawFishIconCanvas(canvas, speciesId) {
   drawFish(ctx, c, c, speciesId, adultStage, 1, 0, { x: 1, y: 0 });
 }
 
+// Flat, representative colors for every item type that isn't one of the
+// special two-tone/ringed treatments below — mirrors main.js's own
+// ITEM_FLAT_COLOR_BY_TYPE/getCoinColor exactly, per direct request ("change
+// the filter icons in the filter modal to match the actual object in the
+// game rather than use emojis"). Coins get a fixed representative gold tone
+// (COIN_TIERS' own gold tier) rather than any particular coin's own live
+// value-tier color, since there's no specific coin instance to read a value
+// from for a generic filter-list icon.
+const FLAT_ICON_COLOR_BY_TYPE = {
+  food: FOOD_COLOR,
+  waste: WASTE_COLOR,
+  alien_dna: ALIEN_DNA_COLOR,
+  mutagen_paste: MUTAGEN_PASTE_COLOR,
+  coin: COIN_TIERS[2].color, // gold — the single most recognizable coin tier
+};
+
 // Same idea for a physical item — reused wherever a Science Lab node's own
 // unlock is really a Manufacturer/Power Plant recipe (see
-// itemTypeForRecipeNode below) rather than a species or building. Mirrors
-// main.js's own per-item render branches (the two-tone Science/Green-
-// Science/Biomass gradients, the Alien Egg's shell-plus-ring), just as one
-// static frame instead of a live, animated item — duplicated rather than
-// imported since main.js can't be imported from here (it already imports
-// FROM UI.js) and this is the one other module that needs it.
+// itemTypeForRecipeNode below) rather than a species or building, AND (per
+// the direct request above) by the Platform item-filter pop-up's own icon
+// grid, covering every item type in the game. Mirrors main.js's own
+// per-item render branches (the two-tone Science/Green-Science/Biomass
+// gradients, the Alien Egg's shell-plus-ring, the flat-fill-plus-rim-and-
+// highlight path everything else gets), just as one static frame instead of
+// a live, animated item — duplicated rather than imported since main.js
+// can't be imported from here (it already imports FROM UI.js) and this is
+// the one other module that needs it.
 function drawItemIconCanvas(canvas, itemType) {
   const ctx = canvas.getContext('2d');
   const size = canvas.width;
@@ -2296,10 +2315,10 @@ function drawItemIconCanvas(canvas, itemType) {
     ctx.fill();
     return;
   }
-  // Generic flat-fill-plus-rim-and-highlight path — covers Mutagen Paste
-  // (the one remaining recipe-output item type) and anything else not
-  // specially handled above.
-  const flatColor = itemType === 'mutagen_paste' ? MUTAGEN_PASTE_COLOR : '#cccccc';
+  // Generic flat-fill-plus-rim-and-highlight path — covers Coins, Food,
+  // Waste, Bio-Sludge, and Mutagen Paste (see FLAT_ICON_COLOR_BY_TYPE above)
+  // plus a plain gray fallback for anything unrecognized.
+  const flatColor = FLAT_ICON_COLOR_BY_TYPE[itemType] || '#cccccc';
   ctx.beginPath();
   ctx.fillStyle = flatColor;
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
@@ -3030,7 +3049,7 @@ export function deselectShopSelection(state) {
   els.previewContent.classList.add('hidden');
   // Deliberately NOT selectTool(state, 'food') — that also closes the Shop/
   // Tank Upgrades panel (see its own closeSidePanels call, for the bottom
-  // hotbar's Food/Demolish/Merge buttons), which would be wrong here: the
+  // hotbar's Food/Merge/Blueprint buttons), which would be wrong here: the
   // player is still IN the shop, just with nothing picked any more.
   state.ui.selectedTool = 'food';
   updateToolbar(state);
@@ -3475,8 +3494,8 @@ function renderPowerGraph(state) {
 }
 
 export function updateHUD(state) {
-  // Keeps the Demolish/Merge gray-out live every frame — see updateToolbar's
-  // own comment on why this can't just wait for the next tool-select event.
+  // Keeps the Merge gray-out live every frame — see updateToolbar's own
+  // comment on why this can't just wait for the next tool-select event.
   updateToolbar(state);
   // Per direct request, #hud is the ONE copy of every readout now — the
   // Shop/Tank Upgrades panels no longer carry their own duplicate set (see
@@ -3727,6 +3746,7 @@ export function updateHUD(state) {
     els.buildingMoveLegendLine1.textContent = 'Left-click to accept';
     els.buildingMoveLegendLine2.textContent = 'Right-click to cancel';
     els.buildingMoveLegendLine2.classList.remove('hidden');
+    els.buildingMoveLegendLine3.classList.add('hidden'); // deleting mid-move isn't a thing
   } else if (state.ui.buildingMoveHoverLabel != null) {
     els.buildingMoveLegendLine1.textContent = state.ui.buildingMoveHoverLabel === 'adjust' ? 'Right-click to Adjust' : 'Right-click to Move';
     // Hovering a placed Platform (any of its 5 variants) also shows a
@@ -3740,6 +3760,14 @@ export function updateHUD(state) {
     } else {
       els.buildingMoveLegendLine2.classList.add('hidden');
     }
+    // "(D) to Delete" — per direct request, shown for ANY hovered building
+    // (Fan/Platform/anything else alike), on top of whichever line2 hint
+    // that specific building type also gets. Folded the old standalone
+    // Demolish tool's whole job into this one held key — see main.js's
+    // updateKeyDDelete for the actual deletion/full-refund/floating-text
+    // mechanic this hint is describing.
+    els.buildingMoveLegendLine3.textContent = '(D) to Delete';
+    els.buildingMoveLegendLine3.classList.remove('hidden');
   }
   els.buildingMoveLegend.classList.toggle('hidden', !buildingMoveLegendVisible);
 
@@ -3976,10 +4004,11 @@ const TUTORIAL_FLOWS = {
   // wrong tool"). This is what actually fixes the reported break (the post-
   // alien flow's "scroll" step hides the whole overlay — noSpotlight — so
   // nothing was stopping a click from reaching the bottom tool-bar and
-  // selecting Demolish there, stranding the following "place" step with no
-  // build tool armed); isDemolishToolAvailable/isMergeToolAvailable also now
-  // refuse Demolish/Merge outright for the whole duration of any flow, so
-  // this is belt-and-suspenders, not the only fix.
+  // selecting the OLD standalone Demolish tool there — since removed
+  // entirely, folded into the Food tool's own D-hotkey delete — stranding
+  // the following "place" step with no build tool armed); isMergeToolAvailable
+  // also refuses Merge outright for the whole duration of any flow, so this
+  // is belt-and-suspenders, not the only fix.
   start: [
     { id: 'shop', text: 'Click the Shop to buy your first fish!', tool: 'food', getCircle: () => tutorialCircleForDom(els.shopCollapseBtn) },
     { id: 'guppy', text: 'Pick a Guppy!', tool: 'food', getCircle: () => tutorialCircleForDom(els.shopGrid.querySelector('[data-tool="fish:guppy"]')) },

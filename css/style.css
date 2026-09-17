@@ -206,13 +206,14 @@ html, body {
 }
 #build-legend { display: flex; gap: 14px; }
 #build-legend.hidden, #tutorial-skip-legend.hidden, #building-move-legend.hidden { display: none; }
-/* #building-move-legend can show either one line (a hover hint) or two (the
-   armed accept/cancel prompt) — a plain pill with rounded ends looks wrong
-   stretched across two stacked lines, so it switches to a taller
-   rounded-rect shape only while its 2nd line is actually visible. */
+/* #building-move-legend can show one, two, or three lines (a plain hover
+   hint plus its optional Rotate/Delete extras, or the armed accept/cancel
+   prompt) — a plain pill with rounded ends looks wrong stretched across
+   multiple stacked lines, so it switches to a taller rounded-rect shape
+   once either extra line is actually visible. */
 #building-move-legend { display: flex; flex-direction: column; gap: 3px; text-align: center; }
-#building-move-legend:has(#building-move-legend-line2:not(.hidden)) { border-radius: 20px; }
-#building-move-legend-line2.hidden { display: none; }
+#building-move-legend:has(#building-move-legend-line2:not(.hidden)), #building-move-legend:has(#building-move-legend-line3:not(.hidden)) { border-radius: 20px; }
+#building-move-legend-line2.hidden, #building-move-legend-line3.hidden { display: none; }
 
 /* Persistent, always-on hotkey reminder — per direct request, small white
    text in the literal bottom-left corner of the viewport (distinct from
@@ -860,13 +861,16 @@ html, body {
 }
 .tool-btn:hover:not(:disabled) { transform: scale(1.06); }
 .tool-btn.selected { border-color: #ffb84d; background: linear-gradient(160deg, #fffaf0 0%, #ffe6b3 100%); }
-/* Demolish (nothing built yet) / Merge (combining or splicing not unlocked
-   yet), per direct request — grayed out and genuinely inert, same look
-   every other disabled buy/confirm button in this game already uses. */
+/* Merge (combining or splicing not unlocked yet), per direct request —
+   grayed out and genuinely inert, same look every other disabled buy/
+   confirm button in this game already uses. Demolish used to share this
+   same disabled treatment before it was removed as a standalone tool
+   entirely (folded into the Food tool's own D-hotkey delete instead — see
+   main.js's updateKeyDDelete). */
 .tool-btn:disabled { opacity: 0.4; cursor: not-allowed; filter: grayscale(0.6); }
 .tool-icon { display: block; border-radius: 50%; }
 .tool-icon-food { width: 22px; height: 22px; background: #ffb238; box-shadow: 0 0 0 5px rgba(255, 178, 56, 0.3); } /* matches Config.js's FOOD_COLOR — was a green too close to Waste's own color to tell apart at a glance */
-.tool-btn-emoji { font-size: 26px; } /* the Demolish button's 🔨 — was a plain colored circle, per direct request for an actual hammer/trashcan icon */
+.tool-btn-emoji { font-size: 26px; } /* the Merge button's 🧤 (Demolish's own 🔨 used this too, before that tool was removed) */
 /* A small sheet of blue blueprint paper — a fine white grid on a deep blue
    ground, per direct request ("make the blueprint on the toolbar look like
    a blue paper blueprint") — rectangular (border-radius overridden down
@@ -932,14 +936,16 @@ html, body {
 }
 .tool-btn-family-dots span.current { background: #ffb84d; }
 
-/* The fixed bottom tool-bar — Food/Demolish/Merge, always on screen
-   regardless of shop/tank-panel/pause state, per direct request. Their
+/* The fixed bottom tool-bar — Food/Merge/Blueprint, always on screen
+   regardless of shop/tank-panel/pause state, per direct request. Demolish
+   used to be a 3rd standalone tool here too, before it was removed
+   entirely in favor of the Food tool's own D-hotkey delete. Their
    descriptive text (cost, what each tool does) moved from the shop's old
    #tool-tooltip line onto each button's own native `title` attribute
    instead — a real hover tooltip, not a separate always-visible line. */
 /* #bottom-bar-row is the fixed, centered, always-on-top row — the Shop
    toggle on the left, Tank Upgrades toggle on the right, flanking the
-   food/demolish/merge pill in the middle, per direct request. #bottom-tool-bar
+   food/merge/blueprint pill in the middle, per direct request. #bottom-tool-bar
    itself is no longer independently fixed-positioned — it's just a plain
    flex child of the row now, keeping its own pill background/padding so it
    still reads as a distinct group from the two circular toggle buttons
@@ -1699,7 +1705,7 @@ html, body {
 .platform-filter-item:hover { transform: scale(1.04); }
 .platform-filter-item.pass { border-color: #3cbe6e; background: #eafaf1; }
 .platform-filter-item.block { border-color: #d63c3c; background: #fdecec; }
-.platform-filter-item-icon { font-size: 20px; line-height: 1; }
+.platform-filter-item-icon { width: 26px; height: 26px; display: block; }
 .platform-filter-item-label { font-size: 8.5px; font-weight: 700; line-height: 1.15; color: #8a7a8a; }
 .platform-filter-item-badge { font-size: 11px; line-height: 1; }
 #platform-filter-hint { font-size: 10px; color: #8a7a8a; line-height: 1.3; }

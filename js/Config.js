@@ -1382,10 +1382,12 @@ export const SPECIES_LIST = Object.values(SPECIES);
 // surface to catch falling items before a Fan/Processor grabs them), not a
 // structural requirement anything else depends on.
 // Full refund on removal (100%, not a fraction any more) — per direct
-// request, since removal is now a deliberate Demolish-tool action (see
-// UI.js's tool-demolish-btn) rather than an always-available right-click,
-// there's no risk of it being used as a free item-conveyor exploit the way
-// a partial-refund policy was originally hedging against.
+// request, since removal is a deliberate action (hovering a building with
+// the Food tool and pressing D — see main.js's updateKeyDDelete, which
+// replaced the old standalone Demolish tool entirely) rather than an
+// always-available right-click, there's no risk of it being used as a free
+// item-conveyor exploit the way a partial-refund policy was originally
+// hedging against.
 export const TILE_REFUND_FRACTION = 1.0;
 // Every building's shop cost is dynamic, mirroring the Economy Fish
 // dynamic-pricing pattern (compounding, not additive) — per direct request.

@@ -481,24 +481,6 @@ export function countPlacedOfType(grid, buildingId) {
   return n;
 }
 
-// Whether ANYTHING has been built on the grid, of any type — per direct
-// request, gates the Demolish tool (nothing to gray a hammer icon for on an
-// empty seabed). Deliberately a real tile scan, not a shortcut off
-// state.level.buildingData's key count — a lone Platform never gets a
-// buildingData entry at all (only Fans/Processors/Auto-Feeders/Turrets need
-// one, for their per-instance angle/ammo/etc — see placeTile below), so that
-// shortcut would wrongly report "nothing built" on a Platform-only grid.
-// Early-returns on the first hit, so this stays cheap even on a busy grid.
-export function hasAnyBuildingPlaced(state) {
-  const grid = state.level.grid;
-  for (let r = SEABED_ROW_START; r < WORLD_TILES_H; r++) {
-    for (let c = 0; c < WORLD_TILES_W; c++) {
-      if (grid[r][c] !== TILE_EMPTY) return true;
-    }
-  }
-  return false;
-}
-
 // Whether a base Waste Turret is already placed — per direct request, the
 // post-alien guided tutorial's own "place a Waste Turret" leg only runs if
 // there isn't one yet (see Systems.js's updatePostAlienTutorial). Only the
