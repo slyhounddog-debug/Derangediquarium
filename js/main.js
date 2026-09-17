@@ -184,6 +184,7 @@ import {
   openPlatformFilterMenu,
   closePlatformFilterMenu,
   isPlatformFilterMenuOpen,
+  copyPlatformFilter,
   pipetteSelectSpecies,
   pipetteSelectBuilding,
   deselectShopSelection,
@@ -364,6 +365,7 @@ const state = {
     selectedTool: 'food', // which click-tool a canvas click performs; only 'food' exists until Phase 2 adds tile placement
     lastArmedTool: null, // the last 'build:<id>'/'fish:<id>' tool armed (UI.js's selectSpeciesForPreview/selectBuildingForPreview) — the Q hotkey's "reselect last building/fish" fallback, see main.js's KeyQ handler
     blueprintCost: null, // live total $ cost of the currently-armed Blueprint stamp, written fresh every render() frame, null while no stamp is armed — read by UI.js's updateHUD for the bottom-left cost bubble
+    blueprintClipboardActive: false, // whether a Blueprint stamp is currently captured/armed, written fresh every render() frame — read by UI.js's updateHUD to switch the persistent Q legend to "Clear Blueprint"
     undoAvailable: false, // whether main.js's Ctrl+Z undo stack currently has anything to undo — written by pushUndoEntry/performUndo, read by UI.js's bottom-left hotkey legend
     undoLabel: null, // 'Undo Place' | 'Undo Move' | 'Undo Sell' | null — what Ctrl+Z would currently do, shown in that same legend line
     shopCollapsed: true, // shop starts tucked away — just the toggle button — so it doesn't clutter the view
@@ -884,6 +886,59 @@ function updateRecipeDrag() {
   recipeDragHoverKey = hoverData && hoverData.type === recipeDragType && hoverKey !== recipeDragSourceKey ? hoverKey : null;
 }
 
+// Platform drag-to-copy-filter — per direct request ("make it so you can
+// click and drag active filters from one platform to another... the same
+// way the recipe copying works between buildings"). An exact mirror of the
+// Manufacturer/Power Plant recipe-drag mechanic just above — the SOURCE
+// tile never moves, only a small ghost follows the cursor (render()'s own
+// draw call below) until the release lands on a genuinely different
+// Platform tile (UI.js's copyPlatformFilter). Deliberately does NOT require
+// the same Platform variant on both ends — "even from a full platform to
+// half platform" — getPlatformFilterKeyAt already only ever matches a
+// Platform-family tile at all, with no type-equality check the way the
+// recipe-drag's own hover check has. A plain click (no real drag) still
+// opens the normal filter pop-up as before — platformFilterDragMoved is
+// what the click handler checks to tell the two gestures apart, same
+// "move-distance threshold" pattern recipeDragMoved/itemDragMoved already
+// established.
+let platformFilterDragSourceKey = null;
+let platformFilterDragStartSx = 0;
+let platformFilterDragStartSy = 0;
+let platformFilterDragMoved = false;
+let platformFilterDragHoverKey = null; // whichever other Platform tile the cursor is currently over — drives the ghost's green-hue tint
+
+input.mouseDownHandlers.push((sx, sy) => {
+  if (state.ui.paused) return;
+  const world = screenToWorld(sx, sy, state.camera);
+  if (effectiveToolAt(world.y) === 'demolish') return; // don't fight with Demolish's own drag-remove on the same press
+  const key = getPlatformFilterKeyAt(state, world.x, world.y);
+  if (!key) return;
+  platformFilterDragSourceKey = key;
+  platformFilterDragStartSx = sx;
+  platformFilterDragStartSy = sy;
+  platformFilterDragMoved = false;
+  platformFilterDragHoverKey = null;
+});
+
+input.mouseUpHandlers.push((sx, sy) => {
+  if (platformFilterDragSourceKey == null) return;
+  const movedPx = Math.hypot(sx - platformFilterDragStartSx, sy - platformFilterDragStartSy);
+  platformFilterDragMoved = movedPx >= ITEM_DRAG_MOVE_THRESHOLD_PX;
+  if (platformFilterDragMoved && platformFilterDragHoverKey) {
+    copyPlatformFilter(state, platformFilterDragSourceKey, platformFilterDragHoverKey);
+  }
+  platformFilterDragSourceKey = null;
+  platformFilterDragHoverKey = null;
+});
+
+function updatePlatformFilterDrag() {
+  if (platformFilterDragSourceKey == null) return;
+  if (!state.level.buildingData[platformFilterDragSourceKey]) { platformFilterDragSourceKey = null; platformFilterDragHoverKey = null; return; } // demolished/moved mid-drag
+  const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
+  const hoverKey = getPlatformFilterKeyAt(state, world.x, world.y);
+  platformFilterDragHoverKey = hoverKey && hoverKey !== platformFilterDragSourceKey ? hoverKey : null;
+}
+
 // Blueprint tool ("Stamp") — a 4th persistent bottom-tool-bar tool (hotkey
 // 4), per direct request: click-and-drag a box over a built area to copy
 // every building inside it, then click again to paste that whole layout
@@ -893,8 +948,14 @@ function updateRecipeDrag() {
 // (Grid.js's captureBlueprint); once it's non-null, the whole stamp follows
 // the cursor as a tinted multi-cell ghost (render()'s own draw call below)
 // until a plain click commits it (Grid.js's placeBlueprint) or a right-
-// click/Escape cancels it back to an empty clipboard, ready to draw a new
-// box — the tool itself stays selected either way.
+// click/Escape/Q cancels it back to an empty clipboard.
+//
+// Per direct request ("make the blueprints only available when the
+// blueprint tool/cursor is selected"), a captured stamp no longer stays
+// silently armed once the player switches to a different tool — see
+// updateBlueprintToolGate below, called every tick unconditionally, which
+// wipes both of these the instant state.ui.selectedTool stops being
+// 'blueprint', by ANY path (a number-key hotkey, a shop click, Q, ...).
 let blueprintDragStartCol = null; // tile col of the drag-select box's first corner, or null while not drag-selecting
 let blueprintDragStartRow = null;
 let blueprintClipboard = null; // captured cells (see Grid.js's captureBlueprint) | null — non-null means "armed, ready to paste"
@@ -921,6 +982,19 @@ input.mouseUpHandlers.push((sx, sy) => {
     blueprintJustCaptured = true; // the native click that follows this same mouseup shouldn't also try to paste at the release point
   }
 });
+
+// Called every tick, unconditionally (even during a guided tutorial, same
+// as updateBuildDrag/updateDemolishDrag right above its own call site) —
+// the moment the Blueprint tool isn't the one currently selected, whatever
+// was captured/in-progress is gone, rather than a stale clipboard staying
+// silently paste-able (and its ghost still following the cursor) in the
+// background after switching away.
+function updateBlueprintToolGate() {
+  if (state.ui.selectedTool === 'blueprint') return;
+  blueprintDragStartCol = null;
+  blueprintDragStartRow = null;
+  blueprintClipboard = null;
+}
 
 // Fan placement is a two-click flow, not a single click: click 1 arms
 // aiming at a valid cell (the tile isn't placed yet), then the ghost
@@ -1130,6 +1204,7 @@ input.clickHandlers.push((sx, sy) => {
   if (fishDragArmed) { fishDragArmed = false; return; } // this click followed a fish-combine drag gesture — don't also bank/feed/mound-click at the release point
   if (itemDragMoved) { itemDragMoved = false; return; } // this click followed a genuine item-drag gesture — don't also bank/feed/place at the release point. An unmoved press-release leaves itemDragMoved false, so a plain click on a Coin/Science item still banks it normally
   if (recipeDragMoved) { recipeDragMoved = false; return; } // this click followed a genuine Manufacturer/Power Plant recipe-copy drag — don't also open the recipe pop-up at the release point
+  if (platformFilterDragMoved) { platformFilterDragMoved = false; return; } // this click followed a genuine Platform filter-copy drag — don't also open the filter pop-up at the release point
   if (blueprintJustCaptured) { blueprintJustCaptured = false; return; } // this click is the tail end of the mouseup that just captured a Blueprint selection — don't also try to paste it at that same point
   if (suppressTutorialTurretPlacementClick) {
     // The same native mouseup/click that just placed the tutorial's own
@@ -1646,7 +1721,24 @@ input.keydownHandlers.push((e) => {
     case 'KeyE': // toggle-collapse the shop panel — moved off KeyQ per direct request, freeing Q up for the Pipette Tool below
       toggleShopCollapse(state);
       break;
-    case 'KeyQ': { // Pipette Tool / "last used" fallback, / Clear Cursor — per direct request
+    case 'KeyQ': { // Clear Blueprint / Pipette Tool / "last used" fallback / Clear Cursor — per direct request
+      // A copied Blueprint takes priority over every other Q meaning below —
+      // per direct request ("press Q when you have a blueprint copied to
+      // clear a blueprint"), matching the dynamic "Q: Clear Blueprint" legend
+      // (UI.js's updateHUD, reading state.ui.blueprintClipboardActive —
+      // written every render() frame, see render()'s own comment). Switches
+      // back to Food too, same as the ordinary "Clear Cursor" case below —
+      // updateBlueprintToolGate then wipes blueprintClipboard itself the very
+      // next tick purely because the tool is no longer 'blueprint', but
+      // clearing it here too makes the ghost/ability-to-paste disappear on
+      // this exact keypress rather than one tick later.
+      if (blueprintClipboard != null) {
+        blueprintClipboard = null;
+        blueprintDragStartCol = null;
+        blueprintDragStartRow = null;
+        selectTool(state, 'food');
+        break;
+      }
       // Per direct request, Q is a genuine toggle again: press it over and
       // over to clear the cursor, reselect the last thing, clear again,
       // reselect again... A build:/fish: tool already armed ("something is
@@ -2123,6 +2215,7 @@ function update(dtMs) {
   updateCamera(state.camera, input, canvas, dtMs);
   updateBuildDrag();
   updateDemolishDrag();
+  updateBlueprintToolGate();
   // Guided tutorial flows (see UI.js's TUTORIAL_FLOWS) freeze everything
   // else below — fish AI, coin/waste production, aliens, elapsed time —
   // deliberately NOT camera panning or build-drag placement above, since the
@@ -2168,6 +2261,7 @@ function update(dtMs) {
   updateFishDrag();
   updateItemDrag();
   updateRecipeDrag();
+  updatePlatformFilterDrag();
   updateBuildingMove();
   updateStoryTriggers(state);
   state.level.elapsed += dtMs;
@@ -2717,6 +2811,12 @@ function render() {
     const hoverWorld = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
     renderMoveGhost(ctx, state, hoverWorld.x, hoverWorld.y, movingBuilding.buildingId, movingBuilding.data);
   }
+
+  // Read every frame, regardless of tool/hover state, by UI.js's updateHUD
+  // to switch the persistent bottom-left Q legend to "Clear Blueprint" —
+  // see the KeyQ handler's own comment for why that meaning takes priority
+  // over Q's usual Pipette/Clear Cursor behavior while this is true.
+  state.ui.blueprintClipboardActive = blueprintClipboard != null;
 
   // Blueprint tool — a live selection-box outline while dragging out an
   // area to copy, or (once captured) the whole stamp following the cursor
@@ -3587,6 +3687,30 @@ function render() {
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(def.icon, gx, gy + 1);
+    ctx.restore();
+  }
+
+  // Platform drag-to-copy-filter ghost — same shape as the recipe-drag one
+  // just above, a plain green checkmark standing in for "you're carrying a
+  // copied filter" rather than a specific building icon, since the filter
+  // being copied isn't tied to any one building's own art.
+  if (platformFilterDragSourceKey !== null) {
+    const gx = input.mouse.x;
+    const gy = input.mouse.y;
+    const gsize = TILE_SIZE * state.camera.zoom;
+    ctx.save();
+    ctx.globalAlpha = 0.8;
+    ctx.fillStyle = platformFilterDragHoverKey ? 'rgba(124, 255, 90, 0.55)' : 'rgba(255, 255, 255, 0.4)';
+    ctx.strokeStyle = platformFilterDragHoverKey ? '#7cff5a' : '#ffffff';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(gx - gsize / 2, gy - gsize / 2, gsize, gsize, 8);
+    ctx.fill();
+    ctx.stroke();
+    ctx.font = `${gsize * 0.5}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('✅', gx, gy + 1);
     ctx.restore();
   }
 

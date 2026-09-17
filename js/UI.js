@@ -375,11 +375,8 @@ export function initUI(state) {
     platformFilterOverlay: document.getElementById('platform-filter-overlay'),
     platformFilterAnchor: document.getElementById('platform-filter-anchor'),
     platformFilterMenu: document.getElementById('platform-filter-menu'),
-    platformFilterModeWhitelistBtn: document.getElementById('platform-filter-mode-whitelist'),
-    platformFilterModeBlacklistBtn: document.getElementById('platform-filter-mode-blacklist'),
     platformFilterClearBtn: document.getElementById('platform-filter-clear-btn'),
     platformFilterItems: document.getElementById('platform-filter-items'),
-    platformFilterHint: document.getElementById('platform-filter-hint'),
     labOverlay: document.getElementById('lab-overlay'),
     labModal: document.getElementById('lab-modal'),
     labScienceReadout: document.getElementById('lab-science-readout'),
@@ -446,8 +443,6 @@ export function initUI(state) {
   els.platformFilterOverlay.addEventListener('click', (e) => {
     if (e.target === els.platformFilterOverlay) closePlatformFilterMenu(); // same "click anywhere else closes it" precedent as every other fly-out pop-up here
   });
-  els.platformFilterModeWhitelistBtn.addEventListener('click', () => setPlatformFilterMode(state, 'whitelist'));
-  els.platformFilterModeBlacklistBtn.addEventListener('click', () => setPlatformFilterMode(state, 'blacklist'));
   els.platformFilterClearBtn.addEventListener('click', () => clearPlatformFilter(state));
 
   // Gene-Splicing moved to the Tank Upgrades panel (see buildTankPanel) — no
@@ -904,18 +899,17 @@ function refreshBuildingInfoLiveStats(state) {
 // ---- Platform item-filter pop-up ----
 // Per direct spec: left-clicking a placed Platform (any of its 5 variants)
 // opens a small pop-up, "like the recipe modals" — same fly-out-of-its-
-// anchor mechanic as openRecipeMenu/openBuildingInfoMenu above. Two mode
-// buttons (a green checkmark and a red X) set state.level.buildingData's own
-// `filterMode` field ('whitelist' | 'blacklist'); clicking an item type
-// below toggles its membership in that tile's `filterItems` array. The
-// EFFECTIVE per-item status (pass/block) is always fully derived from just
-// those two fields — 'blacklist' passes everything except the listed types,
-// 'whitelist' passes ONLY the listed types — so there's nothing else to keep
-// in sync: "click red x, then click Food and Biomass" leaves everything else
-// showing green automatically, and "click the green checkmark, then click
-// Coins" automatically shows red x on everything else, both for free, with
-// no separate action needed for either (see Grid.js's platformIgnoresItem,
-// which reads these same two fields for the real collision-skip check).
+// anchor mechanic as openRecipeMenu/openBuildingInfoMenu above. Whitelist-
+// only, per a later direct simplification ("remove the red X button and the
+// green checkmark [mode buttons] completely... by default, have all the
+// objects... look like they are blacklisted with the red x on them, and if
+// you click them, they toggle to a green checkmark"): every item type in
+// the grid starts OUT of that tile's `filterItems` array (shown red-X,
+// still collides normally — the exact behavior a plain Platform always
+// had), and clicking one just toggles its own membership directly, no mode
+// selection needed first. Clear All resets the whole list back to empty
+// (every item red-X again) — see Grid.js's platformIgnoresItem, which reads
+// this same field for the real collision-skip check.
 const PLATFORM_FILTER_MENU_TRANSITION_MS = 220; // must match #platform-filter-menu's CSS transition duration
 
 export function openPlatformFilterMenu(state, tileKey) {
@@ -963,33 +957,24 @@ function updatePlatformFilterMenuPosition(state) {
   els.platformFilterAnchor.style.top = `${screen.y - MOUND_MENU_GAP_PX}px`;
 }
 
-// Rebuilds the mode buttons + item grid for whichever Platform sits at
-// platformFilterTileKey — called only on open and after a mutation (mode
-// switch, item toggle, clear all), NOT every frame, same "don't tear down
-// the DOM under a real click" fix the recipe menu's own refreshRecipeMenu
-// comment documents. The much lighter per-frame check in updateHUD just
-// closes the popup if the underlying tile gets demolished/moved out from
-// under it, without touching this DOM at all.
+// Rebuilds the item grid for whichever Platform sits at
+// platformFilterTileKey — called only on open and after a mutation (item
+// toggle, clear all, or a drag-copy landing on this exact tile — see
+// copyPlatformFilter below), NOT every frame, same "don't tear down the DOM
+// under a real click" fix the recipe menu's own refreshRecipeMenu comment
+// documents. The much lighter per-frame check in updateHUD just closes the
+// popup if the underlying tile gets demolished/moved out from under it,
+// without touching this DOM at all.
 function refreshPlatformFilterMenu(state) {
   if (!platformFilterTileKey) return;
   const data = state.level.buildingData[platformFilterTileKey];
   if (!data) { closePlatformFilterMenu(); return; }
-  els.platformFilterModeWhitelistBtn.classList.toggle('selected', data.filterMode === 'whitelist');
-  els.platformFilterModeBlacklistBtn.classList.toggle('selected', data.filterMode === 'blacklist');
 
   els.platformFilterItems.innerHTML = '';
   for (const itemDef of PLATFORM_FILTER_ITEM_TYPES) {
     const isListed = data.filterItems.includes(itemDef.id);
-    // The effective per-item status, purely derived from filterMode — see
-    // this section's own top comment. `null` (no mode chosen yet) shows a
-    // neutral dash for every item, since nothing has an effective status
-    // until a mode is picked.
-    let status = null; // 'pass' | 'block' | null
-    if (data.filterMode === 'whitelist') status = isListed ? 'pass' : 'block';
-    else if (data.filterMode === 'blacklist') status = isListed ? 'block' : 'pass';
-
     const btn = document.createElement('button');
-    btn.className = 'platform-filter-item' + (status ? ` ${status}` : ' inert');
+    btn.className = 'platform-filter-item' + (isListed ? ' pass' : ' block');
     const icon = document.createElement('div');
     icon.className = 'platform-filter-item-icon';
     icon.textContent = itemDef.icon;
@@ -998,59 +983,50 @@ function refreshPlatformFilterMenu(state) {
     label.textContent = itemDef.label;
     const badge = document.createElement('div');
     badge.className = 'platform-filter-item-badge';
-    badge.textContent = status === 'pass' ? '✅' : status === 'block' ? '❌' : '—';
+    badge.textContent = isListed ? '✅' : '❌';
     btn.appendChild(icon);
     btn.appendChild(label);
     btn.appendChild(badge);
-    if (data.filterMode) {
-      btn.addEventListener('click', () => togglePlatformFilterItem(state, itemDef.id));
-    }
+    btn.addEventListener('click', () => togglePlatformFilterItem(state, itemDef.id));
     els.platformFilterItems.appendChild(btn);
   }
-
-  els.platformFilterHint.textContent = data.filterMode
-    ? 'Click an item to toggle it.'
-    : 'Pick ✅ or ❌ above, then click item types below.';
 }
 
-// Mode buttons — per direct spec, deliberately does NOT clear filterItems on
-// a switch: the same picks just get reinterpreted under the new mode (a
-// blacklist of {Food, Biomass} becomes "only Food and Biomass pass" if
-// switched to whitelist) rather than losing the selection. Clear All (below)
-// is the one action that actually resets the list.
-function setPlatformFilterMode(state, mode) {
-  if (!platformFilterTileKey) return;
-  const data = state.level.buildingData[platformFilterTileKey];
-  if (!data) return;
-  data.filterMode = mode;
-  refreshPlatformFilterMenu(state);
-}
-
-// Toggled from red x's to green checks and back — re-clicking an item
-// already in `filterItems` removes it, flipping its EFFECTIVE status back to
-// whatever the mode's own default is for a non-member (see
-// refreshPlatformFilterMenu's own status derivation). A no-op while no mode
-// has been picked yet (filterMode === null) — items only become clickable
-// once a mode is chosen, see refreshPlatformFilterMenu's own listener guard.
+// Toggled from red x's to green checks and back — re-clicking an already-
+// whitelisted item removes it, flipping it back to the red-X default.
 function togglePlatformFilterItem(state, itemId) {
   if (!platformFilterTileKey) return;
   const data = state.level.buildingData[platformFilterTileKey];
-  if (!data || !data.filterMode) return;
+  if (!data) return;
   const idx = data.filterItems.indexOf(itemId);
   if (idx === -1) data.filterItems.push(itemId);
   else data.filterItems.splice(idx, 1);
   refreshPlatformFilterMenu(state);
 }
 
-// Back to a plain, always-solid Platform with no filter at all — the one
-// action that actually resets filterItems, not just filterMode.
+// Back to a plain, always-solid Platform — every item red-X again, nothing
+// whitelisted.
 function clearPlatformFilter(state) {
   if (!platformFilterTileKey) return;
   const data = state.level.buildingData[platformFilterTileKey];
   if (!data) return;
-  data.filterMode = null;
   data.filterItems = [];
   refreshPlatformFilterMenu(state);
+}
+
+// Drag-copy — mirrors copyBuildingRecipe's exact shape (main.js's
+// updateRecipeDrag/mouseUp handlers drive an identical gesture for this),
+// per direct request ("click and drag active filters from one platform to
+// another... the same way the recipe copying works"). Deliberately does NOT
+// require the source/target to be the same Platform variant — "even from a
+// full platform to half platform" — since a filter is just a plain array of
+// item-type ids, equally meaningful on any of the 5 shapes.
+export function copyPlatformFilter(state, sourceKey, targetKey) {
+  const sourceData = state.level.buildingData[sourceKey];
+  const targetData = state.level.buildingData[targetKey];
+  if (!sourceData || !targetData) return;
+  targetData.filterItems = [...sourceData.filterItems];
+  if (platformFilterMenuOpen && platformFilterTileKey === targetKey) refreshPlatformFilterMenu(state);
 }
 
 // Tracks the clicked tile's live on-screen position so the popup stays
@@ -3713,7 +3689,16 @@ export function updateHUD(state) {
   const toolIsPurchasable = state.ui.selectedTool.startsWith('build:') || state.ui.selectedTool.startsWith('fish:');
   const blueprintCostVisible = state.ui.blueprintCost != null;
   const buildLegendVisible = !tutorialActive && (toolIsPurchasable || blueprintCostVisible);
-  els.buildLegend.textContent = blueprintCostVisible ? `Cost: $${state.ui.blueprintCost}` : 'Click to purchase';
+  // "Click to purchase" replaced with the actual live "Cost: $N" — per
+  // direct request, the same bubble the Blueprint tool's own cost readout
+  // already uses (the two are mutually exclusive, so sharing it needs no
+  // extra UI), now showing the real price of whichever building/fish is
+  // currently armed instead of a generic instruction.
+  let buildLegendText = '';
+  if (blueprintCostVisible) buildLegendText = `Cost: $${state.ui.blueprintCost}`;
+  else if (state.ui.selectedTool.startsWith('build:')) buildLegendText = `Cost: $${getBuildingCost(state, state.ui.selectedTool.slice('build:'.length))}`;
+  else if (state.ui.selectedTool.startsWith('fish:')) buildLegendText = `Cost: $${getFishPurchaseCost(state, state.ui.selectedTool.slice('fish:'.length))}`;
+  els.buildLegend.textContent = buildLegendText;
   els.buildLegend.classList.toggle('hidden', !buildLegendVisible);
   // Tutorial-skip legend — "(Esc) to skip tutorial" — shown for the whole
   // duration of any guided tutorial flow, per direct request; main.js's
@@ -3777,8 +3762,13 @@ export function updateHUD(state) {
   // fish: tool is already armed ("something is being held"), otherwise
   // Pipette/reselect-last (see main.js's KeyQ handler and
   // state.ui.lastArmedTool) — `toolIsPurchasable` (already computed above)
-  // is exactly that same "something armed" condition.
-  els.hotkeyLegendQ.textContent = toolIsPurchasable ? 'Q: Clear Cursor' : 'Q: Pipette/ Last-used Tool';
+  // is exactly that same "something armed" condition. A copied Blueprint
+  // takes priority over both — main.js's KeyQ handler checks it first too
+  // (see that handler's own comment) — via state.ui.blueprintClipboardActive,
+  // written fresh every render() frame.
+  els.hotkeyLegendQ.textContent = state.ui.blueprintClipboardActive
+    ? 'Q: Clear Blueprint'
+    : (toolIsPurchasable ? 'Q: Clear Cursor' : 'Q: Pipette/ Last-used Tool');
   // Ctrl+Z — shown only while there's actually something to undo (main.js
   // writes state.ui.undoAvailable/undoLabel every time its own undo stack
   // changes — see that file's pushUndoEntry/performUndo).

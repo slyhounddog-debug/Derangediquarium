@@ -1653,10 +1653,11 @@ html, body {
 
 /* Platform item-filter pop-up — "like the recipe modals," per direct
    request: same fly-out-of-its-anchor mechanic as #recipe-menu/
-   #building-info-menu above. Two big mode buttons (green check/red X) pick
-   whether clicking an item type below adds it to a whitelist or a
-   blacklist; a small icon grid lists every item type in the game with its
-   own live pass/block badge. */
+   #building-info-menu above. Whitelist-only (per a later direct
+   simplification, see UI.js's own section comment) — a small icon grid
+   lists every item type in the game, each starting red-X (blocked, the
+   same behavior a plain Platform always had) and toggling to a green
+   check (passes through with zero collision) on click. */
 #platform-filter-overlay { position: fixed; inset: 0; z-index: 190; }
 #platform-filter-overlay.hidden { display: none; }
 #platform-filter-anchor { position: fixed; transform: translate(-50%, -100%); }
@@ -1675,24 +1676,13 @@ html, body {
 }
 #platform-filter-menu.platform-filter-menu-closed { transform: scale(0.05); opacity: 0; }
 #platform-filter-title { font-size: 15px; font-weight: 800; color: #c25f8f; margin-bottom: 10px; }
-#platform-filter-mode-row { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
-.platform-filter-mode-btn {
-  flex: 1 1 auto;
-  font-size: 22px; line-height: 1;
-  background: #f3e9dd; border: 2px solid transparent; border-radius: 14px;
-  padding: 8px 0;
-  cursor: pointer;
-  transition: transform 0.1s ease, border-color 0.1s ease, background 0.1s ease;
-}
-.platform-filter-mode-btn:hover { transform: scale(1.05); }
-#platform-filter-mode-whitelist.selected { border-color: #3cbe6e; background: #eafaf1; box-shadow: 0 0 0 2px rgba(60, 190, 110, 0.35); }
-#platform-filter-mode-blacklist.selected { border-color: #d63c3c; background: #fdecec; box-shadow: 0 0 0 2px rgba(214, 60, 60, 0.35); }
 #platform-filter-clear-btn {
-  flex: 1 1 auto;
+  width: 100%;
   font-size: 10.5px; font-weight: 800; color: #6b4c6b;
   background: #f3e9dd; border: 2px solid transparent; border-radius: 14px;
   padding: 8px 4px;
   cursor: pointer;
+  margin-bottom: 12px;
 }
 #platform-filter-clear-btn:hover { background: #ebdccb; }
 #platform-filter-items {
@@ -1707,10 +1697,6 @@ html, body {
   transition: transform 0.1s ease, border-color 0.1s ease;
 }
 .platform-filter-item:hover { transform: scale(1.04); }
-/* Inert — no mode chosen yet, so there's nothing a click would actually do
-   (see refreshPlatformFilterMenu's own listener guard). Still shows every
-   item's neutral "—" badge, just dimmed and not clickable. */
-.platform-filter-item.inert { opacity: 0.55; cursor: default; }
 .platform-filter-item.pass { border-color: #3cbe6e; background: #eafaf1; }
 .platform-filter-item.block { border-color: #d63c3c; background: #fdecec; }
 .platform-filter-item-icon { font-size: 20px; line-height: 1; }

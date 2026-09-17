@@ -380,26 +380,27 @@ function isSolid(tile) {
 // ---- Platform item filters ----
 // Per direct request: every Platform variant (the flat tile AND all 4 Half
 // Platform ramps) can be turned into a collision filter — UI.js's
-// openPlatformFilterMenu edits `state.level.buildingData`'s `filterMode`
-// (null | 'blacklist' | 'whitelist') and `filterItems` (array of item type
-// ids) fields for that tile. With no filter configured (filterMode === null,
-// the default a fresh Platform starts with), this always returns false — a
-// plain Platform still blocks everything, exactly as it always has.
-// Otherwise: 'blacklist' means "everything passes through EXCEPT the listed
-// types" (those still collide normally, like a plain Platform); 'whitelist'
-// means "ONLY the listed types pass through" (everything else still
-// collides normally). A "pass" here is total — zero collision whatsoever,
-// as if the tile were plain open air for that one item type — so it's
-// checked centrally by isSolidForItem below, the one gate every solid-tile
-// collision check (sweepVertical/sweepHorizontal/applyItemPush) and the
-// ramp wedge's own resolveRampCollisionAt both now go through, rather than
-// a separate special-case at each site.
+// openPlatformFilterMenu edits `state.level.buildingData`'s `filterItems`
+// (array of item type ids) field for that tile. Whitelist-only, per a later
+// direct simplification ("only have whitelisting for the filters... by
+// default have all the objects look like they are blacklisted... if you
+// click them, they toggle to a green checkmark") — every item type starts
+// OUT of the list (shown red-X in the pop-up, still collides normally,
+// exactly like a plain Platform always has) and only the ones the player
+// explicitly clicks into the list (shown green-check) pass through with
+// zero collision, as if the tile were plain open air for that one item
+// type. This is checked centrally by isSolidForItem below, the one gate
+// every solid-tile collision check (sweepVertical/sweepHorizontal/
+// applyItemPush) and the ramp wedge's own resolveRampCollisionAt both go
+// through, rather than a separate special-case at each site. A fresh
+// Platform's `filterItems` starts empty, which is why it behaves exactly
+// like it always has until the player actually opens the pop-up and adds
+// something to the list.
 function platformIgnoresItem(state, tileType, col, row, itemType) {
   if (!PLATFORM_FLAT_COST_TILES.has(tileType)) return false;
   const data = state.level.buildingData[buildingKey(col, row)];
-  if (!data || !data.filterMode) return false;
-  const isListed = data.filterItems.includes(itemType);
-  return data.filterMode === 'blacklist' ? !isListed : isListed;
+  if (!data) return false;
+  return data.filterItems.includes(itemType);
 }
 
 // The one gate every flat-solid-tile collision check goes through now — a
@@ -747,10 +748,10 @@ export function placeTile(state, col, row, buildingId, angle = 0) {
     state.level.buildingData[buildingKey(col, row)] = { type: buildingId, recipeId: null, fueled: false, progressMs: 0 };
   } else if (PLATFORM_FLAT_COST_TILES.has(buildingId)) {
     // Every Platform variant (flat + all 4 ramps) can be turned into an item
-    // filter — see platformIgnoresItem's own comment above. filterMode stays
-    // null (no filter — a plain, always-solid Platform) until the player
-    // opens UI.js's openPlatformFilterMenu and picks one.
-    state.level.buildingData[buildingKey(col, row)] = { type: buildingId, filterMode: null, filterItems: [] };
+    // filter — see platformIgnoresItem's own comment above. filterItems
+    // starts empty (a plain, always-solid Platform) until the player opens
+    // UI.js's openPlatformFilterMenu and whitelists something.
+    state.level.buildingData[buildingKey(col, row)] = { type: buildingId, filterItems: [] };
   }
   if (!state.level.tutorialFlags.firstBuildingPlaced) {
     state.level.tutorialFlags.firstBuildingPlaced = true;
@@ -929,7 +930,7 @@ export function cycleTileCheat(state, worldX, worldY) {
   } else if (POWER_PLANT_TILES.has(next)) {
     state.level.buildingData[buildingKey(col, row)] = { type: next, recipeId: null, fueled: false, progressMs: 0 };
   } else if (PLATFORM_FLAT_COST_TILES.has(next)) {
-    state.level.buildingData[buildingKey(col, row)] = { type: next, filterMode: null, filterItems: [] };
+    state.level.buildingData[buildingKey(col, row)] = { type: next, filterItems: [] };
   }
 }
 
@@ -939,11 +940,11 @@ export function cycleTileCheat(state, worldX, worldY) {
 // main.js's KeyR handler, which only calls this while no build:/fish: tool
 // is currently armed; while one IS armed, R instead cycles the SHOP
 // selection via UI.js's cycleSelectedBuildingFamily). Carries the tile's own
-// item filter (filterMode/filterItems — see platformIgnoresItem's own
-// comment) across the cycle: swapping which SHAPE a Platform is doesn't
-// change what it's configured to let through, so there's nothing to reset
-// here, only the grid's own type string and the buildingData entry's own
-// `type` field (kept in sync with it, same as every other building).
+// item filter (filterItems — see platformIgnoresItem's own comment) across
+// the cycle: swapping which SHAPE a Platform is doesn't change what it's
+// configured to let through, so there's nothing to reset here, only the
+// grid's own type string and the buildingData entry's own `type` field
+// (kept in sync with it, same as every other building).
 const PLATFORM_CYCLE = [
   TILE_PLATFORM, TILE_PLATFORM_HALF_LEFT, TILE_PLATFORM_HALF_RIGHT,
   TILE_PLATFORM_HALF_TOPLEFT, TILE_PLATFORM_HALF_TOPRIGHT,
@@ -959,7 +960,7 @@ export function cyclePlatformAt(state, worldX, worldY) {
   const key = buildingKey(col, row);
   const data = state.level.buildingData[key];
   if (data) data.type = next;
-  else state.level.buildingData[key] = { type: next, filterMode: null, filterItems: [] };
+  else state.level.buildingData[key] = { type: next, filterItems: [] };
   return true;
 }
 
@@ -2933,26 +2934,25 @@ function renderPlatformRamp(ctx, x, y, size, color, tileType) {
   ctx.stroke();
 }
 
-// Small badge showing whether a Platform (any of its 5 variants) is
-// currently acting as an item filter, and which mode — a green checkmark
-// badge for a whitelist ("only these item types pass through") or a red X
-// badge for a blacklist ("everything EXCEPT these item types passes
-// through") — per direct request ("Add a visual indicator on any platform
-// that's currently acting as any filter"). A plain Platform with no filter
-// configured (data.filterMode === null/undefined, the default every fresh
-// one starts with) shows nothing at all, same as it always has. Fixed to
-// the tile's own top-left corner regardless of which of the 4 ramp
-// orientations it is — a consistent spot across all 5 variants reads more
-// clearly at a glance than trying to dodge each wedge's own open corner.
+// Small green-checkmark badge showing that a Platform (any of its 5
+// variants) currently has at least one item type whitelisted through it —
+// per direct request ("Add a visual indicator on any platform that's
+// currently acting as any filter"). A plain Platform with nothing
+// whitelisted (data.filterItems empty, the default every fresh one starts
+// with — behaviorally identical to an ordinary solid Platform) shows
+// nothing at all, same as it always has. Fixed to the tile's own top-left
+// corner regardless of which of the 4 ramp orientations it is — a
+// consistent spot across all 5 variants reads more clearly at a glance than
+// trying to dodge each wedge's own open corner.
 function renderPlatformFilterBadge(ctx, x, y, size, data) {
-  if (!data || !data.filterMode) return;
+  if (!data || !data.filterItems || data.filterItems.length === 0) return;
   const r = Math.max(3, size * 0.16);
   const cx = x + size * 0.2;
   const cy = y + size * 0.2;
   ctx.save();
   ctx.beginPath();
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
-  ctx.fillStyle = data.filterMode === 'whitelist' ? 'rgba(60, 190, 110, 0.94)' : 'rgba(214, 60, 60, 0.94)';
+  ctx.fillStyle = 'rgba(60, 190, 110, 0.94)';
   ctx.fill();
   ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
   ctx.lineWidth = 1;
@@ -2961,7 +2961,7 @@ function renderPlatformFilterBadge(ctx, x, y, size, data) {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#ffffff';
-  ctx.fillText(data.filterMode === 'whitelist' ? '✓' : '✕', cx, cy + 0.5);
+  ctx.fillText('✓', cx, cy + 0.5);
   ctx.restore();
 }
 
