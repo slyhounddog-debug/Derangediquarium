@@ -3327,7 +3327,23 @@ export function renderBuildGhost(ctx, state, worldX, worldY, buildingId, angle, 
   const size = TILE_SIZE * state.camera.zoom;
   ctx.globalAlpha = 0.45;
   ctx.fillStyle = check.ok ? '#8fe0b8' : '#ff6b6b';
-  ctx.fillRect(screen.x, screen.y, size, size);
+  const localVerts = RAMP_TRIANGLE_LOCAL_VERTS[buildingId];
+  if (localVerts) {
+    // A Half Platform occupies only half its tile — the old plain fillRect
+    // ghost showed a full square regardless, which didn't match the real
+    // triangular wedge that actually gets placed. Draw the same triangle the
+    // real tile renders (renderPlatformRamp) instead, so the ghost preview is
+    // a true preview of the shape, not just where it'll sit.
+    const verts = localVerts.map(([lx, ly]) => [screen.x + (lx / TILE_SIZE) * size, screen.y + (ly / TILE_SIZE) * size]);
+    ctx.beginPath();
+    ctx.moveTo(verts[0][0], verts[0][1]);
+    ctx.lineTo(verts[1][0], verts[1][1]);
+    ctx.lineTo(verts[2][0], verts[2][1]);
+    ctx.closePath();
+    ctx.fill();
+  } else {
+    ctx.fillRect(screen.x, screen.y, size, size);
+  }
   ctx.globalAlpha = 1;
   if (check.ok && FAN_TILES.has(buildingId)) {
     renderDirectionIndicator(ctx, buildingId, screen.x, screen.y, size, angle, state.camera.zoom, showCone);
