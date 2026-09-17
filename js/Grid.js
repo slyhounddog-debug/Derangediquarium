@@ -129,9 +129,25 @@ const PLATFORM_FLAT_COST_TILES = new Set([TILE_PLATFORM, TILE_PLATFORM_HALF_LEFT
 // ---- Half Platform ramps — real 45-degree wedge collision ----
 // Deliberately NOT added to SOLID_TILES: a flat "is this whole tile solid"
 // check is wrong for a ramp, which is only solid below its own sloped
-// diagonal, not across the full tile height — see sweepVertical/
-// stepItemOnGrid's own ramp-aware branches below, which replace the flat
-// check specifically for these two tile types instead.
+// diagonal, not across the full tile height — see resolveRampCollision
+// below, which is the ONE place this collision is ever resolved, called
+// uniformly regardless of whether the item arrived falling from above,
+// sliding along the ground into it sideways (e.g. a Fan pushing it), or
+// anything in between. An earlier version of this file instead special-cased
+// each direction separately — a flat "hit a wall, zero the velocity" check
+// for horizontal contact, and a persistent onRampCol/onRampRow "attached"
+// state machine (stepRampSlide) for continuing to slide once landed on from
+// above — which is exactly what produced a real, reported bug: an item
+// being pushed along the seabed into a ramp's own solid wedge had its
+// horizontal velocity flatly zeroed every single tick before it ever moved,
+// so no amount of Fan force could ever push it any further ("stops dead in
+// its tracks... will literally never move, with 100 fans pushing it," per
+// direct report) — a "square hitting a square" response, not a round object
+// meeting a 45-degree ramp. Fixed by removing all direction-specific
+// special-casing and the persistent attached-state machine entirely, in
+// favor of one continuous circle-vs-line correction (resolveRampCollision)
+// re-evaluated fresh from the item's own current geometry every single
+// substep of every tick, with no memory of "how" contact began.
 //
 // Geometry, in tile-LOCAL coordinates (0,0 = top-left corner, y increases
 // downward matching this game's own world-Y convention throughout):
@@ -176,6 +192,78 @@ function rampSurfaceLocalY(tileType, localX) {
 function rampSurfaceWorldY(tileType, col, row, worldX) {
   const localX = Math.max(0, Math.min(TILE_SIZE, worldX - col * TILE_SIZE));
   return row * TILE_SIZE + rampSurfaceLocalY(tileType, localX);
+}
+
+// A gentle bounce, not a real elastic collision — per direct spec, "it
+// should be able to bounce slightly off the platform if coming at it from a
+// more perpendicular-ish angle," not stick or fully absorb every hit.
+const RAMP_BOUNCE_RESTITUTION = 0.25;
+
+// THE one place a Half Platform ramp's own solid wedge is ever collided
+// with — called fresh every substep of every tick (see sweepVertical below),
+// regardless of how the item arrived (falling onto it, sliding along the
+// seabed into it, or anything in between), with no memory of any previous
+// tick's contact. Per direct spec ("the math should be set up to treat any
+// angle of object hitting the platform correctly and keep it's momentum"),
+// this is a real circle-vs-line collision, not a direction-specific special
+// case: it measures the item's own actual perpendicular (signed) distance to
+// the ramp's sloped surface — treated as an infinite line for this purpose,
+// since the tile lookup that led here already guarantees item.x/item.y sit
+// within this exact tile's own column/row — using a point that's always ON
+// that line (the tile's own local (0, surfaceY(0)) corner) as the anchor.
+// If the circle is fully on the open-air side (signedDist >= radius),
+// there's nothing to do at all — an item can freely drift through a ramp's
+// own open wedge, and nothing here forces it onto the surface just because
+// it's nearby.
+//
+// Once genuinely overlapping, two things happen together, both driven by
+// the same tangent/normal decomposition of the item's CURRENT velocity
+// (whatever integrateItemForces already produced this tick — gravity, Fan
+// force, drag, all already baked in):
+//   1. Position is pushed straight out along the surface's own normal by
+//      exactly the penetration depth — so the item always ends up resting
+//      flush against the real 45-degree line, never floating above it or
+//      sinking into it, regardless of which direction it arrived from.
+//   2. The tangential component of velocity (running ALONG the slope) is
+//      preserved completely — a frictionless surface never robs momentum
+//      from motion already running along it, which is exactly what lets a
+//      Fan-pushed item sliding along the ground translate that speed into
+//      genuinely climbing/sliding across the ramp instead of just stopping.
+//      The normal component (running INTO the slope) only gets a small
+//      bounce (RAMP_BOUNCE_RESTITUTION) if it was actively driving further
+//      into the surface; if it was already separating (a Fan blowing the
+//      item back off, say), it's left completely untouched.
+// This is one continuous formula for every possible angle of impact — a
+// nearly head-on hit just happens to put most of its incoming speed on the
+// normal axis (and so mostly bounces), a nearly-parallel one puts almost
+// none there (and so barely changes at all, reading as a smooth glide-on),
+// and everything in between falls out of the exact same math with no
+// separate threshold or branch anywhere. Nothing here can ever glue an item
+// to the ramp either — since this is a pure geometric overlap test run fresh
+// every substep, an item on a trajectory that's genuinely separating (Fan
+// lift-off, or simply having already cleared the wedge) just stops
+// registering an overlap at all on the very next check, with zero special
+// "release" logic needed anywhere.
+function resolveRampCollision(item, grid) {
+  const col = colAt(item.x);
+  const row = rowAt(item.y);
+  const tile = grid[row] && grid[row][col];
+  const tangent = RAMP_TANGENT[tile];
+  if (!tangent) return false;
+  const normal = RAMP_NORMAL[tile];
+  const anchorX = col * TILE_SIZE;
+  const anchorY = row * TILE_SIZE + rampSurfaceLocalY(tile, 0);
+  const signedDist = (item.x - anchorX) * normal.nx + (item.y - anchorY) * normal.ny;
+  if (signedDist >= item.radius) return false;
+  const penetration = item.radius - signedDist;
+  item.x += normal.nx * penetration;
+  item.y += normal.ny * penetration;
+  const vNormal = item.vx * normal.nx + item.vy * normal.ny;
+  const vTangent = item.vx * tangent.tx + item.vy * tangent.ty;
+  const newVNormal = vNormal < 0 ? -vNormal * RAMP_BOUNCE_RESTITUTION : vNormal;
+  item.vx = vTangent * tangent.tx + newVNormal * normal.nx;
+  item.vy = vTangent * tangent.ty + newVNormal * normal.ny;
+  return true;
 }
 
 // Per-tier fan stats, keyed by tile id — Grid.js's own lookup table (not
@@ -818,23 +906,11 @@ function sweepVertical(item, grid, dy) {
   for (let i = 0; i < steps; i++) {
     const nextBottom = item.y + stepY + item.radius;
     const tile = tileAt(grid, item.x, nextBottom);
-    // A Half Platform ramp is only solid below its own sloped surface, not
-    // across the whole tile height — landing on one rests at whatever
-    // height the slope is at THIS item's own x, not a flat tile-top, and
-    // hands off to stepRampSlide (see stepItemOnGrid) to keep sliding down
-    // the incline instead of resting motionless like a flat Platform.
-    if (RAMP_TANGENT[tile]) {
-      const row = rowAt(nextBottom);
-      const col = colAt(item.x);
-      const surfaceY = rampSurfaceWorldY(tile, col, row, item.x);
-      if (nextBottom >= surfaceY) {
-        item.y = surfaceY - item.radius;
-        item.vy = 0;
-        return { landed: true, tile, row, col, ramp: true };
-      }
-      item.y += stepY;
-      continue;
-    }
+    // A Half Platform ramp is deliberately never "solid" for this flat
+    // top-of-tile check (see SOLID_TILES's own comment) — its own sloped
+    // collision is resolved uniformly, for every direction of approach, by
+    // resolveRampCollision below, called once per substep so a fast fall
+    // can't tunnel past a ramp's surface within one big step.
     if (isSolid(tile)) {
       const row = rowAt(nextBottom);
       item.y = row * TILE_SIZE - item.radius; // rest exactly on top of the tile, not overshot into it
@@ -864,6 +940,11 @@ function sweepVertical(item, grid, dy) {
       return { landed: true, tile: null, row: rowAt(WORLD_H), col: colAt(item.x) };
     }
     item.y += stepY;
+    // Real Half Platform ramp collision — see resolveRampCollision's own
+    // comment. Checked once per substep (not just once at the end of the
+    // whole tick) so a fast fall can't tunnel past a ramp's own surface
+    // within a single big step the way a plain end-of-tick check could.
+    resolveRampCollision(item, grid);
   }
   return { landed: false };
 }
@@ -1088,70 +1169,6 @@ export function renderDisintegrateEffect(ctx, x, y, radius, color, fraction, ite
 // side/top walls every item now respects — see clampItemToWorldWalls in
 // Entities.js) rather than ever being deleted for falling somewhere
 // unreachable.
-// Runs every tick an item is resting on a Half Platform's own 45-degree
-// surface (item.onRampCol/onRampRow, set by sweepVertical's own ramp
-// landing branch above) — replaces the normal flat horizontal/vertical
-// sweep for as long as it stays true. This is the real physics: after
-// integrateItemForces has already applied this tick's gravity/Fan/drag
-// acceleration to item.vx/vy (unchanged, called once up in
-// stepItemOnGrid, same as always), the resulting velocity is PROJECTED
-// onto the slope's own downhill tangent — removing whatever component
-// pointed into the solid surface (so the item can't sink through it) while
-// preserving the along-slope component, which is exactly what a
-// frictionless ball rolling down a real 45-degree incline does: each tick,
-// gravity keeps adding to the along-slope speed, so the item genuinely
-// accelerates down the ramp rather than sliding at a fixed rate.
-//
-// Two ways this releases the item back to normal, un-constrained physics
-// for the REST of this same tick (both return false, having deliberately
-// NOT touched item.x/y — the caller falls through to the ordinary
-// horizontal+vertical sweep using whatever velocity integrateItemForces
-// already produced): (1) the tile it's tracking stopped being a ramp
-// (demolished, cheat-cycled, or the debug tile-cycle turned it into
-// something else), or (2) this tick's own velocity has a positive
-// component along the ramp's OUTWARD NORMAL — something (almost always a
-// Fan) is actively lifting it away from the surface right now. That second
-// case matters a lot: without it, a ramp would be a one-way trap no Fan
-// could ever blow anything back out of, repeating the exact "sticky
-// conveyor belt" complaint that got this project's original Ramp Left/
-// Right mechanic removed entirely, years before this one existed.
-function stepRampSlide(item, grid, dt) {
-  const tileType = grid[item.onRampRow] && grid[item.onRampRow][item.onRampCol];
-  const tangent = RAMP_TANGENT[tileType];
-  if (!tangent) {
-    item.onRampCol = null;
-    item.onRampRow = null;
-    return false;
-  }
-  const normal = RAMP_NORMAL[tileType];
-  const vNormal = item.vx * normal.nx + item.vy * normal.ny;
-  if (vNormal > 0) {
-    item.onRampCol = null;
-    item.onRampRow = null;
-    return false;
-  }
-  const vAlong = item.vx * tangent.tx + item.vy * tangent.ty;
-  item.vx = vAlong * tangent.tx;
-  item.vy = vAlong * tangent.ty;
-  item.x += item.vx * dt;
-  item.y += item.vy * dt;
-  // Re-clamp exactly onto the surface at the new x — kills any float drift
-  // from integrating motion along a diagonal line in discrete steps.
-  const col = item.onRampCol;
-  const row = item.onRampRow;
-  item.y = rampSurfaceWorldY(tileType, col, row, item.x) - item.radius;
-  // Slid off the tile's own column range — release it. Whatever the very
-  // next tick's ordinary tile lookup finds under/beside it (another ramp to
-  // chain into, a flat Platform, open space to fall through) takes over
-  // completely naturally, with zero special-casing needed here for what
-  // comes next.
-  if (item.x < col * TILE_SIZE || item.x > (col + 1) * TILE_SIZE) {
-    item.onRampCol = null;
-    item.onRampRow = null;
-  }
-  return true;
-}
-
 export function stepItemOnGrid(item, state, dt, physics) {
   const grid = state.level.grid;
 
@@ -1166,39 +1183,30 @@ export function stepItemOnGrid(item, state, dt, physics) {
   const fanForce = computeFanForce(state, item);
   integrateItemForces(item, dt, physics, fanForce);
 
-  // Half Platform ramp — an item currently resting on one slides
-  // continuously along its 45-degree surface instead of the normal flat
-  // sweep below; see stepRampSlide's own comment for the real physics.
-  if (item.onRampCol != null && stepRampSlide(item, grid, dt)) {
-    return 'falling'; // still in motion (sliding, or just exited this same tick) — the same status a moving item off a Fan cone already reports
-  }
-
   // Horizontal: swept against solid tiles so it can't tunnel sideways into
-  // one — ramp-aware, since a Half Platform is only solid below its own
-  // sloped surface: an item can pass freely through the tile's OPEN wedge,
-  // but is blocked the instant it would sink into the solid triangle at
-  // that x (the ramp's own "wall" side, e.g. the full-height left edge of
-  // a Right ramp).
+  // one. A Half Platform ramp is deliberately never "solid" here — it can
+  // always be moved into freely, the same as open air — its own sloped
+  // collision is resolved uniformly for every direction of approach by
+  // resolveRampCollision, called below from inside sweepVertical every
+  // substep of this same tick's fall/rise. Per direct report, an earlier
+  // version instead flatly zeroed vx the instant a horizontal move would
+  // sink into a ramp's wedge — a "square hitting a square" response that
+  // could leave an item permanently stuck against a ramp no matter how much
+  // Fan force kept pushing it, since the same zeroing reapplied every tick
+  // before position ever advanced. See resolveRampCollision's own comment.
   const nextX = item.x + item.vx * dt;
   const horizTile = tileAt(grid, nextX, item.y);
-  const horizTangent = RAMP_TANGENT[horizTile];
-  if (horizTangent) {
-    const surfaceY = rampSurfaceWorldY(horizTile, colAt(nextX), rowAt(item.y), nextX);
-    if (item.y + item.radius > surfaceY) item.vx = 0;
-    else item.x = nextX;
-  } else if (isSolid(horizTile)) {
+  if (isSolid(horizTile)) {
     item.vx = 0;
   } else {
     item.x = nextX;
   }
 
-  // Vertical: swept tile landing (ramp-aware — see sweepVertical).
+  // Vertical: swept tile landing (also resolves any Half Platform ramp
+  // contact along the way, once per substep — see sweepVertical/
+  // resolveRampCollision).
   const result = sweepVertical(item, grid, item.vy * dt);
   if (result.landed) {
-    if (result.ramp) {
-      item.onRampCol = result.col;
-      item.onRampRow = result.row;
-    }
     return handleLanding();
   }
 
