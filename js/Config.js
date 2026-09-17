@@ -447,6 +447,28 @@ export const ITEM_MASS_BY_TYPE = {
   science: 2.8, science_green: 2.8, // Class 4 — Medium-Heavy (was 9, then 4, then 3, now 2.8 per direct request)
   alien_dna: 4, biomass: 4, // Class 5 — Heavy (was 7, then 5, now 4 per direct request, alongside the T3/T4 Fan force cuts below)
 };
+
+// ---- Platform item filters ----
+// Per direct request: every Platform variant (the flat tile and all 4 Half
+// Platform ramps alike) can be turned into a collision filter instead of the
+// plain "always solid" default — left-clicking a placed one opens a small
+// pop-up (UI.js's openPlatformFilterMenu) listing every item type in the
+// game with a green-check/red-x toggle. This list is the single source of
+// truth both that pop-up and Grid.js's own collision-skip check
+// (platformIgnoresItem) read from, so the two can never drift apart — it
+// mirrors main.js's own DRAGGABLE_ITEM_TYPES exactly (every item type that
+// physically exists in the game), just paired with a display label/icon.
+export const PLATFORM_FILTER_ITEM_TYPES = [
+  { id: 'coin', label: 'Coins', icon: '🪙' },
+  { id: 'food', label: 'Food', icon: '🍖' },
+  { id: 'waste', label: 'Waste', icon: '🗑️' },
+  { id: 'science', label: 'Blue Science', icon: '🔬' },
+  { id: 'science_green', label: 'Green Science', icon: '🟢' },
+  { id: 'alien_dna', label: 'Bio-Sludge', icon: '🧫' },
+  { id: 'biomass', label: 'Biomass', icon: '🟩' },
+  { id: 'mutagen_paste', label: 'Mutagen Paste', icon: '🩷' },
+  { id: 'alien_egg', label: 'Alien Egg', icon: '🥚' },
+];
 // vx decays by this factor every tick — without damping, a single bump
 // would leave an item drifting sideways forever instead of a jostled pile
 // settling back down, the way real friction would.

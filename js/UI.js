@@ -73,6 +73,7 @@ import {
   ALIEN_EGG_COLOR,
   ALIEN_EGG_RING_COLOR,
   MUTAGEN_PASTE_COLOR,
+  PLATFORM_FILTER_ITEM_TYPES,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings, loadLevel } from './Levels.js';
 import { getFishPurchaseCost, effectiveCoinCapacity, effectiveScienceCapacity, countTankItemsByType, hasAnyMergeOpportunity, resolveMergeTutorialPair, computeTheoreticalGoldPerMinute } from './Entities.js';
@@ -121,6 +122,10 @@ let buildingInfoMenuOpen = false;
 let buildingInfoMenuClosing = false;
 let buildingInfoMenuCloseTimer = null;
 let buildingInfoTileKey = null; // "row,col" key of whichever placed building this generic info pop-up is currently open for
+let platformFilterMenuOpen = false;
+let platformFilterMenuClosing = false;
+let platformFilterMenuCloseTimer = null;
+let platformFilterTileKey = null; // "row,col" key of whichever placed Platform this item-filter pop-up is currently open for
 let labMenuOpen = false;
 let labMenuClosing = false;
 let labMenuCloseTimer = null;
@@ -367,6 +372,14 @@ export function initUI(state) {
     buildingInfoDesc: document.getElementById('building-info-desc'),
     buildingInfoStats: document.getElementById('building-info-stats'),
     buildingInfoLiveStats: document.getElementById('building-info-live-stats'),
+    platformFilterOverlay: document.getElementById('platform-filter-overlay'),
+    platformFilterAnchor: document.getElementById('platform-filter-anchor'),
+    platformFilterMenu: document.getElementById('platform-filter-menu'),
+    platformFilterModeWhitelistBtn: document.getElementById('platform-filter-mode-whitelist'),
+    platformFilterModeBlacklistBtn: document.getElementById('platform-filter-mode-blacklist'),
+    platformFilterClearBtn: document.getElementById('platform-filter-clear-btn'),
+    platformFilterItems: document.getElementById('platform-filter-items'),
+    platformFilterHint: document.getElementById('platform-filter-hint'),
     labOverlay: document.getElementById('lab-overlay'),
     labModal: document.getElementById('lab-modal'),
     labScienceReadout: document.getElementById('lab-science-readout'),
@@ -430,6 +443,12 @@ export function initUI(state) {
   els.buildingInfoOverlay.addEventListener('click', (e) => {
     if (e.target === els.buildingInfoOverlay) closeBuildingInfoMenu(); // same "click anywhere else closes it" precedent as the recipe/Mound pop-ups
   });
+  els.platformFilterOverlay.addEventListener('click', (e) => {
+    if (e.target === els.platformFilterOverlay) closePlatformFilterMenu(); // same "click anywhere else closes it" precedent as every other fly-out pop-up here
+  });
+  els.platformFilterModeWhitelistBtn.addEventListener('click', () => setPlatformFilterMode(state, 'whitelist'));
+  els.platformFilterModeBlacklistBtn.addEventListener('click', () => setPlatformFilterMode(state, 'blacklist'));
+  els.platformFilterClearBtn.addEventListener('click', () => clearPlatformFilter(state));
 
   // Gene-Splicing moved to the Tank Upgrades panel (see buildTankPanel) — no
   // longer purchased here, per direct request ("unlocked through the tank
@@ -880,6 +899,158 @@ function refreshBuildingInfoLiveStats(state) {
     ? '⏱️ Uptime: <b>warming up...</b>'
     : `⏱️ Uptime (3 min): <b>${Math.round(uptimeFraction * 100)}%</b>`;
   els.buildingInfoLiveStats.innerHTML = `<div class="building-stat">${powerLine}</div><div class="building-stat">${uptimeLine}</div>`;
+}
+
+// ---- Platform item-filter pop-up ----
+// Per direct spec: left-clicking a placed Platform (any of its 5 variants)
+// opens a small pop-up, "like the recipe modals" — same fly-out-of-its-
+// anchor mechanic as openRecipeMenu/openBuildingInfoMenu above. Two mode
+// buttons (a green checkmark and a red X) set state.level.buildingData's own
+// `filterMode` field ('whitelist' | 'blacklist'); clicking an item type
+// below toggles its membership in that tile's `filterItems` array. The
+// EFFECTIVE per-item status (pass/block) is always fully derived from just
+// those two fields — 'blacklist' passes everything except the listed types,
+// 'whitelist' passes ONLY the listed types — so there's nothing else to keep
+// in sync: "click red x, then click Food and Biomass" leaves everything else
+// showing green automatically, and "click the green checkmark, then click
+// Coins" automatically shows red x on everything else, both for free, with
+// no separate action needed for either (see Grid.js's platformIgnoresItem,
+// which reads these same two fields for the real collision-skip check).
+const PLATFORM_FILTER_MENU_TRANSITION_MS = 220; // must match #platform-filter-menu's CSS transition duration
+
+export function openPlatformFilterMenu(state, tileKey) {
+  platformFilterMenuOpen = true;
+  platformFilterMenuClosing = false;
+  platformFilterTileKey = tileKey;
+  if (platformFilterMenuCloseTimer !== null) { clearTimeout(platformFilterMenuCloseTimer); platformFilterMenuCloseTimer = null; }
+  closeSidePanels(state); // keep the Shop/Tank Upgrades panel from sitting open behind this, same as every other fly-out pop-up
+  els.platformFilterOverlay.classList.remove('hidden');
+  refreshPlatformFilterMenu(state);
+  updatePlatformFilterMenuPosition(state); // position it correctly before the reveal so it doesn't flash at (0,0) first
+
+  els.platformFilterMenu.classList.add('platform-filter-menu-closed');
+  void els.platformFilterMenu.offsetWidth; // forced reflow — same retrigger trick every other one-shot transition in this file uses
+  els.platformFilterMenu.classList.remove('platform-filter-menu-closed');
+  playPanelOpen();
+}
+
+export function closePlatformFilterMenu() {
+  if (!platformFilterMenuOpen) return;
+  platformFilterMenuOpen = false;
+  platformFilterMenuClosing = true;
+  platformFilterTileKey = null;
+  els.platformFilterMenu.classList.add('platform-filter-menu-closed');
+  platformFilterMenuCloseTimer = setTimeout(() => {
+    els.platformFilterOverlay.classList.add('hidden');
+    platformFilterMenuClosing = false;
+    platformFilterMenuCloseTimer = null;
+  }, PLATFORM_FILTER_MENU_TRANSITION_MS);
+  playPanelClose();
+}
+
+// Read by main.js's Escape handler, same reason isRecipeMenuOpen is.
+export function isPlatformFilterMenuOpen() {
+  return platformFilterMenuOpen;
+}
+
+function updatePlatformFilterMenuPosition(state) {
+  if (!platformFilterTileKey) return;
+  const [row, col] = platformFilterTileKey.split(',').map(Number);
+  const worldX = col * TILE_SIZE + TILE_SIZE / 2;
+  const worldY = row * TILE_SIZE;
+  const screen = worldToScreen(worldX, worldY, state.camera);
+  els.platformFilterAnchor.style.left = `${screen.x}px`;
+  els.platformFilterAnchor.style.top = `${screen.y - MOUND_MENU_GAP_PX}px`;
+}
+
+// Rebuilds the mode buttons + item grid for whichever Platform sits at
+// platformFilterTileKey — called only on open and after a mutation (mode
+// switch, item toggle, clear all), NOT every frame, same "don't tear down
+// the DOM under a real click" fix the recipe menu's own refreshRecipeMenu
+// comment documents. The much lighter per-frame check in updateHUD just
+// closes the popup if the underlying tile gets demolished/moved out from
+// under it, without touching this DOM at all.
+function refreshPlatformFilterMenu(state) {
+  if (!platformFilterTileKey) return;
+  const data = state.level.buildingData[platformFilterTileKey];
+  if (!data) { closePlatformFilterMenu(); return; }
+  els.platformFilterModeWhitelistBtn.classList.toggle('selected', data.filterMode === 'whitelist');
+  els.platformFilterModeBlacklistBtn.classList.toggle('selected', data.filterMode === 'blacklist');
+
+  els.platformFilterItems.innerHTML = '';
+  for (const itemDef of PLATFORM_FILTER_ITEM_TYPES) {
+    const isListed = data.filterItems.includes(itemDef.id);
+    // The effective per-item status, purely derived from filterMode — see
+    // this section's own top comment. `null` (no mode chosen yet) shows a
+    // neutral dash for every item, since nothing has an effective status
+    // until a mode is picked.
+    let status = null; // 'pass' | 'block' | null
+    if (data.filterMode === 'whitelist') status = isListed ? 'pass' : 'block';
+    else if (data.filterMode === 'blacklist') status = isListed ? 'block' : 'pass';
+
+    const btn = document.createElement('button');
+    btn.className = 'platform-filter-item' + (status ? ` ${status}` : ' inert');
+    const icon = document.createElement('div');
+    icon.className = 'platform-filter-item-icon';
+    icon.textContent = itemDef.icon;
+    const label = document.createElement('div');
+    label.className = 'platform-filter-item-label';
+    label.textContent = itemDef.label;
+    const badge = document.createElement('div');
+    badge.className = 'platform-filter-item-badge';
+    badge.textContent = status === 'pass' ? '✅' : status === 'block' ? '❌' : '—';
+    btn.appendChild(icon);
+    btn.appendChild(label);
+    btn.appendChild(badge);
+    if (data.filterMode) {
+      btn.addEventListener('click', () => togglePlatformFilterItem(state, itemDef.id));
+    }
+    els.platformFilterItems.appendChild(btn);
+  }
+
+  els.platformFilterHint.textContent = data.filterMode
+    ? 'Click an item to toggle it.'
+    : 'Pick ✅ or ❌ above, then click item types below.';
+}
+
+// Mode buttons — per direct spec, deliberately does NOT clear filterItems on
+// a switch: the same picks just get reinterpreted under the new mode (a
+// blacklist of {Food, Biomass} becomes "only Food and Biomass pass" if
+// switched to whitelist) rather than losing the selection. Clear All (below)
+// is the one action that actually resets the list.
+function setPlatformFilterMode(state, mode) {
+  if (!platformFilterTileKey) return;
+  const data = state.level.buildingData[platformFilterTileKey];
+  if (!data) return;
+  data.filterMode = mode;
+  refreshPlatformFilterMenu(state);
+}
+
+// Toggled from red x's to green checks and back — re-clicking an item
+// already in `filterItems` removes it, flipping its EFFECTIVE status back to
+// whatever the mode's own default is for a non-member (see
+// refreshPlatformFilterMenu's own status derivation). A no-op while no mode
+// has been picked yet (filterMode === null) — items only become clickable
+// once a mode is chosen, see refreshPlatformFilterMenu's own listener guard.
+function togglePlatformFilterItem(state, itemId) {
+  if (!platformFilterTileKey) return;
+  const data = state.level.buildingData[platformFilterTileKey];
+  if (!data || !data.filterMode) return;
+  const idx = data.filterItems.indexOf(itemId);
+  if (idx === -1) data.filterItems.push(itemId);
+  else data.filterItems.splice(idx, 1);
+  refreshPlatformFilterMenu(state);
+}
+
+// Back to a plain, always-solid Platform with no filter at all — the one
+// action that actually resets filterItems, not just filterMode.
+function clearPlatformFilter(state) {
+  if (!platformFilterTileKey) return;
+  const data = state.level.buildingData[platformFilterTileKey];
+  if (!data) return;
+  data.filterMode = null;
+  data.filterItems = [];
+  refreshPlatformFilterMenu(state);
 }
 
 // Tracks the clicked tile's live on-screen position so the popup stays
@@ -3495,6 +3666,12 @@ export function updateHUD(state) {
   if (buildingInfoMenuOpen && !state.level.buildingData[buildingInfoTileKey]) closeBuildingInfoMenu(); // the tile it's showing got demolished (or moved) out from under it
   if (buildingInfoMenuOpen) refreshBuildingInfoLiveStats(state);
   if (buildingInfoMenuOpen || buildingInfoMenuClosing) updateBuildingInfoMenuPosition(state);
+  // Same lighter per-frame check as the recipe/building-info pop-ups above —
+  // the item grid's own DOM is only ever rebuilt on open or after a real
+  // mutation (see refreshPlatformFilterMenu's own comment), never every
+  // frame; this just closes the popup if the underlying tile is gone.
+  if (platformFilterMenuOpen && !state.level.buildingData[platformFilterTileKey]) closePlatformFilterMenu();
+  if (platformFilterMenuOpen || platformFilterMenuClosing) updatePlatformFilterMenuPosition(state);
   if (labMenuOpen) refreshLabTree(state); // no position-tracking needed any more — it's a centered modal now, not anchored to the Mound's screen position
   if (!state.ui.tankPanelCollapsed) refreshTankPanelView(state);
 
@@ -3608,7 +3785,7 @@ export function updateHUD(state) {
   els.hotkeyLegendUndo.classList.toggle('hidden', !state.ui.undoAvailable);
   if (state.ui.undoAvailable) els.hotkeyLegendUndo.textContent = `Ctrl+Z: ${state.ui.undoLabel}`;
   const escHasSomethingToClear = !tutorialActive && (
-    isMoundMenuOpen() || isRecipeMenuOpen() || isBuildingInfoMenuOpen() ||
+    isMoundMenuOpen() || isRecipeMenuOpen() || isBuildingInfoMenuOpen() || isPlatformFilterMenuOpen() ||
     isLabPurchaseModalOpen() || isLabMenuOpen() ||
     state.ui.buildingMoveArmed ||
     state.ui.selectedTool !== 'food' || !state.ui.shopCollapsed || !state.ui.tankPanelCollapsed

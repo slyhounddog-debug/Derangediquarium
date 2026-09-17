@@ -144,6 +144,7 @@ import {
   findNearestWasteTurretAndWaste,
   getRecipeBuildingKeyAt,
   getBuildingInfoKeyAt,
+  getPlatformFilterKeyAt,
   getItemDisintegrateFraction,
   renderDisintegrateEffect,
   pickUpBuildingForMove,
@@ -180,6 +181,9 @@ import {
   openBuildingInfoMenu,
   closeBuildingInfoMenu,
   isBuildingInfoMenuOpen,
+  openPlatformFilterMenu,
+  closePlatformFilterMenu,
+  isPlatformFilterMenuOpen,
   pipetteSelectSpecies,
   pipetteSelectBuilding,
   deselectShopSelection,
@@ -1371,6 +1375,12 @@ input.clickHandlers.push((sx, sy) => {
   // EMPTY cell to place a fresh building would immediately pop this info-
   // modal open right over top of what you just built.
   if (!effectiveTool.startsWith('build:')) {
+    // A placed Platform (any of its 5 variants) opens its own item-filter
+    // pop-up instead of the generic building-info one — per direct request
+    // ("when you left click a platform, it opens the filter modal"), checked
+    // first so a Platform never falls through to the generic info popup.
+    const platformFilterKey = getPlatformFilterKeyAt(state, world.x, world.y);
+    if (platformFilterKey) { openPlatformFilterMenu(state, platformFilterKey); return; }
     const buildingInfo = getBuildingInfoKeyAt(state, world.x, world.y);
     if (buildingInfo) { openBuildingInfoMenu(state, buildingInfo.key); return; }
   }
@@ -1504,6 +1514,21 @@ input.keydownHandlers.push((e) => {
     state.level.mergeTutorialTargetIds = null; // clear any locked merge-tutorial target pair — see Entities.js's resolveMergeTutorialPair
     return;
   }
+  // Per direct request ("Allow the E Hotkey during tutorials to open/close
+  // the shop") — the one other exception to "every hotkey is swallowed
+  // during a tutorial," alongside Escape's own skip above. Mirrors the real
+  // Shop button's own click listener exactly, including its tutorial-advance
+  // calls, so a flow currently waiting on "open the Shop" (the game-start
+  // and post-alien flows both do) still progresses whether the player used
+  // the hotkey or clicked the real button.
+  if (e.code === 'KeyE' && state.level.tutorialFlow) {
+    toggleShopCollapse(state);
+    if (!state.ui.shopCollapsed) {
+      advanceTutorialFlow(state, 'start', 'shop');
+      advanceTutorialFlow(state, 'postalien', 'shop');
+    }
+    return;
+  }
   // Guided tutorial flows (see UI.js's TUTORIAL_FLOWS) swallow every OTHER
   // hotkey, same reasoning as the cinematic intro above — the overlay's own
   // click-through "hole" is the only interaction that should work.
@@ -1519,6 +1544,7 @@ input.keydownHandlers.push((e) => {
     // silent no-op either way.
     if (isMoundMenuOpen()) { closeMoundMenu(); return; }
     if (isRecipeMenuOpen()) { closeRecipeMenu(); return; }
+    if (isPlatformFilterMenuOpen()) { closePlatformFilterMenu(); return; }
     if (isBuildingInfoMenuOpen()) { closeBuildingInfoMenu(); return; }
     if (isLabPurchaseModalOpen()) { closeLabPurchaseModal(); return; }
     if (isLabMenuOpen()) { closeLabMenu(); return; }
