@@ -97,9 +97,9 @@ import {
   BOSS_DEFEATED_MODAL_DELAY_MS,
   TURRET_TUTORIAL_GOLD_GRANT,
   TURRET_TUTORIAL_GOLD_GRANT_MESSAGE,
-  NOTIFICATION_LOG_MAX,
 } from './Config.js';
 import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop } from './Engine.js';
+import { pushGameNotification } from './Notifications.js';
 import { loadLevel, LEVELS } from './Levels.js';
 import { updateStoryTriggers } from './Systems.js';
 import { updateAmbience, renderAmbience } from './Ambience.js';
@@ -929,6 +929,12 @@ input.mouseUpHandlers.push((sx, sy) => {
 // shortcuts, or clicking a different shop icon) implicitly cancels it
 // without any of those call sites needing to know this state exists.
 const FAN_BUILDING_IDS = [TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4];
+// Used by the building-hover legend below to add a "(R) to Rotate" second
+// line specifically for a placed Platform (any of its 5 variants) — R
+// cycles it in place for free (see Grid.js's cyclePlatformAt), the same
+// hotkey that cycles the shop's own Platform family slot while a build tool
+// is armed.
+const PLATFORM_BUILDING_IDS = BUILDING_FAMILIES.platform;
 let fanAimingCell = null; // { col, row, buildingId } | null
 
 function isFanAimingActive() {
@@ -992,15 +998,13 @@ const UNDO_STACK_MAX = 20;
 let undoStack = [];
 
 // main.js's own local notification-push helper (this file's two remaining
-// direct call sites, both one-time flag-gated messages) — same duplicated-
-// inline "push+cap" pattern every other module already has its own copy of
-// (see CLAUDE.md's Rolling Notification Log section). Per direct request,
-// skips a push that would exactly repeat the most recent entry.
+// direct call sites, both one-time flag-gated messages) — a thin wrapper
+// around Notifications.js's own pushGameNotification, the one real, shared
+// implementation of the push+cap+dedupe+timestamp logic (see that file's
+// own comment), kept as a same-named local helper per CLAUDE.md's Rolling
+// Notification Log convention.
 function pushMainNotification(state, text) {
-  const notifications = state.level.notifications;
-  if (notifications.length > 0 && notifications[notifications.length - 1].text === text) return;
-  notifications.push({ id: notifications.length + 1, text, elapsed: state.level.elapsed });
-  if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
+  pushGameNotification(state, text);
 }
 
 function undoActionLabel(type) {
@@ -3494,7 +3498,7 @@ function render() {
       const { col: hoverCol, row: hoverRow } = worldToTile(hoverWorld.x, hoverWorld.y);
       const hoverTile = getTile(state.level.grid, hoverCol, hoverRow);
       state.ui.buildingMoveHoverLabel = hoverTile && hoverTile !== TILE_EMPTY
-        ? (FAN_BUILDING_IDS.includes(hoverTile) ? 'adjust' : 'move')
+        ? (FAN_BUILDING_IDS.includes(hoverTile) ? 'adjust' : (PLATFORM_BUILDING_IDS.includes(hoverTile) ? 'move-platform' : 'move'))
         : null;
     } else {
       state.ui.buildingMoveHoverLabel = null;

@@ -53,7 +53,6 @@ import {
   WASTE_MAX_FALL_SPEED,
   TANK_POINT_PER_ADULT_FISH,
   TANK_POINT_COLOR,
-  NOTIFICATION_LOG_MAX,
   WORLD_W,
   ITEM_MASS_BY_TYPE,
   FISH_BASE_SIZE,
@@ -167,6 +166,7 @@ import {
   BOSS_DEATH_SCIENCE_GREEN_COUNT,
 } from './Config.js';
 import { stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemForces, updateBuildings } from './Grid.js';
+import { pushGameNotification } from './Notifications.js';
 // Sound is a fire-and-forget side effect at the moment something already
 // happened — the same pattern this file already uses for floatingTexts/
 // notifications, just for audio instead of a visual/text readout.
@@ -2040,22 +2040,13 @@ const FIRST_FISH_DEATH_MESSAGE =
   'Your fish is now swimming with the fishes. Oh wait...it just starved. You might want to try feeding your fish.';
 
 // Shared by every one-time story/tutorial notification below (Tank Points,
-// first fish death, etc.) — same push+cap pattern Mound.js's own
-// pushNotification uses. Kept as a duplicated inline helper rather than a
-// shared exported utility per CLAUDE.md's Rolling Notification Log section:
-// "any system can push a { text } onto state.level.notifications... see
-// either writer for the pattern."
+// first fish death, etc.) — a thin wrapper around Notifications.js's own
+// pushGameNotification, which is the one real, shared implementation of the
+// push+cap+dedupe+timestamp logic (see that file's own comment) — kept as a
+// same-named local helper per CLAUDE.md's Rolling Notification Log
+// convention, just no longer duplicating the actual logic inline.
 function pushStoryNotification(state, text) {
-  const notifications = state.level.notifications;
-  // Per direct request ("no duplicates messages back to back... if there's
-  // other messages in between, that's fine") — only skips a push whose text
-  // exactly matches the MOST RECENT entry, so a genuinely repeated warning
-  // (e.g. a power shortage nudge) can't spam the log 20 times in a row while
-  // nothing else is happening, but the same line is free to reappear later
-  // once something else has been logged in between.
-  if (notifications.length > 0 && notifications[notifications.length - 1].text === text) return;
-  notifications.push({ id: notifications.length + 1, text, elapsed: state.level.elapsed });
-  if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
+  pushGameNotification(state, text);
 }
 
 // A one-time chat tip the first time a Bio-Sludge (alien_dna) item is ever

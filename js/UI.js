@@ -18,7 +18,6 @@ import {
   FISH_MOVEMENT_UPGRADE_COSTS,
   FISH_MOVEMENT_UPGRADE_MAX_LEVEL,
   FISH_MOVEMENT_UPGRADE_SPEED_BONUS,
-  NOTIFICATION_LOG_MAX,
   BUILDING_FAMILIES,
   BUILDING_TYPES,
   CLEANLINESS_MAX,
@@ -87,6 +86,7 @@ import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND
 import { drawFish } from './FishRenderer.js';
 import { playUpgrade, setMusicVolume, setSfxVolume, getMusicVolume, getSfxVolume, playPanelOpen, playPanelClose, playInsufficientFunds } from './Sound.js';
 import { hasSaveGame, saveGame, loadSaveGame } from './Save.js';
+import { pushGameNotification } from './Notifications.js';
 
 const MOUND_MENU_GAP_PX = 12; // screen px of breathing room between the popup's bottom edge and the Mound's top edge
 const MOUND_MENU_TRANSITION_MS = 220; // must match #mound-menu's CSS transition duration
@@ -272,15 +272,11 @@ function maybeBounceAchievementTabFirstOpen(state) {
 // "push+cap" pattern every other module already has its own copy of (see
 // CLAUDE.md's Rolling Notification Log section), factored into one place
 // here purely because UI.js has several call sites for it, unlike a module
-// with just one or two. Per direct request, skips a push that would exactly
-// repeat the most recent entry, so nothing spams the log back-to-back while
-// nothing else is happening (a later repeat, with something else logged in
-// between, is still fine).
+// with just one or two. A thin wrapper around Notifications.js's own
+// pushGameNotification — the one real, shared implementation of the
+// push+cap+dedupe+timestamp logic (see that file's own comment).
 function pushUiNotification(state, text) {
-  const notifications = state.level.notifications;
-  if (notifications.length > 0 && notifications[notifications.length - 1].text === text) return;
-  notifications.push({ id: notifications.length + 1, text, elapsed: state.level.elapsed });
-  if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
+  pushGameNotification(state, text);
 }
 
 export function initUI(state) {
@@ -3571,7 +3567,17 @@ export function updateHUD(state) {
     els.buildingMoveLegendLine2.classList.remove('hidden');
   } else if (state.ui.buildingMoveHoverLabel != null) {
     els.buildingMoveLegendLine1.textContent = state.ui.buildingMoveHoverLabel === 'adjust' ? 'Right-click to Adjust' : 'Right-click to Move';
-    els.buildingMoveLegendLine2.classList.add('hidden');
+    // Hovering a placed Platform (any of its 5 variants) also shows a
+    // second "(R) to Rotate" line — per direct request — reusing this same
+    // bubble's own line2 slot (normally only used for the armed "Right-
+    // click to cancel" state, which is mutually exclusive with just
+    // hovering).
+    if (state.ui.buildingMoveHoverLabel === 'move-platform') {
+      els.buildingMoveLegendLine2.textContent = '(R) to Rotate';
+      els.buildingMoveLegendLine2.classList.remove('hidden');
+    } else {
+      els.buildingMoveLegendLine2.classList.add('hidden');
+    }
   }
   els.buildingMoveLegend.classList.toggle('hidden', !buildingMoveLegendVisible);
 
@@ -4175,9 +4181,20 @@ export function updateNotificationTicker(state) {
   lastRenderedNotificationCount = notifications.length;
   els.notificationLog.innerHTML = '';
   for (let i = notifications.length - 1; i >= 0; i--) {
+    const entry = notifications[i];
     const line = document.createElement('div');
     line.className = 'notification-line';
-    line.textContent = notifications[i].text;
+    // A real timestamp log, per direct request ("keep a timestamp log for
+    // when each chat message comes in") — entry.timestamp is a real
+    // Date.now() wall-clock stamp, set once at push time by Notifications.js's
+    // pushGameNotification, shown as a small local-time prefix on every line.
+    const timeSpan = document.createElement('span');
+    timeSpan.className = 'notification-line-time';
+    timeSpan.textContent = entry.timestamp
+      ? new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      : '';
+    line.appendChild(timeSpan);
+    line.appendChild(document.createTextNode(entry.text));
     els.notificationLog.appendChild(line);
   }
 }

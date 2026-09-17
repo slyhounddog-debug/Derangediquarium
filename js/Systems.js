@@ -14,7 +14,6 @@ import {
   TURRET_TUTORIAL_DELAY_MS,
   ALIEN_INTRO_DELAY_MS,
   WASTE_DRAG_TUTORIAL_WAIT_MS,
-  NOTIFICATION_LOG_MAX,
   ALIEN_WAVE_INTERVAL_EARLY_MS,
   ALIEN_WAVE_INTERVAL_LATE_MS,
   ALIEN_WAVE_DIFFICULTY_RAMP_WAVES,
@@ -56,21 +55,22 @@ import { getAvailableSpecies, getAvailableBuildings } from './Levels.js';
 import { getFishPurchaseCost, findCombinablePair, spawnTurretTutorialWaste } from './Entities.js';
 import { hasWasteTurretPlaced, countPlacedOfType } from './Grid.js';
 import { saveGame } from './Save.js';
+import { pushGameNotification } from './Notifications.js';
 
 const BANKRUPTCY_BAILOUT_MESSAGE =
   "Oopah, looks like someone got their CDL so they could drive the struggle bus! Here's 100 gold to get you back on your feet. I'll be expecting that back (I'm lying).";
 const GAME_OVER_MESSAGE =
   'My mama always said "Shooting a fish out of water in a barrel with bigger fish to fry" and I always took that to heart. Better luck next time! (Restart in the menu)';
 
+// A thin wrapper around Notifications.js's own pushGameNotification — the
+// one real, shared implementation of the push+cap+dedupe+timestamp logic
+// (see that file's own comment; this is the module a periodic re-check,
+// like the power-shortage nudge, would otherwise spam through every check
+// interval while the same condition just sits there unresolved) — kept as a
+// same-named local helper per CLAUDE.md's Rolling Notification Log
+// convention.
 function pushNotification(state, text) {
-  const notifications = state.level.notifications;
-  // Per direct request — skip a push that would exactly repeat the most
-  // recent entry (this is the module a periodic re-check, like the power-
-  // shortage nudge, would otherwise spam through every check interval while
-  // the same condition just sits there unresolved).
-  if (notifications.length > 0 && notifications[notifications.length - 1].text === text) return;
-  notifications.push({ id: notifications.length + 1, text, elapsed: state.level.elapsed });
-  if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
+  pushGameNotification(state, text);
 }
 
 // The cheapest thing currently purchasable at all — Food, or the cheapest

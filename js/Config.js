@@ -83,17 +83,32 @@ export const CAMERA_BOTTOM_BUFFER_PX = 126;
 // every row/col calc a single division by TILE_SIZE, no offset to remember.
 export const TILE_EMPTY = 'empty'; // passable — items fall straight through
 export const TILE_PLATFORM = 'platform'; // solid — items land and rest on top. Purely an optional routing aid now (a cheap flat surface to catch a falling item before a Fan/Processor grabs it) — placement no longer requires anything to anchor to it; see Grid.js's canPlaceTile.
-// Two more Platform variants, per direct request — a real 45-degree ramp
-// wedge instead of a flat top, occupying only the solid triangular half of
-// the tile (see Grid.js's rampSurfaceLocalY for the exact collision
-// geometry). "Right" pushes a falling object right-and-down (tall on the
-// left, tapering to nothing on the right — an object sliding down the
-// slope moves toward the LOW side); "Left" is the mirror image. All 3
+// Four Half Platform variants, per direct request — each a real 45-degree
+// ramp wedge occupying only the solid triangular half of the tile (see
+// Grid.js's RAMP_TRIANGLE_VERTS for the exact collision geometry — a genuine
+// circle-vs-triangle collision, not a flat top). Left/Right are the
+// "floor-level" pair, cut along the tile's own natural (top-left -> bottom-
+// right / top-right -> bottom-left) diagonal, tall on one side tapering to
+// nothing on the other — Right is tall-left/open-top-right (an object
+// sliding down its slope moves down-and-RIGHT), Left is the mirror
+// (down-and-LEFT). Top Left/Top Right are each the exact COMPLEMENTARY
+// triangle within the same square, mirrored across that same diagonal —
+// solid where Right/Left are open and vice versa — per direct request ("Top
+// Left and Top Right, as mirrored versions (along the diagonal line) of the
+// 2 half platforms currently... act like the other two corner pieces
+// opposite the left and right platforms"). Together, Right+TopRight (or
+// Left+TopLeft) exactly tile a full square split along one diagonal, which
+// is what makes all 4 usable as a real routing system: a Top piece deflects
+// something falling from above sideways, a Bottom (Left/Right) piece
+// deflects something moving along the floor up onto/off of a ledge — mixed
+// together they can route an item through a zigzag "pipe" of ramps. All 5
 // Platform variants share one shop slot (BUILDING_FAMILIES.platform) and
 // cycle by clicking it again or pressing R while one is selected — see
 // UI.js's cycleSelectedBuildingFamily.
 export const TILE_PLATFORM_HALF_LEFT = 'platform_half_left';
 export const TILE_PLATFORM_HALF_RIGHT = 'platform_half_right';
+export const TILE_PLATFORM_HALF_TOPLEFT = 'platform_half_topleft';
+export const TILE_PLATFORM_HALF_TOPRIGHT = 'platform_half_topright';
 export const TILE_COLLECTOR = 'collector'; // solid — the base Processor: items landing here are immediately consumed (coins auto-banked)
 export const TILE_COLLECTOR_ELECTRIC = 'collector_electric'; // solid — Electric Processor, faster processing, draws power — see PROCESSOR_STATS
 export const TILE_COLLECTOR_ADVANCED = 'collector_advanced'; // solid — Advanced Processor, bought in the Science Lab — see PROCESSOR_STATS
@@ -1389,6 +1404,16 @@ export const BUILDING_TYPES = {
     description: 'A 45° ramp — deflects anything that lands on it down and to the right.',
     color: '#dba36f', unlockedByDefault: true,
   },
+  [TILE_PLATFORM_HALF_TOPLEFT]: {
+    id: TILE_PLATFORM_HALF_TOPLEFT, name: 'Half Platform - Top Left', icon: '◸', cost: PLATFORM_FLAT_COST,
+    description: 'A 45° ramp, solid at the top — deflects anything that hits it down and to the right.',
+    color: '#dba36f', unlockedByDefault: true,
+  },
+  [TILE_PLATFORM_HALF_TOPRIGHT]: {
+    id: TILE_PLATFORM_HALF_TOPRIGHT, name: 'Half Platform - Top Right', icon: '◿', cost: PLATFORM_FLAT_COST,
+    description: 'A 45° ramp, solid at the top — deflects anything that hits it down and to the left.',
+    color: '#dba36f', unlockedByDefault: true,
+  },
   // Renamed back to plain "Collector" per direct request (an earlier pass
   // had renamed this "Electric Collector" while it briefly drew no power;
   // per a later direct request it's back to costing a small amount again —
@@ -1492,15 +1517,15 @@ export const BUILDING_FAMILIES = {
   collector: [TILE_COLLECTOR, TILE_COLLECTOR_ELECTRIC, TILE_COLLECTOR_ADVANCED],
   refinery: [TILE_REFINERY, TILE_REFINERY_ELECTRIC, TILE_REFINERY_ADVANCED],
   turret: [TILE_TURRET_WASTE, TILE_TURRET_ELECTRIC, TILE_TURRET_ADVANCED],
-  // Not a cost/power tier ladder like the 4 families above — all 3 variants
+  // Not a cost/power tier ladder like the 4 families above — all 5 variants
   // are unlocked from level start and cost the same flat $3 (see
   // getBuildingCost's own PLATFORM_FLAT_COST check). Ordered so the plain
   // flat Platform lands LAST — this family's own "highest unlocked" default
   // (see UI.js's buildBuildPalette, `memberIds[memberIds.length - 1]`) —
   // so clicking the shop slot for the very first time still defaults to
-  // the flat Platform everyone's used to, with the two ramps reachable by
+  // the flat Platform everyone's used to, with the four ramps reachable by
   // clicking again (or pressing R) to cycle.
-  platform: [TILE_PLATFORM_HALF_LEFT, TILE_PLATFORM_HALF_RIGHT, TILE_PLATFORM],
+  platform: [TILE_PLATFORM_HALF_LEFT, TILE_PLATFORM_HALF_RIGHT, TILE_PLATFORM_HALF_TOPLEFT, TILE_PLATFORM_HALF_TOPRIGHT, TILE_PLATFORM],
 };
 
 // ---- Processor (Collector) tiers ----

@@ -488,6 +488,15 @@ html, body {
   border-bottom: 1px solid rgba(107, 76, 107, 0.1);
 }
 .notification-line:last-child { border-bottom: none; }
+/* A small muted timestamp prefix on every log line — per direct request
+   ("keep a timestamp log for when each chat message comes in"). */
+.notification-line-time {
+  font-family: 'Baloo 2', sans-serif;
+  font-size: 11px;
+  color: rgba(107, 76, 107, 0.55);
+  margin-right: 8px;
+  white-space: nowrap;
+}
 
 /* 50% bigger than the original 36px/18px (a later "50% bigger" pass from an
    earlier request), per direct request ("make the shop and tank upgrade

@@ -20,10 +20,10 @@ import {
   MOUND_WIDTH_TILES,
   MOUND_HEIGHT_PX,
   TIER_UNLOCKS,
-  NOTIFICATION_LOG_MAX,
 } from './Config.js';
 import { worldToScreen } from './Engine.js';
 import { createShimmerTimer, updateShimmerTimer, drawShimmerSweep } from './Shimmer.js';
+import { pushGameNotification } from './Notifications.js';
 
 const MOUND_WIDTH_PX = MOUND_WIDTH_TILES * TILE_SIZE;
 export const MOUND_X = WORLD_W / 2; // world-space center, fixed for the life of the level
@@ -68,13 +68,12 @@ const TIER_CRACK_MESSAGES = {
   3: 'The mound stops cracking and just gives up, shattering completely. Underneath: a Science Lab that has apparently been there the whole time, humming with unfinished research. Everything from here on out is going to cost Science.',
 };
 
+// A thin wrapper around Notifications.js's own pushGameNotification — the
+// one real, shared implementation of the push+cap+dedupe+timestamp logic
+// (see that file's own comment) — kept as a same-named local helper per
+// CLAUDE.md's Rolling Notification Log convention.
 function pushNotification(state, text) {
-  const notifications = state.level.notifications;
-  // Per direct request — skip a push that would exactly repeat the most
-  // recent entry, so nothing spams the log back-to-back.
-  if (notifications.length > 0 && notifications[notifications.length - 1].text === text) return;
-  notifications.push({ id: notifications.length + 1, text, elapsed: state.level.elapsed });
-  if (notifications.length > NOTIFICATION_LOG_MAX) notifications.shift();
+  pushGameNotification(state, text);
 }
 
 // Two steps sit across the first real tier, per direct request (the old
