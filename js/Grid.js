@@ -11,6 +11,8 @@ import {
   SEABED_ROW_START,
   TILE_EMPTY,
   TILE_PLATFORM,
+  TILE_PLATFORM_HALF_LEFT,
+  TILE_PLATFORM_HALF_RIGHT,
   TILE_COLLECTOR,
   TILE_COLLECTOR_ELECTRIC,
   TILE_COLLECTOR_ADVANCED,
@@ -120,6 +122,61 @@ const SOLID_TILES = new Set([
   ...REFINERY_TILES, ...MANUFACTURER_TILES, ...POWER_PLANT_TILES,
 ]);
 const FAN_TILES = new Set([TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4]);
+// All 3 Platform variants share the same flat cost — see getBuildingCost/
+// computeBlueprintCost's own PLATFORM_FLAT_COST checks below.
+const PLATFORM_FLAT_COST_TILES = new Set([TILE_PLATFORM, TILE_PLATFORM_HALF_LEFT, TILE_PLATFORM_HALF_RIGHT]);
+
+// ---- Half Platform ramps — real 45-degree wedge collision ----
+// Deliberately NOT added to SOLID_TILES: a flat "is this whole tile solid"
+// check is wrong for a ramp, which is only solid below its own sloped
+// diagonal, not across the full tile height — see sweepVertical/
+// stepItemOnGrid's own ramp-aware branches below, which replace the flat
+// check specifically for these two tile types instead.
+//
+// Geometry, in tile-LOCAL coordinates (0,0 = top-left corner, y increases
+// downward matching this game's own world-Y convention throughout):
+// - Half Platform - Right: solid wedge is the lower-left triangle (full
+//   height at localX=0, tapering to zero height at localX=TILE_SIZE) — the
+//   surface (hypotenuse) runs from local (0,0) to (TILE_SIZE,TILE_SIZE), so
+//   surfaceY(localX) = localX. An object resting on this surface is HIGH on
+//   the left, LOW on the right, so gravity slides it down-and-RIGHT.
+// - Half Platform - Left: the mirror image — solid wedge is the lower-right
+//   triangle, surface runs from local (TILE_SIZE,0) to (0,TILE_SIZE), so
+//   surfaceY(localX) = TILE_SIZE - localX. Slides down-and-LEFT.
+//
+// Verified directly (see the Current Phase changelog's own worked-out
+// corner check): for the Right ramp, corner (0,0) and (0,TILE_SIZE) are
+// both on/inside the solid region (y>=x), while (TILE_SIZE,0) is not —
+// confirming "tall on the left, empty on the top-right" matches the
+// intended "pushes right" shape.
+const RAMP_TANGENT = {
+  [TILE_PLATFORM_HALF_RIGHT]: { tx: Math.SQRT1_2, ty: Math.SQRT1_2 }, // downhill: right + down
+  [TILE_PLATFORM_HALF_LEFT]: { tx: -Math.SQRT1_2, ty: Math.SQRT1_2 }, // downhill: left + down
+};
+// The outward normal (perpendicular to the tangent, pointing away from the
+// solid wedge, into open air) — used to detect "something is actively
+// lifting this item off the ramp" (e.g. a Fan blast) so it can fly free
+// instead of staying glued to the surface. Per direct project precedent
+// (the original Ramp Left/Right mechanic was removed years ago for reading
+// like "a sticky conveyor belt") — a ramp that never lets go under any
+// circumstance would repeat that exact mistake.
+const RAMP_NORMAL = {
+  [TILE_PLATFORM_HALF_RIGHT]: { nx: Math.SQRT1_2, ny: -Math.SQRT1_2 }, // up + right
+  [TILE_PLATFORM_HALF_LEFT]: { nx: -Math.SQRT1_2, ny: -Math.SQRT1_2 }, // up + left
+};
+function rampSurfaceLocalY(tileType, localX) {
+  if (tileType === TILE_PLATFORM_HALF_RIGHT) return localX;
+  if (tileType === TILE_PLATFORM_HALF_LEFT) return TILE_SIZE - localX;
+  return null;
+}
+// World-Y of the ramp's own sloped surface directly above/below world-X
+// `worldX`, for the ramp tile at (col, row) — clamped so a query slightly
+// outside the tile's own column (a sub-pixel sweep step, say) still
+// resolves to a sane edge value instead of extrapolating the slope forever.
+function rampSurfaceWorldY(tileType, col, row, worldX) {
+  const localX = Math.max(0, Math.min(TILE_SIZE, worldX - col * TILE_SIZE));
+  return row * TILE_SIZE + rampSurfaceLocalY(tileType, localX);
+}
 
 // Per-tier fan stats, keyed by tile id — Grid.js's own lookup table (not
 // duplicated onto BUILDING_TYPES, which is presentation/shop data).
@@ -311,15 +368,15 @@ function buildingCostGrowthRate(baseCost) {
   return BUILDING_COST_GROWTH_RATE_TIER1;
 }
 
-// Every building's live shop cost — Platform is a flat PLATFORM_FLAT_COST
-// regardless of how many exist; every other building's cost compounds at
-// its own tiered rate for each tile of that exact type already placed,
-// rounded up — see Config.js's comment above PLATFORM_FLAT_COST for the
-// full rationale.
+// Every building's live shop cost — Platform (any of its 3 variants — see
+// PLATFORM_FLAT_COST_TILES) is a flat PLATFORM_FLAT_COST regardless of how
+// many exist; every other building's cost compounds at its own tiered rate
+// for each tile of that exact type already placed, rounded up — see
+// Config.js's comment above PLATFORM_FLAT_COST for the full rationale.
 export function getBuildingCost(state, buildingId) {
   const building = BUILDING_TYPES[buildingId];
   if (!building) return Infinity;
-  if (buildingId === TILE_PLATFORM) return PLATFORM_FLAT_COST;
+  if (PLATFORM_FLAT_COST_TILES.has(buildingId)) return PLATFORM_FLAT_COST;
   const n = countPlacedOfType(state.level.grid, buildingId);
   return Math.ceil(building.cost * Math.pow(buildingCostGrowthRate(building.cost), n));
 }
@@ -612,7 +669,7 @@ export function computeBlueprintCost(state, baseCol, baseRow, cells) {
     if (!canPlaceTile(state, col, row, cell.buildingId).ok) continue;
     const building = BUILDING_TYPES[cell.buildingId];
     if (!building) continue;
-    if (cell.buildingId === TILE_PLATFORM) { total += PLATFORM_FLAT_COST; continue; }
+    if (PLATFORM_FLAT_COST_TILES.has(cell.buildingId)) { total += PLATFORM_FLAT_COST; continue; }
     const extra = extraCounts[cell.buildingId] || 0;
     const n = countPlacedOfType(state.level.grid, cell.buildingId) + extra;
     total += Math.ceil(building.cost * Math.pow(buildingCostGrowthRate(building.cost), n));
@@ -626,7 +683,7 @@ export function computeBlueprintCost(state, baseCol, baseRow, cells) {
 // pointing straight up (toward the water column) since that's the most
 // useful direction to test filtration with.
 const CHEAT_CYCLE = [
-  TILE_EMPTY, TILE_PLATFORM,
+  TILE_EMPTY, TILE_PLATFORM, TILE_PLATFORM_HALF_LEFT, TILE_PLATFORM_HALF_RIGHT,
   TILE_COLLECTOR, TILE_COLLECTOR_ELECTRIC, TILE_COLLECTOR_ADVANCED,
   TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4,
   TILE_TURRET_WASTE, TILE_TURRET_ELECTRIC, TILE_TURRET_ADVANCED,
@@ -661,6 +718,26 @@ export function cycleTileCheat(state, worldX, worldY) {
   } else if (POWER_PLANT_TILES.has(next)) {
     state.level.buildingData[buildingKey(col, row)] = { type: next, recipeId: null, fueled: false, progressMs: 0 };
   }
+}
+
+// R hotkey, second half — per direct request: hovering an already-PLACED
+// Platform (any of its 3 variants) and pressing R cycles it in place, for
+// free, to the next variant — "only when not selected on a building" (see
+// main.js's KeyR handler, which only calls this while no build:/fish: tool
+// is currently armed; while one IS armed, R instead cycles the SHOP
+// selection via UI.js's cycleSelectedBuildingFamily). None of the 3
+// variants carry any buildingData (a bare Platform never has — see
+// placeTile's own comment), so this is a pure grid-array swap, no data to
+// preserve or reset.
+const PLATFORM_CYCLE = [TILE_PLATFORM, TILE_PLATFORM_HALF_LEFT, TILE_PLATFORM_HALF_RIGHT];
+export function cyclePlatformAt(state, worldX, worldY) {
+  const { col, row } = worldToTile(worldX, worldY);
+  if (row < SEABED_ROW_START || row >= WORLD_TILES_H || col < 0 || col >= WORLD_TILES_W) return false;
+  const current = state.level.grid[row][col];
+  const idx = PLATFORM_CYCLE.indexOf(current);
+  if (idx === -1) return false; // not a Platform tile at all
+  state.level.grid[row][col] = PLATFORM_CYCLE[(idx + 1) % PLATFORM_CYCLE.length];
+  return true;
 }
 
 // ---- Directional Fan force field ----
@@ -741,6 +818,23 @@ function sweepVertical(item, grid, dy) {
   for (let i = 0; i < steps; i++) {
     const nextBottom = item.y + stepY + item.radius;
     const tile = tileAt(grid, item.x, nextBottom);
+    // A Half Platform ramp is only solid below its own sloped surface, not
+    // across the whole tile height — landing on one rests at whatever
+    // height the slope is at THIS item's own x, not a flat tile-top, and
+    // hands off to stepRampSlide (see stepItemOnGrid) to keep sliding down
+    // the incline instead of resting motionless like a flat Platform.
+    if (RAMP_TANGENT[tile]) {
+      const row = rowAt(nextBottom);
+      const col = colAt(item.x);
+      const surfaceY = rampSurfaceWorldY(tile, col, row, item.x);
+      if (nextBottom >= surfaceY) {
+        item.y = surfaceY - item.radius;
+        item.vy = 0;
+        return { landed: true, tile, row, col, ramp: true };
+      }
+      item.y += stepY;
+      continue;
+    }
     if (isSolid(tile)) {
       const row = rowAt(nextBottom);
       item.y = row * TILE_SIZE - item.radius; // rest exactly on top of the tile, not overshot into it
@@ -994,6 +1088,70 @@ export function renderDisintegrateEffect(ctx, x, y, radius, color, fraction, ite
 // side/top walls every item now respects — see clampItemToWorldWalls in
 // Entities.js) rather than ever being deleted for falling somewhere
 // unreachable.
+// Runs every tick an item is resting on a Half Platform's own 45-degree
+// surface (item.onRampCol/onRampRow, set by sweepVertical's own ramp
+// landing branch above) — replaces the normal flat horizontal/vertical
+// sweep for as long as it stays true. This is the real physics: after
+// integrateItemForces has already applied this tick's gravity/Fan/drag
+// acceleration to item.vx/vy (unchanged, called once up in
+// stepItemOnGrid, same as always), the resulting velocity is PROJECTED
+// onto the slope's own downhill tangent — removing whatever component
+// pointed into the solid surface (so the item can't sink through it) while
+// preserving the along-slope component, which is exactly what a
+// frictionless ball rolling down a real 45-degree incline does: each tick,
+// gravity keeps adding to the along-slope speed, so the item genuinely
+// accelerates down the ramp rather than sliding at a fixed rate.
+//
+// Two ways this releases the item back to normal, un-constrained physics
+// for the REST of this same tick (both return false, having deliberately
+// NOT touched item.x/y — the caller falls through to the ordinary
+// horizontal+vertical sweep using whatever velocity integrateItemForces
+// already produced): (1) the tile it's tracking stopped being a ramp
+// (demolished, cheat-cycled, or the debug tile-cycle turned it into
+// something else), or (2) this tick's own velocity has a positive
+// component along the ramp's OUTWARD NORMAL — something (almost always a
+// Fan) is actively lifting it away from the surface right now. That second
+// case matters a lot: without it, a ramp would be a one-way trap no Fan
+// could ever blow anything back out of, repeating the exact "sticky
+// conveyor belt" complaint that got this project's original Ramp Left/
+// Right mechanic removed entirely, years before this one existed.
+function stepRampSlide(item, grid, dt) {
+  const tileType = grid[item.onRampRow] && grid[item.onRampRow][item.onRampCol];
+  const tangent = RAMP_TANGENT[tileType];
+  if (!tangent) {
+    item.onRampCol = null;
+    item.onRampRow = null;
+    return false;
+  }
+  const normal = RAMP_NORMAL[tileType];
+  const vNormal = item.vx * normal.nx + item.vy * normal.ny;
+  if (vNormal > 0) {
+    item.onRampCol = null;
+    item.onRampRow = null;
+    return false;
+  }
+  const vAlong = item.vx * tangent.tx + item.vy * tangent.ty;
+  item.vx = vAlong * tangent.tx;
+  item.vy = vAlong * tangent.ty;
+  item.x += item.vx * dt;
+  item.y += item.vy * dt;
+  // Re-clamp exactly onto the surface at the new x — kills any float drift
+  // from integrating motion along a diagonal line in discrete steps.
+  const col = item.onRampCol;
+  const row = item.onRampRow;
+  item.y = rampSurfaceWorldY(tileType, col, row, item.x) - item.radius;
+  // Slid off the tile's own column range — release it. Whatever the very
+  // next tick's ordinary tile lookup finds under/beside it (another ramp to
+  // chain into, a flat Platform, open space to fall through) takes over
+  // completely naturally, with zero special-casing needed here for what
+  // comes next.
+  if (item.x < col * TILE_SIZE || item.x > (col + 1) * TILE_SIZE) {
+    item.onRampCol = null;
+    item.onRampRow = null;
+  }
+  return true;
+}
+
 export function stepItemOnGrid(item, state, dt, physics) {
   const grid = state.level.grid;
 
@@ -1008,14 +1166,41 @@ export function stepItemOnGrid(item, state, dt, physics) {
   const fanForce = computeFanForce(state, item);
   integrateItemForces(item, dt, physics, fanForce);
 
-  // Horizontal: swept against solid tiles so it can't tunnel sideways into one.
-  const nextX = item.x + item.vx * dt;
-  if (isSolid(tileAt(grid, nextX, item.y))) item.vx = 0;
-  else item.x = nextX;
+  // Half Platform ramp — an item currently resting on one slides
+  // continuously along its 45-degree surface instead of the normal flat
+  // sweep below; see stepRampSlide's own comment for the real physics.
+  if (item.onRampCol != null && stepRampSlide(item, grid, dt)) {
+    return 'falling'; // still in motion (sliding, or just exited this same tick) — the same status a moving item off a Fan cone already reports
+  }
 
-  // Vertical: swept tile landing, same as before.
+  // Horizontal: swept against solid tiles so it can't tunnel sideways into
+  // one — ramp-aware, since a Half Platform is only solid below its own
+  // sloped surface: an item can pass freely through the tile's OPEN wedge,
+  // but is blocked the instant it would sink into the solid triangle at
+  // that x (the ramp's own "wall" side, e.g. the full-height left edge of
+  // a Right ramp).
+  const nextX = item.x + item.vx * dt;
+  const horizTile = tileAt(grid, nextX, item.y);
+  const horizTangent = RAMP_TANGENT[horizTile];
+  if (horizTangent) {
+    const surfaceY = rampSurfaceWorldY(horizTile, colAt(nextX), rowAt(item.y), nextX);
+    if (item.y + item.radius > surfaceY) item.vx = 0;
+    else item.x = nextX;
+  } else if (isSolid(horizTile)) {
+    item.vx = 0;
+  } else {
+    item.x = nextX;
+  }
+
+  // Vertical: swept tile landing (ramp-aware — see sweepVertical).
   const result = sweepVertical(item, grid, item.vy * dt);
-  if (result.landed) return handleLanding();
+  if (result.landed) {
+    if (result.ramp) {
+      item.onRampCol = result.col;
+      item.onRampRow = result.row;
+    }
+    return handleLanding();
+  }
 
   return 'falling';
 }
@@ -2548,6 +2733,41 @@ function renderBrickPattern(ctx, x, y, size, color) {
   ctx.strokeRect(x + ctx.lineWidth / 2, y + ctx.lineWidth / 2, size - ctx.lineWidth, size - ctx.lineWidth);
 }
 
+// A Half Platform's real look — literally half of the same brick material,
+// clipped to its own actual collision wedge (see rampSurfaceLocalY's own
+// comment for the exact geometry) rather than a separate, only-vaguely-
+// related icon. A bright highlight stroke along the exposed hypotenuse —
+// the real sliding surface an item lands on — makes the sloped face read
+// clearly as distinct from a flat Platform's square top.
+function renderPlatformRamp(ctx, x, y, size, color, direction) {
+  ctx.save();
+  ctx.beginPath();
+  if (direction === 'right') {
+    // Solid lower-left triangle — full height at the left edge, tapering to
+    // nothing at the right edge; matches TILE_PLATFORM_HALF_RIGHT's own
+    // rampSurfaceLocalY (surfaceY = localX).
+    ctx.moveTo(x, y);
+    ctx.lineTo(x, y + size);
+    ctx.lineTo(x + size, y + size);
+  } else {
+    // Mirror image — full height at the right edge, tapering to nothing at
+    // the left edge; matches TILE_PLATFORM_HALF_LEFT.
+    ctx.moveTo(x + size, y);
+    ctx.lineTo(x, y + size);
+    ctx.lineTo(x + size, y + size);
+  }
+  ctx.closePath();
+  ctx.clip();
+  renderBrickPattern(ctx, x, y, size, color);
+  ctx.restore();
+  ctx.strokeStyle = shadeHexColor(color, 0.35);
+  ctx.lineWidth = Math.max(1.5, size * 0.06);
+  ctx.beginPath();
+  if (direction === 'right') { ctx.moveTo(x, y); ctx.lineTo(x + size, y + size); }
+  else { ctx.moveTo(x + size, y); ctx.lineTo(x, y + size); }
+  ctx.stroke();
+}
+
 // Dispatches to each family's own hand-drawn icon function above — per
 // direct request, replacing the old flat-square-plus-shop-icon-glyph look
 // (which needed a click to tell buildings apart) with a real drawn machine
@@ -2573,6 +2793,10 @@ function renderBrickPattern(ctx, x, y, size, color) {
 export function renderTileShape(ctx, type, color, x, y, size, data) {
   if (type === TILE_PLATFORM) {
     renderBrickPattern(ctx, x, y, size, color);
+    return;
+  }
+  if (type === TILE_PLATFORM_HALF_LEFT || type === TILE_PLATFORM_HALF_RIGHT) {
+    renderPlatformRamp(ctx, x, y, size, color, type === TILE_PLATFORM_HALF_LEFT ? 'left' : 'right');
     return;
   }
   if (COLLECTOR_TILES.has(type)) {

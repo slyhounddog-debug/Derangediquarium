@@ -153,6 +153,7 @@ import {
   renderBlueprintGhost,
   placeBlueprint,
   computeBlueprintCost,
+  cyclePlatformAt,
 } from './Grid.js';
 import { isPointOnMound, crackMound, renderMound, centerCameraOnMound, isPointOnScienceLab, renderScienceLab } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
@@ -194,6 +195,7 @@ import {
   tutorialScrollDirectionNeeded,
   updateBossHealthBar,
   showGameOverModal,
+  cycleSelectedBuildingFamily,
 } from './UI.js';
 
 const canvas = document.getElementById('game-canvas');
@@ -1645,6 +1647,22 @@ input.keydownHandlers.push((e) => {
             else if (state.ui.lastArmedTool.startsWith('build:')) pipetteSelectBuilding(state, state.ui.lastArmedTool.slice('build:'.length));
           }
         }
+      }
+      break;
+    }
+    case 'KeyR': { // Cycle Platform variants — per direct request
+      // Two jobs, mutually exclusive: with a build:/fish: tool armed, R
+      // cycles THAT shop selection to its next family tier (the exact same
+      // action a 2nd click on the shop slot already performs — see UI.js's
+      // cycleSelectedBuildingFamily, generalized to any family, not just
+      // Platform, since the mechanism is identical either way). With
+      // NOTHING armed, R instead cycles an already-PLACED, merely-hovered
+      // Platform tile directly on the grid, for free (Grid.js's
+      // cyclePlatformAt) — per direct spec, "only when not selected on a
+      // building."
+      if (!cycleSelectedBuildingFamily(state)) {
+        const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
+        cyclePlatformAt(state, world.x, world.y);
       }
       break;
     }

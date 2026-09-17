@@ -2281,32 +2281,68 @@ function buildFamilyButton(state, familyId, memberIds) {
     const currentId = familySelectedTier[familyId];
     // Only cycle if this slot is already the active selection — a first
     // click just selects whatever tier it's currently defaulted to.
-    if (state.ui.selectedTool === `build:${currentId}`) {
-      const idx = memberIds.indexOf(currentId);
-      familySelectedTier[familyId] = memberIds[(idx + 1) % memberIds.length];
-    }
-    // The post-alien guided tutorial's "turret" step always wants the base
-    // Waste Turret specifically ("place the waste turret"), regardless of
-    // which tier this slot happened to be cycled to — force it back to the
-    // family's lowest (first-unlocked) tier rather than whatever the click
-    // above just landed on.
-    const isPostAlienTurretStep = familyId === 'turret' && state.level.tutorialFlow?.id === 'postalien' && state.level.tutorialFlow.step === 'turret';
-    if (isPostAlienTurretStep) {
-      familySelectedTier[familyId] = memberIds[0];
-    }
-    refreshFamilyButton(state, familyId); // sync dataset.tool to the (possibly just-cycled) tier before selecting it
-    selectBuildingForPreview(state, BUILDING_TYPES[familySelectedTier[familyId]]);
-    if (familyId === 'turret') advanceTutorialFlow(state, 'postalien', 'turret');
-    // Per direct request ("when you select the turret just in the turret
-    // tutorial, it automatically closes the shop first") — the shop no
-    // longer needs to stay open for this tutorial's placement spot now that
-    // it's moved to the middle of the city (see POST_ALIEN_TURRET_SPOT),
-    // where it would otherwise sit right behind the fly-out panel.
-    if (isPostAlienTurretStep) closeSidePanels(state);
+    if (state.ui.selectedTool === `build:${currentId}`) cycleFamilySelection(state, familyId);
+    else applyFamilySelection(state, familyId, currentId);
   });
 
   refreshFamilyButton(state, familyId);
   els.buildToolGrid.appendChild(btn);
+}
+
+// The shared "tail" every family selection (a plain select, OR a cycle-to-
+// the-next-tier) ends with — factored out so both share the exact same
+// side effects (sync the button's own dataset.tool/icon/price/dots, arm
+// the preview window, and the post-alien guided tutorial's "turret" step
+// override, which always wants the base Waste Turret specifically
+// regardless of which tier a click/cycle actually landed on).
+function applyFamilySelection(state, familyId, tierId) {
+  familySelectedTier[familyId] = tierId;
+  const isPostAlienTurretStep = familyId === 'turret' && state.level.tutorialFlow?.id === 'postalien' && state.level.tutorialFlow.step === 'turret';
+  if (isPostAlienTurretStep) familySelectedTier[familyId] = familyButtons[familyId].memberIds[0];
+  refreshFamilyButton(state, familyId); // sync dataset.tool to the (possibly just-overridden) tier before selecting it
+  selectBuildingForPreview(state, BUILDING_TYPES[familySelectedTier[familyId]]);
+  if (familyId === 'turret') advanceTutorialFlow(state, 'postalien', 'turret');
+  // Per direct request ("when you select the turret just in the turret
+  // tutorial, it automatically closes the shop first") — the shop no
+  // longer needs to stay open for this tutorial's placement spot now that
+  // it's moved to the middle of the city (see POST_ALIEN_TURRET_SPOT),
+  // where it would otherwise sit right behind the fly-out panel.
+  if (isPostAlienTurretStep) closeSidePanels(state);
+}
+
+// Cycles a family slot to its next unlocked tier — shared by a shop slot's
+// own repeat-click (buildFamilyButton above) and the R hotkey below.
+function cycleFamilySelection(state, familyId) {
+  const f = familyButtons[familyId];
+  if (!f) return;
+  const idx = f.memberIds.indexOf(familySelectedTier[familyId]);
+  applyFamilySelection(state, familyId, f.memberIds[(idx + 1) % f.memberIds.length]);
+}
+
+function familyIdForBuilding(buildingId) {
+  for (const [familyId, memberIds] of Object.entries(BUILDING_FAMILIES)) {
+    if (memberIds.includes(buildingId)) return familyId;
+  }
+  return null;
+}
+
+// R hotkey, first half (main.js's KeyR handler) — per direct request
+// ("pressing R while selected on any platform building to cycle between
+// the 3 variants"), generalized to any multi-tier family rather than
+// hardcoded to Platform specifically, since the mechanism (cycle to the
+// next unlocked tier) is already exactly what a 2nd click on the shop slot
+// does for every family. Returns true if something was actually cycled, so
+// main.js knows whether to fall back to its OTHER job for R — cycling an
+// already-placed, merely-hovered Platform instead (Grid.js's
+// cyclePlatformAt), which only applies while NO build:/fish: tool is armed.
+export function cycleSelectedBuildingFamily(state) {
+  const tool = state.ui.selectedTool;
+  if (!tool.startsWith('build:')) return false;
+  const buildingId = tool.slice('build:'.length);
+  const familyId = familyIdForBuilding(buildingId);
+  if (!familyId) return false;
+  cycleFamilySelection(state, familyId);
+  return true;
 }
 
 function buildSingleBuildingButton(state, building) {

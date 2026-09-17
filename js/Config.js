@@ -83,6 +83,17 @@ export const CAMERA_BOTTOM_BUFFER_PX = 126;
 // every row/col calc a single division by TILE_SIZE, no offset to remember.
 export const TILE_EMPTY = 'empty'; // passable — items fall straight through
 export const TILE_PLATFORM = 'platform'; // solid — items land and rest on top. Purely an optional routing aid now (a cheap flat surface to catch a falling item before a Fan/Processor grabs it) — placement no longer requires anything to anchor to it; see Grid.js's canPlaceTile.
+// Two more Platform variants, per direct request — a real 45-degree ramp
+// wedge instead of a flat top, occupying only the solid triangular half of
+// the tile (see Grid.js's rampSurfaceLocalY for the exact collision
+// geometry). "Right" pushes a falling object right-and-down (tall on the
+// left, tapering to nothing on the right — an object sliding down the
+// slope moves toward the LOW side); "Left" is the mirror image. All 3
+// Platform variants share one shop slot (BUILDING_FAMILIES.platform) and
+// cycle by clicking it again or pressing R while one is selected — see
+// UI.js's cycleSelectedBuildingFamily.
+export const TILE_PLATFORM_HALF_LEFT = 'platform_half_left';
+export const TILE_PLATFORM_HALF_RIGHT = 'platform_half_right';
 export const TILE_COLLECTOR = 'collector'; // solid — the base Processor: items landing here are immediately consumed (coins auto-banked)
 export const TILE_COLLECTOR_ELECTRIC = 'collector_electric'; // solid — Electric Processor, faster processing, draws power — see PROCESSOR_STATS
 export const TILE_COLLECTOR_ADVANCED = 'collector_advanced'; // solid — Advanced Processor, bought in the Science Lab — see PROCESSOR_STATS
@@ -1363,15 +1374,30 @@ export const BUILDING_TYPES = {
     description: 'Solid floor. Items land and rest on top — cheap, optional item routing.',
     color: '#dba36f', unlockedByDefault: true, // available from level start, unchanged — no longer load-bearing for whether anything ELSE can be placed, though (see canPlaceTile's own comment)
   },
-  // Renamed back to plain "Collector" per direct request, now that the base
-  // tier draws no power at all again (see PROCESSOR_STATS[TILE_COLLECTOR] —
-  // powerCostPerSecCoin/Science both 0) — an earlier pass had renamed this
-  // "Electric Collector" specifically because it drew power; the two tiers
-  // above it keep their own already-established names (Advanced/Bio
-  // Collector) unchanged. Base cost unchanged at 40.
+  // Same material/cost as plain Platform (see getBuildingCost's own
+  // PLATFORM_FLAT_COST check, extended to cover both of these) — just a
+  // different shape: a real 45-degree wedge, solid only below its own
+  // sloped surface. Per direct request, unlocked from level start same as
+  // the flat Platform.
+  [TILE_PLATFORM_HALF_LEFT]: {
+    id: TILE_PLATFORM_HALF_LEFT, name: 'Half Platform - Left', icon: '◺', cost: PLATFORM_FLAT_COST,
+    description: 'A 45° ramp — deflects anything that lands on it down and to the left.',
+    color: '#dba36f', unlockedByDefault: true,
+  },
+  [TILE_PLATFORM_HALF_RIGHT]: {
+    id: TILE_PLATFORM_HALF_RIGHT, name: 'Half Platform - Right', icon: '◹', cost: PLATFORM_FLAT_COST,
+    description: 'A 45° ramp — deflects anything that lands on it down and to the right.',
+    color: '#dba36f', unlockedByDefault: true,
+  },
+  // Renamed back to plain "Collector" per direct request (an earlier pass
+  // had renamed this "Electric Collector" while it briefly drew no power;
+  // per a later direct request it's back to costing a small amount again —
+  // see PROCESSOR_STATS[TILE_COLLECTOR], 2mw on a coin/4mw on Science). The
+  // two tiers above it keep their own already-established names (Advanced/
+  // Bio Collector) unchanged. Base cost unchanged at 40.
   [TILE_COLLECTOR]: {
     id: TILE_COLLECTOR, name: 'Collector', icon: '🧲', cost: 40,
-    description: 'Auto-banks coins and Science touching it. Draws no power.',
+    description: 'Auto-banks coins and Science touching it. Draws 2-4mw while collecting.',
     color: '#8fe0b8', unlockedByDefault: false,
   },
   [TILE_COLLECTOR_ELECTRIC]: {
@@ -1466,6 +1492,15 @@ export const BUILDING_FAMILIES = {
   collector: [TILE_COLLECTOR, TILE_COLLECTOR_ELECTRIC, TILE_COLLECTOR_ADVANCED],
   refinery: [TILE_REFINERY, TILE_REFINERY_ELECTRIC, TILE_REFINERY_ADVANCED],
   turret: [TILE_TURRET_WASTE, TILE_TURRET_ELECTRIC, TILE_TURRET_ADVANCED],
+  // Not a cost/power tier ladder like the 4 families above — all 3 variants
+  // are unlocked from level start and cost the same flat $3 (see
+  // getBuildingCost's own PLATFORM_FLAT_COST check). Ordered so the plain
+  // flat Platform lands LAST — this family's own "highest unlocked" default
+  // (see UI.js's buildBuildPalette, `memberIds[memberIds.length - 1]`) —
+  // so clicking the shop slot for the very first time still defaults to
+  // the flat Platform everyone's used to, with the two ramps reachable by
+  // clicking again (or pressing R) to cycle.
+  platform: [TILE_PLATFORM_HALF_LEFT, TILE_PLATFORM_HALF_RIGHT, TILE_PLATFORM],
 };
 
 // ---- Processor (Collector) tiers ----
@@ -1492,7 +1527,7 @@ export const BUILDING_FAMILIES = {
 // state.level.buildingData wasteAccumMs field) is removed entirely, not just
 // zeroed. coinMs set to the exact requested 9/6/4 seconds across the 3 tiers.
 export const PROCESSOR_STATS = {
-  [TILE_COLLECTOR]: { coinMs: 9000, scienceMs: 20000, scienceGreenMs: 30000, powerCostPerSecCoin: 0, powerCostPerSecScience: 0 },
+  [TILE_COLLECTOR]: { coinMs: 9000, scienceMs: 20000, scienceGreenMs: 30000, powerCostPerSecCoin: 2, powerCostPerSecScience: 4 },
   [TILE_COLLECTOR_ELECTRIC]: { coinMs: 6000, scienceMs: 15000, scienceGreenMs: 20000, powerCostPerSecCoin: 10, powerCostPerSecScience: 20 },
   [TILE_COLLECTOR_ADVANCED]: { coinMs: 4000, scienceMs: 9000, scienceGreenMs: 12000, powerCostPerSecCoin: 20, powerCostPerSecScience: 40 },
 };
