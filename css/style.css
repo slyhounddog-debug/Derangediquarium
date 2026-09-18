@@ -1606,7 +1606,7 @@ html, body {
 .recipe-option:hover { transform: scale(1.02); }
 .recipe-option.selected { border-color: var(--recipe-color, #8fe0b8); background: #eafaf1; }
 .recipe-option.locked { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
-.recipe-option-icon { font-size: 26px; flex-shrink: 0; }
+.recipe-option-icon { display: block; flex-shrink: 0; } /* a real drawn <canvas> icon now, not an emoji — see UI.js's drawItemIconCanvas */
 .recipe-option-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .recipe-option-name { font-size: 11px; font-weight: 800; }
 .recipe-option-desc { font-size: 9.5px; color: #8a7a8a; line-height: 1.25; }

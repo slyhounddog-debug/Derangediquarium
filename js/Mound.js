@@ -22,7 +22,7 @@ import {
   TIER_UNLOCKS,
 } from './Config.js';
 import { worldToScreen } from './Engine.js';
-import { createShimmerTimer, updateShimmerTimer, drawShimmerSweep } from './Shimmer.js';
+import { createShimmerTimer, updateShimmerTimer, drawShimmerSweep, UI_SHEEN_SWEEP_DURATION_MS } from './Shimmer.js';
 import { pushGameNotification } from './Notifications.js';
 
 const MOUND_WIDTH_PX = MOUND_WIDTH_TILES * TILE_SIZE;
@@ -271,8 +271,16 @@ export function renderMound(ctx, state) {
     ctx.stroke();
   }
   // Drawn last, still inside the dome-silhouette clip, so the sweep never
-  // paints outside the Mound's own shape.
-  drawShimmerSweep(ctx, updateShimmerTimer(moundShimmer, state.level.elapsed), topLeft.x, topLeft.y, w, h);
+  // paints outside the Mound's own shape. Per direct request, tuned to match
+  // the DOM ".sheen-target" UI-button sweep specifically (1.1s duration,
+  // eased timing, a brighter 0.7 peak vs. the generic 0.55 every other
+  // shimmer caller — Science Lab, fish — still uses).
+  drawShimmerSweep(
+    ctx,
+    updateShimmerTimer(moundShimmer, state.level.elapsed, UI_SHEEN_SWEEP_DURATION_MS),
+    topLeft.x, topLeft.y, w, h,
+    { peakAlpha: 0.7, ease: true }
+  );
   ctx.restore(); // lifts the dome-silhouette clip set above, now that the texture, every crack/branch, and the shimmer have been drawn through it
 }
 

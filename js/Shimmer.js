@@ -14,6 +14,12 @@
 // handed — this is cosmetic timing, not simulation.
 
 export const SHIMMER_SWEEP_DURATION_MS = 900;
+// Matches the DOM ".sheen-target" UI-button sweep's own 1.1s duration
+// exactly (see style.css's sheen-sweep keyframes) — per direct request, the
+// Mound's own recurring shimmer now rides this instead of the shorter
+// generic 900ms default, while every other caller (the Science Lab, a
+// fish's one-shot growth/placement shimmer) is untouched.
+export const UI_SHEEN_SWEEP_DURATION_MS = 1100;
 const SHIMMER_MIN_INTERVAL_MS = 10000;
 const SHIMMER_MAX_INTERVAL_MS = 50000;
 
@@ -36,15 +42,17 @@ export function createShimmerTimer() {
 // elapsed's own ms timeline and are deliberately left alone across a level
 // restart (elapsed resets to 0 and just counts back up toward whatever
 // `nextAt` already was) — same as every other module-level decorative timer
-// in this codebase, e.g. Ambience.js's bubble seeding.
-export function updateShimmerTimer(timer, elapsed) {
+// in this codebase, e.g. Ambience.js's bubble seeding. `durationMs` lets a
+// caller (Mound.js, for the Mound specifically) ride a different sweep
+// length than the shared default without affecting anyone else.
+export function updateShimmerTimer(timer, elapsed, durationMs = SHIMMER_SWEEP_DURATION_MS) {
   if (timer.nextAt === null) timer.nextAt = elapsed + randomShimmerInterval();
   if (timer.activeStartedAt === null && elapsed >= timer.nextAt) {
     timer.activeStartedAt = elapsed;
-    timer.nextAt = elapsed + randomShimmerInterval(); // the FOLLOWING cycle, independent of this sweep's own ~900ms runtime
+    timer.nextAt = elapsed + randomShimmerInterval(); // the FOLLOWING cycle, independent of this sweep's own runtime
   }
   if (timer.activeStartedAt === null) return null;
-  const t = (elapsed - timer.activeStartedAt) / SHIMMER_SWEEP_DURATION_MS;
+  const t = (elapsed - timer.activeStartedAt) / durationMs;
   if (t >= 1) {
     timer.activeStartedAt = null;
     return null;
@@ -84,14 +92,20 @@ export function oneShotShimmerProgress(startedAt, elapsed) {
 // rather than a hard-edged wipe. Caller is responsible for clipping to the
 // shape's own silhouette first (a rectangle here, a circle for a fish,
 // whatever the shape actually is); this just fills the given bounding box.
-export function drawShimmerSweep(ctx, t, x, y, w, h) {
+// `opts.peakAlpha` (default 0.55) and `opts.ease` (default off — a plain
+// smoothstep easing curve on the sweep's own travel, approximating the DOM
+// sheen's CSS `ease` timing) let a specific caller (Mound.js, for the Mound)
+// read closer to the UI-button sheen without changing anyone else's look.
+export function drawShimmerSweep(ctx, t, x, y, w, h, opts = {}) {
   if (t === null) return;
+  const peakAlpha = opts.peakAlpha ?? 0.55;
+  const et = opts.ease ? t * t * (3 - 2 * t) : t;
   const bandWidth = w * 0.4;
   const travel = w + bandWidth;
-  const sweepX = x - bandWidth / 2 + t * travel;
+  const sweepX = x - bandWidth / 2 + et * travel;
   const grad = ctx.createLinearGradient(sweepX, y + h, sweepX + bandWidth, y);
   grad.addColorStop(0, 'rgba(255, 255, 255, 0)');
-  grad.addColorStop(0.5, 'rgba(255, 255, 255, 0.55)');
+  grad.addColorStop(0.5, `rgba(255, 255, 255, ${peakAlpha})`);
   grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
   ctx.fillStyle = grad;
   ctx.fillRect(x, y, w, h);

@@ -113,8 +113,6 @@ let lastScienceCapCount = null; // same, for Science Bubbles
 let notificationLogExpanded = false;
 let lastRenderedNotificationCount = -1; // rebuild the log list only when it actually changes, not every frame
 let lastPillNotificationCount = null; // separate from the above — tracks the pill's own bounce/shimmer trigger regardless of whether the log is expanded; null means "not yet initialized," so the very first real notification on page load doesn't bounce
-let notificationUnread = false; // true from the moment a new message arrives until the player actually expands the log — see scheduleNotificationReminder below
-let notificationReminderTimer = null;
 let moundMenuOpen = false;
 let moundMenuClosing = false; // true while the shrink-back transition is still playing, before it's actually hidden
 let moundMenuCloseTimer = null;
@@ -194,32 +192,12 @@ function scheduleSheenAll() {
   document.querySelectorAll('.sheen-target').forEach(scheduleSheen);
 }
 
-// Per direct request — while there's an unread notification (the pill has a
-// message the player hasn't actually expanded the log to read yet), it
-// bounces on its own every random 3-6 seconds as a reminder, not just once
-// on arrival. Self-terminating: each firing checks notificationUnread again
-// before bouncing and before rescheduling, so it stops on its own the tick
-// after the log gets expanded (see the notificationLatest click handler)
-// rather than needing an explicit cancel from that other call site.
-const NOTIFICATION_REMINDER_MIN_MS = 3000;
-const NOTIFICATION_REMINDER_MAX_MS = 6000;
-function scheduleNotificationReminder() {
-  if (notificationReminderTimer !== null) return; // already have one pending
-  const delay = NOTIFICATION_REMINDER_MIN_MS + Math.random() * (NOTIFICATION_REMINDER_MAX_MS - NOTIFICATION_REMINDER_MIN_MS);
-  notificationReminderTimer = setTimeout(() => {
-    notificationReminderTimer = null;
-    if (!notificationUnread) return;
-    playFlash(els.notificationLatest, 'bounce-play');
-    scheduleNotificationReminder();
-  }, delay);
-}
-
 // Per direct request — "at the beginning, before the shop has been opened,
-// have it bounce until it's opened for the first time." Same self-
-// terminating setTimeout-chain shape as scheduleNotificationReminder above:
-// each firing re-checks the flag before bouncing and before rescheduling, so
-// it stops on its own the tick after the shop is first expanded (see
-// toggleShopCollapse) rather than needing an explicit cancel from there.
+// have it bounce until it's opened for the first time." A self-terminating
+// setTimeout chain: each firing re-checks the flag before bouncing and
+// before rescheduling, so it stops on its own the tick after the shop is
+// first expanded (see toggleShopCollapse) rather than needing an explicit
+// cancel from there.
 let shopButtonReminderTimer = null;
 // Halved per direct request ("have the shop bounce twice as often until
 // it's opened for the first time") — was 3000/6000.
@@ -494,11 +472,6 @@ export function initUI(state) {
     notificationLogExpanded = !notificationLogExpanded;
     els.notificationLog.classList.toggle('hidden', !notificationLogExpanded);
     lastRenderedNotificationCount = -1; // force a rebuild next update so it's populated the instant it opens
-    // The player has now actually looked at the pill — stop the periodic
-    // reminder bounce (see scheduleNotificationReminder below) regardless of
-    // whether they immediately close the log again; only a genuinely NEW
-    // message re-arms it.
-    if (notificationLogExpanded) notificationUnread = false;
     // Story trigger: the first time the log is ever CLOSED again (not
     // opened) — per direct request, so the player has actually read
     // whatever's in there before this line lands, rather than firing the
@@ -1081,9 +1054,17 @@ function refreshRecipeMenu(state) {
     const optionEl = document.createElement('div');
     optionEl.className = 'recipe-option' + (data.recipeId === recipe.id ? ' selected' : '') + (unlocked ? '' : ' locked');
     optionEl.style.setProperty('--recipe-color', recipe.color);
-    const icon = document.createElement('div');
+    // A real drawn item icon (whatever the recipe actually produces — or,
+    // for a Power Plant, whatever fuel it burns) instead of a generic
+    // emoji, per direct request ("the recipe icon [should] match the actual
+    // object in the game") — reuses the exact same drawItemIconCanvas the
+    // Platform filter pop-up and the Science Lab tree already draw their
+    // own real-item icons with.
+    const icon = document.createElement('canvas');
     icon.className = 'recipe-option-icon';
-    icon.textContent = recipe.icon;
+    icon.width = RECIPE_OPTION_ICON_CANVAS_SIZE;
+    icon.height = RECIPE_OPTION_ICON_CANVAS_SIZE;
+    drawItemIconCanvas(icon, isManufacturer ? recipe.output : recipe.inputs[0]);
     // Name + description share a text column next to the icon now — per
     // direct request, each recipe row lays out horizontally (icon on the
     // left, text stacked to its right) instead of the old icon-on-top card.
@@ -2333,6 +2314,7 @@ const BUILDING_ICON_CANVAS_SIZE = 46;
 const LAB_NODE_ICON_CANVAS_SIZE = 20;
 const LAB_PURCHASE_ICON_CANVAS_SIZE = 34;
 const PLATFORM_FILTER_ICON_CANVAS_SIZE = 26;
+const RECIPE_OPTION_ICON_CANVAS_SIZE = 26; // matches .recipe-option-icon's own prior 26px emoji font-size
 function drawBuildingIconCanvas(canvas, buildingId) {
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -4508,17 +4490,17 @@ export function updateNotificationTicker(state) {
   // Bounce + shimmer the pill on every genuinely NEW message — per direct
   // request. lastPillNotificationCount starts null so the level's opening
   // "Welcome to the tank" line (already present before this first call)
-  // doesn't trigger it on load; every real arrival after that does.
+  // doesn't trigger it on load; every real arrival after that does. Per a
+  // later direct request ("bounce just the first time... once is enough
+  // notification"), this single bounce is now the whole of it — the earlier
+  // periodic "keep bouncing every 3-6s until the log is opened" reminder
+  // loop (scheduleNotificationReminder/notificationUnread) is removed
+  // entirely rather than just suppressed, since nothing else ever needs it.
   if (lastPillNotificationCount !== null && notifications.length !== lastPillNotificationCount) {
     playFlash(els.notificationLatest, 'bounce-play');
     els.notificationLatest.classList.remove('sheen-play');
     void els.notificationLatest.offsetWidth;
     els.notificationLatest.classList.add('sheen-play');
-    // A genuinely new message re-arms the periodic reminder bounce — see
-    // scheduleNotificationReminder above — even if the log was already read
-    // and closed for a PREVIOUS message.
-    notificationUnread = true;
-    scheduleNotificationReminder();
   }
   lastPillNotificationCount = notifications.length;
 
@@ -4536,7 +4518,7 @@ export function updateNotificationTicker(state) {
     const timeSpan = document.createElement('span');
     timeSpan.className = 'notification-line-time';
     timeSpan.textContent = entry.timestamp
-      ? new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      ? new Date(entry.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
       : '';
     line.appendChild(timeSpan);
     line.appendChild(document.createTextNode(entry.text));

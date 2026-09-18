@@ -1178,15 +1178,28 @@ function stepCollectorProcessing(item, state, dt) {
     item.collectorProgressMs = null;
     return 'falling';
   }
+  const powerCost = getCollectorPowerCostForItem(PROCESSOR_STATS[tileType], item.type);
+  if (!hasEnoughPowerToOperate(state, powerCost)) {
+    // Genuinely out of power (not merely running slower) — per direct
+    // request ("collectors should spit out objects if they don't have
+    // enough energy to run"), spit the held item back out to normal physics
+    // instead of leaving it stuck mid-hold forever. The intake scan in
+    // updateBuildings below won't re-grab it (or anything else) while the
+    // grid's still this short, so it can't just get sucked right back in
+    // and re-ejected every tick.
+    item.mass = item.collectorOriginalMass;
+    item.collectorProgressMs = null;
+    return 'falling';
+  }
   item.x += (item.collectorCenterX - item.x) * COLLECTOR_PULL_STRENGTH * dt;
   item.y += (item.collectorCenterY - item.y) * COLLECTOR_PULL_STRENGTH * dt;
   // A free base Collector (both power rates 0) always finishes at full
-  // speed; an Advanced/Bio tier's progress genuinely stalls at 0% grid
-  // efficiency instead of just running slower forever — matches "buildings
-  // using electricity should stop working" once supply can't cover demand.
-  // Which rate applies depends on what's actually being held right now —
-  // see getCollectorPowerCostForItem's own comment.
-  const appliedEfficiency = getCollectorPowerCostForItem(PROCESSOR_STATS[tileType], item.type) > 0 ? state.level.powerEfficiency : 1;
+  // speed; an Advanced/Bio tier's progress runs slower between the stalled
+  // threshold and 100% efficiency (the ejection check above only fires
+  // below it) — matches "buildings using electricity should stop working"
+  // once supply can't cover demand at all, while still allowing a genuine
+  // partial shortfall to just slow things down rather than halt them.
+  const appliedEfficiency = powerCost > 0 ? state.level.powerEfficiency : 1;
   // A linked, non-hungry Catalyst Fish speeds this exact tile up — see
   // getCatalystSpeedMultiplier's own comment. The key is derived from the
   // item's own stored collector center, since this runs per-ITEM (called
@@ -1422,6 +1435,20 @@ function getCollectorPowerCostForItem(stats, itemType) {
   return (itemType === 'science' || itemType === 'science_green') ? stats.powerCostPerSecScience : stats.powerCostPerSecCoin;
 }
 
+// Shared by the Collector/Refinery/Manufacturer branches below — per direct
+// request ("Manufacturers and collectors should spit out objects if they
+// don't have enough energy to run"), extended to the Refinery too since it
+// holds an item mid-cycle via the exact same mechanism and would otherwise
+// be left stuck stalling forever in the identical situation. True whenever
+// a building that costs `powerCostPerSec` mw genuinely has enough live grid
+// power to keep operating right now — reuses the same
+// POWER_SHORTAGE_STALLED_THRESHOLD the power-shortage visual overlay
+// (further down this file) already treats as "genuinely stopped, not just
+// running slower," so the two can't disagree about what counts as "enough."
+function hasEnoughPowerToOperate(state, powerCostPerSec) {
+  return powerCostPerSec <= 0 || state.level.powerEfficiency >= POWER_SHORTAGE_STALLED_THRESHOLD;
+}
+
 // Starts the same pull-to-center hold stepCollectorProcessing eases through
 // every tick — previously only ever kicked off by a top-landing event
 // (handleLanding); now triggered by updateBuildings' intake scan below
@@ -1524,6 +1551,11 @@ export function updateBuildings(state, dtMs) {
           // enough" — the exact same bug class already fixed for the Waste
           // Turret's own intake via this same helper.
           if (isTouchingBuildingTile(centerX, centerY, it.x, it.y, it.radius)) {
+            // Doesn't even start a new hold while genuinely out of power —
+            // otherwise stepCollectorProcessing's own ejection above would
+            // spit it right back out next tick, and this same scan would
+            // just re-grab it again the tick after that, flickering forever.
+            if (!hasEnoughPowerToOperate(state, getCollectorPowerCostForItem(PROCESSOR_STATS[data.type], it.type))) continue;
             beginCollectorProcessing(it, centerX, centerY, data.type);
             anyProcessing = true;
             playIntake();
@@ -1660,6 +1692,13 @@ export function updateBuildings(state, dtMs) {
 
     if (REFINERY_TILES.has(data.type)) {
       const stats = REFINERY_STATS[data.type];
+      // Doesn't even start a new hold while genuinely out of power — same
+      // reasoning as the Collector's own intake gate above, so a
+      // power-costing tier that can't run right now doesn't grab-then-
+      // immediately-eject the same item every tick.
+      if (data.lockedRecipe === null && !hasEnoughPowerToOperate(state, stats.powerCostPerSec)) {
+        continue;
+      }
       if (data.lockedRecipe === null) {
         // Rejects incoming items while actively processing (satisfied by
         // only ever scanning here, while idle) — and if both Bio-Sludge
@@ -1713,6 +1752,17 @@ export function updateBuildings(state, dtMs) {
             playIntake();
           }
         }
+      } else if (!hasEnoughPowerToOperate(state, stats.powerCostPerSec)) {
+        // Genuinely out of power mid-cycle — per direct request, spit the
+        // held item back out to normal physics instead of stalling it here
+        // forever. Just nulling heldItemId is enough: stepHeldItem's own
+        // defensive release check (data.heldItemId !== item.id) notices this
+        // on the item's very next per-tick step and restores its real mass/
+        // physics automatically — no need to duplicate that release logic
+        // here.
+        data.heldItemId = null;
+        data.lockedRecipe = null;
+        data.progressMs = 0;
       } else {
         const efficiency = stats.powerCostPerSec > 0 ? state.level.powerEfficiency : 1;
         data.progressMs += dtMs * efficiency * getCatalystSpeedMultiplier(state, key);
@@ -1762,6 +1812,10 @@ export function updateBuildings(state, dtMs) {
           const pendingIdx = data.pendingInputs.indexOf(it.type);
           if (pendingIdx === -1) continue;
           if (isTouchingBuildingTile(centerX, centerY, it.x, it.y, it.radius)) {
+            // Doesn't even start a new hold while genuinely out of power —
+            // same reasoning as the Collector/Refinery's own intake gates
+            // above, so it doesn't grab-then-immediately-eject every tick.
+            if (!hasEnoughPowerToOperate(state, MANUFACTURER_ITEM_POWER_COST_MW[it.type] || 0)) continue;
             // Held (pulled to center, disintegrating), not spliced yet — see
             // the identical treatment in the Refinery branch above.
             it.heldByKey = key;
@@ -1779,6 +1833,19 @@ export function updateBuildings(state, dtMs) {
             break;
           }
         }
+      } else if (!hasEnoughPowerToOperate(state, MANUFACTURER_ITEM_POWER_COST_MW[data.currentItemType] || 0)) {
+        // Genuinely out of power mid-process — per direct request, spit the
+        // ingredient back out instead of stalling forever. It wasn't
+        // actually consumed, so its type goes back into pendingInputs (the
+        // Manufacturer still needs one) rather than being dropped — the
+        // item's own physics/mass get restored automatically by
+        // stepHeldItem's defensive release check, the same way the
+        // Refinery's identical branch above works.
+        data.pendingInputs.push(data.currentItemType);
+        data.heldItemId = null;
+        data.processing = false;
+        data.currentItemType = null;
+        data.progressMs = 0;
       } else {
         // Every ingredient type now costs SOME power to process (10-35mw,
         // see MANUFACTURER_ITEM_POWER_COST_MW) — unlike before, there's no
