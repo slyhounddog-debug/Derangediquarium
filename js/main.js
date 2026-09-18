@@ -186,6 +186,9 @@ import {
   closePlatformFilterMenu,
   isPlatformFilterMenuOpen,
   copyPlatformFilter,
+  toggleFavoriteForSelectedTool,
+  removeFavoriteAtHoveredSlot,
+  selectFavorite,
   pipetteSelectSpecies,
   pipetteSelectBuilding,
   deselectShopSelection,
@@ -328,6 +331,12 @@ const state = {
     achievementsClaimed: [],
     hatsUnlocked: ['none'], // 'none' (no hat) is always owned/free — see Config.js's HATS
     equippedHatId: 'none', // applies globally to every fish in the tank — see FishRenderer.js's drawFish
+    // 3 pinned "favorite" bottom-tool-bar slots (hotkeys 4-6) — per direct
+    // request. Each entry is a 'build:<id>'/'fish:<id>' tool string, or null
+    // for an empty slot; persisted like every other meta field. Set/cleared
+    // via UI.js's toggleFavoriteForSelectedTool (the F hotkey, in the shop)
+    // and removeFavoriteAtHoveredSlot (F while hovering a slot directly).
+    favorites: [null, null, null],
     // Lifetime counters/peaks/streaks every achievement's own statField
     // reads (Config.js's ACHIEVEMENTS) — persists across a restart same as
     // everything else in state.meta, since these represent real permanent
@@ -1270,6 +1279,17 @@ input.clickHandlers.push((sx, sy) => {
   // selected.
   if (blueprintClipboard != null) {
     const { col, row } = worldToTile(world.x, world.y);
+    const totalCost = computeBlueprintCost(state, col, row, blueprintClipboard);
+    if (totalCost > state.level.money) {
+      // All-or-nothing: an unaffordable paste attempt is rejected outright,
+      // same red-flash/cursor-text feedback an ordinary unaffordable single
+      // placement already gets — but the clipboard survives the rejection so
+      // the player can retry once they've got enough money, rather than
+      // losing the whole captured stamp on a single wasted click.
+      flashMoneyInsufficient(state);
+      showBuildError("Can't afford");
+      return;
+    }
     const placedCells = placeBlueprint(state, col, row, blueprintClipboard);
     for (const p of placedCells) pushUndoEntry({ type: 'place', col: p.col, row: p.row, buildingId: p.buildingId });
     blueprintClipboard = null;
@@ -1700,14 +1720,34 @@ input.keydownHandlers.push((e) => {
     case 'KeyK': // clear all items
       state.level.items = [];
       break;
-    case 'Digit1': // Food — matches the fixed bottom tool-bar's own hotkeys. Digit2 (Demolish) is deliberately gone, not renumbered — that tool was removed entirely, folded into Food's own D-hotkey delete (updateKeyDDelete)
+    case 'Digit1': // Food — matches the fixed bottom tool-bar's own hotkeys
       selectTool(state, 'food');
       break;
-    case 'Digit3': // Merge
+    case 'Digit2': // Merge — moved down to fill the old Demolish slot, per direct request, once Blueprint moved to 3 and Favorites took 4-6
       selectTool(state, 'merge');
       break;
-    case 'Digit4': // Blueprint ("Stamp") — see blueprintClipboard's own comment above
+    case 'Digit3': // Blueprint ("Stamp") — moved back to 3 per direct request, freeing 4-6 for the Favorite slots below — see blueprintClipboard's own comment above
       selectTool(state, 'blueprint');
+      break;
+    case 'Digit4': // Favorite slot 1
+      selectFavorite(state, 0);
+      break;
+    case 'Digit5': // Favorite slot 2
+      selectFavorite(state, 1);
+      break;
+    case 'Digit6': // Favorite slot 3
+      selectFavorite(state, 2);
+      break;
+    case 'KeyF': // Add/Remove Favorite — per direct request
+      // Hovering a favorite slot on the toolbar always means "remove
+      // whatever's there," regardless of what's currently selected in the
+      // shop — checked first; removeFavoriteAtHoveredSlot returns false
+      // (a genuine no-op, nothing removed) when the cursor isn't over any
+      // slot at all, in which case F instead toggles the CURRENTLY
+      // SELECTED shop tool's own favorite status (add if not already one,
+      // remove if it is — a no-op for Food/Merge/Blueprint/nothing
+      // selected, or if all 3 slots are already full).
+      if (!removeFavoriteAtHoveredSlot(state)) toggleFavoriteForSelectedTool(state);
       break;
     case 'KeyZ': // Ctrl+Z — undo the last building place/move/sell
       if (e.ctrlKey || e.metaKey) {

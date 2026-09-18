@@ -868,6 +868,16 @@ html, body {
    entirely (folded into the Food tool's own D-hotkey delete instead — see
    main.js's updateKeyDDelete). */
 .tool-btn:disabled { opacity: 0.4; cursor: not-allowed; filter: grayscale(0.6); }
+/* Favorite slots (3, hotkeys 4-6) — per direct request. An empty slot shows
+   a plain faint dashed star outline (UI.js's buildFavoriteSlots sets this
+   text content once and never touches it again for that slot until it's
+   actually filled); a filled one shows the real building/fish art via the
+   same drawBuildingIconCanvas/drawFishIconCanvas every shop icon already
+   uses, with .selected working exactly like it does on any other tool-bar
+   button. */
+.tool-btn-favorite { border-color: rgba(255, 184, 77, 0.35); } /* a faint gold tint distinguishes the 3 favorite slots as their own group from the 3 fixed tools beside them, even before .selected's own stronger gold border kicks in */
+.tool-btn-favorite-empty { font-size: 24px; color: rgba(107, 76, 107, 0.3); }
+.tool-btn-favorite-icon { display: block; border-radius: 10px; pointer-events: none; }
 .tool-icon { display: block; border-radius: 50%; }
 .tool-icon-food { width: 22px; height: 22px; background: #ffb238; box-shadow: 0 0 0 5px rgba(255, 178, 56, 0.3); } /* matches Config.js's FOOD_COLOR — was a green too close to Waste's own color to tell apart at a glance */
 .tool-btn-emoji { font-size: 26px; } /* the Merge button's 🧤 (Demolish's own 🔨 used this too, before that tool was removed) */

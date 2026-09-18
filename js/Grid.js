@@ -796,15 +796,19 @@ export function captureBlueprint(state, colA, rowA, colB, rowB) {
 }
 
 // Renders every captured cell as a translucent ghost anchored at
-// (baseCol, baseRow) — each cell tinted green/red by its OWN real,
-// cost-checked canPlaceTile result (not ignoreCost, unlike the single-
-// building move ghost) since pasting a stamp is a real purchase per
-// building, not a free relocation.
+// (baseCol, baseRow) — a cell's OWN real occupancy/bounds check (ignoreCost
+// — see computeBlueprintCost's own comment on why) tints it red regardless,
+// but even a genuinely empty cell now ALSO shows red the instant the
+// STAMP AS A WHOLE isn't affordable — per direct request ("if you can't
+// afford the entire blueprint, don't allow any of it to be placed"), so the
+// ghost never shows a misleadingly all-green preview for a paste that's
+// about to be silently rejected in full by placeBlueprint below.
 export function renderBlueprintGhost(ctx, state, baseCol, baseRow, cells) {
+  const canAffordWhole = computeBlueprintCost(state, baseCol, baseRow, cells) <= state.level.money;
   for (const cell of cells) {
     const col = baseCol + cell.dCol;
     const row = baseRow + cell.dRow;
-    const check = canPlaceTile(state, col, row, cell.buildingId);
+    const check = canPlaceTile(state, col, row, cell.buildingId, true);
     const screen = worldToScreen(col * TILE_SIZE, row * TILE_SIZE, state.camera);
     const size = TILE_SIZE * state.camera.zoom;
     const color = BUILDING_TYPES[cell.buildingId].color;
@@ -814,20 +818,28 @@ export function renderBlueprintGhost(ctx, state, baseCol, baseRow, cells) {
     ctx.restore();
     ctx.save();
     ctx.globalAlpha = 0.4;
-    ctx.fillStyle = check.ok ? '#7cff5a' : '#ff5a5a';
+    ctx.fillStyle = check.ok && canAffordWhole ? '#7cff5a' : '#ff5a5a';
     ctx.fillRect(screen.x, screen.y, size, size);
     ctx.restore();
   }
 }
 
-// Commits a blueprint stamp at (baseCol, baseRow) — places every captured
-// cell that's both empty and affordable (a real purchase per building, see
-// captureBlueprint's own comment), silently skipping any cell that isn't —
-// per direct spec, "for placement where there are no overlapping
-// buildings." Returns the list of cells actually placed so main.js can
-// push one Ctrl+Z undo entry per real placement, same as any other
-// individual building purchase.
+// Commits a blueprint stamp at (baseCol, baseRow) — per direct request
+// ("if you can't afford the entire blueprint, don't allow any of the
+// blueprint to be placed, instead of buying what can be afforded"), this is
+// now genuinely all-or-nothing on cost: if the stamp's real total (every
+// cell that COULD physically go down, occupancy/bounds permitting — see
+// computeBlueprintCost) exceeds current money, nothing is placed at all and
+// nothing is spent. Once that gate passes, the actual placement loop still
+// silently skips any individual cell that's occupied/out of bounds — "for
+// placement where there are no overlapping buildings" — since that's a
+// genuinely different concern (can't build there at all) from affordability
+// (could build there, just not paid for). Returns the list of cells
+// actually placed so main.js can push one Ctrl+Z undo entry per real
+// placement, same as any other individual building purchase.
 export function placeBlueprint(state, baseCol, baseRow, cells) {
+  const totalCost = computeBlueprintCost(state, baseCol, baseRow, cells);
+  if (totalCost > state.level.money) return [];
   const placedCells = [];
   for (const cell of cells) {
     const col = baseCol + cell.dCol;
@@ -843,23 +855,27 @@ export function placeBlueprint(state, baseCol, baseRow, cells) {
 
 // Live total cost of pasting a captured stamp at (baseCol, baseRow) — per
 // direct request, shown as a cost bubble while the stamp follows the
-// cursor. Mirrors placeBlueprint's own skip rule exactly (a cell
-// canPlaceTile would reject — occupied, out of bounds — costs nothing and
-// isn't counted, same as it silently isn't placed), and mirrors
-// getBuildingCost's own compounding formula, but tracks a hypothetical
-// extra count per building type AS IT WALKS THE LIST — placeBlueprint
-// places cells one at a time, so a stamp with several of the exact same
-// building genuinely costs more for the 2nd/3rd/... one than the live grid
-// count alone would suggest, since each successive placement raises the
-// next one's own live cost the same way placing them one at a time by hand
-// would.
+// cursor, AND the one source of truth placeBlueprint's own all-or-nothing
+// affordability gate checks against. A cell is only ever excluded from this
+// total for a genuine "can't build there at all" reason — occupied, out of
+// bounds — checked with ignoreCost:true deliberately, so an individual
+// cell's own real-time affordability against not-yet-decremented money
+// never silently drops it from the count (the whole point of this total is
+// to answer "what would the ENTIRE stamp cost," not "what does whatever
+// happens to already be affordable cost"). Mirrors getBuildingCost's own
+// compounding formula, but tracks a hypothetical extra count per building
+// type AS IT WALKS THE LIST — placeBlueprint places cells one at a time, so
+// a stamp with several of the exact same building genuinely costs more for
+// the 2nd/3rd/... one than the live grid count alone would suggest, since
+// each successive placement raises the next one's own live cost the same
+// way placing them one at a time by hand would.
 export function computeBlueprintCost(state, baseCol, baseRow, cells) {
   let total = 0;
   const extraCounts = {};
   for (const cell of cells) {
     const col = baseCol + cell.dCol;
     const row = baseRow + cell.dRow;
-    if (!canPlaceTile(state, col, row, cell.buildingId).ok) continue;
+    if (!canPlaceTile(state, col, row, cell.buildingId, true).ok) continue;
     const building = BUILDING_TYPES[cell.buildingId];
     if (!building) continue;
     if (PLATFORM_FLAT_COST_TILES.has(cell.buildingId)) { total += PLATFORM_FLAT_COST; continue; }

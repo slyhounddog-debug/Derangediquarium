@@ -138,15 +138,19 @@
      request. Small white text, dynamically re-worded by UI.js's updateHUD
      every frame: E flips between "Open Shop"/"Close Shop" (state.ui.
      shopCollapsed), Q between "Pipette Tool"/"Clear Cursor" (whether a
-     build:/fish: tool is currently armed), Esc between "Pause Game"/"Clear
+     build:/fish: tool is currently armed), F between "Add Favorite"/
+     "Remove Favorite" (hidden entirely when F would have nothing to do —
+     see UI.js's own favoriteLegendText), Esc between "Pause Game"/"Clear
      Cursor" (whether Escape currently has a popup/panel/tool to close
-     instead of opening the pause menu) — see main.js's KeyE/KeyQ handlers
-     and Escape's own keydown branch for what each actually does. The
-     dedicated pause-menu button (#pause-toggle-btn) was removed per direct
-     request — Escape is the only way to open/close the pause menu now. -->
+     instead of opening the pause menu) — see main.js's KeyE/KeyQ/KeyF
+     handlers and Escape's own keydown branch for what each actually does.
+     The dedicated pause-menu button (#pause-toggle-btn) was removed per
+     direct request — Escape is the only way to open/close the pause menu
+     now. -->
 <div id="hotkey-legend">
   <div id="hotkey-legend-e">E: Open Shop</div>
   <div id="hotkey-legend-q">Q: Pipette Tool</div>
+  <div id="hotkey-legend-f" class="hidden">F: Add Favorite</div>
   <div id="hotkey-legend-esc">Esc: Pause Game</div>
   <div id="hotkey-legend-undo" class="hidden">Ctrl+Z: Undo</div>
 </div>
@@ -333,10 +337,18 @@
     <button id="tool-food-btn" class="tool-btn sheen-target" title="Food — $3 (1) — hover a building and press D (or hold D and drag) to delete it for a full refund">
       <span class="tool-icon tool-icon-food"></span>
     </button>
-    <button id="tool-merge-btn" class="tool-btn sheen-target tool-btn-emoji" title="Merge — select this, then drag one Adult fish onto a matching one to combine or splice it (3)">🧤</button>
-    <button id="tool-blueprint-btn" class="tool-btn sheen-target" title="Blueprint — drag a box over built buildings to copy them, then click to paste that layout elsewhere (4)">
+    <button id="tool-merge-btn" class="tool-btn sheen-target tool-btn-emoji" title="Merge — select this, then drag one Adult fish onto a matching one to combine or splice it (2)">🧤</button>
+    <button id="tool-blueprint-btn" class="tool-btn sheen-target" title="Blueprint — drag a box over built buildings to copy them, then click to paste that layout elsewhere (3)">
       <span class="tool-icon tool-icon-blueprint"></span>
     </button>
+    <!-- 3 Favorite slots — per direct request: pick a fish/building in the
+         shop and press F to pin it here (F again removes it), or hover one
+         of these 3 buttons and press F to remove whatever's in it directly.
+         Empty/filled content and hotkeys (4/5/6) are all populated live by
+         UI.js's buildFavoriteSlots/refreshFavoriteSlots. -->
+    <button id="tool-favorite-1-btn" class="tool-btn sheen-target tool-btn-favorite"></button>
+    <button id="tool-favorite-2-btn" class="tool-btn sheen-target tool-btn-favorite"></button>
+    <button id="tool-favorite-3-btn" class="tool-btn sheen-target tool-btn-favorite"></button>
   </div>
 
   <div id="tank-anchor">

@@ -340,6 +340,12 @@ export function initUI(state) {
     toolFoodBtn: document.getElementById('tool-food-btn'),
     toolMergeBtn: document.getElementById('tool-merge-btn'),
     toolBlueprintBtn: document.getElementById('tool-blueprint-btn'),
+    favoriteSlotBtns: [
+      document.getElementById('tool-favorite-1-btn'),
+      document.getElementById('tool-favorite-2-btn'),
+      document.getElementById('tool-favorite-3-btn'),
+    ],
+    hotkeyLegendF: document.getElementById('hotkey-legend-f'),
     buildToolGrid: document.getElementById('build-tool-grid'),
     pauseOverlay: document.getElementById('pause-overlay'),
     pauseMenu: document.getElementById('pause-menu'),
@@ -601,6 +607,7 @@ export function initUI(state) {
   updateTankPanelCollapse(state);
   buildShopPanel(state);
   buildBuildPalette(state);
+  buildFavoriteSlots(state);
   buildTankPanel(state);
   buildAchievementPanel(state);
   buildCustomizationPanel(state);
@@ -2181,6 +2188,128 @@ function updateToolbar(state) {
   for (const btn of els.shopGrid.children) {
     btn.classList.toggle('selected', state.ui.selectedTool === btn.dataset.tool);
   }
+  // Favorite slots highlight the exact same way — each button's own
+  // dataset.tool (set by refreshFavoriteSlots, empty string for an unfilled
+  // slot) is compared against the live selected tool every frame.
+  for (const btn of els.favoriteSlotBtns) {
+    btn.classList.toggle('selected', !!btn.dataset.tool && state.ui.selectedTool === btn.dataset.tool);
+  }
+}
+
+// ---- Favorite toolbar slots ----
+// Per direct request: 3 extra bottom-tool-bar slots (hotkeys 4-6) a player
+// can pin any fish or building into. state.meta.favorites is a plain
+// 3-element array — each entry a 'build:<id>'/'fish:<id>' tool string or
+// null for an empty slot — persisted like every other meta field (survives
+// a level change/save, same as an equipped hat).
+export function isFavorite(state, tool) {
+  return state.meta.favorites.includes(tool);
+}
+
+// Built once at init — click-to-select handlers never change, only the
+// icon/title content each button shows (see refreshFavoriteSlots).
+function buildFavoriteSlots(state) {
+  els.favoriteSlotBtns.forEach((btn, index) => {
+    btn.addEventListener('click', () => selectFavorite(state, index));
+  });
+  refreshFavoriteSlots(state);
+}
+
+// Rebuilds every favorite slot's own icon/title from state.meta.favorites —
+// called once at init and again any time the list actually changes (a
+// toggle/removal), NOT every frame (nothing here needs to be, unlike the
+// plain .selected highlight in updateToolbar above).
+function refreshFavoriteSlots(state) {
+  els.favoriteSlotBtns.forEach((btn, index) => {
+    const tool = state.meta.favorites[index];
+    const hotkeyNum = index + 4; // slots are hotkeys 4/5/6
+    btn.innerHTML = '';
+    if (!tool) {
+      btn.dataset.tool = '';
+      btn.title = `Empty favorite slot (${hotkeyNum}) — select a fish or building in the shop and press F to pin it here`;
+      const placeholder = document.createElement('span');
+      placeholder.className = 'tool-btn-favorite-empty';
+      placeholder.textContent = '☆';
+      btn.appendChild(placeholder);
+      return;
+    }
+    btn.dataset.tool = tool;
+    const isBuilding = tool.startsWith('build:');
+    const id = tool.slice(tool.indexOf(':') + 1);
+    const icon = document.createElement('canvas');
+    icon.className = 'tool-btn-favorite-icon';
+    icon.width = BUILDING_ICON_CANVAS_SIZE;
+    icon.height = BUILDING_ICON_CANVAS_SIZE;
+    let name = id;
+    if (isBuilding) {
+      drawBuildingIconCanvas(icon, id);
+      name = BUILDING_TYPES[id] ? BUILDING_TYPES[id].name : id;
+    } else {
+      drawFishIconCanvas(icon, id);
+      name = SPECIES[id] ? SPECIES[id].name : id;
+    }
+    btn.title = `${name} — favorite (${hotkeyNum}) — hover this slot and press F to remove it`;
+    btn.appendChild(icon);
+  });
+}
+
+// F pressed while the shop's own current selection is a build:/fish: tool —
+// per direct spec: adds it to the first empty slot, or removes it if it's
+// already favorited. A no-op for any other tool (Food/Merge/Blueprint/
+// nothing selected), and a no-op if all 3 slots are already full and this
+// isn't already one of them — a hard cap, deliberately no auto-replace of
+// an existing favorite.
+export function toggleFavoriteForSelectedTool(state) {
+  const tool = state.ui.selectedTool;
+  if (!tool.startsWith('build:') && !tool.startsWith('fish:')) return;
+  const idx = state.meta.favorites.indexOf(tool);
+  if (idx !== -1) {
+    state.meta.favorites[idx] = null;
+  } else {
+    const emptyIdx = state.meta.favorites.indexOf(null);
+    if (emptyIdx === -1) return; // all 3 full — hard cap
+    state.meta.favorites[emptyIdx] = tool;
+  }
+  refreshFavoriteSlots(state);
+}
+
+// Real DOM :hover check — the simplest reliable way to answer "is the mouse
+// over this exact fixed toolbar button right now," at the exact synchronous
+// moment a keydown fires, without a separate mouseenter/mouseleave-tracked
+// flag. Returns 0/1/2, or -1 if the cursor isn't over any favorite slot.
+// Used both by removeFavoriteAtHoveredSlot below and updateHUD's own F
+// legend text, both in this same module.
+function getHoveredFavoriteSlotIndex() {
+  for (let i = 0; i < els.favoriteSlotBtns.length; i++) {
+    if (els.favoriteSlotBtns[i].matches(':hover')) return i;
+  }
+  return -1;
+}
+
+// F pressed while hovering a favorite slot on the toolbar — per direct
+// spec, this ALWAYS removes (never adds), regardless of what's currently
+// selected in the shop. Returns true if it actually removed something, so
+// main.js's keydown handler can tell "F did the toolbar-hover thing" from
+// "fall through to the shop-selection meaning" without duplicating this
+// same hover check itself.
+export function removeFavoriteAtHoveredSlot(state) {
+  const idx = getHoveredFavoriteSlotIndex();
+  if (idx === -1 || state.meta.favorites[idx] == null) return false;
+  state.meta.favorites[idx] = null;
+  refreshFavoriteSlots(state);
+  return true;
+}
+
+// Arms a favorite slot's own tool exactly as if its real shop icon had been
+// clicked — reuses pipetteSelectBuilding/pipetteSelectSpecies (already
+// thin wrappers around selectBuildingForPreview/selectSpeciesForPreview,
+// the exact same functions a real shop click calls) rather than duplicating
+// that selection logic a third time.
+export function selectFavorite(state, index) {
+  const tool = state.meta.favorites[index];
+  if (!tool) return;
+  if (tool.startsWith('build:')) pipetteSelectBuilding(state, tool.slice('build:'.length));
+  else if (tool.startsWith('fish:')) pipetteSelectSpecies(state, tool.slice('fish:'.length));
 }
 
 // familyId -> { btn, iconSpan, priceTag, dotsWrap, memberIds } for every
@@ -3797,6 +3926,26 @@ export function updateHUD(state) {
   els.hotkeyLegendQ.textContent = state.ui.blueprintClipboardActive
     ? 'Q: Clear Blueprint'
     : (toolIsPurchasable ? 'Q: Clear Cursor' : 'Q: Pipette/ Last-used Tool');
+  // F — dynamically "Add Favorite"/"Remove Favorite", hidden entirely
+  // whenever F would genuinely have nothing to do, per direct request
+  // ("having it dynamically change between add/remove depending on what
+  // the action will do in that instance"). Mirrors main.js's own KeyF
+  // handler's exact decision tree — hovering a favorite slot always means
+  // remove (even an already-empty one, which just hides the line, since
+  // there's nothing there to remove); otherwise it's whatever the current
+  // shop selection would do (add if a build:/fish: tool isn't already
+  // favorited, remove if it is, hidden if there's no such tool selected or
+  // all 3 slots are already full).
+  const hoveredFavoriteIdx = getHoveredFavoriteSlotIndex();
+  let favoriteLegendText = null;
+  if (hoveredFavoriteIdx !== -1) {
+    if (state.meta.favorites[hoveredFavoriteIdx] != null) favoriteLegendText = 'Remove Favorite';
+  } else if (state.ui.selectedTool.startsWith('build:') || state.ui.selectedTool.startsWith('fish:')) {
+    if (isFavorite(state, state.ui.selectedTool)) favoriteLegendText = 'Remove Favorite';
+    else if (state.meta.favorites.includes(null)) favoriteLegendText = 'Add Favorite';
+  }
+  els.hotkeyLegendF.classList.toggle('hidden', favoriteLegendText === null);
+  if (favoriteLegendText !== null) els.hotkeyLegendF.textContent = `F: ${favoriteLegendText}`;
   // Ctrl+Z — shown only while there's actually something to undo (main.js
   // writes state.ui.undoAvailable/undoLabel every time its own undo stack
   // changes — see that file's pushUndoEntry/performUndo).
