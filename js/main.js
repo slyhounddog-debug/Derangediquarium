@@ -97,6 +97,8 @@ import {
   BOSS_DEFEATED_MODAL_DELAY_MS,
   TURRET_TUTORIAL_GOLD_GRANT,
   TURRET_TUTORIAL_GOLD_GRANT_MESSAGE,
+  TILE_MANUFACTURER,
+  TILE_POWER_PLANT,
 } from './Config.js';
 import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop } from './Engine.js';
 import { pushGameNotification } from './Notifications.js';
@@ -647,6 +649,17 @@ let itemDragMoved = false; // set once at mouseup — read (and cleared) by the 
 // pop-up, so without this the very same click that placed the turret would
 // immediately reopen its info modal on top of it.
 let suppressTutorialTurretPlacementClick = false;
+// Set true the instant updateBuildDrag places a fresh Manufacturer or Power
+// Plant. Per direct request, a Manufacturer/Power Plant's recipe pop-up
+// shouldn't pop open the very instant it's placed — that would prevent
+// drag-to-place with these buildings, since getRecipeBuildingKeyAt (below)
+// deliberately ignores the currently selected tool so the pop-up can be
+// reopened later regardless of what's armed, which also means the native
+// click that follows this same placement's mousedown would otherwise
+// immediately reopen it. Consumed (and cleared) by the click handler's own
+// check, same pattern as suppressTutorialTurretPlacementClick above — a
+// separate, later click is what actually opens the recipe menu.
+let suppressRecipeMenuAfterPlacementClick = false;
 // Short rolling history of the cursor's own raw world position while a drag
 // is active — see updateItemDrag's own comment for why release velocity is
 // now averaged over this window instead of read off a single tick's delta.
@@ -1238,6 +1251,13 @@ input.clickHandlers.push((sx, sy) => {
     // fires, which strips the "!effectiveTool.startsWith('build:')" guard
     // below that normally protects an ordinary placement's own click.
     suppressTutorialTurretPlacementClick = false;
+    return;
+  }
+  if (suppressRecipeMenuAfterPlacementClick) {
+    // The same native mouseup/click that just placed a fresh Manufacturer or
+    // Power Plant — see this flag's own comment above for why it would
+    // otherwise immediately reopen that building's own recipe pop-up.
+    suppressRecipeMenuAfterPlacementClick = false;
     return;
   }
   const world = screenToWorld(sx, sy, state.camera);
@@ -2013,6 +2033,9 @@ function updateBuildDrag() {
   if (!check.ok) handleBuildPlacementFailure(check.reason);
   const placed = placeTile(state, col, row, buildingId, angle);
   if (placed) pushUndoEntry({ type: 'place', col, row, buildingId });
+  if (placed && (buildingId === TILE_MANUFACTURER || buildingId === TILE_POWER_PLANT)) {
+    suppressRecipeMenuAfterPlacementClick = true;
+  }
   // Post-alien guided tutorial's final step — any successful Turret
   // placement (the family's currently-armed tier, forced to the base Waste
   // Turret when this step's own icon was selected — see UI.js's

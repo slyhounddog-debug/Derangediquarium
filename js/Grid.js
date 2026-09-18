@@ -40,6 +40,17 @@ import {
   MANUFACTURER_ITEM_PROCESS_MS,
   MANUFACTURER_INPUT_COLOR_BY_TYPE,
   MANUFACTURER_ITEM_POWER_COST_MW,
+  FOOD_COLOR,
+  BIOMASS_COLOR,
+  BIOMASS_COLOR_CORE,
+  ALIEN_DNA_COLOR,
+  MUTAGEN_PASTE_COLOR,
+  ALIEN_EGG_COLOR,
+  ALIEN_EGG_RING_COLOR,
+  SCIENCE_ITEM_COLOR_A,
+  SCIENCE_ITEM_COLOR_B,
+  SCIENCE_GREEN_COLOR_A,
+  SCIENCE_GREEN_COLOR_B,
   POWER_PLANT_RECIPES,
   POWER_PLANT_STATS,
   PROCESS_DOTS_COUNT,
@@ -2924,6 +2935,133 @@ function renderPowerPlantIcon(ctx, x, y, size, color) {
   ctx.stroke();
 }
 
+// Real drawn item art for the recipe signage plaque below — not a generic
+// swatch or a copy of the recipe's own emoji. Duplicated here rather than
+// imported, same "Grid.js can't reach into main.js/UI.js's own per-item
+// render code" reasoning UI.js's own drawItemIconCanvas already documents
+// for the identical need — simplified to a flat/gradient circle (or, for
+// the Alien Egg, its own shell-plus-ring look) rather than every exact
+// highlight/rim detail those two files draw, since this renders small.
+// Only ever called with one of the 7 item types an actual Manufacturer
+// output or Power Plant fuel can be (see MANUFACTURER_RECIPES/
+// POWER_PLANT_RECIPES) — anything else falls through to the plain Food look.
+function renderRecipePlaqueIcon(ctx, itemType, cx, cy, r) {
+  if (itemType === 'science' || itemType === 'science_green') {
+    const colorA = itemType === 'science_green' ? SCIENCE_GREEN_COLOR_A : SCIENCE_ITEM_COLOR_A;
+    const colorB = itemType === 'science_green' ? SCIENCE_GREEN_COLOR_B : SCIENCE_ITEM_COLOR_B;
+    const grad = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.3, r * 0.1, cx, cy, r);
+    grad.addColorStop(0, colorA);
+    grad.addColorStop(1, colorB);
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
+    ctx.lineWidth = Math.max(1, r * 0.14);
+    ctx.stroke();
+    return;
+  }
+  if (itemType === 'biomass') {
+    const grad = ctx.createRadialGradient(cx - r * 0.25, cy - r * 0.25, r * 0.1, cx, cy, r);
+    grad.addColorStop(0, BIOMASS_COLOR_CORE);
+    grad.addColorStop(1, BIOMASS_COLOR);
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = grad;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.lineWidth = Math.max(1, r * 0.14);
+    ctx.stroke();
+    return;
+  }
+  if (itemType === 'alien_egg') {
+    ctx.beginPath();
+    ctx.ellipse(cx, cy, r * 0.72, r, 0, 0, Math.PI * 2);
+    ctx.fillStyle = ALIEN_EGG_COLOR;
+    ctx.fill();
+    ctx.strokeStyle = ALIEN_EGG_RING_COLOR;
+    ctx.lineWidth = Math.max(1, r * 0.18);
+    ctx.stroke();
+    return;
+  }
+  // Bio-Sludge (alien_dna), Mutagen Paste, or Food — a plain flat-filled
+  // circle plus a dark rim and a small glossy highlight.
+  const flatColor = itemType === 'mutagen_paste' ? MUTAGEN_PASTE_COLOR
+    : itemType === 'alien_dna' ? ALIEN_DNA_COLOR
+    : FOOD_COLOR;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fillStyle = flatColor;
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
+  ctx.lineWidth = Math.max(1, r * 0.14);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(cx - r * 0.28, cy - r * 0.28, r * 0.28, 0, Math.PI * 2);
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+  ctx.fill();
+}
+
+// A small painted signage plaque, shown ONLY once a Manufacturer/Power
+// Plant has an active recipe actually chosen — per direct request ("add a
+// painted signage plaque on manufacturers and powerplants that show up only
+// when a recipe is chosen, and had a real object icon on the plaque to
+// denote the recipe chosen for the building"). Mounted low on the tile's
+// own face, a plain painted wooden plank with a dark frame and a couple of
+// grain lines, holding the recipe's own real item icon (renderRecipePlaqueIcon
+// above) dead center — the item shown is whatever the recipe actually
+// revolves around: a Manufacturer recipe's own `output`, or — since a Power
+// Plant recipe has no output item at all, it credits power directly — its
+// fuel `inputs[0]` instead, the exact same convention the recipe pop-up's
+// own real-item icons already established (see UI.js's refreshRecipeMenu).
+function renderRecipePlaque(ctx, type, x, y, size, data) {
+  if (!data || data.recipeId == null) return;
+  const recipe = type === TILE_MANUFACTURER ? MANUFACTURER_RECIPES[data.recipeId]
+    : type === TILE_POWER_PLANT ? POWER_PLANT_RECIPES[data.recipeId]
+    : null;
+  if (!recipe) return;
+  const itemType = type === TILE_MANUFACTURER ? recipe.output : recipe.inputs[0];
+
+  // Deliberately shifted to the tile's bottom-LEFT, not centered — the
+  // bottom-right corner is already home to the "stalled" badge
+  // (renderStalledBadge, an idle/no-recipe Manufacturer or Power Plant), and
+  // a recipe can genuinely be chosen while still idle between ingredients,
+  // so the two would otherwise visually collide right when both are true.
+  const plaqueW = size * 0.44;
+  const plaqueH = size * 0.2;
+  const plaqueX = x + size * 0.08;
+  const plaqueY = y + size * 0.86 - plaqueH / 2;
+
+  ctx.fillStyle = '#8a6a3f';
+  ctx.fillRect(plaqueX, plaqueY, plaqueW, plaqueH);
+  ctx.strokeStyle = '#3d2c17';
+  ctx.lineWidth = Math.max(1, size * 0.025);
+  ctx.strokeRect(plaqueX, plaqueY, plaqueW, plaqueH);
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.18)';
+  ctx.lineWidth = Math.max(1, size * 0.008);
+  for (let i = 1; i < 3; i++) {
+    const gy = plaqueY + (plaqueH * i) / 3;
+    ctx.beginPath();
+    ctx.moveTo(plaqueX + plaqueW * 0.06, gy);
+    ctx.lineTo(plaqueX + plaqueW * 0.94, gy);
+    ctx.stroke();
+  }
+  // small mounting rivets at each corner of the plaque
+  const rivetR = Math.max(0.6, size * 0.018);
+  for (const [rx, ry] of [
+    [plaqueX + plaqueW * 0.08, plaqueY + plaqueH * 0.5],
+    [plaqueX + plaqueW * 0.92, plaqueY + plaqueH * 0.5],
+  ]) {
+    ctx.beginPath();
+    ctx.arc(rx, ry, rivetR, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(20, 14, 8, 0.6)';
+    ctx.fill();
+  }
+
+  const iconR = plaqueH * 0.36;
+  renderRecipePlaqueIcon(ctx, itemType, plaqueX + plaqueW / 2, plaqueY + plaqueH / 2, iconR);
+}
+
 // Platform's own distinct look, per direct request ("make the platforms
 // look more like simple bricks") — replaces the generic bevel-square shape
 // every other building starts from. A real 2-row offset brick course (a
@@ -3084,8 +3222,10 @@ export function renderTileShape(ctx, type, color, x, y, size, data) {
     renderTierBadge(ctx, type, x, y, size);
   } else if (type === TILE_MANUFACTURER) {
     renderManufacturerIcon(ctx, x, y, size, color);
+    renderRecipePlaque(ctx, type, x, y, size, data);
   } else if (type === TILE_POWER_PLANT) {
     renderPowerPlantIcon(ctx, x, y, size, color);
+    renderRecipePlaque(ctx, type, x, y, size, data);
   } else {
     ctx.fillStyle = color;
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
