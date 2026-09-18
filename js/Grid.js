@@ -2935,17 +2935,17 @@ function renderPowerPlantIcon(ctx, x, y, size, color) {
   ctx.stroke();
 }
 
-// Real drawn item art for the recipe signage plaque below — not a generic
-// swatch or a copy of the recipe's own emoji. Duplicated here rather than
-// imported, same "Grid.js can't reach into main.js/UI.js's own per-item
-// render code" reasoning UI.js's own drawItemIconCanvas already documents
-// for the identical need — simplified to a flat/gradient circle (or, for
-// the Alien Egg, its own shell-plus-ring look) rather than every exact
-// highlight/rim detail those two files draw, since this renders small.
+// Real drawn item art marking a Manufacturer/Power Plant's chosen recipe —
+// not a generic swatch or a copy of the recipe's own emoji. Duplicated here
+// rather than imported, same "Grid.js can't reach into main.js/UI.js's own
+// per-item render code" reasoning UI.js's own drawItemIconCanvas already
+// documents for the identical need — simplified to a flat/gradient circle
+// (or, for the Alien Egg, its own shell-plus-ring look) rather than every
+// exact highlight/rim detail those two files draw, since this renders small.
 // Only ever called with one of the 7 item types an actual Manufacturer
 // output or Power Plant fuel can be (see MANUFACTURER_RECIPES/
 // POWER_PLANT_RECIPES) — anything else falls through to the plain Food look.
-function renderRecipePlaqueIcon(ctx, itemType, cx, cy, r) {
+function renderRecipeItemIcon(ctx, itemType, cx, cy, r) {
   if (itemType === 'science' || itemType === 'science_green') {
     const colorA = itemType === 'science_green' ? SCIENCE_GREEN_COLOR_A : SCIENCE_ITEM_COLOR_A;
     const colorB = itemType === 'science_green' ? SCIENCE_GREEN_COLOR_B : SCIENCE_ITEM_COLOR_B;
@@ -3002,19 +3002,20 @@ function renderRecipePlaqueIcon(ctx, itemType, cx, cy, r) {
   ctx.fill();
 }
 
-// A small painted signage plaque, shown ONLY once a Manufacturer/Power
-// Plant has an active recipe actually chosen — per direct request ("add a
-// painted signage plaque on manufacturers and powerplants that show up only
-// when a recipe is chosen, and had a real object icon on the plaque to
-// denote the recipe chosen for the building"). Mounted low on the tile's
-// own face, a plain painted wooden plank with a dark frame and a couple of
-// grain lines, holding the recipe's own real item icon (renderRecipePlaqueIcon
-// above) dead center — the item shown is whatever the recipe actually
-// revolves around: a Manufacturer recipe's own `output`, or — since a Power
-// Plant recipe has no output item at all, it credits power directly — its
-// fuel `inputs[0]` instead, the exact same convention the recipe pop-up's
-// own real-item icons already established (see UI.js's refreshRecipeMenu).
-function renderRecipePlaque(ctx, type, x, y, size, data) {
+// A recipe identifier marking a Manufacturer/Power Plant's chosen recipe —
+// shown ONLY once one is actually chosen. Originally a small painted
+// signage plaque (a wooden plank behind the icon); per direct follow-up
+// request ("remove the plaque from the recipe identifiers... leave just the
+// object, and increase the size of the object identifier"), the plank/
+// frame/grain-lines/rivets are gone entirely — just the recipe's own real
+// item icon (renderRecipeItemIcon above), on its own, at roughly double its
+// former radius now that it's no longer boxed into a small plaque. The item
+// shown is whatever the recipe actually revolves around: a Manufacturer
+// recipe's own `output`, or — since a Power Plant recipe has no output item
+// at all, it credits power directly — its fuel `inputs[0]` instead, the
+// exact same convention the recipe pop-up's own real-item icons already
+// established (see UI.js's refreshRecipeMenu).
+function renderRecipeIcon(ctx, type, x, y, size, data) {
   if (!data || data.recipeId == null) return;
   const recipe = type === TILE_MANUFACTURER ? MANUFACTURER_RECIPES[data.recipeId]
     : type === TILE_POWER_PLANT ? POWER_PLANT_RECIPES[data.recipeId]
@@ -3022,44 +3023,17 @@ function renderRecipePlaque(ctx, type, x, y, size, data) {
   if (!recipe) return;
   const itemType = type === TILE_MANUFACTURER ? recipe.output : recipe.inputs[0];
 
-  // Deliberately shifted to the tile's bottom-LEFT, not centered — the
+  // Deliberately shifted toward the tile's bottom-left, not centered — the
   // bottom-right corner is already home to the "stalled" badge
   // (renderStalledBadge, an idle/no-recipe Manufacturer or Power Plant), and
   // a recipe can genuinely be chosen while still idle between ingredients,
-  // so the two would otherwise visually collide right when both are true.
-  const plaqueW = size * 0.44;
-  const plaqueH = size * 0.2;
-  const plaqueX = x + size * 0.08;
-  const plaqueY = y + size * 0.86 - plaqueH / 2;
-
-  ctx.fillStyle = '#8a6a3f';
-  ctx.fillRect(plaqueX, plaqueY, plaqueW, plaqueH);
-  ctx.strokeStyle = '#3d2c17';
-  ctx.lineWidth = Math.max(1, size * 0.025);
-  ctx.strokeRect(plaqueX, plaqueY, plaqueW, plaqueH);
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.18)';
-  ctx.lineWidth = Math.max(1, size * 0.008);
-  for (let i = 1; i < 3; i++) {
-    const gy = plaqueY + (plaqueH * i) / 3;
-    ctx.beginPath();
-    ctx.moveTo(plaqueX + plaqueW * 0.06, gy);
-    ctx.lineTo(plaqueX + plaqueW * 0.94, gy);
-    ctx.stroke();
-  }
-  // small mounting rivets at each corner of the plaque
-  const rivetR = Math.max(0.6, size * 0.018);
-  for (const [rx, ry] of [
-    [plaqueX + plaqueW * 0.08, plaqueY + plaqueH * 0.5],
-    [plaqueX + plaqueW * 0.92, plaqueY + plaqueH * 0.5],
-  ]) {
-    ctx.beginPath();
-    ctx.arc(rx, ry, rivetR, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(20, 14, 8, 0.6)';
-    ctx.fill();
-  }
-
-  const iconR = plaqueH * 0.36;
-  renderRecipePlaqueIcon(ctx, itemType, plaqueX + plaqueW / 2, plaqueY + plaqueH / 2, iconR);
+  // so the two would otherwise visually collide right when both are true;
+  // this position also stays clear of the left-edge process-progress dots
+  // and the Manufacturer's own center ghost-flash circle.
+  const cx = x + size * 0.34;
+  const cy = y + size * 0.86;
+  const r = size * 0.14;
+  renderRecipeItemIcon(ctx, itemType, cx, cy, r);
 }
 
 // Platform's own distinct look, per direct request ("make the platforms
@@ -3222,10 +3196,10 @@ export function renderTileShape(ctx, type, color, x, y, size, data) {
     renderTierBadge(ctx, type, x, y, size);
   } else if (type === TILE_MANUFACTURER) {
     renderManufacturerIcon(ctx, x, y, size, color);
-    renderRecipePlaque(ctx, type, x, y, size, data);
+    renderRecipeIcon(ctx, type, x, y, size, data);
   } else if (type === TILE_POWER_PLANT) {
     renderPowerPlantIcon(ctx, x, y, size, color);
-    renderRecipePlaque(ctx, type, x, y, size, data);
+    renderRecipeIcon(ctx, type, x, y, size, data);
   } else {
     ctx.fillStyle = color;
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
