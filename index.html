@@ -91,19 +91,19 @@
 </div>
 
 <!-- Minimal minimap, per direct request — sits directly under #hud, same
-     right-aligned corner. #minimap-canvas's own pixel size is driven live by
-     main.js's renderMinimap (it resizes the canvas's real width/height
-     attributes between the two display modes — "zoom to fit the whole tank"
-     when minimized vs "fit to width" when expanded — CSS alone can't do that
-     resize since a canvas's internal resolution and its CSS display size are
-     two different things). The 3 buttons directly beneath it — expand/
-     minimize, Pause Time, 2x Speed — sit in one row per direct request. -->
+     right-aligned corner. #minimap-canvas always renders the whole tank
+     letterboxed to fit its own small fixed box (main.js's renderMinimap).
+     The 4 buttons directly beneath it — per direct request, tank-viewport
+     zoom expand/minimize (NOT the minimap's own size — that's a fixed
+     single size now), Pause Time, 2x Speed, and the pause-menu hamburger —
+     sit in one row. -->
 <div id="minimap-wrap">
   <canvas id="minimap-canvas" title="Click to jump there"></canvas>
   <div id="minimap-controls">
-    <button id="minimap-expand-btn" class="minimap-ctrl-btn sheen-target" title="Expand minimap">⤢</button>
+    <button id="minimap-expand-btn" class="minimap-ctrl-btn sheen-target" title="Zoom to fit the whole tank">⤢</button>
     <button id="time-pause-btn" class="minimap-ctrl-btn sheen-target" title="Pause Time (Space)">⏸️</button>
     <button id="time-speed-btn" class="minimap-ctrl-btn sheen-target" title="2x Speed (X)">⏩</button>
+    <button id="pause-menu-btn" class="minimap-ctrl-btn sheen-target" title="Menu (Esc)">☰</button>
   </div>
 </div>
 
@@ -154,22 +154,27 @@
 <!-- Persistent, always-on hotkey reminder, bottom-left corner — per direct
      request. Small white text, dynamically re-worded by UI.js's updateHUD
      every frame: E flips between "Open Shop"/"Close Shop" (state.ui.
-     shopCollapsed), Q between "Pipette Tool"/"Clear Cursor" (whether a
-     build:/fish: tool is currently armed), F between "Add Favorite"/
-     "Remove Favorite" (hidden entirely when F would have nothing to do —
-     see UI.js's own favoriteLegendText), Esc between "Pause Game"/"Clear
-     Cursor" (whether Escape currently has a popup/panel/tool to close
-     instead of opening the pause menu) — see main.js's KeyE/KeyQ/KeyF
-     handlers and Escape's own keydown branch for what each actually does.
-     The dedicated pause-menu button (#pause-toggle-btn) was removed per
-     direct request — Escape is the only way to open/close the pause menu
-     now. -->
+     shopCollapsed), Q between "Pipette Tool"/"Clear Cursor" (whether any
+     tool is currently armed), F between "Add Favorite"/"Remove Favorite"
+     (hidden entirely when F would have nothing to do — see UI.js's own
+     favoriteLegendText) — see main.js's KeyE/KeyQ/KeyF handlers for what
+     each actually does. The Esc line is gone per direct request ("remove
+     the Esc part of the legend... make it so the esc hotkey always opens
+     and closes the pause menu, since now we have Q and Right-Click to
+     cover all the canceling/clearing needs") — Esc's job is no longer
+     context-dependent, so there's nothing dynamic left to explain; the
+     minimap's own hamburger button (#pause-menu-btn) both does the same
+     thing and carries the "(Esc)" hint in its own title tooltip instead.
+     #hotkey-legend-alt is the one line exempted from Alt-mode's own
+     "hide everything" rule (css's body.alt-mode selector) — per direct
+     request, it's the only thing still shown while Alt-mode itself is on,
+     re-worded live by UI.js's updateHUD same as every other line here. -->
 <div id="hotkey-legend">
   <div id="hotkey-legend-e">E: Open Shop</div>
   <div id="hotkey-legend-q">Q: Pipette Tool</div>
   <div id="hotkey-legend-f" class="hidden">F: Add Favorite</div>
-  <div id="hotkey-legend-esc">Esc: Pause Game</div>
   <div id="hotkey-legend-undo" class="hidden">Ctrl+Z: Undo</div>
+  <div id="hotkey-legend-alt">Alt: Turn on Alt-mode</div>
 </div>
 
 <div id="alien-countdown" class="hidden">👽 Wave <span id="alien-countdown-wave">1</span> incoming: <span id="alien-countdown-seconds">10</span>s</div>
@@ -186,6 +191,13 @@
     <button id="boss-victory-restart-btn" class="pause-btn sheen-target">Restart</button>
   </div>
 </div>
+
+<!-- Save/auto-save toast, per direct request ("change the Game saved and
+     Game auto-saved messages so they show up in the top middle of the
+     screen for a short period before disappearing. They don't need to show
+     up in the chat message history at all") — UI.js's updateHUD shows/hides
+     it from state.ui.toastText. -->
+<div id="save-toast" class="hidden"></div>
 
 <div id="scroll-hint" class="hidden">
   <div id="scroll-hint-text">Scroll down</div>

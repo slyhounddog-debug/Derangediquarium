@@ -184,6 +184,14 @@ export const FISH_VERTICAL_MARGIN_FRACTION = 0.05; // stays clear of the outer 5
 export const FISH_MIN_X = WORLD_W * FISH_HORIZONTAL_MARGIN_FRACTION;
 export const FISH_MAX_X = WORLD_W * (1 - FISH_HORIZONTAL_MARGIN_FRACTION);
 export const FISH_MIN_Y = SEABED_FLOOR_Y * FISH_VERTICAL_MARGIN_FRACTION;
+// Per direct report ("aliens can spawn too high vertically so they are not
+// on the screen when they spawn... make it so they will always spawn 10%
+// lower than the top of the tank so they don't end up behind the HUD/
+// Chat") — a separate, more generous floor than FISH_MIN_Y's 5% specifically
+// for where an alien portal is allowed to roll (Systems.js's spawnAlienWave).
+// Purely a spawn-position minimum, not a movement clamp — same "spawn-only"
+// relationship FISH_MIN_Y already has to fish movement.
+export const ALIEN_SPAWN_MIN_Y = SEABED_FLOOR_Y * 0.10;
 export const FISH_MAX_Y = SEABED_FLOOR_Y * (1 - FISH_VERTICAL_MARGIN_FRACTION); // spawn-only now — see note above
 // A shop purchase spawns within whatever's currently on screen (camera
 // position + viewport size, from state.camera), inset by this much on each
@@ -1485,12 +1493,16 @@ export const BUILDING_TYPES = {
   },
   [TILE_TURRET_WASTE]: {
     id: TILE_TURRET_WASTE, name: 'Waste Turret', icon: '🔫', cost: 25,
-    description: 'Auto-fires on the nearest alien. Feeds itself from any Waste touching it.',
+    // Per direct request ("change the description of turrets to mention
+    // biomass as well") — Biomass now doubles as premium ammo (see
+    // BIOMASS_TURRET_DAMAGE_MULTIPLIER/BIOMASS_TURRET_SHOTS_PER_AMMO), for
+    // any tile in TURRET_AMMO_TILES (this tier and Electric, below).
+    description: 'Auto-fires on the nearest alien. Feeds itself from any Waste (or Biomass, for more damage per shot) touching it.',
     color: '#9c8a6b', unlockedByDefault: true, // free from the start, alongside Platform — the only defense before the Science Lab exists
   },
   [TILE_TURRET_ELECTRIC]: {
     id: TILE_TURRET_ELECTRIC, name: 'Electric Waste Turret', icon: '🔫', cost: 55,
-    description: 'Faster and harder-hitting than the Waste Turret. Needs BOTH Waste ammo and power to fire.',
+    description: 'Faster and harder-hitting than the Waste Turret. Needs BOTH Waste (or Biomass) ammo and power to fire.',
     color: '#5fb8ff', unlockedByDefault: false,
   },
   [TILE_TURRET_ADVANCED]: {

@@ -79,6 +79,38 @@ html, body {
   100% { transform: translateY(0); }
 }
 
+/* Alt-mode, per direct request — a toggle hotkey (Alt) that hides every
+   piece of persistent HUD/UI chrome for a clean, unobstructed view of the
+   tank itself (screenshots, recording, just looking at your fish). Toggled
+   by main.js's Alt keydown handler, applied by UI.js as a single class on
+   <body> so every rule needed lives in one place. Deliberately does NOT
+   touch #game-canvas, or any modal/popup overlay (Mound/recipe/building-
+   info/platform-filter/Lab/Lab-purchase/pause/start/boss-victory/loading) —
+   those are transient player-initiated states, not "the HUD," and hiding
+   one out from under an in-progress interaction would be actively
+   confusing; close it first if you want it gone too. #hotkey-legend-alt is
+   the one exception inside #hotkey-legend — the hotkey that turns Alt-mode
+   back off has to stay visible, or there'd be no way to discover how to
+   undo it. */
+body.alt-mode #hud,
+body.alt-mode #minimap-wrap,
+body.alt-mode #notification-ticker,
+body.alt-mode #bottom-bar-row,
+body.alt-mode #build-legend,
+body.alt-mode #tutorial-skip-legend,
+body.alt-mode #building-move-legend,
+body.alt-mode #alien-countdown,
+body.alt-mode #boss-health-bar-wrap,
+body.alt-mode #save-toast,
+body.alt-mode #scroll-hint,
+body.alt-mode #tutorial-overlay,
+body.alt-mode #tutorial-text {
+  display: none !important;
+}
+body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
+  display: none;
+}
+
 #hud {
   /* Always visible now, top-right — per direct request, the Shop/Tank
      Upgrades panels no longer carry their own duplicate HUD copy (see the
@@ -160,10 +192,10 @@ html, body {
 #hud-power-graph.hidden { display: none; }
 #hud-power-graph-canvas { display: block; }
 
-/* The dedicated circular pause-menu toggle button (top-right, below #hud)
-   is gone per direct request — Escape is the only way to open/close the
-   pause menu now (see main.js's keydown handler and #hotkey-legend's
-   dynamic Esc line below). */
+/* The old dedicated circular pause-menu toggle button (top-right, below
+   #hud) is gone — its job is now the hamburger button in #minimap-controls
+   below (#pause-menu-btn), alongside Escape (see main.js's keydown
+   handler), per a later direct request to add it back in that row. */
 
 /* Minimap — sits directly under #hud, same right-aligned corner (same
    --glass-wall-right-width offset #hud itself uses, so neither ever drifts
@@ -525,6 +557,38 @@ html, body {
 #notification-log::-webkit-scrollbar-track { background: #fff0f6; border-radius: 999px; }
 #notification-log::-webkit-scrollbar-thumb { background: #ffb6d5; border-radius: 999px; }
 #notification-log::-webkit-scrollbar-thumb:hover { background: #ff9ac4; }
+
+/* Save/auto-save toast, per direct request — top-middle of the screen, a
+   short-lived pill (not a chat-log entry). The animation's own 2.6s duration
+   must match UI.js's TOAST_DURATION_MS so the fade-out finishes right as the
+   JS timeout adds .hidden, rather than either snapping visible->gone early
+   or sitting fully faded-but-still-in-the-layout for an extra beat. */
+#save-toast {
+  position: fixed;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  background: linear-gradient(160deg, #fffdf8 0%, #ffe9f4 100%);
+  color: #6b4c6b;
+  font-family: 'Comic Neue', 'Baloo 2', sans-serif;
+  font-size: 15px;
+  font-weight: 700;
+  padding: 9px 20px;
+  border: 2px solid #ffffff;
+  border-radius: 999px;
+  box-shadow: 0 6px 16px rgba(107, 76, 107, 0.25), inset 0 2px 0 rgba(255, 255, 255, 0.9), inset 0 -3px 6px rgba(255, 173, 209, 0.3);
+  pointer-events: none;
+  white-space: nowrap;
+}
+#save-toast.hidden { display: none; }
+#save-toast.save-toast-fade { animation: save-toast-fade 2.6s ease forwards; }
+@keyframes save-toast-fade {
+  0% { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+  10% { opacity: 1; transform: translateX(-50%) translateY(0); }
+  80% { opacity: 1; }
+  100% { opacity: 0; }
+}
 .notification-line {
   font-family: 'Comic Neue', 'Baloo 2', sans-serif;
   font-size: 14px;
@@ -1156,6 +1220,14 @@ html, body {
   opacity: 0.85;
 }
 .building-stat b { font-weight: 800; opacity: 1; }
+/* Per direct request ("make it so all the stat lines in the shop use the
+   actual object visual rather than an emoji to represent it") — a small
+   inline real-item icon (UI.js's itemIconImgHtml), sized/aligned to sit
+   cleanly in the middle of a line of text next to its own number. */
+.stat-item-icon {
+  vertical-align: middle;
+  margin: -2px 1px 0;
+}
 
 /* Tank Upgrades panel — a stack of cards (leveled ladders like Food Quality/
    Fish Movement/Coin Capacity, plus one-time unlocks like Electricity Graph/
@@ -1880,25 +1952,29 @@ html, body {
 }
 /* A node not matching the active filter dims heavily, per direct request
    ("darkens all other nodes in the science lab a lot except for the chosen
-   type") — grayscale on top of the opacity drop so it also reads as
-   visually "off," not just faded.
+   type"). Per a later direct follow-up ("make the filtered science nodes
+   darken slightly, so it's more obvious which nodes are filtered and which
+   are unavailable") — this uses a real `brightness()` filter now instead of
+   `opacity`, which used to just fade the node toward the page background
+   (reading as "faded/transparent," not "darkened," and easy to mistake for
+   plain unavailable/locked at a glance) — grayscale stacks on top so a
+   filtered node also reads as visually "off," not just dim.
    Per direct request ("still filter out unavailable science lab nodes, so
    there's 4 distinct visual states for a lab node: locked, unlocked, locked
    and filtered, unlocked and filtered") — .lab-node.locked (below) sets its
    own opacity at equal (2-class) specificity, so without the explicit
-   3-class combo selector below, source order alone decided which opacity
-   won on a locked+dimmed node, silently collapsing "locked and filtered"
-   into looking identical to plain "locked" (or, depending on order,
-   erasing the filtered dim entirely) — losing one of the 4 states. The
-   3-class selector always outranks any 2-class rule regardless of source
-   order, so a locked, filtered node reliably reads as its own, dimmer-still
-   4th state instead of drifting depending on file order. .unaffordable
-   (prereqs met, just can't afford it yet) counts as "unlocked" here, same
-   bucket as an affordable or purchased node — it shares the plain 2-class
-   rule below since nothing else sets its opacity in a way that could
-   out-cascade it. */
-.lab-node.lab-node-dimmed { opacity: 0.4; filter: grayscale(0.6); }
-.lab-node.locked.lab-node-dimmed { opacity: 0.16; filter: grayscale(0.75); }
+   3-class combo selector below, source order alone decided which look won
+   on a locked+dimmed node, silently collapsing "locked and filtered" into
+   looking identical to plain "locked" (or, depending on order, erasing the
+   filtered dim entirely) — losing one of the 4 states. The 3-class selector
+   always outranks any 2-class rule regardless of source order, so a locked,
+   filtered node reliably reads as its own, darker-still 4th state instead
+   of drifting depending on file order. .unaffordable (prereqs met, just
+   can't afford it yet) counts as "unlocked" here, same bucket as an
+   affordable or purchased node — it shares the plain 2-class rule below
+   since nothing else sets a competing filter that could out-cascade it. */
+.lab-node.lab-node-dimmed { filter: brightness(0.55) grayscale(0.55); }
+.lab-node.locked.lab-node-dimmed { filter: brightness(0.32) grayscale(0.7); }
 
 /* Click-and-drag panning instead of scrolling, per direct request — the
    tree grew too large (the Gene-Splicing hybrid sub-tree) for scrollbars/

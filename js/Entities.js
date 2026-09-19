@@ -48,6 +48,7 @@ import {
   FISH_MIN_X,
   FISH_MAX_X,
   FISH_MIN_Y,
+  ALIEN_SPAWN_MIN_Y,
   WASTE_RADIUS,
   WASTE_GRAVITY,
   WASTE_MAX_FALL_SPEED,
@@ -616,7 +617,10 @@ function updateAlien(alien, state, dtMs) {
       const archetype = ALIEN_ARCHETYPES[0]; // Tier 1 — same gentle intro tier the very first wave's own lone alien already uses
       pendingTurretTutorialAlienSpawns.push({
         x: FISH_MIN_X + Math.random() * (FISH_MAX_X - FISH_MIN_X),
-        y: FISH_MIN_Y + Math.random() * (SEABED_FLOOR_Y * 0.7 - FISH_MIN_Y),
+        // ALIEN_SPAWN_MIN_Y, not FISH_MIN_Y — per direct report, an alien
+        // portal needs a more generous top margin than fish do so it can
+        // never open behind the fixed HUD/chat pills.
+        y: ALIEN_SPAWN_MIN_Y + Math.random() * (SEABED_FLOOR_Y * 0.7 - ALIEN_SPAWN_MIN_Y),
         hp: archetype.hpMin + Math.floor(Math.random() * (archetype.hpMax - archetype.hpMin + 1)),
         archetypeId: archetype.id,
       });
@@ -709,7 +713,11 @@ function updateAlien(alien, state, dtMs) {
 
   if (alien.x < FISH_MIN_X) { alien.x = FISH_MIN_X; alien.vx = Math.abs(alien.vx); }
   if (alien.x > FISH_MAX_X) { alien.x = FISH_MAX_X; alien.vx = -Math.abs(alien.vx); }
-  if (alien.y < FISH_MIN_Y) { alien.y = FISH_MIN_Y; alien.vy = Math.abs(alien.vy); }
+  // ALIEN_SPAWN_MIN_Y (10%), not FISH_MIN_Y (5%) — per direct report, this
+  // keeps a living alien from ever wandering back up into the same HUD/
+  // chat-obscured strip its own spawn point is now kept clear of, not just
+  // the moment it spawns.
+  if (alien.y < ALIEN_SPAWN_MIN_Y) { alien.y = ALIEN_SPAWN_MIN_Y; alien.vy = Math.abs(alien.vy); }
   if (alien.y > SEABED_FLOOR_Y) { alien.y = SEABED_FLOOR_Y; alien.vy = -Math.abs(alien.vy); } // aliens can't swim into the seabed city either, same rule as fish
 
   // Mother Alien Fish only — "spawns extra aliens out of its mouth every

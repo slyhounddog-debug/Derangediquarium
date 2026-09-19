@@ -17,6 +17,33 @@ let musicGain = null;
 let sfxGain = null;
 let musicStarted = false;
 
+// ---- Music post-processing chain: musicGain -> musicLowpassFilter ->
+// (pitchShiftNode, once its worklet module has loaded) -> ctx.destination
+// ---- See setMusicUnderwaterMuffle/setMusicPitchBoost below. Both effects
+// apply uniformly to whichever of the 3 tracks is actually audible right
+// now (Game/Battle/Boss all feed the same shared musicGain upstream of
+// this), so neither needs to know or care which one that is.
+let musicLowpassFilter = null;
+let pitchShiftNode = null;
+let pitchShiftReadyPromise = null;
+let wantMuffle = false; // desired state, reapplied once the nodes actually exist
+let wantPitchBoost = false;
+// Per direct request ("when time is paused, add a muffle effect to the
+// music, so it sounds like it's under water") — a lowpass sweeps down to
+// this cutoff; fully open (no audible filtering) is MUSIC_FILTER_OPEN_HZ.
+const MUSIC_FILTER_MUFFLED_HZ = 550;
+const MUSIC_FILTER_OPEN_HZ = 20000;
+// Per direct request ("when time is at 2x speed, slightly increase the
+// pitch of the music but keep the pacing the same") — deliberately small; a
+// bigger ratio would make PitchShiftProcessor's fixed grain size read as an
+// audible granular warble instead of a clean shift.
+const MUSIC_PITCH_BOOST_RATIO = 1.045;
+// How quickly each effect ramps to its new target — smooth enough to avoid
+// an audible pop/step, the standard `setTargetAtTime` "time constant" shape
+// (not a linear duration — ~5x this value is roughly how long the ramp
+// visually/audibly finishes).
+const MUSIC_EFFECT_RAMP_S = 0.5;
+
 // The 3 real music tracks (see ensureMusicTracks below) and their own
 // per-track gain nodes, feeding into the shared musicGain above so the
 // Settings volume slider still controls all of them uniformly.
@@ -66,11 +93,75 @@ function ensureContext() {
   ctx = new AudioContextClass();
   musicGain = ctx.createGain();
   musicGain.gain.value = musicVolume * MUSIC_VOLUME_MAX_GAIN;
-  musicGain.connect(ctx.destination);
+  musicLowpassFilter = ctx.createBiquadFilter();
+  musicLowpassFilter.type = 'lowpass';
+  musicLowpassFilter.frequency.value = wantMuffle ? MUSIC_FILTER_MUFFLED_HZ : MUSIC_FILTER_OPEN_HZ; // picks up any setMusicUnderwaterMuffle call that landed before the very first user gesture created this context
+  musicGain.connect(musicLowpassFilter);
+  // Starts connected straight to the destination — the pitch-shift worklet
+  // module loads asynchronously (audioWorklet.addModule returns a Promise),
+  // so music can play immediately without waiting on it; once it resolves,
+  // ensurePitchShiftNode below swaps this direct connection out for a real
+  // route through the pitch node instead.
+  musicLowpassFilter.connect(ctx.destination);
   sfxGain = ctx.createGain();
   sfxGain.gain.value = sfxVolume * SFX_VOLUME_MAX_GAIN;
   sfxGain.connect(ctx.destination);
+  ensurePitchShiftNode();
   return ctx;
+}
+
+// Loads PitchShiftProcessor.js's AudioWorklet module (once) and splices its
+// node into the chain in place of musicLowpassFilter's temporary direct
+// connection to the destination — see ensureContext's own comment. Any
+// setMusicPitchBoost call that landed before this resolved is replayed here
+// via wantPitchBoost so the effect still ends up in the right state either
+// way, regardless of which finished first.
+function ensurePitchShiftNode() {
+  if (pitchShiftReadyPromise || !ctx.audioWorklet) return pitchShiftReadyPromise;
+  pitchShiftReadyPromise = ctx.audioWorklet.addModule('js/PitchShiftProcessor.js').then(() => {
+    // outputChannelCount deliberately left at its default (matches the
+    // input's own channel count) rather than hardcoded to 2 — the
+    // processor's own channelBuffers array already grows to fit whatever
+    // channel count it's actually handed, mono or stereo alike.
+    pitchShiftNode = new AudioWorkletNode(ctx, 'pitch-shift-processor', {
+      numberOfInputs: 1,
+      numberOfOutputs: 1,
+    });
+    musicLowpassFilter.disconnect(ctx.destination);
+    musicLowpassFilter.connect(pitchShiftNode);
+    pitchShiftNode.connect(ctx.destination);
+    applyPitchBoostTarget();
+  }).catch((err) => {
+    // A worklet failure (unsupported browser, blocked module fetch, ...)
+    // just means the 2x-speed pitch effect silently never applies — music
+    // keeps playing through the direct connection ensureContext already set
+    // up, same graceful "no Web Audio support" fallback every other export
+    // in this file already follows.
+    console.error('Derangiquarium: pitch-shift worklet failed to load', err);
+  });
+  return pitchShiftReadyPromise;
+}
+
+function applyPitchBoostTarget() {
+  if (!pitchShiftNode) return;
+  const target = wantPitchBoost ? MUSIC_PITCH_BOOST_RATIO : 1.0;
+  pitchShiftNode.parameters.get('pitchRatio').setTargetAtTime(target, ctx.currentTime, MUSIC_EFFECT_RAMP_S);
+}
+
+// Per direct request ("when time is paused, add a muffle effect to the
+// music, so it sounds like it's under water"). A smooth setTargetAtTime
+// ramp (not an instant jump) so toggling Pause Time doesn't pop.
+export function setMusicUnderwaterMuffle(active) {
+  wantMuffle = active;
+  if (!musicLowpassFilter) return; // no AudioContext yet (pre-first-gesture) — applied once ensureContext runs, via the same wantMuffle flag main.js re-reads through UI.js's own toggle
+  musicLowpassFilter.frequency.setTargetAtTime(active ? MUSIC_FILTER_MUFFLED_HZ : MUSIC_FILTER_OPEN_HZ, ctx.currentTime, MUSIC_EFFECT_RAMP_S);
+}
+
+// Per direct request ("when time is at 2x speed, slightly increase the
+// pitch of the music but keep the pacing the same").
+export function setMusicPitchBoost(active) {
+  wantPitchBoost = active;
+  applyPitchBoostTarget(); // no-ops harmlessly if the worklet hasn't resolved yet — ensurePitchShiftNode's own .then() replays it once it has
 }
 
 // Silence (and genuinely stop processing) all audio the instant the

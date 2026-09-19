@@ -91,8 +91,8 @@ import {
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
-import { playUpgrade, setMusicVolume, setSfxVolume, getMusicVolume, getSfxVolume, playPanelOpen, playPanelClose, playInsufficientFunds } from './Sound.js';
-import { hasSaveGame, saveGame, loadSaveGame, clearSaveGame } from './Save.js';
+import { playUpgrade, setMusicVolume, setSfxVolume, getMusicVolume, getSfxVolume, playPanelOpen, playPanelClose, playInsufficientFunds, setMusicUnderwaterMuffle, setMusicPitchBoost } from './Sound.js';
+import { hasSaveGame, saveGame, loadSaveGame } from './Save.js';
 import { pushGameNotification } from './Notifications.js';
 
 const MOUND_MENU_GAP_PX = 12; // screen px of breathing room between the popup's bottom edge and the Mound's top edge
@@ -290,6 +290,7 @@ export function initUI(state) {
     bossVictoryOverlay: document.getElementById('boss-victory-overlay'),
     bossVictoryStats: document.getElementById('boss-victory-stats'),
     bossVictoryRestartBtn: document.getElementById('boss-victory-restart-btn'),
+    saveToast: document.getElementById('save-toast'),
     scrollHint: document.getElementById('scroll-hint'),
     scrollHintText: document.getElementById('scroll-hint-text'),
     scrollHintArrows: document.querySelectorAll('.scroll-hint-arrow'),
@@ -301,14 +302,15 @@ export function initUI(state) {
     buildingMoveLegendLine3: document.getElementById('building-move-legend-line3'),
     hotkeyLegendE: document.getElementById('hotkey-legend-e'),
     hotkeyLegendQ: document.getElementById('hotkey-legend-q'),
-    hotkeyLegendEsc: document.getElementById('hotkey-legend-esc'),
     hotkeyLegendUndo: document.getElementById('hotkey-legend-undo'),
+    hotkeyLegendAlt: document.getElementById('hotkey-legend-alt'),
     tutorialOverlay: document.getElementById('tutorial-overlay'),
     tutorialText: document.getElementById('tutorial-text'),
     powerGraphCanvas: document.getElementById('hud-power-graph-canvas'),
     minimapExpandBtn: document.getElementById('minimap-expand-btn'),
     timePauseBtn: document.getElementById('time-pause-btn'),
     timeSpeedBtn: document.getElementById('time-speed-btn'),
+    pauseMenuBtn: document.getElementById('pause-menu-btn'),
     shopPanel: document.getElementById('shop-panel'),
     shopCollapseBtn: document.getElementById('shop-collapse-btn'),
     shopMoney: document.getElementById('shop-money'),
@@ -533,9 +535,14 @@ export function initUI(state) {
   els.pauseLoadSaveBtn.addEventListener('click', () => loadLastSaveFromPause(state));
   els.pauseRestartBtn.addEventListener('click', () => restartLevel(state));
   els.pauseMainMenuBtn.addEventListener('click', () => returnToMainMenuFromPause(state));
-  els.minimapExpandBtn.addEventListener('click', () => toggleMinimapExpanded(state));
+  // minimap-expand-btn is wired in main.js now, not here — per direct
+  // report, the button was supposed to control the real tank-viewport zoom
+  // (camera.zoom, main.js's own domain), not the minimap's display size,
+  // which UI.js's toggleMinimapExpanded used to (wrongly) control. See
+  // main.js's toggleTankZoomMode.
   els.timePauseBtn.addEventListener('click', () => toggleTimePause(state));
   els.timeSpeedBtn.addEventListener('click', () => toggleSpeedX2(state));
+  els.pauseMenuBtn.addEventListener('click', () => togglePauseMenu(state));
   els.bossVictoryRestartBtn.addEventListener('click', () => {
     els.bossVictoryOverlay.classList.remove('visible');
     els.bossVictoryOverlay.classList.add('hidden');
@@ -707,29 +714,47 @@ function closePauseMenu(state) {
 // update()/createGameLoop read state.ui.timePaused/speedX2 directly every
 // tick (see update()'s and getTimeScale's own comments) — this function's
 // only job is the flag flip plus the button's own visual state.
-export function toggleTimePause(state) {
-  state.ui.timePaused = !state.ui.timePaused;
+// Per a later direct request ("I shouldn't be able to click pause time and
+// 2x time [at once]... if pause time is chosen, it should de-select 2x
+// speed"), the two are now mutually exclusive both directions — turning one
+// on always forces the other off — rather than each just toggling
+// independently. refreshTimeControlButtons keeps both buttons' visuals (and
+// the underwater-muffle/pitch-boost music effects — see Sound.js) in sync
+// with whatever the two flags actually are after any change, regardless of
+// which one just changed.
+function refreshTimeControlButtons(state) {
   els.timePauseBtn.textContent = state.ui.timePaused ? '▶️' : '⏸️';
   els.timePauseBtn.title = state.ui.timePaused ? 'Resume Time (Space)' : 'Pause Time (Space)';
   els.timePauseBtn.classList.toggle('active', state.ui.timePaused);
+  els.timeSpeedBtn.classList.toggle('active', state.ui.speedX2);
+  setMusicUnderwaterMuffle(state.ui.timePaused);
+  setMusicPitchBoost(state.ui.speedX2);
+}
+
+export function toggleTimePause(state) {
+  state.ui.timePaused = !state.ui.timePaused;
+  if (state.ui.timePaused) state.ui.speedX2 = false; // mutually exclusive — see this section's own comment
+  refreshTimeControlButtons(state);
 }
 
 export function toggleSpeedX2(state) {
   state.ui.speedX2 = !state.ui.speedX2;
-  els.timeSpeedBtn.classList.toggle('active', state.ui.speedX2);
+  if (state.ui.speedX2) state.ui.timePaused = false; // mutually exclusive — see this section's own comment
+  refreshTimeControlButtons(state);
 }
 
-// ---- Minimap expand/minimize ----
-// The canvas's own real pixel size/redraw is main.js's job (renderMinimap,
-// called every render() frame) — this just flips the flag it reads and
-// swaps the button's own icon between the two directions it would now
-// switch to, per direct request ("a dynamically switching expand/minimize
-// button... that switches from zoom to fit for the whole tank, and fit to
-// width for the tank").
-export function toggleMinimapExpanded(state) {
-  state.ui.minimapExpanded = !state.ui.minimapExpanded;
-  els.minimapExpandBtn.textContent = state.ui.minimapExpanded ? '⤡' : '⤢';
-  els.minimapExpandBtn.title = state.ui.minimapExpanded ? 'Minimize minimap' : 'Expand minimap';
+// ---- Alt-mode ----
+// Per direct request — a toggle hotkey (Alt, wired in main.js) that hides
+// every piece of persistent HUD/UI chrome (style.css's body.alt-mode rules)
+// for a clean, unobstructed view of the tank. A single class on <body> is
+// what actually hides everything — this function's only other job is the
+// one line of the bottom-left legend that's exempt from that blanket hide
+// (#hotkey-legend-alt), which needs its own live re-wording the same way
+// every other legend line in this file already gets.
+export function toggleAltMode(state) {
+  state.ui.altMode = !state.ui.altMode;
+  document.body.classList.toggle('alt-mode', state.ui.altMode);
+  els.hotkeyLegendAlt.textContent = state.ui.altMode ? 'Alt: Turn OFF Alt-mode' : 'Alt: Turn on Alt-mode';
 }
 
 // Opened by main.js's click handler when isPointOnMound(...) hits — replaces
@@ -767,12 +792,6 @@ export function closeMoundMenu() {
     moundMenuClosing = false;
     moundMenuCloseTimer = null;
   }, MOUND_MENU_TRANSITION_MS);
-}
-
-// Read by main.js's Escape handler so Escape closes this popup first rather
-// than opening the pause menu on top of it.
-export function isMoundMenuOpen() {
-  return moundMenuOpen;
 }
 
 // ---- Manufacturer/Power Plant recipe pop-up ----
@@ -816,11 +835,6 @@ export function closeRecipeMenu() {
   playPanelClose();
 }
 
-// Read by main.js's Escape handler, same reason isMoundMenuOpen is.
-export function isRecipeMenuOpen() {
-  return recipeMenuOpen;
-}
-
 // Generic "what is this and what does it do" pop-up for any OTHER placed
 // building (Manufacturer/Power Plant get their own recipe pop-up instead —
 // see main.js's click handler, which only ever calls this once
@@ -860,10 +874,6 @@ export function closeBuildingInfoMenu() {
     buildingInfoMenuCloseTimer = null;
   }, BUILDING_INFO_MENU_TRANSITION_MS);
   playPanelClose();
-}
-
-export function isBuildingInfoMenuOpen() {
-  return buildingInfoMenuOpen;
 }
 
 function updateBuildingInfoMenuPosition(state) {
@@ -968,11 +978,6 @@ export function closePlatformFilterMenu() {
     platformFilterMenuCloseTimer = null;
   }, PLATFORM_FILTER_MENU_TRANSITION_MS);
   playPanelClose();
-}
-
-// Read by main.js's Escape handler, same reason isRecipeMenuOpen is.
-export function isPlatformFilterMenuOpen() {
-  return platformFilterMenuOpen;
 }
 
 function updatePlatformFilterMenuPosition(state) {
@@ -1282,18 +1287,6 @@ export function closeLabMenu() {
     labMenuCloseTimer = null;
   }, LAB_MENU_TRANSITION_MS);
   playPanelClose();
-}
-
-// Read by main.js's Escape handler, same reason isMoundMenuOpen is.
-export function isLabMenuOpen() {
-  return labMenuOpen;
-}
-
-// Read by main.js's Escape handler — checked AHEAD of isLabMenuOpen so
-// Escape closes the confirmation modal first (it sits on top) rather than
-// closing the whole tree out from under it.
-export function isLabPurchaseModalOpen() {
-  return labPurchaseNodeId !== null;
 }
 
 // One dependency-depth per column — a node with no prerequisites is depth
@@ -1764,7 +1757,7 @@ function fishEconomyStatsHtml(speciesId) {
   const baby = s.growthStages[0];
   const adult = s.growthStages[s.growthStages.length - 1];
   const foodPerMin = (s.hungerRate * 60) / FOOD_HUNGER_RELIEF_BY_LEVEL[0];
-  let html = `<div class="building-stat">🍽️ Hunger: <b>${foodPerMin.toFixed(1)} food/min</b></div>`;
+  let html = `<div class="building-stat">🍽️ Hunger: <b>${foodPerMin.toFixed(1)} ${itemIconImgHtml('food')}/min</b></div>`;
   if (s.behavior.includes('FEEDER') && adult.dropValue) {
     // Shown as a baby -> adult range, not just the adult figure — per direct
     // request. Every stage now shares the same dropInterval (see Config.js's
@@ -1778,7 +1771,7 @@ function fishEconomyStatsHtml(speciesId) {
     // Rounded to the nearest whole dollar now, per direct request — was
     // toFixed(1) (nearest tenth) before that, toFixed(2) before that; a
     // dollar range doesn't need fractional-cent precision to be useful.
-    html += `<div class="building-stat">🪙 Money: <b>$${Math.round(babyMoneyPerMin)} - $${Math.round(adultMoneyPerMin)}/min</b></div>`;
+    html += `<div class="building-stat">${itemIconImgHtml('coin')} Money: <b>$${Math.round(babyMoneyPerMin)} - $${Math.round(adultMoneyPerMin)}/min</b></div>`;
   }
   if (!s.behavior.includes('SCAVENGER')) {
     // Real bug fix: this used to read the flat global WASTE_POOP_INTERVAL_MS
@@ -1789,7 +1782,7 @@ function fishEconomyStatsHtml(speciesId) {
     // actual poop timer; only this display-side stat had drifted out of
     // sync with it).
     const wastePerMin = 60000 / (WASTE_POOP_INTERVAL_MS * (s.wastePoopIntervalMultiplier || 1));
-    html += `<div class="building-stat">💩 Waste: <b>${wastePerMin.toFixed(1)}/min</b></div>`; // nearest tenth, per direct request — see the Money line's own comment
+    html += `<div class="building-stat">${itemIconImgHtml('waste')} Waste: <b>${wastePerMin.toFixed(1)}/min</b></div>`; // nearest tenth, per direct request — see the Money line's own comment
   }
   // Per direct request ("add in the fish speed stat"). The base swimSpeed
   // times the flat game-wide multiplier — deliberately NOT the live
@@ -2056,13 +2049,14 @@ export function initStartScreen(state, onStart) {
 }
 
 // Saves the whole meta+level state to LocalStorage (Save.js) from the pause
-// menu's own Save button — a plain fire-and-forget action with a small
-// notification-ticker confirmation, same "push a real notification, don't
-// pop a confirmation modal" precedent every other one-off action in this
-// game already follows.
+// menu's own Save button — a plain fire-and-forget action. Per direct
+// request, the confirmation is now a top-center toast (state.ui.toastText,
+// shown by updateHUD's own updateSaveToast) instead of a chat-log
+// notification — it doesn't need to stick around in the notification
+// history the way a real gameplay event does.
 function saveGameFromPause(state) {
   const ok = saveGame(state);
-  pushUiNotification(state, ok ? 'Game saved.' : "Couldn't save — your browser blocked it.");
+  state.ui.toastText = ok ? 'Game saved.' : "Couldn't save — your browser blocked it.";
 }
 
 // The Settings panel's "Load Last Save" button, per direct request — reverts
@@ -2113,25 +2107,27 @@ function restartLevel(state) {
   state.ui.replaySplashPending = true;
 }
 
-// Per direct request ("add a main menu button to the pause menu that resets
-// the game back to the start state minus any previous save") — unlike
-// Restart (which only wipes state.level, keeping state.meta's permanent
-// unlocks/gems/achievements intact), this is a genuine full wipe: the saved
-// game is erased and the whole page reloads. A real reload — rather than
-// hand-resetting every field of state.meta/state.level in place — is
-// deliberate: main.js's `const state = {...}` literal is the one true
-// definition of "the start state," and re-running it from scratch is the
-// only way to guarantee this stays byword-for-byword in sync with it as
-// that literal grows, instead of a second, easily-forgotten copy here
-// silently drifting out of date. Confirmed via a native browser confirm()
-// rather than this game's usual notification-ticker pattern (see
-// saveGameFromPause's own comment on why THAT one doesn't confirm) — every
-// other pause-menu action is either free of side effects or trivially
-// undoable; this one is not.
+// Per direct request ("add a main menu button to the pause menu"), later
+// clarified ("the Main Menu button SHOULD NOT erase a save file, it should
+// preserve ONLY the save file. The music and everything else can reset back
+// like the webpage was refreshed, not the save state was wiped. THE ONLY
+// WAY to clear a save is to start a new game/save over it") — this is now a
+// PLAIN page reload and nothing else. It doesn't touch LocalStorage at all
+// (no clearSaveGame() call) — exactly like a manual browser refresh, which
+// is precisely the point: the real save on disk is untouched either way,
+// same as the start screen's own "New Game" button already leaves it alone
+// (see initStartScreen — it never calls clearSaveGame() either; only an
+// actual Save/autosave ever overwrites the stored save). A real reload —
+// rather than hand-resetting every field of the in-memory state.meta/
+// state.level in place — is deliberate: main.js's `const state = {...}`
+// literal is the one true definition of "the start state," and re-running
+// it from scratch is the only way to guarantee this stays byte-for-byte in
+// sync with it as that literal grows. Still confirmed via a native browser
+// confirm() — a reload does lose any UNSAVED progress since the last real
+// Save/autosave, which is real enough to warrant asking first.
 function returnToMainMenuFromPause(state) {
-  const ok = window.confirm('Return to the main menu? This erases your saved game and all progress — there is no undo.');
+  const ok = window.confirm('Return to the main menu? Any progress since your last save will be lost (your saved game itself is kept).');
   if (!ok) return;
-  clearSaveGame();
   window.location.reload();
 }
 
@@ -2524,6 +2520,34 @@ function drawItemIconCanvas(canvas, itemType) {
   ctx.beginPath();
   ctx.arc(cx - r * 0.3, cy - r * 0.3, r * 0.24, 0, Math.PI * 2);
   ctx.fill();
+}
+
+// Per direct request ("make it so all the stat lines in the shop use the
+// actual object visual rather than an emoji to represent it") — an inline
+// `<img>` tag standing in for whatever a stat line used to represent with a
+// plain-Unicode emoji (🗑️/🍖/🔬/🟢/🟩/🧬/🪙/💩), built from the exact same
+// drawItemIconCanvas real-art renderer the Platform filter/Lab tree icons
+// already use elsewhere, baked to a data URL so it can drop straight into
+// these functions' existing "build one big HTML string, innerHTML it in
+// one shot" shape (buildingStatsHtml/fishEconomyStatsHtml et al.) without a
+// bigger rewrite into real DOM nodes. drawItemIconCanvas's output is fully
+// deterministic for a given itemType/size (no animation, no live game
+// state) — cached per type+size so repeated calls (this runs fresh every
+// time a shop selection's stats are built) never redraw or re-encode the
+// same icon twice.
+const itemIconDataUrlCache = new Map();
+function itemIconImgHtml(itemType, sizePx = 14) {
+  const cacheKey = `${itemType}:${sizePx}`;
+  let dataUrl = itemIconDataUrlCache.get(cacheKey);
+  if (!dataUrl) {
+    const canvas = document.createElement('canvas');
+    canvas.width = sizePx;
+    canvas.height = sizePx;
+    drawItemIconCanvas(canvas, itemType);
+    dataUrl = canvas.toDataURL();
+    itemIconDataUrlCache.set(cacheKey, dataUrl);
+  }
+  return `<img src="${dataUrl}" class="stat-item-icon" width="${sizePx}" height="${sizePx}" alt="">`;
 }
 
 // A Science Lab node granting nothing structural of its own (grants: {})
@@ -3347,7 +3371,7 @@ function buildingStatsHtml(buildingId) {
       ? `${p.powerCostPerSecCoin}`
       : `${p.powerCostPerSecCoin}-${p.powerCostPerSecScience}`;
     return (
-      `<div class="building-stat">⏱️ Coin <b>${p.coinMs / 1000}s</b> · 🔬 <b>${p.scienceMs / 1000}s</b> · 🟢 <b>${p.scienceGreenMs / 1000}s</b></div>` +
+      `<div class="building-stat">⏱️ Coin <b>${p.coinMs / 1000}s</b> · ${itemIconImgHtml('science')} <b>${p.scienceMs / 1000}s</b> · ${itemIconImgHtml('science_green')} <b>${p.scienceGreenMs / 1000}s</b></div>` +
       `<div class="building-stat">⚡ <b>${powerRange}</b> mw/s</div>`
     );
   }
@@ -3372,10 +3396,11 @@ function buildingStatsHtml(buildingId) {
     const isAmmoTurret = TURRET_AMMO_TILES.has(buildingId);
     const biomassDamage = Math.round(t.damage * BIOMASS_TURRET_DAMAGE_MULTIPLIER * 10) / 10;
     const damageText = isAmmoTurret ? `${t.damage}-${biomassDamage}` : `${t.damage}`;
-    const ammoText = `🗑️🧫 <b>${WASTE_TURRET_SHOTS_PER_WASTE}-${BIOMASS_TURRET_SHOTS_PER_AMMO}</b>/ammo, holds <b>${WASTE_TURRET_MAX_WASTE}</b>`;
+    const ammoIcons = `${itemIconImgHtml('waste')}${itemIconImgHtml('biomass')}`;
+    const ammoText = `${ammoIcons} <b>${WASTE_TURRET_SHOTS_PER_WASTE}-${BIOMASS_TURRET_SHOTS_PER_AMMO}</b>/ammo, holds <b>${WASTE_TURRET_MAX_WASTE}</b>`;
     const powerText = `⚡ <b>${t.powerCostPerShot}</b> mw/shot`;
     let line2;
-    if (isAmmoTurret && t.powerCostPerShot > 0) line2 = `🗑️🧫 <b>${WASTE_TURRET_SHOTS_PER_WASTE}-${BIOMASS_TURRET_SHOTS_PER_AMMO}</b>/ammo · ${powerText}`;
+    if (isAmmoTurret && t.powerCostPerShot > 0) line2 = `${ammoIcons} <b>${WASTE_TURRET_SHOTS_PER_WASTE}-${BIOMASS_TURRET_SHOTS_PER_AMMO}</b>/ammo · ${powerText}`;
     else if (isAmmoTurret) line2 = ammoText;
     else line2 = powerText;
     return (
@@ -3387,7 +3412,7 @@ function buildingStatsHtml(buildingId) {
   if (r) {
     const dnaS = (r.foodProcessMs * ALIEN_DNA_REFINERY_TIME_MULTIPLIER) / 1000;
     return (
-      `<div class="building-stat">🗑️➜🍖 <b>${r.foodProcessMs / 1000}s</b> · 🧬➜🟩 <b>${dnaS}s</b></div>` +
+      `<div class="building-stat">${itemIconImgHtml('waste')}➜${itemIconImgHtml('food')} <b>${r.foodProcessMs / 1000}s</b> · ${itemIconImgHtml('alien_dna')}➜${itemIconImgHtml('biomass')} <b>${dnaS}s</b></div>` +
       `<div class="building-stat">⚡ <b>${r.powerCostPerSec}</b> mw/sec</div>`
     );
   }
@@ -3401,13 +3426,13 @@ function buildingStatsHtml(buildingId) {
     const rates = Object.values(MANUFACTURER_ITEM_POWER_COST_MW);
     const p = MANUFACTURER_ITEM_PROCESS_MS;
     return (
-      `<div class="building-stat">🗑️ ${p.waste / 1000}s · 🍖 ${p.food / 1000}s · 🟩 ${p.biomass / 1000}s per item</div>` +
+      `<div class="building-stat">${itemIconImgHtml('waste')} ${p.waste / 1000}s · ${itemIconImgHtml('food')} ${p.food / 1000}s · ${itemIconImgHtml('biomass')} ${p.biomass / 1000}s per item</div>` +
       `<div class="building-stat">Pick a recipe once placed · ⚡ <b>${Math.min(...rates)}-${Math.max(...rates)}</b> mw</div>`
     );
   }
   if (buildingId === TILE_POWER_PLANT) {
     return (
-      `<div class="building-stat">🍖➜20mw/15s · 🟩➜40mw/20s · 🔬➜100mw/30s</div>` +
+      `<div class="building-stat">${itemIconImgHtml('food')}➜20mw/15s · ${itemIconImgHtml('biomass')}➜40mw/20s · ${itemIconImgHtml('science')}➜100mw/30s</div>` +
       `<div class="building-stat">Pick a fuel recipe once placed</div>`
     );
   }
@@ -3696,7 +3721,36 @@ function renderPowerGraph(state) {
   }
 }
 
+// How long the top-center save/autosave toast (#save-toast) stays up before
+// hiding itself — see state.ui.toastText's own comment in main.js for why
+// this is ticked off a raw performance.now() timestamp instead of an
+// accumulated dtMs.
+const TOAST_DURATION_MS = 2600;
+let toastHideTimer = null;
+
+function updateSaveToast(state) {
+  if (!state.ui.toastText) return;
+  if (els.saveToast.textContent !== state.ui.toastText || els.saveToast.classList.contains('hidden')) {
+    els.saveToast.textContent = state.ui.toastText;
+    els.saveToast.classList.remove('hidden');
+    // Same remove-reflow-readd restart trick playFlash already uses
+    // elsewhere in this file, so a second toast firing before the first one
+    // finished fading restarts the fade-out animation cleanly instead of
+    // the class staying present (a no-op re-add) and the animation just
+    // continuing from wherever it already was.
+    els.saveToast.classList.remove('save-toast-fade');
+    void els.saveToast.offsetWidth;
+    els.saveToast.classList.add('save-toast-fade');
+  }
+  clearTimeout(toastHideTimer);
+  toastHideTimer = setTimeout(() => {
+    els.saveToast.classList.add('hidden');
+    state.ui.toastText = null;
+  }, TOAST_DURATION_MS);
+}
+
 export function updateHUD(state) {
+  updateSaveToast(state);
   // Keeps the Merge gray-out live every frame — see updateToolbar's own
   // comment on why this can't just wait for the next tool-select event.
   updateToolbar(state);
@@ -3980,31 +4034,24 @@ export function updateHUD(state) {
 
   if (buildLegendVisible || tutorialActive || buildingMoveLegendVisible) positionBottomLeftLegends();
 
-  // Persistent E/Q/Esc hotkey reminder, bottom-left corner — per direct
+  // Persistent E/Q hotkey reminder, bottom-left corner — per direct
   // request, always visible (unlike the two legends above), re-worded live
   // to match what each key actually does right now. `toolIsPurchasable` is
-  // already computed above (a build:/fish: tool armed). The Esc line
-  // mirrors main.js's own Escape keydown branch's decision tree exactly —
-  // "Clear Cursor" whenever Escape would close a popup/panel/tool instead of
-  // opening the pause menu, "Pause Game" otherwise — using the same popup
-  // checks and selectedTool/panel-collapsed reads that branch itself uses,
-  // so this can never drift out of sync with what Escape actually does.
-  // buildingMoveArmed is included here too — a move/moved-Fan-aiming step
-  // never changes selectedTool away from the cursor/Food tool it was armed
-  // from, so without this the hint would wrongly read "Pause Game" while
-  // Escape would actually cancel it.
+  // already computed above (a build:/fish: tool armed). The old dynamic Esc
+  // line is gone — see this function's own note further down.
   els.hotkeyLegendE.textContent = `E: ${state.ui.shopCollapsed ? 'Open Shop' : 'Close Shop'}`;
-  // Q is a genuine toggle, per direct request — Clear Cursor while a build:/
-  // fish: tool is already armed ("something is being held"), otherwise
-  // Pipette/reselect-last (see main.js's KeyQ handler and
-  // state.ui.lastArmedTool) — `toolIsPurchasable` (already computed above)
-  // is exactly that same "something armed" condition. A copied Blueprint
-  // takes priority over both — main.js's KeyQ handler checks it first too
-  // (see that handler's own comment) — via state.ui.blueprintClipboardActive,
-  // written fresh every render() frame.
+  // Q is a genuine toggle, per direct request — Clear Cursor while ANY tool
+  // is already armed ("something is being held" — build:/fish:, but also
+  // Merge/Blueprint/Food per a later direct follow-up, not just
+  // toolIsPurchasable's narrower build:/fish:-only build/purchase-cost
+  // condition above), otherwise Pipette/reselect-last (see main.js's KeyQ
+  // handler and state.ui.lastArmedTool). A copied Blueprint takes priority
+  // over both — main.js's KeyQ handler checks it first too (see that
+  // handler's own comment) — via state.ui.blueprintClipboardActive, written
+  // fresh every render() frame.
   els.hotkeyLegendQ.textContent = state.ui.blueprintClipboardActive
     ? 'Q: Clear Blueprint'
-    : (toolIsPurchasable ? 'Q: Clear Cursor' : 'Q: Pipette/ Last-used Tool');
+    : (state.ui.selectedTool !== 'cursor' ? 'Q: Clear Cursor' : 'Q: Pipette/ Last-used Tool');
   // F — dynamically "Add Favorite"/"Remove Favorite", hidden entirely
   // whenever F would genuinely have nothing to do, per direct request
   // ("having it dynamically change between add/remove depending on what
@@ -4030,15 +4077,11 @@ export function updateHUD(state) {
   // changes — see that file's pushUndoEntry/performUndo).
   els.hotkeyLegendUndo.classList.toggle('hidden', !state.ui.undoAvailable);
   if (state.ui.undoAvailable) els.hotkeyLegendUndo.textContent = `Ctrl+Z: ${state.ui.undoLabel}`;
-  const escHasSomethingToClear = !tutorialActive && (
-    isMoundMenuOpen() || isRecipeMenuOpen() || isBuildingInfoMenuOpen() || isPlatformFilterMenuOpen() ||
-    isLabPurchaseModalOpen() || isLabMenuOpen() ||
-    state.ui.buildingMoveArmed ||
-    state.ui.selectedTool !== 'cursor' || !state.ui.shopCollapsed || !state.ui.tankPanelCollapsed
-  );
-  els.hotkeyLegendEsc.textContent = tutorialActive
-    ? 'Esc: Skip Tutorial'
-    : `Esc: ${escHasSomethingToClear ? 'Clear Cursor' : 'Pause Game'}`;
+  // The Esc line is gone entirely, per direct request — Escape's job is no
+  // longer context-dependent (see main.js's own simplified Escape handler),
+  // so there's nothing left to dynamically re-word here. The SEPARATE
+  // "(Esc) to skip tutorial" hint (#tutorial-skip-legend) is untouched —
+  // that's still real, distinct Escape behavior during a guided tutorial.
 }
 
 function positionBottomLeftLegends() {
@@ -4158,15 +4201,25 @@ function tutorialCircleForDom(el, padding = 12) {
 function startTutorialFishSpotWorld(state) {
   return { x: WORLD_W / 2, y: Math.min(state.camera.y + 100, SEABED_FLOOR_Y - 50) };
 }
-// Dead center of the city, per direct request ("the placement spot for the
+// Horizontally centered, per direct request ("the placement spot for the
 // turret in the turret tutorial should be in the middle of the city"). This
 // used to sit off toward the left edge specifically to stay clear of the
 // Shop panel's own fly-out box, back when the Shop was meant to stay open
 // through this step — now that selecting the Waste Turret during this exact
 // tutorial step auto-closes the Shop (see the turret family button's click
 // handler above), there's nothing left to stay clear of, so the spot can be
-// the genuinely obvious, centered one.
-const POST_ALIEN_TURRET_SPOT = { x: WORLD_W / 2, y: WORLD_H - TILE_SIZE / 2 };
+// the genuinely obvious, centered one. Vertically, it sits near — but not
+// exactly on — the world's real bottom edge (WORLD_H), matching the "scroll
+// all the way down" step immediately before this one. Real bug caught
+// during testing (Playwright, after the tank's own height shrank — see
+// Config.js's WORLD_TILES_H): a literal `WORLD_H - TILE_SIZE / 2` (dead
+// center of the very last seabed row) put this step's own spotlight circle
+// visibly overlapping the fixed bottom tool-bar, since the circle's radius
+// is a fixed 70 SCREEN px regardless of zoom while the toolbar sits at a
+// fixed CSS position — 3 tiles of headroom keeps the whole circle clear of
+// it at any reasonable viewport size, while staying comfortably inside the
+// "scrolled to the bottom" view the previous step already established.
+const POST_ALIEN_TURRET_SPOT = { x: WORLD_W / 2, y: WORLD_H - TILE_SIZE * 3 };
 
 // Shared by the post-alien flow's final step AND the standalone 'wastedrag'
 // flow below (used when a Waste Turret already existed before the tutorial

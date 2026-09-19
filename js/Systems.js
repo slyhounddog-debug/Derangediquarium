@@ -36,6 +36,7 @@ import {
   FISH_MIN_X,
   FISH_MAX_X,
   FISH_MIN_Y,
+  ALIEN_SPAWN_MIN_Y,
   SEABED_FLOOR_Y,
   ALIEN_FIRST_WAVE_SAFE_X_FRACTION,
   TILE_MANUFACTURER,
@@ -316,8 +317,11 @@ function spawnAlienWave(state) {
       x: FISH_MIN_X + Math.random() * xRange,
       // Biased toward the upper-mid water column (not down near the seabed
       // line) so a fresh portal reads as "emerging from open water," not
-      // spawning right on top of the player's factory.
-      y: FISH_MIN_Y + Math.random() * (SEABED_FLOOR_Y * 0.7 - FISH_MIN_Y),
+      // spawning right on top of the player's factory. ALIEN_SPAWN_MIN_Y
+      // (not FISH_MIN_Y) per direct report — aliens need a more generous
+      // top margin than fish do, so a portal can never roll high enough to
+      // open behind the fixed HUD/chat pills.
+      y: ALIEN_SPAWN_MIN_Y + Math.random() * (SEABED_FLOOR_Y * 0.7 - ALIEN_SPAWN_MIN_Y),
       hp: archetype.hpMin + Math.floor(Math.random() * (archetype.hpMax - archetype.hpMin + 1)),
       archetypeId: archetype.id,
       openAtMs: state.level.elapsed + i * ALIEN_PORTAL_STAGGER_MS,
@@ -434,16 +438,18 @@ function updateRecipeCopyTip(state) {
 // frozen (see main.js's update(), which gates every call to
 // updateStoryTriggers on those), it self-throttles for free with no extra
 // checks needed here. Reuses the exact same Save.js saveGame() the pause
-// menu's manual Save button already calls, and posts to the notification
-// ticker the same "push a real message, don't pop a blocking modal"
-// precedent every other one-off confirmation in this game already follows
-// (see UI.js's saveGameFromPause) — worded distinctly ("auto-saved," not
-// "saved") so the player can tell the two apart in the log.
+// menu's manual Save button already calls. Per direct request, the
+// confirmation is a top-center toast (state.ui.toastText) rather than a
+// chat-log notification — a plain state.ui write, not rendering, so it
+// doesn't cross this module's own "no rendering" rule; UI.js's updateHUD is
+// what actually shows/hides it (see main.js's own state.ui.toastText
+// comment) — worded distinctly ("auto-saved," not "saved") so the player
+// can tell the two apart on the rare occasion they overlap.
 function updateAutosave(state) {
   if (state.level.elapsed < state.level.nextAutosaveAtMs) return;
   state.level.nextAutosaveAtMs += AUTOSAVE_INTERVAL_MS;
   const ok = saveGame(state);
-  pushNotification(state, ok ? 'Game auto-saved. 💾' : "Auto-save failed — your browser blocked it.");
+  state.ui.toastText = ok ? 'Game auto-saved. 💾' : 'Auto-save failed — your browser blocked it.';
 }
 
 // Occasional (not guaranteed) chat nudge while buildings are genuinely

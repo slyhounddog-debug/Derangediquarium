@@ -171,22 +171,10 @@ import {
   toggleShopCollapse,
   toggleTankPanel,
   openMoundMenu,
-  closeMoundMenu,
-  isMoundMenuOpen,
   openLabMenu,
-  closeLabMenu,
-  isLabMenuOpen,
-  closeLabPurchaseModal,
-  isLabPurchaseModalOpen,
   openRecipeMenu,
-  closeRecipeMenu,
-  isRecipeMenuOpen,
   openBuildingInfoMenu,
-  closeBuildingInfoMenu,
-  isBuildingInfoMenuOpen,
   openPlatformFilterMenu,
-  closePlatformFilterMenu,
-  isPlatformFilterMenuOpen,
   copyPlatformFilter,
   toggleFavoriteForSelectedTool,
   removeFavoriteAtHoveredSlot,
@@ -204,6 +192,7 @@ import {
   togglePauseMenu,
   toggleTimePause,
   toggleSpeedX2,
+  toggleAltMode,
   advanceTutorialFlow,
   closeSidePanels,
   tutorialScrollDirectionNeeded,
@@ -216,24 +205,19 @@ const canvas = document.getElementById('game-canvas');
 const ctx = canvas.getContext('2d');
 
 // ---- Minimap ----
-// Minimized box: the whole tank (water column + seabed city + the scrollable
-// bottom buffer) letterboxed to fit within this bounding box — "zoom to fit
-// the whole tank." Expanded: a fixed, wider width with the height computed
-// purely from that width and the tank's true aspect ratio — "fit to width" —
-// per direct request, deliberately bigger/taller than the minimized box so
-// toggling really reads as "expand," not just a reshuffle.
+// Per direct report ("the expand/minimize button doesn't work. It's
+// supposed to be for the whole tank viewport, not the minimap") — the
+// minimap itself is a single fixed size now: the whole tank (water column +
+// seabed city + the scrollable bottom buffer) letterboxed to fit within this
+// one bounding box. The expand/minimize button moved to controlling the
+// real camera zoom instead — see toggleTankZoomMode below.
 const MINIMAP_BOX_W = 170;
 const MINIMAP_BOX_H = 110;
-const MINIMAP_EXPANDED_W = 220;
 const minimapCanvas = document.getElementById('minimap-canvas');
 const minimapCtx = minimapCanvas.getContext('2d');
 
-function minimapScaleAndSize(expanded) {
+function minimapScaleAndSize() {
   const totalWorldH = WORLD_H + CAMERA_BOTTOM_BUFFER_PX;
-  if (expanded) {
-    const w = MINIMAP_EXPANDED_W;
-    return { w, h: totalWorldH * (w / WORLD_W), scale: w / WORLD_W };
-  }
   const scale = Math.min(MINIMAP_BOX_W / WORLD_W, MINIMAP_BOX_H / totalWorldH);
   return { w: WORLD_W * scale, h: totalWorldH * scale, scale };
 }
@@ -245,11 +229,38 @@ function minimapScaleAndSize(expanded) {
 minimapCanvas.addEventListener('click', (e) => {
   const rect = minimapCanvas.getBoundingClientRect();
   const clickY = (e.clientY - rect.top) * (minimapCanvas.height / rect.height);
-  const { scale } = minimapScaleAndSize(state.ui.minimapExpanded);
+  const { scale } = minimapScaleAndSize();
   const viewH = canvas.height / state.camera.zoom;
   const maxY = Math.max(0, WORLD_H + CAMERA_BOTTOM_BUFFER_PX - viewH);
   state.camera.y = Math.max(0, Math.min(clickY / scale - viewH / 2, maxY));
 });
+
+// ---- Tank-viewport zoom (the minimap's own expand/minimize button) ----
+// Per direct request: "zoom to fit" computes a zoom that fits the ENTIRE
+// tank (world width AND total height, whichever is the tighter constraint)
+// within the viewport at once, so nothing needs scrolling; toggling back to
+// "fit to width" instead zooms so the tank's full WIDTH exactly fills the
+// viewport, ignoring height (the normal "scroll to see more" zoom). Neither
+// replaces the page-load/resize default (fitCameraZoom, which fits the
+// water column height) unless the player has actually clicked this button at
+// least once — tankZoomMode stays null until then, and fitCameraZoom below
+// keeps using its original formula in that case.
+let tankZoomMode = null; // null | 'whole' | 'width'
+function computeFitWholeTankZoom() {
+  return Math.min(canvas.width / WORLD_W, canvas.height / WORLD_H);
+}
+function computeFitWidthZoom() {
+  return canvas.width / WORLD_W;
+}
+const minimapExpandBtnEl = document.getElementById('minimap-expand-btn');
+function toggleTankZoomMode() {
+  tankZoomMode = tankZoomMode === 'whole' ? 'width' : 'whole';
+  fitCameraZoom();
+  if (tankZoomMode === 'whole') state.camera.y = 0; // guarantee the top of the tank is actually in view, not just theoretically fittable
+  minimapExpandBtnEl.textContent = tankZoomMode === 'whole' ? '⤡' : '⤢';
+  minimapExpandBtnEl.title = tankZoomMode === 'whole' ? 'Fit tank to width' : 'Zoom to fit the whole tank';
+}
+minimapExpandBtnEl.addEventListener('click', toggleTankZoomMode);
 
 // Per direct request ("a minimal minimap under the HUD") — a plain two-tone
 // water/city silhouette, the live camera viewport as an outlined rect, and a
@@ -258,7 +269,7 @@ minimapCanvas.addEventListener('click', (e) => {
 // buildings/fish/items, keeping it genuinely minimal rather than a second
 // full render pass. Called once a frame from render(), below.
 function renderMinimap(state) {
-  const { w, h, scale } = minimapScaleAndSize(state.ui.minimapExpanded);
+  const { w, h, scale } = minimapScaleAndSize();
   const wPx = Math.max(1, Math.round(w));
   const hPx = Math.max(1, Math.round(h));
   if (minimapCanvas.width !== wPx || minimapCanvas.height !== hPx) {
@@ -497,7 +508,10 @@ const state = {
     // persists state.meta/state.level).
     timePaused: false,
     speedX2: false,
-    minimapExpanded: false, // false = "zoom to fit the whole tank" (compact), true = "fit to width" (larger, more vertical detail) — see main.js's renderMinimap
+    // Per direct request — a toggle hotkey (Alt) that hides every piece of
+    // persistent HUD/UI chrome (see style.css's body.alt-mode rules) for a
+    // clean, unobstructed view of the tank. Pure display state, not saved.
+    altMode: false,
     // False until the player clicks "Start" on the new first-launch start
     // screen (UI.js's initStartScreen) — update() below checks this ahead of
     // (and independently from) `paused`, so the tank sits fully frozen (but
@@ -532,6 +546,26 @@ const state = {
     // shown right now.
     buildErrorText: null,
     buildErrorElapsedMs: 0,
+    // A small top-center toast, per direct request ("change the Game saved
+    // and Game auto-saved messages so they show up in the top middle of the
+    // screen for a short period before disappearing. They don't need to
+    // show up in the chat message history at all") — rendered as a real DOM
+    // element (#save-toast) instead of on-canvas like buildErrorText above,
+    // since a top-center screen position has no canvas coordinate to anchor
+    // to. UI.js's updateHUD (called unconditionally from render() every
+    // frame, regardless of state.ui.paused — same "frozen but visible"
+    // precedent the pause menu itself already follows) is what actually
+    // shows/auto-hides it, via a real setTimeout rather than a ticked
+    // elapsed counter — the Save button that sets this text lives IN the
+    // pause menu, so a timer that only advanced through update()'s own
+    // per-tick dtMs (which stops entirely while paused) would never
+    // actually count down while the menu that triggered it stays open.
+    // Systems.js's updateAutosave writes this field directly (a plain
+    // state.ui write, not rendering — same cross-module-flag convention
+    // coinCapFlashPending/wasteTurretAmmoGainedPending already use) since
+    // Systems.js itself is forbidden from touching the DOM; UI.js's
+    // saveGameFromPause (already UI.js's own domain) writes it directly too.
+    toastText: null,
     // Same cross-module-flag pattern as coinCapFlashPending/
     // wasteTurretAmmoGainedPending above — set by UI.js's restartLevel
     // (the pause menu's Restart button) the instant it calls loadLevel, per
@@ -557,9 +591,15 @@ loadLevel(state, LEVELS[0].id);
 // bit less than 100%, so a sliver of the seabed city is always visible
 // below it. That keeps feeding/collecting free of vertical panning while
 // still cueing that there's a city to scroll down to. Never zooms in past
-// 1x on a tall window; recomputed on every resize.
+// 1x on a tall window; recomputed on every resize. Once the player has
+// clicked the minimap's expand/minimize button at least once (tankZoomMode
+// no longer null — see that button's own comment), THAT explicit choice
+// takes over here instead, including across a later window resize, until
+// the button is clicked again.
 function fitCameraZoom() {
-  state.camera.zoom = Math.min(1, (canvas.height * CAMERA_WATER_COLUMN_FIT_FRACTION) / SEABED_FLOOR_Y);
+  if (tankZoomMode === 'whole') state.camera.zoom = computeFitWholeTankZoom();
+  else if (tankZoomMode === 'width') state.camera.zoom = computeFitWidthZoom();
+  else state.camera.zoom = Math.min(1, (canvas.height * CAMERA_WATER_COLUMN_FIT_FRACTION) / SEABED_FLOOR_Y);
   state.camera.viewWidth = canvas.width / state.camera.zoom;
   state.camera.viewHeight = canvas.height / state.camera.zoom;
 }
@@ -1748,6 +1788,13 @@ input.keydownHandlers.push((e) => {
   // action — deliberately never blocked by anything below (the cinematic
   // intro/tutorial-flow gates included), so it's always reachable for QA.
   if (e.code === 'Backquote') { state.debug.overlayVisible = !state.debug.overlayVisible; return; }
+  // Alt-mode, per direct request — same "always reachable" reasoning as the
+  // debug overlay above (a pure display toggle, harmless during a tutorial/
+  // cinematic/paused menu, and there'd be no way to turn it back OFF if a
+  // tutorial or the pause menu could swallow it while it's active).
+  // preventDefault stops the browser's own Alt behavior (focusing/opening
+  // its menu bar) from firing alongside this.
+  if (e.code === 'AltLeft' || e.code === 'AltRight') { e.preventDefault(); toggleAltMode(state); return; }
   // Escape can always skip an active guided tutorial — per direct request
   // ("make sure escape can actually skip any tutorial"), checked here,
   // ahead of the general tutorial-flow hotkey block below, so it's the one
@@ -1779,56 +1826,19 @@ input.keydownHandlers.push((e) => {
   // hotkey, same reasoning as the cinematic intro above — the overlay's own
   // click-through "hole" is the only interaction that should work.
   if (state.level.tutorialFlow) return;
+  // Per direct request ("make it so the esc hotkey always opens and closes
+  // the pause menu, since now we have Q and Right-Click to cover all the
+  // canceling/clearing needs") — Escape used to run a whole decision tree
+  // (close whatever popup's on top, cancel an armed tool/in-progress move,
+  // THEN fall back to the pause menu) exactly like right-click's own
+  // universal-cancel handler still does. That's now entirely Q's (clearing
+  // an armed tool) and right-click's (clearing a tool AND cancelling an
+  // in-progress move/Blueprint-drag) job instead — every popup this used to
+  // close (Mound/recipe/building-info/platform-filter/Lab/Lab-purchase) also
+  // already closes on a click anywhere outside it, so nothing is stranded
+  // without a close path. Escape's own job is simply "toggle the pause
+  // menu," full stop, same as the new hamburger button.
   if (e.code === 'Escape') {
-    // Escape's job: close whatever popup is on top (or the Shop/Tank
-    // Upgrades panel, if one's open), and cancel an armed build/fish/
-    // merge/blueprint tool back to Food. Per direct request, if NONE of that
-    // applies — no popup open, no panel open, Food already selected — it
-    // toggles the pause menu instead. The dedicated pause-menu button
-    // (#pause-toggle-btn) was removed per a later direct request — Escape is
-    // the only way to open/close the pause menu now, so it's never just a
-    // silent no-op either way.
-    if (isMoundMenuOpen()) { closeMoundMenu(); return; }
-    if (isRecipeMenuOpen()) { closeRecipeMenu(); return; }
-    if (isPlatformFilterMenuOpen()) { closePlatformFilterMenu(); return; }
-    if (isBuildingInfoMenuOpen()) { closeBuildingInfoMenu(); return; }
-    if (isLabPurchaseModalOpen()) { closeLabPurchaseModal(); return; }
-    if (isLabMenuOpen()) { closeLabMenu(); return; }
-    if (blueprintClipboard != null || blueprintDragStartCol != null) {
-      // Cancel an in-progress Blueprint selection/paste back to a clean
-      // slate — the tool itself stays selected, same as a right-click does.
-      blueprintDragStartCol = null;
-      blueprintDragStartRow = null;
-      blueprintClipboard = null;
-      return;
-    }
-    if (movingBuilding != null) {
-      // Cancel a pick-up in progress — put it right back where it came from,
-      // its own data completely untouched.
-      putDownMovedBuilding(state, movingBuilding.fromCol, movingBuilding.fromRow, movingBuilding.buildingId, movingBuilding.data);
-      movingBuilding = null;
-      return;
-    }
-    if (isFanAimingActive()) {
-      if (fanAimingMoveData != null) {
-        // This aiming step was the second half of a move, not a brand-new
-        // placement — it was already picked up off the grid, so cancelling
-        // has to put it back at its ORIGINAL spot rather than just abandon
-        // the pending aim the way a genuine new placement's cancel does.
-        putDownMovedBuilding(state, fanAimingMoveOrigin.fromCol, fanAimingMoveOrigin.fromRow, fanAimingCell.buildingId, fanAimingMoveData);
-        fanAimingMoveData = null;
-        fanAimingMoveOrigin = null;
-      }
-      fanAimingCell = null; // cancel the pending aim...
-      cancelActiveTool(state); // ...and the armed Fan tool itself, back to Food — a Fan is still a "building selected" per direct request
-      return;
-    }
-    const somethingSelected = state.ui.selectedTool !== 'cursor' || !state.ui.shopCollapsed || !state.ui.tankPanelCollapsed;
-    if (somethingSelected) {
-      closeSidePanels(state); // per direct request — Escape also closes the Shop/Tank Upgrades panel if one's open
-      cancelActiveTool(state);
-      return;
-    }
     togglePauseMenu(state);
     return;
   }
@@ -1929,19 +1939,24 @@ input.keydownHandlers.push((e) => {
       }
       // Per direct request, Q is a genuine toggle again: press it over and
       // over to clear the cursor, reselect the last thing, clear again,
-      // reselect again... A build:/fish: tool already armed ("something is
-      // being held") clears straight back to the cursor, matching the
-      // "Clear Cursor" legend wording; with NOTHING armed, it Pipettes whatever's
-      // directly under the cursor (fish checked first — their own hit
-      // radius, matching the shimmer effect's size, is usually the larger/
-      // more forgiving target — then a placed building), falling back to
-      // reselecting whichever build:/fish: tool was last armed
-      // (state.ui.lastArmedTool, written by UI.js's selectSpeciesForPreview/
-      // selectBuildingForPreview) if nothing qualifies under the cursor
-      // either.
+      // reselect again... Per a later direct follow-up ("when a tool is
+      // selected, the Q hotkey should be consumed by clearing the tool
+      // only... another Q is needed for a pipette or last-used hotkey"), ANY
+      // armed tool (build:/fish:, but also Merge/Blueprint/Food — not just
+      // build:/fish: as before) clears straight back to the plain cursor on
+      // this press, matching the "Q: Clear Cursor" legend wording —
+      // cancelActiveTool already covers every one of those cases. Only with
+      // NOTHING armed (the cursor already selected) does this Q instead
+      // Pipette whatever's directly under the cursor (fish checked first —
+      // their own hit radius, matching the shimmer effect's size, is
+      // usually the larger/more forgiving target — then a placed building),
+      // falling back to reselecting whichever build:/fish: tool was last
+      // armed (state.ui.lastArmedTool, written by UI.js's
+      // selectSpeciesForPreview/selectBuildingForPreview) if nothing
+      // qualifies under the cursor either.
       const rawTool = state.ui.selectedTool;
-      if (rawTool.startsWith('build:') || rawTool.startsWith('fish:')) {
-        deselectShopSelection(state);
+      if (rawTool !== 'cursor') {
+        cancelActiveTool(state);
       } else {
         const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
         const fish = findFishForPipetteAt(state, world.x, world.y);
@@ -2864,8 +2879,16 @@ function drawAlienBody(ctx, x, y, radius, facing, color, gazeAngle, spikes = 3, 
 // than a real cursor image asset, same "no external file, generate it"
 // spirit as this project's synthesized audio. Only ever written to the DOM
 // when the tool actually changed, not every frame.
-function emojiCursorCss(emoji, hotspotX = 4, hotspotY = 26) {
-  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'><text x='0' y='26' font-size='26'>${emoji}</text></svg>`;
+// glyphX/glyphY let a caller shift WHERE the emoji itself is drawn inside
+// the fixed 32x32 box instead of moving the hotspot number — per direct
+// request for the shell cursor below ("move the cursor point more towards
+// the top left of the emoji by moving the emoji down and right"): pushing
+// the glyph away from a fixed hotspot, down and to the right, leaves that
+// same hotspot sitting relatively closer to the glyph's own top-left corner
+// than before, without having to re-guess where the hotspot number itself
+// should land.
+function emojiCursorCss(emoji, hotspotX = 4, hotspotY = 26, glyphX = 0, glyphY = 26) {
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'><text x='${glyphX}' y='${glyphY}' font-size='26'>${emoji}</text></svg>`;
   return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${hotspotX} ${hotspotY}, auto`;
 }
 // The Food tool's cursor is a plain colored dot instead of an emoji — per
@@ -2912,9 +2935,15 @@ const CURSOR_BY_TOOL = {
   // measure this one the same way — (24, 6) is a best-effort estimate for
   // where a spiral conch shell's own pointed tip sits within its 32x32 glyph
   // box (most emoji sets draw 🐚 with the spiral point toward the upper
-  // right and the flared opening toward the lower left); nudge these two
-  // numbers if the real rendered glyph's tip lands somewhere else.
-  cursor: emojiCursorCss('🐚', 24, 6),
+  // right and the flared opening toward the lower left).
+  // Per direct follow-up report ("move the cursor point more towards the top
+  // left of the emoji by moving the emoji down and right") — the hotspot
+  // itself (24, 6) is unchanged; instead the glyph is drawn shifted (+5, +4)
+  // from the other two cursors' default draw position, which leaves that
+  // same fixed hotspot sitting closer to the glyph's own top-left corner
+  // than before. Nudge glyphX/glyphY (not the hotspot) further if the real
+  // rendered glyph still doesn't line up.
+  cursor: emojiCursorCss('🐚', 24, 6, 5, 30),
 };
 let lastCursorTool = null;
 function updateCanvasCursor() {
