@@ -379,14 +379,21 @@ for (const [i, char] of splashLetters.entries()) {
   span.style.animationDelay = `${SPLASH_GROW_IN_DURATION_S + i * SPLASH_LETTER_STAGGER_S}s`;
   splashTitle.appendChild(span);
 }
-const START_TUTORIAL_DELAY_AFTER_SPLASH_MS = 2000; // per direct request (cut from 3000) — the game-start guided tutorial no longer starts the instant Start is clicked; it waits this long after the splash screen has actually finished fading away
+const START_TUTORIAL_DELAY_AFTER_SPLASH_MS = 1000; // per direct request (cut from 2000, itself cut from 3000) — the game-start guided tutorial no longer starts the instant Start is clicked; it waits this long after the splash screen has actually finished fading away
 splashTitle.addEventListener('animationend', (e) => {
   if (e.target !== splashTitle) return; // ignore bubbled per-letter animationend events, only the title's own grow-fade ending means it's done
   splashScreen.remove();
   setTimeout(() => {
     if (!state.level.tutorialFlags.startTutorialShown) {
       state.level.tutorialFlags.startTutorialShown = true;
-      state.level.tutorialFlow = { id: 'start', step: 'shop' };
+      // Per direct request ("if the shop is already open, skip that step of
+      // the tutorial") — the 'shop' step's whole job is spotlighting the
+      // Shop toggle button and waiting for a click that opens it (see
+      // UI.js's advanceTutorialFlow('start', 'shop') call, fired from the
+      // shop-toggle click handler below); if it's already open by the time
+      // this fires, that click already happened (or never needed to), so
+      // start straight on 'guppy' instead.
+      state.level.tutorialFlow = { id: 'start', step: state.ui.shopCollapsed ? 'shop' : 'guppy' };
     }
   }, START_TUTORIAL_DELAY_AFTER_SPLASH_MS);
 });

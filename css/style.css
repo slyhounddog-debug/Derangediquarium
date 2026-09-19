@@ -247,6 +247,14 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
   box-shadow: 0 3px 9px rgba(255, 90, 170, 0.35);
   animation: minimap-ctrl-btn-pulse 1.4s ease-in-out infinite;
 }
+/* Per direct follow-up request ("make the pulsing for the sped up time
+   twice as fast as it is now, keep the pause time the same pulsing as it
+   is now") — 2x Speed reuses the exact same minimap-ctrl-btn-pulse
+   keyframes, just at half the duration; Pause Time keeps the 1.4s default
+   above untouched. */
+#time-speed-btn.active {
+  animation-duration: 0.7s;
+}
 @keyframes minimap-ctrl-btn-pulse {
   0%, 100% { transform: scale(1); box-shadow: 0 3px 9px rgba(255, 90, 170, 0.35); }
   50% { transform: scale(1.08); box-shadow: 0 3px 14px rgba(255, 90, 170, 0.6); }
