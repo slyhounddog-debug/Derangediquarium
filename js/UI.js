@@ -91,7 +91,7 @@ import {
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
-import { playUpgrade, setMusicVolume, setSfxVolume, getMusicVolume, getSfxVolume, playPanelOpen, playPanelClose, playInsufficientFunds, setMusicUnderwaterMuffle, setMusicPitchBoost } from './Sound.js';
+import { playUpgrade, setMusicVolume, setSfxVolume, getMusicVolume, getSfxVolume, playPanelOpen, playPanelClose, playInsufficientFunds, setMusicUnderwaterMuffle, setMusicSpeedBoost } from './Sound.js';
 import { hasSaveGame, saveGame, loadSaveGame } from './Save.js';
 import { pushGameNotification } from './Notifications.js';
 
@@ -730,7 +730,7 @@ function refreshTimeControlButtons(state) {
   els.timePauseBtn.classList.toggle('active', state.ui.timePaused);
   els.timeSpeedBtn.classList.toggle('active', state.ui.speedX2);
   setMusicUnderwaterMuffle(state.ui.timePaused);
-  setMusicPitchBoost(state.ui.speedX2);
+  setMusicSpeedBoost(state.ui.speedX2);
 }
 
 export function toggleTimePause(state) {

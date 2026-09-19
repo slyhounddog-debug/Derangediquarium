@@ -18,31 +18,42 @@ let sfxGain = null;
 let musicStarted = false;
 
 // ---- Music post-processing chain: musicGain -> musicLowpassFilter ->
-// (pitchShiftNode, once its worklet module has loaded) -> ctx.destination
-// ---- See setMusicUnderwaterMuffle/setMusicPitchBoost below. Both effects
-// apply uniformly to whichever of the 3 tracks is actually audible right
-// now (Game/Battle/Boss all feed the same shared musicGain upstream of
-// this), so neither needs to know or care which one that is.
+// musicHighpassFilter -> ctx.destination ---- See setMusicUnderwaterMuffle/
+// setMusicSpeedBoost below. Both effects apply uniformly to whichever of the
+// 3 tracks is actually audible right now (Game/Battle/Boss all feed the same
+// shared musicGain upstream of this), so neither needs to know or care which
+// one that is.
 let musicLowpassFilter = null;
-let pitchShiftNode = null;
-let pitchShiftReadyPromise = null;
+let musicHighpassFilter = null;
 let wantMuffle = false; // desired state, reapplied once the nodes actually exist
-let wantPitchBoost = false;
+let wantSpeedBoost = false;
 // Per direct request ("when time is paused, add a muffle effect to the
 // music, so it sounds like it's under water") — a lowpass sweeps down to
 // this cutoff; fully open (no audible filtering) is MUSIC_FILTER_OPEN_HZ.
 const MUSIC_FILTER_MUFFLED_HZ = 550;
 const MUSIC_FILTER_OPEN_HZ = 20000;
-// Per direct request ("when time is at 2x speed, slightly increase the
-// pitch of the music but keep the pacing the same") — deliberately small; a
-// bigger ratio would make PitchShiftProcessor's fixed grain size read as an
-// audible granular warble instead of a clean shift.
-const MUSIC_PITCH_BOOST_RATIO = 1.045;
+// Per direct request ("adjust the 2x speed music filter to just be a high
+// pass filter at 1200hz on the music instead of the pitch raise") —
+// replaces the previous AudioWorklet-based granular pitch shifter entirely.
+// Fully open (no audible filtering) is as low as a highpass filter's cutoff
+// can meaningfully go without clipping into DC.
+const MUSIC_HIGHPASS_ACTIVE_HZ = 1200;
+const MUSIC_HIGHPASS_OPEN_HZ = 20;
+// Per direct request ("let a 10% increase of music speed naturally raise
+// the pitch, just when the time is sped up") — a genuine <audio>
+// playbackRate change (see ensureMusicTracks' preservesPitch = false, which
+// is what makes a playbackRate change actually shift pitch instead of the
+// browser's default time-stretch-only behavior).
+const MUSIC_SPEED_BOOST_RATE = 1.1;
 // How quickly each effect ramps to its new target — smooth enough to avoid
 // an audible pop/step, the standard `setTargetAtTime` "time constant" shape
 // (not a linear duration — ~5x this value is roughly how long the ramp
-// visually/audibly finishes).
+// visually/audibly finishes). playbackRate has no AudioParam equivalent, so
+// MUSIC_SPEED_RAMP_MS below drives its own manual rAF-based fade over
+// roughly the same span.
 const MUSIC_EFFECT_RAMP_S = 0.5;
+const MUSIC_SPEED_RAMP_MS = 800;
+let speedRampRafId = null;
 
 // The 3 real music tracks (see ensureMusicTracks below) and their own
 // per-track gain nodes, feeding into the shared musicGain above so the
@@ -96,56 +107,16 @@ function ensureContext() {
   musicLowpassFilter = ctx.createBiquadFilter();
   musicLowpassFilter.type = 'lowpass';
   musicLowpassFilter.frequency.value = wantMuffle ? MUSIC_FILTER_MUFFLED_HZ : MUSIC_FILTER_OPEN_HZ; // picks up any setMusicUnderwaterMuffle call that landed before the very first user gesture created this context
+  musicHighpassFilter = ctx.createBiquadFilter();
+  musicHighpassFilter.type = 'highpass';
+  musicHighpassFilter.frequency.value = wantSpeedBoost ? MUSIC_HIGHPASS_ACTIVE_HZ : MUSIC_HIGHPASS_OPEN_HZ; // picks up any setMusicSpeedBoost call that landed before the very first user gesture created this context
   musicGain.connect(musicLowpassFilter);
-  // Starts connected straight to the destination — the pitch-shift worklet
-  // module loads asynchronously (audioWorklet.addModule returns a Promise),
-  // so music can play immediately without waiting on it; once it resolves,
-  // ensurePitchShiftNode below swaps this direct connection out for a real
-  // route through the pitch node instead.
-  musicLowpassFilter.connect(ctx.destination);
+  musicLowpassFilter.connect(musicHighpassFilter);
+  musicHighpassFilter.connect(ctx.destination);
   sfxGain = ctx.createGain();
   sfxGain.gain.value = sfxVolume * SFX_VOLUME_MAX_GAIN;
   sfxGain.connect(ctx.destination);
-  ensurePitchShiftNode();
   return ctx;
-}
-
-// Loads PitchShiftProcessor.js's AudioWorklet module (once) and splices its
-// node into the chain in place of musicLowpassFilter's temporary direct
-// connection to the destination — see ensureContext's own comment. Any
-// setMusicPitchBoost call that landed before this resolved is replayed here
-// via wantPitchBoost so the effect still ends up in the right state either
-// way, regardless of which finished first.
-function ensurePitchShiftNode() {
-  if (pitchShiftReadyPromise || !ctx.audioWorklet) return pitchShiftReadyPromise;
-  pitchShiftReadyPromise = ctx.audioWorklet.addModule('js/PitchShiftProcessor.js').then(() => {
-    // outputChannelCount deliberately left at its default (matches the
-    // input's own channel count) rather than hardcoded to 2 — the
-    // processor's own channelBuffers array already grows to fit whatever
-    // channel count it's actually handed, mono or stereo alike.
-    pitchShiftNode = new AudioWorkletNode(ctx, 'pitch-shift-processor', {
-      numberOfInputs: 1,
-      numberOfOutputs: 1,
-    });
-    musicLowpassFilter.disconnect(ctx.destination);
-    musicLowpassFilter.connect(pitchShiftNode);
-    pitchShiftNode.connect(ctx.destination);
-    applyPitchBoostTarget();
-  }).catch((err) => {
-    // A worklet failure (unsupported browser, blocked module fetch, ...)
-    // just means the 2x-speed pitch effect silently never applies — music
-    // keeps playing through the direct connection ensureContext already set
-    // up, same graceful "no Web Audio support" fallback every other export
-    // in this file already follows.
-    console.error('Derangiquarium: pitch-shift worklet failed to load', err);
-  });
-  return pitchShiftReadyPromise;
-}
-
-function applyPitchBoostTarget() {
-  if (!pitchShiftNode) return;
-  const target = wantPitchBoost ? MUSIC_PITCH_BOOST_RATIO : 1.0;
-  pitchShiftNode.parameters.get('pitchRatio').setTargetAtTime(target, ctx.currentTime, MUSIC_EFFECT_RAMP_S);
 }
 
 // Per direct request ("when time is paused, add a muffle effect to the
@@ -157,11 +128,42 @@ export function setMusicUnderwaterMuffle(active) {
   musicLowpassFilter.frequency.setTargetAtTime(active ? MUSIC_FILTER_MUFFLED_HZ : MUSIC_FILTER_OPEN_HZ, ctx.currentTime, MUSIC_EFFECT_RAMP_S);
 }
 
-// Per direct request ("when time is at 2x speed, slightly increase the
-// pitch of the music but keep the pacing the same").
-export function setMusicPitchBoost(active) {
-  wantPitchBoost = active;
-  applyPitchBoostTarget(); // no-ops harmlessly if the worklet hasn't resolved yet — ensurePitchShiftNode's own .then() replays it once it has
+// Per direct request ("when time is at 2x speed... a high pass filter at
+// 1200hz on the music... let a 10% increase of music speed naturally raise
+// the pitch... have the effects fade in/out"). Two independent fades run
+// together: the highpass filter's own smooth AudioParam ramp, and a manual
+// rAF-driven ramp of every music <audio> element's playbackRate (see
+// rampMusicPlaybackRate below — HTMLMediaElement.playbackRate has no
+// AudioParam equivalent, so there's no setTargetAtTime to lean on here).
+export function setMusicSpeedBoost(active) {
+  wantSpeedBoost = active;
+  if (musicHighpassFilter) {
+    musicHighpassFilter.frequency.setTargetAtTime(active ? MUSIC_HIGHPASS_ACTIVE_HZ : MUSIC_HIGHPASS_OPEN_HZ, ctx.currentTime, MUSIC_EFFECT_RAMP_S);
+  }
+  rampMusicPlaybackRate(active ? MUSIC_SPEED_BOOST_RATE : 1.0);
+}
+
+// Smoothly ramps Game/Battle/Boss's playbackRate together, in lockstep —
+// each animation frame reads every track's CURRENT rate and nudges all of
+// them by the same interpolated step, so they're always set to numerically
+// identical values at every point along the fade. That's what keeps Game and
+// Battle in sync through the transition itself (resyncMusicTracks' own
+// periodic currentTime check below is a safety net for any residual drift,
+// not what's doing the syncing here). A no-op before ensureMusicTracks has
+// run — the elements' own initial playbackRate (set there) already picks up
+// whatever wantSpeedBoost was at that point.
+function rampMusicPlaybackRate(target) {
+  if (speedRampRafId) cancelAnimationFrame(speedRampRafId);
+  const tracks = [gameMusicEl, battleMusicEl, bossMusicEl].filter(Boolean);
+  if (!tracks.length) return;
+  const startRates = tracks.map((el) => el.playbackRate);
+  const startTime = performance.now();
+  const step = (now) => {
+    const t = Math.min(1, (now - startTime) / MUSIC_SPEED_RAMP_MS);
+    tracks.forEach((el, i) => { el.playbackRate = startRates[i] + (target - startRates[i]) * t; });
+    speedRampRafId = t < 1 ? requestAnimationFrame(step) : null;
+  };
+  speedRampRafId = requestAnimationFrame(step);
 }
 
 // Silence (and genuinely stop processing) all audio the instant the
@@ -617,6 +619,18 @@ function ensureMusicTracks() {
   battleMusicEl.loop = true;
   bossMusicEl = new Audio('audio/Boss.mp3');
   bossMusicEl.loop = true;
+  // preservesPitch defaults to true in every modern browser (Chrome/Firefox/
+  // Safari all time-stretch by default) — explicitly disabled, vendor
+  // prefixes included, so setMusicSpeedBoost's playbackRate ramp actually
+  // shifts pitch as a natural side effect of playing faster, per direct
+  // request, rather than staying pitch-flat.
+  const initialRate = wantSpeedBoost ? MUSIC_SPEED_BOOST_RATE : 1.0;
+  [gameMusicEl, battleMusicEl, bossMusicEl].forEach((el) => {
+    el.preservesPitch = false;
+    el.mozPreservesPitch = false;
+    el.webkitPreservesPitch = false;
+    el.playbackRate = initialRate;
+  });
 
   gameTrackGain = ctx.createGain();
   battleTrackGain = ctx.createGain();
