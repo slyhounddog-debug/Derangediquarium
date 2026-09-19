@@ -40,20 +40,24 @@ const MUSIC_FILTER_OPEN_HZ = 20000;
 const MUSIC_HIGHPASS_ACTIVE_HZ = 1000;
 const MUSIC_HIGHPASS_OPEN_HZ = 20;
 // Per direct request ("let a 10% increase of music speed naturally raise
-// the pitch, just when the time is sped up", later tuned down to 5%) — a
+// the pitch, just when the time is sped up", tuned down to 5% then 3%) — a
 // genuine <audio> playbackRate change (see ensureMusicTracks'
 // preservesPitch = false, which is what makes a playbackRate change
 // actually shift pitch instead of the browser's default time-stretch-only
 // behavior).
-const MUSIC_SPEED_BOOST_RATE = 1.05;
-// How quickly each effect ramps to its new target — smooth enough to avoid
-// an audible pop/step, the standard `setTargetAtTime` "time constant" shape
-// (not a linear duration — ~5x this value is roughly how long the ramp
-// visually/audibly finishes). playbackRate has no AudioParam equivalent, so
-// MUSIC_SPEED_RAMP_MS below drives its own manual rAF-based fade over
-// roughly the same span.
+const MUSIC_SPEED_BOOST_RATE = 1.03;
+// How quickly the underwater-muffle lowpass ramps to its new target —
+// smooth enough to avoid an audible pop/step, the standard `setTargetAtTime`
+// "time constant" shape (not a linear duration — ~5x this value is roughly
+// how long the ramp visually/audibly finishes).
 const MUSIC_EFFECT_RAMP_S = 0.5;
-const MUSIC_SPEED_RAMP_MS = 800;
+// How long the 2x-speed effect (highpass filter + playbackRate, both ramped
+// together in setMusicSpeedBoost below) takes to fade — as an exact linear
+// duration, not a `setTargetAtTime` time constant, since "the fade out time"
+// needs to be a literal, precise span. Per direct request, fading OUT
+// (dropping back to normal) is quicker than fading in.
+const MUSIC_SPEED_FADE_IN_MS = 800;
+const MUSIC_SPEED_FADE_OUT_MS = 500;
 let speedRampRafId = null;
 
 // The 3 real music tracks (see ensureMusicTracks below) and their own
@@ -130,18 +134,28 @@ export function setMusicUnderwaterMuffle(active) {
 }
 
 // Per direct request ("when time is at 2x speed... a high pass filter at
-// 1200hz on the music... let a 10% increase of music speed naturally raise
-// the pitch... have the effects fade in/out"). Two independent fades run
-// together: the highpass filter's own smooth AudioParam ramp, and a manual
-// rAF-driven ramp of every music <audio> element's playbackRate (see
-// rampMusicPlaybackRate below — HTMLMediaElement.playbackRate has no
-// AudioParam equivalent, so there's no setTargetAtTime to lean on here).
+// 1000hz on the music... let a 3% increase of music speed naturally raise
+// the pitch... have the effects fade in/out", with fade-out specifically
+// tuned to 0.5s). Two fades run together, both using the same exact-duration
+// linear ramp (MUSIC_SPEED_FADE_IN_MS/MUSIC_SPEED_FADE_OUT_MS) so the filter
+// and the pitch/speed change move in lockstep: the highpass filter's own
+// AudioParam ramp, and a manual rAF-driven ramp of every music <audio>
+// element's playbackRate (see rampMusicPlaybackRate below —
+// HTMLMediaElement.playbackRate has no AudioParam equivalent to lean on).
 export function setMusicSpeedBoost(active) {
   wantSpeedBoost = active;
+  const fadeMs = active ? MUSIC_SPEED_FADE_IN_MS : MUSIC_SPEED_FADE_OUT_MS;
   if (musicHighpassFilter) {
-    musicHighpassFilter.frequency.setTargetAtTime(active ? MUSIC_HIGHPASS_ACTIVE_HZ : MUSIC_HIGHPASS_OPEN_HZ, ctx.currentTime, MUSIC_EFFECT_RAMP_S);
+    const now = ctx.currentTime;
+    const target = active ? MUSIC_HIGHPASS_ACTIVE_HZ : MUSIC_HIGHPASS_OPEN_HZ;
+    // cancel-then-hold-then-ramp — safely retargets a ramp that might
+    // already be mid-flight (toggling 2x speed again before the previous
+    // fade finished) without an audible jump/click.
+    musicHighpassFilter.frequency.cancelScheduledValues(now);
+    musicHighpassFilter.frequency.setValueAtTime(musicHighpassFilter.frequency.value, now);
+    musicHighpassFilter.frequency.linearRampToValueAtTime(target, now + fadeMs / 1000);
   }
-  rampMusicPlaybackRate(active ? MUSIC_SPEED_BOOST_RATE : 1.0);
+  rampMusicPlaybackRate(active ? MUSIC_SPEED_BOOST_RATE : 1.0, fadeMs);
 }
 
 // Smoothly ramps Game/Battle/Boss's playbackRate together, in lockstep —
@@ -153,14 +167,14 @@ export function setMusicSpeedBoost(active) {
 // not what's doing the syncing here). A no-op before ensureMusicTracks has
 // run — the elements' own initial playbackRate (set there) already picks up
 // whatever wantSpeedBoost was at that point.
-function rampMusicPlaybackRate(target) {
+function rampMusicPlaybackRate(target, durationMs) {
   if (speedRampRafId) cancelAnimationFrame(speedRampRafId);
   const tracks = [gameMusicEl, battleMusicEl, bossMusicEl].filter(Boolean);
   if (!tracks.length) return;
   const startRates = tracks.map((el) => el.playbackRate);
   const startTime = performance.now();
   const step = (now) => {
-    const t = Math.min(1, (now - startTime) / MUSIC_SPEED_RAMP_MS);
+    const t = Math.min(1, (now - startTime) / durationMs);
     tracks.forEach((el, i) => { el.playbackRate = startRates[i] + (target - startRates[i]) * t; });
     speedRampRafId = t < 1 ? requestAnimationFrame(step) : null;
   };
