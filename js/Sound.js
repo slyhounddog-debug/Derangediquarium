@@ -33,18 +33,19 @@ let wantSpeedBoost = false;
 const MUSIC_FILTER_MUFFLED_HZ = 550;
 const MUSIC_FILTER_OPEN_HZ = 20000;
 // Per direct request ("adjust the 2x speed music filter to just be a high
-// pass filter at 1200hz on the music instead of the pitch raise") —
-// replaces the previous AudioWorklet-based granular pitch shifter entirely.
-// Fully open (no audible filtering) is as low as a highpass filter's cutoff
-// can meaningfully go without clipping into DC.
-const MUSIC_HIGHPASS_ACTIVE_HZ = 1200;
+// pass filter at 1200hz on the music instead of the pitch raise", later
+// tuned down to 1000hz) — replaces the previous AudioWorklet-based granular
+// pitch shifter entirely. Fully open (no audible filtering) is as low as a
+// highpass filter's cutoff can meaningfully go without clipping into DC.
+const MUSIC_HIGHPASS_ACTIVE_HZ = 1000;
 const MUSIC_HIGHPASS_OPEN_HZ = 20;
 // Per direct request ("let a 10% increase of music speed naturally raise
-// the pitch, just when the time is sped up") — a genuine <audio>
-// playbackRate change (see ensureMusicTracks' preservesPitch = false, which
-// is what makes a playbackRate change actually shift pitch instead of the
-// browser's default time-stretch-only behavior).
-const MUSIC_SPEED_BOOST_RATE = 1.1;
+// the pitch, just when the time is sped up", later tuned down to 5%) — a
+// genuine <audio> playbackRate change (see ensureMusicTracks'
+// preservesPitch = false, which is what makes a playbackRate change
+// actually shift pitch instead of the browser's default time-stretch-only
+// behavior).
+const MUSIC_SPEED_BOOST_RATE = 1.05;
 // How quickly each effect ramps to its new target — smooth enough to avoid
 // an audible pop/step, the standard `setTargetAtTime` "time constant" shape
 // (not a linear duration — ~5x this value is roughly how long the ramp
