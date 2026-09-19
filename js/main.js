@@ -200,7 +200,10 @@ import {
   initStartScreen,
   scheduleShopButtonReminder,
   cancelActiveTool,
+  isCursorOrFoodTool,
   togglePauseMenu,
+  toggleTimePause,
+  toggleSpeedX2,
   advanceTutorialFlow,
   closeSidePanels,
   tutorialScrollDirectionNeeded,
@@ -211,6 +214,79 @@ import {
 
 const canvas = document.getElementById('game-canvas');
 const ctx = canvas.getContext('2d');
+
+// ---- Minimap ----
+// Minimized box: the whole tank (water column + seabed city + the scrollable
+// bottom buffer) letterboxed to fit within this bounding box — "zoom to fit
+// the whole tank." Expanded: a fixed, wider width with the height computed
+// purely from that width and the tank's true aspect ratio — "fit to width" —
+// per direct request, deliberately bigger/taller than the minimized box so
+// toggling really reads as "expand," not just a reshuffle.
+const MINIMAP_BOX_W = 170;
+const MINIMAP_BOX_H = 110;
+const MINIMAP_EXPANDED_W = 220;
+const minimapCanvas = document.getElementById('minimap-canvas');
+const minimapCtx = minimapCanvas.getContext('2d');
+
+function minimapScaleAndSize(expanded) {
+  const totalWorldH = WORLD_H + CAMERA_BOTTOM_BUFFER_PX;
+  if (expanded) {
+    const w = MINIMAP_EXPANDED_W;
+    return { w, h: totalWorldH * (w / WORLD_W), scale: w / WORLD_W };
+  }
+  const scale = Math.min(MINIMAP_BOX_W / WORLD_W, MINIMAP_BOX_H / totalWorldH);
+  return { w: WORLD_W * scale, h: totalWorldH * scale, scale };
+}
+
+// Click-to-jump — centers the camera vertically on wherever was clicked,
+// same clamp updateCamera itself applies every tick (so a click near either
+// end can't scroll past the real bounds even for the one frame before
+// updateCamera re-clamps it anyway).
+minimapCanvas.addEventListener('click', (e) => {
+  const rect = minimapCanvas.getBoundingClientRect();
+  const clickY = (e.clientY - rect.top) * (minimapCanvas.height / rect.height);
+  const { scale } = minimapScaleAndSize(state.ui.minimapExpanded);
+  const viewH = canvas.height / state.camera.zoom;
+  const maxY = Math.max(0, WORLD_H + CAMERA_BOTTOM_BUFFER_PX - viewH);
+  state.camera.y = Math.max(0, Math.min(clickY / scale - viewH / 2, maxY));
+});
+
+// Per direct request ("a minimal minimap under the HUD") — a plain two-tone
+// water/city silhouette, the live camera viewport as an outlined rect, and a
+// dot per living alien (the one thing worth calling out at a glance — "where
+// is the wave right now" during a scrolled-away fight). Nothing else: no
+// buildings/fish/items, keeping it genuinely minimal rather than a second
+// full render pass. Called once a frame from render(), below.
+function renderMinimap(state) {
+  const { w, h, scale } = minimapScaleAndSize(state.ui.minimapExpanded);
+  const wPx = Math.max(1, Math.round(w));
+  const hPx = Math.max(1, Math.round(h));
+  if (minimapCanvas.width !== wPx || minimapCanvas.height !== hPx) {
+    minimapCanvas.width = wPx;
+    minimapCanvas.height = hPx;
+  }
+  const mctx = minimapCtx;
+  mctx.clearRect(0, 0, wPx, hPx);
+  const seabedYPx = SEABED_FLOOR_Y * scale;
+  mctx.fillStyle = '#2a6690';
+  mctx.fillRect(0, 0, wPx, seabedYPx);
+  mctx.fillStyle = '#5c4a3a';
+  mctx.fillRect(0, seabedYPx, wPx, hPx - seabedYPx);
+  mctx.fillStyle = '#ff3b30';
+  for (const entity of state.level.entities) {
+    if (entity.type !== 'alien' || entity.hp <= 0) continue;
+    mctx.beginPath();
+    mctx.arc(entity.x * scale, entity.y * scale, 2, 0, Math.PI * 2);
+    mctx.fill();
+  }
+  const viewX = Math.max(0, state.camera.x * scale);
+  const viewY = Math.max(0, state.camera.y * scale);
+  const viewW = Math.min(wPx - viewX, (canvas.width / state.camera.zoom) * scale);
+  const viewH = Math.min(hPx - viewY, (canvas.height / state.camera.zoom) * scale);
+  mctx.strokeStyle = '#ffe066';
+  mctx.lineWidth = 1.5;
+  mctx.strokeRect(viewX + 0.75, viewY + 0.75, Math.max(1, viewW), Math.max(1, viewH));
+}
 
 // Every flat-fill item type's own color — coin is the one exception (its
 // color is value-tier-derived via getCoinColor, checked separately), and
@@ -374,7 +450,17 @@ const state = {
   // uses them to spawn purchased fish somewhere actually on screen.
   camera: { x: 0, y: 0, zoom: 1, viewWidth: 0, viewHeight: 0 },
   ui: {
-    selectedTool: 'food', // which click-tool a canvas click performs; only 'food' exists until Phase 2 adds tile placement
+    // Which click-tool a canvas click performs. 'cursor' is the true default
+    // — a plain shell-emoji cursor that can't drop Food (see CURSOR_BY_TOOL)
+    // but can do everything else a placed-tool-free cursor always could
+    // (move/delete buildings, drag items/recipes, shoot aliens, open
+    // building modals, ...) — per direct request ("default back to just a
+    // cursor... this default cursor CANNOT drop food"). 'food' is now a
+    // separate, deliberately-armed tool (hotkey 1 / the shop's Food icon)
+    // that does everything 'cursor' does PLUS drops Food on click. See
+    // UI.js's isCursorOrFoodTool for the shared "either of these two neutral
+    // tools" check used everywhere that distinction matters.
+    selectedTool: 'cursor',
     lastArmedTool: null, // the last 'build:<id>'/'fish:<id>' tool armed (UI.js's selectSpeciesForPreview/selectBuildingForPreview) — the Q hotkey's "reselect last building/fish" fallback, see main.js's KeyQ handler
     blueprintCost: null, // live total $ cost of the currently-armed Blueprint stamp, written fresh every render() frame, null while no stamp is armed — read by UI.js's updateHUD for the bottom-left cost bubble
     blueprintClipboardActive: false, // whether a Blueprint stamp is currently captured/armed, written fresh every render() frame — read by UI.js's updateHUD to switch the persistent Q legend to "Clear Blueprint"
@@ -401,6 +487,17 @@ const state = {
     buildingMoveArmed: false,
     buildingMoveHoverLabel: null,
     paused: false, // pause menu open/closed (Escape); update() below skips simulating entirely while true
+    // Time-manipulation HUD buttons, per direct request. timePaused freezes
+    // fish/alien/building simulation while still letting the player build/
+    // move/delete/drag — see update()'s own comment for exactly what stays
+    // running. speedX2 instead runs the WHOLE sim (including timePaused's
+    // own gate, so the two are mutually exclusive in effect — see
+    // getTimeScale below) at double real-time rate. Both are UI/session
+    // state, not campaign progress, so neither is saved (Save.js only ever
+    // persists state.meta/state.level).
+    timePaused: false,
+    speedX2: false,
+    minimapExpanded: false, // false = "zoom to fit the whole tank" (compact), true = "fit to width" (larger, more vertical detail) — see main.js's renderMinimap
     // False until the player clicks "Start" on the new first-launch start
     // screen (UI.js's initStartScreen) — update() below checks this ahead of
     // (and independently from) `paused`, so the tank sits fully frozen (but
@@ -643,7 +740,7 @@ let itemDragStartSx = 0;
 let itemDragStartSy = 0;
 let itemDragMoved = false; // set once at mouseup — read (and cleared) by the click handler right after
 // Set true the instant updateBuildDrag places the postalien tutorial's own
-// Waste Turret and clears selectedTool back to Food — see the click
+// Waste Turret and clears selectedTool back to the cursor — see the click
 // handler's own check of this flag for why: that reset strips the ordinary
 // "!effectiveTool.startsWith('build:')" guard against the building-info
 // pop-up, so without this the very same click that placed the turret would
@@ -684,15 +781,17 @@ input.mouseDownHandlers.push((sx, sy) => {
   const world = screenToWorld(sx, sy, state.camera);
   // Per direct request ("objects can't be dragged when a building or fish
   // is selected for purchasing... you have to be on the food cursor tool to
-  // drag objects") — reuses the same effectiveToolAt a build tool already
-  // gets silently reinterpreted as Food through while hovering open
-  // water, so this stays consistent with that existing behavior rather than
-  // introducing a second, slightly different notion of "which tool is this
-  // really." Fish/Merge are NOT given that same open-water carve-out by
-  // effectiveToolAt (see its own comment), so both correctly still block a
-  // drag here regardless of where the cursor is, matching "a fish selected
-  // for purchasing" explicitly named in the request.
-  if (effectiveToolAt(world.y) !== 'food') return;
+  // drag objects" — now also true of the plain cursor tool, per the later
+  // "default cursor can be used for... dragging objects/recipes" request) —
+  // reuses the same effectiveToolAt a build tool already gets silently
+  // reinterpreted as Food through while hovering open water, so this stays
+  // consistent with that existing behavior rather than introducing a
+  // second, slightly different notion of "which tool is this really." Fish/
+  // Merge are NOT given that same open-water carve-out by effectiveToolAt
+  // (see its own comment), so both correctly still block a drag here
+  // regardless of where the cursor is, matching "a fish selected for
+  // purchasing" explicitly named in the request.
+  if (!isCursorOrFoodTool(effectiveToolAt(world.y))) return;
   let best = null;
   let bestDistSq = Infinity;
   for (const item of state.level.items) {
@@ -877,7 +976,7 @@ let recipeDragHoverKey = null; // whichever same-type building the cursor is cur
 input.mouseDownHandlers.push((sx, sy) => {
   if (state.ui.paused) return;
   const world = screenToWorld(sx, sy, state.camera);
-  if (input.keysDown.has('KeyD') && state.ui.selectedTool === 'food') return; // don't fight with the D-hotkey's own drag-delete on the same press
+  if (input.keysDown.has('KeyD') && isCursorOrFoodTool(state.ui.selectedTool)) return; // don't fight with the D-hotkey's own drag-delete on the same press
   const key = getRecipeBuildingKeyAt(state, world.x, world.y);
   if (!key) return;
   recipeDragSourceKey = key;
@@ -933,7 +1032,7 @@ let platformFilterDragHoverKey = null; // whichever other Platform tile the curs
 input.mouseDownHandlers.push((sx, sy) => {
   if (state.ui.paused) return;
   const world = screenToWorld(sx, sy, state.camera);
-  if (input.keysDown.has('KeyD') && state.ui.selectedTool === 'food') return; // don't fight with the D-hotkey's own drag-delete on the same press
+  if (input.keysDown.has('KeyD') && isCursorOrFoodTool(state.ui.selectedTool)) return; // don't fight with the D-hotkey's own drag-delete on the same press
   const key = getPlatformFilterKeyAt(state, world.x, world.y);
   if (!key) return;
   platformFilterDragSourceKey = key;
@@ -1041,11 +1140,12 @@ let fanAimingCell = null; // { col, row, buildingId } | null
 function isFanAimingActive() {
   if (fanAimingCell == null) return false;
   // A moved Fan's own angle step never changes selectedTool at all (it
-  // stays 'food' the whole time a move is in progress) — so unlike a
-  // genuine new placement, it can't self-heal off a "does selectedTool
-  // still match the armed build tool" check. updateBuildingMove() below is
-  // what replaces that self-healing for this case instead (auto-cancels if
-  // selectedTool ever leaves 'food').
+  // stays on whichever of the cursor/Food tool it was armed from, the whole
+  // time a move is in progress) — so unlike a genuine new placement, it
+  // can't self-heal off a "does selectedTool still match the armed build
+  // tool" check. updateBuildingMove() below is what replaces that self-
+  // healing for this case instead (auto-cancels if selectedTool ever arms a
+  // real build:/fish:/merge/blueprint tool — see isCursorOrFoodTool).
   if (fanAimingMoveData != null) return true;
   return state.ui.selectedTool === `build:${fanAimingCell.buildingId}`;
 }
@@ -1190,23 +1290,25 @@ let fanAimingMoveOrigin = null; // { fromCol, fromRow } | null
 // Called every tick from update() — the only thing a move genuinely needs
 // checked continuously (the ghost itself is drawn fresh every render()
 // frame straight off movingBuilding, no separate live-update needed). Its
-// one job: if the player does something that changes state.ui.selectedTool
-// away from 'food' while a move is in progress — opens the shop and picks
+// one job: if the player does something that arms a build:/fish:/merge/
+// blueprint tool while a move is in progress — opens the shop and picks
 // something, hits a tool hotkey, whatever — auto-cancel and put the
 // building back, the same self-healing spirit isFanAimingActive() already
 // has for its own tool check, rather than leaving a picked-up building in
-// limbo with nowhere to go.
+// limbo with nowhere to go. isCursorOrFoodTool (not a literal 'food' check)
+// since selecting either of the two neutral tools mid-move is fine — a move
+// is armed from the cursor OR the Food tool alike, see middleClickHandlers.
 function updateBuildingMove() {
-  if (movingBuilding != null && state.ui.selectedTool !== 'food') {
+  if (movingBuilding != null && !isCursorOrFoodTool(state.ui.selectedTool)) {
     putDownMovedBuilding(state, movingBuilding.fromCol, movingBuilding.fromRow, movingBuilding.buildingId, movingBuilding.data);
     movingBuilding = null;
   }
   // Same self-healing for a moved Fan's own angle-choosing step — it never
-  // changes selectedTool away from 'food' itself (see isFanAimingActive's
-  // own comment), so this is what actually catches "the player did
-  // something that should cancel this" for that case, restoring the Fan at
-  // its ORIGINAL spot since it was already picked up off the grid.
-  if (fanAimingCell != null && fanAimingMoveData != null && state.ui.selectedTool !== 'food') {
+  // changes selectedTool away from the cursor/Food tool itself (see
+  // isFanAimingActive's own comment), so this is what actually catches "the
+  // player did something that should cancel this" for that case, restoring
+  // the Fan at its ORIGINAL spot since it was already picked up off the grid.
+  if (fanAimingCell != null && fanAimingMoveData != null && !isCursorOrFoodTool(state.ui.selectedTool)) {
     putDownMovedBuilding(state, fanAimingMoveOrigin.fromCol, fanAimingMoveOrigin.fromRow, fanAimingCell.buildingId, fanAimingMoveData);
     fanAimingCell = null;
     fanAimingMoveData = null;
@@ -1247,7 +1349,7 @@ input.clickHandlers.push((sx, sy) => {
     // Waste Turret (via updateBuildDrag's drag-placement path) — per direct
     // report, this click would otherwise ALSO open the building-info
     // pop-up on the tile it just placed, since updateBuildDrag already reset
-    // selectedTool back to 'food' (deselecting the shop) before this click
+    // selectedTool back to 'cursor' (deselecting the shop) before this click
     // fires, which strips the "!effectiveTool.startsWith('build:')" guard
     // below that normally protects an ordinary placement's own click.
     suppressTutorialTurretPlacementClick = false;
@@ -1506,6 +1608,11 @@ input.clickHandlers.push((sx, sy) => {
     const buildingInfo = getBuildingInfoKeyAt(state, world.x, world.y);
     if (buildingInfo) { openBuildingInfoMenu(state, buildingInfo.key); return; }
   }
+  // Per direct request ("the default cursor CANNOT drop food. The food tool
+  // has to be selected to drop food") — this is the ONE and only place Food
+  // ever gets dropped, strictly gated on the literal 'food' tool (never the
+  // plain 'cursor' default, even though the two are otherwise
+  // interchangeable everywhere else — see UI.js's isCursorOrFoodTool).
   if (effectiveTool === 'food') {
     const reason = trySpawnFood(state, world.x, world.y);
     if (reason === 'no_money') flashMoneyInsufficient(state);
@@ -1535,15 +1642,16 @@ input.rightClickHandlers.push(() => {
   blueprintClipboard = null;
 });
 
-// Right-click-to-move — see movingBuilding's own comment above. Only arms
-// from the Food tool (matching the hover legend's own gating below) — a
-// build/fish/merge tool has its own unrelated right-click-free
-// interactions. A right-click always CANCELS first, regardless of tool,
-// whichever of the two "something's in progress" states applies — a plain
-// pick-up-in-progress (movingBuilding), or a moved Fan's own angle-choosing
-// step (fanAimingMoveData) — putting the building back at its original
-// spot with its own data completely untouched either way.
-input.rightClickHandlers.push((sx, sy) => {
+// Cancel an in-progress building move — see movingBuilding's own comment
+// above. Whichever of the two "something's in progress" states applies — a
+// plain pick-up-in-progress (movingBuilding), or a moved Fan's own angle-
+// choosing step (fanAimingMoveData) — puts the building back at its
+// original spot with its own data completely untouched either way. Arming a
+// NEW move moved to middle-click, per direct request ("right-click to move
+// is changed to middle-click to move") — see middleClickHandlers below;
+// cancelling one already in progress deliberately STAYED on right-click,
+// per the later "make right-click a universal cancel button" request.
+input.rightClickHandlers.push(() => {
   if (state.ui.paused || state.level.tutorialFlow) return;
   if (movingBuilding != null) {
     putDownMovedBuilding(state, movingBuilding.fromCol, movingBuilding.fromRow, movingBuilding.buildingId, movingBuilding.data);
@@ -1555,9 +1663,32 @@ input.rightClickHandlers.push((sx, sy) => {
     fanAimingCell = null;
     fanAimingMoveData = null;
     fanAimingMoveOrigin = null;
-    return;
   }
-  if (state.ui.selectedTool !== 'food') return;
+});
+
+// Universal cancel, per direct request ("make right-click a universal
+// cancel button. Right-click should clear a fish/building/tool that's
+// selected, and default back to just a cursor"). Mirrors the Escape key's
+// own "somethingSelected" branch (closeSidePanels + cancelActiveTool) with
+// no pause-menu fallback — a right-click with nothing to cancel is just a
+// plain no-op, unlike Escape which opens the pause menu in that case. Runs
+// every right-click alongside the two handlers above, so cancelling an
+// in-progress move ALSO clears whatever tool was armed at the same time —
+// one right-click genuinely clears everything back to the plain cursor.
+input.rightClickHandlers.push(() => {
+  if (state.ui.paused || state.level.tutorialFlow) return;
+  closeSidePanels(state);
+  cancelActiveTool(state);
+});
+
+// Middle-click-to-move — see movingBuilding's own comment above. Only arms
+// from the cursor/Food tool (matching the hover legend's own gating below,
+// isCursorOrFoodTool) — a build/fish/merge tool has its own unrelated
+// interactions and shouldn't also start a move.
+input.middleClickHandlers.push((sx, sy) => {
+  if (state.ui.paused || state.level.tutorialFlow) return;
+  if (movingBuilding != null || (isFanAimingActive() && fanAimingMoveData != null)) return; // a move's already in progress — middle-click isn't a second gesture on top of it
+  if (!isCursorOrFoodTool(state.ui.selectedTool)) return;
   const world = screenToWorld(sx, sy, state.camera);
   const { col, row } = worldToTile(world.x, world.y);
   const picked = pickUpBuildingForMove(state, col, row);
@@ -1692,7 +1823,7 @@ input.keydownHandlers.push((e) => {
       cancelActiveTool(state); // ...and the armed Fan tool itself, back to Food — a Fan is still a "building selected" per direct request
       return;
     }
-    const somethingSelected = state.ui.selectedTool !== 'food' || !state.ui.shopCollapsed || !state.ui.tankPanelCollapsed;
+    const somethingSelected = state.ui.selectedTool !== 'cursor' || !state.ui.shopCollapsed || !state.ui.tankPanelCollapsed;
     if (somethingSelected) {
       closeSidePanels(state); // per direct request — Escape also closes the Shop/Tank Upgrades panel if one's open
       cancelActiveTool(state);
@@ -1784,23 +1915,23 @@ input.keydownHandlers.push((e) => {
       // clear a blueprint"), matching the dynamic "Q: Clear Blueprint" legend
       // (UI.js's updateHUD, reading state.ui.blueprintClipboardActive —
       // written every render() frame, see render()'s own comment). Switches
-      // back to Food too, same as the ordinary "Clear Cursor" case below —
-      // updateBlueprintToolGate then wipes blueprintClipboard itself the very
-      // next tick purely because the tool is no longer 'blueprint', but
-      // clearing it here too makes the ghost/ability-to-paste disappear on
-      // this exact keypress rather than one tick later.
+      // back to the plain cursor too, same as the ordinary "Clear Cursor"
+      // case below — updateBlueprintToolGate then wipes blueprintClipboard
+      // itself the very next tick purely because the tool is no longer
+      // 'blueprint', but clearing it here too makes the ghost/ability-to-
+      // paste disappear on this exact keypress rather than one tick later.
       if (blueprintClipboard != null) {
         blueprintClipboard = null;
         blueprintDragStartCol = null;
         blueprintDragStartRow = null;
-        selectTool(state, 'food');
+        selectTool(state, 'cursor');
         break;
       }
       // Per direct request, Q is a genuine toggle again: press it over and
       // over to clear the cursor, reselect the last thing, clear again,
       // reselect again... A build:/fish: tool already armed ("something is
-      // being held") clears straight back to Food, matching the "Clear
-      // Cursor" legend wording; with NOTHING armed, it Pipettes whatever's
+      // being held") clears straight back to the cursor, matching the
+      // "Clear Cursor" legend wording; with NOTHING armed, it Pipettes whatever's
       // directly under the cursor (fish checked first — their own hit
       // radius, matching the shimmer effect's size, is usually the larger/
       // more forgiving target — then a placed building), falling back to
@@ -1875,6 +2006,13 @@ input.keydownHandlers.push((e) => {
       break;
     case 'KeyC': // set the countdown to the next Alien Invasion wave to exactly 10s from now — per direct request, for testing the Wave Countdown HUD/warning notifications without waiting out a real 3.5-4.5 minute gap. Touches ONLY alienNextWaveAtMs, same minimal shape as KeyY above — doesn't touch wave size, tier mix, or the difficulty ramp (all computed fresh, from alienWavesSpawned/elapsed, at the moment the wave actually fires), and is silently overwritten by updateAlienWaves' own real scheduling if a wave is already active (the countdown genuinely hasn't started yet in that case, same as it wouldn't for a real player).
       state.level.alienNextWaveAtMs = state.level.elapsed + 10000;
+      break;
+    case 'Space': // Pause Time — per direct request, same toggle the minimap's own Pause button uses (see UI.js's toggleTimePause)
+      e.preventDefault(); // Space's native behavior (activating a focused button, page scroll) would otherwise fight this
+      toggleTimePause(state);
+      break;
+    case 'KeyX': // 2x Speed — per direct request, same toggle the minimap's own 2x button uses (see UI.js's toggleSpeedX2)
+      toggleSpeedX2(state);
       break;
   }
 });
@@ -2046,9 +2184,9 @@ function updateBuildDrag() {
     // Checked BEFORE advanceTutorialFlow mutates tutorialFlow to the next
     // step — real bug caught during testing: calling deselectShopSelection
     // unconditionally on every turret placement (tutorial or not) reset
-    // state.ui.selectedTool to 'food' WHILE the mouse button was still down,
+    // state.ui.selectedTool to 'cursor' WHILE the mouse button was still down,
     // ahead of the native mouseup's own "click" event — which meant that
-    // click then read as an ordinary Food-tool click landing on the
+    // click then read as an ordinary cursor-tool click landing on the
     // freshly-placed turret, immediately popping its generic building-info
     // modal open right on top of it. Gating this to only the tutorial's own
     // exact step (per the original request — "after you place the turret,
@@ -2063,7 +2201,7 @@ function updateBuildDrag() {
       // this exact turret, which reads oddly if the turret build tool is
       // still the one armed (the player would have to click it off
       // themselves first, or risk placing a second one by accident while
-      // trying to drag). Auto-clears back to Food the instant the tutorial
+      // trying to drag). Auto-clears back to the cursor the instant the tutorial
       // turret is down, same as deselectShopSelection already does for a
       // manually re-clicked single-tier shop item.
       deselectShopSelection(state);
@@ -2083,16 +2221,17 @@ function updateBuildDrag() {
 
 // D-hotkey delete, including hold-and-drag — see lastKeyDDeleteCell's own
 // comment above. Per direct request ("built into the food cursor tool via
-// the D hotkey"), this is specifically a Food-tool ability, not a global
-// modifier that works no matter what else is selected — checked against the
-// raw selectedTool, not effectiveToolAt, since a build/blueprint tool is
-// only ever reinterpreted as Food over OPEN water (see effectiveToolAt's
-// own comment) and deletion only ever applies on the seabed anyway, where
-// an armed build tool stays exactly itself. Matches updateCanvasCursor's
-// own hammer-cursor swap and render()'s own D-held ghost-tint preview,
-// which both gate on the same condition.
+// the D hotkey," later extended to the plain cursor tool too — "the default
+// cursor can be used for... moving/deleting buildings"), this is a cursor/
+// Food-tool ability, not a global modifier that works no matter what else is
+// selected — checked against the raw selectedTool, not effectiveToolAt,
+// since a build/blueprint tool is only ever reinterpreted as Food over OPEN
+// water (see effectiveToolAt's own comment) and deletion only ever applies
+// on the seabed anyway, where an armed build tool stays exactly itself.
+// Matches updateCanvasCursor's own hammer-cursor swap and render()'s own
+// D-held ghost-tint preview, which both gate on the same condition.
 function updateKeyDDelete() {
-  if (!input.keysDown.has('KeyD') || state.ui.selectedTool !== 'food') {
+  if (!input.keysDown.has('KeyD') || !isCursorOrFoodTool(state.ui.selectedTool)) {
     lastKeyDDeleteCell = null;
     return;
   }
@@ -2326,14 +2465,29 @@ function update(dtMs) {
     state.ui.buildErrorElapsedMs += dtMs;
     if (state.ui.buildErrorElapsedMs >= BUILD_ERROR_TEXT_DURATION_MS) state.ui.buildErrorText = null;
   }
-  updateEntities(state, dtMs);
+  // Pause Time button/hotkey (state.ui.timePaused) — per direct request,
+  // deliberately NOT the same thing as the debug time-scale cheat's 0x step
+  // (TIME_SCALE_STEPS[0]) further down this file: that scales how often
+  // update() itself gets CALLED (via getTimeScale/createGameLoop's
+  // accumulator), so a 0x debug pause stops this whole function from ever
+  // running again — including the drag-follow calls below — which would
+  // also freeze the exact interactions Pause Time is supposed to leave
+  // working ("purchase/move/delete buildings/fish and drag objects"). This
+  // flag instead gates just updateEntities (fish AI/production, alien
+  // spawns/wave timers, Grid.js's building intake — "fish don't produce
+  // money/waste/science and aliens don't spawn and buildings don't accept
+  // objects") and the level clock, while update() keeps running every real
+  // frame so the drag/move functions below stay responsive.
+  if (!state.ui.timePaused) updateEntities(state, dtMs);
   updateFishDrag();
   updateItemDrag();
   updateRecipeDrag();
   updatePlatformFilterDrag();
   updateBuildingMove();
-  updateStoryTriggers(state);
-  state.level.elapsed += dtMs;
+  if (!state.ui.timePaused) {
+    updateStoryTriggers(state);
+    state.level.elapsed += dtMs;
+  }
 
   stepsCounter++;
   const now = performance.now();
@@ -2750,17 +2904,29 @@ const CURSOR_BY_TOOL = {
   // glove" should click from.
   merge: emojiCursorCss('🧤', 17, 17),
   food: circleCursorCss(FOOD_COLOR),
+  // The default/neutral tool's cursor, per direct request ("default back to
+  // just a cursor that looks like a shell emoji, with the tip of the shell
+  // being the point of the cursor"). Unlike the hammer/glove hotspots above
+  // (each measured directly off an offscreen-canvas pixel scan of a real
+  // render), there's no such rendering environment available here to
+  // measure this one the same way — (24, 6) is a best-effort estimate for
+  // where a spiral conch shell's own pointed tip sits within its 32x32 glyph
+  // box (most emoji sets draw 🐚 with the spiral point toward the upper
+  // right and the flared opening toward the lower left); nudge these two
+  // numbers if the real rendered glyph's tip lands somewhere else.
+  cursor: emojiCursorCss('🐚', 24, 6),
 };
 let lastCursorTool = null;
 function updateCanvasCursor() {
   const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
   const effectiveTool = effectiveToolAt(world.y);
   // Per direct request ("built into the food cursor tool via the D
-  // hotkey") — holding D on the Food tool swaps the cursor to the same
-  // hammer glyph the old standalone Demolish tool used, matching
-  // updateKeyDDelete's own exact activation condition (Food tool + D held +
-  // over the seabed, where there's actually something to delete).
-  const cursorKey = input.keysDown.has('KeyD') && effectiveTool === 'food' && world.y >= SEABED_FLOOR_Y
+  // hotkey," later extended to the plain cursor tool too) — holding D on
+  // the cursor/Food tool swaps the cursor to the same hammer glyph the old
+  // standalone Demolish tool used, matching updateKeyDDelete's own exact
+  // activation condition (cursor/Food tool + D held + over the seabed,
+  // where there's actually something to delete).
+  const cursorKey = input.keysDown.has('KeyD') && isCursorOrFoodTool(effectiveTool) && world.y >= SEABED_FLOOR_Y
     ? 'delete'
     : (CURSOR_BY_TOOL[effectiveTool] ? effectiveTool : 'default');
   if (cursorKey === lastCursorTool) return;
@@ -2834,7 +3000,7 @@ function render() {
     // around while trying to choose the fan location") no cone shows until
     // the location itself is actually confirmed.
     renderBuildGhost(ctx, state, world.x, world.y, buildingId, angle, false);
-  } else if (hoverEffectiveTool === 'food' && input.keysDown.has('KeyD') && input.mouse.inside && !state.ui.paused) {
+  } else if (isCursorOrFoodTool(hoverEffectiveTool) && input.keysDown.has('KeyD') && input.mouse.inside && !state.ui.paused) {
     // Ghost-mode preview of whatever's under the cursor, plus the refund
     // it'll pay out — TILE_REFUND_FRACTION is 1.0 (a full refund) per
     // direct request. Shown while holding D on the Food tool (the old
@@ -3688,22 +3854,25 @@ function render() {
     ctx.restore();
   }
 
-  // Right-click-to-move hover hint / in-progress state — per direct request
+  // Building-move hover hint / in-progress state — per direct request
   // ("Remove the right click hover tooltip from the fans. Instead, anytime
   // the cursor is over a building, add to the legend in the bottom left,
   // 'Right-click to Adjust' or 'Right-click to Move'... If they right click
   // the building, add... 'Left-click to accept' and 'Right-click to
-  // cancel'"). Computed here into state.ui rather than drawn on canvas —
-  // UI.js's updateHUD reads it to drive the new bottom-left legend, the same
-  // cross-module-flag pattern this file already uses for
-  // coinCapFlashPending/wasteTurretAmmoGainedPending, since UI.js can't be
-  // imported back into here without a circular dependency.
+  // cancel'"), with the arming half later moved to middle-click ("right-
+  // click to move is changed to middle-click to move" — UI.js's updateHUD
+  // is what actually swaps the legend text). Computed here into state.ui
+  // rather than drawn on canvas — UI.js's updateHUD reads it to drive the
+  // bottom-left legend, the same cross-module-flag pattern this file
+  // already uses for coinCapFlashPending/wasteTurretAmmoGainedPending,
+  // since UI.js can't be imported back into here without a circular
+  // dependency.
   if (movingBuilding != null || (isFanAimingActive() && fanAimingMoveData != null)) {
     state.ui.buildingMoveArmed = true;
     state.ui.buildingMoveHoverLabel = null;
   } else {
     state.ui.buildingMoveArmed = false;
-    if (hoverEffectiveTool === 'food' && input.mouse.inside && !state.ui.paused) {
+    if (isCursorOrFoodTool(hoverEffectiveTool) && input.mouse.inside && !state.ui.paused) {
       const { col: hoverCol, row: hoverRow } = worldToTile(hoverWorld.x, hoverWorld.y);
       const hoverTile = getTile(state.level.grid, hoverCol, hoverRow);
       state.ui.buildingMoveHoverLabel = hoverTile && hoverTile !== TILE_EMPTY
@@ -3827,6 +3996,7 @@ function render() {
   updateBossHealthBar(state);
   updateHUD(state);
   updateNotificationTicker(state);
+  renderMinimap(state);
   state.debug.cursorWorld = cursorWorld;
   updateDebugOverlay(state, {
     fps: fpsDisplay,
@@ -3839,7 +4009,12 @@ function render() {
 createGameLoop({
   update,
   render,
-  getTimeScale: () => TIME_SCALE_STEPS[state.debug.timeScaleIndex],
+  // state.ui.speedX2 (the player-facing 2x speed button/hotkey) stacks
+  // multiplicatively on top of the debug time-scale cheat rather than
+  // replacing it — the debug +/- keys are a dev tool independent of this
+  // player feature, and there's no real-world case where a player toggles
+  // both at once, so simplicity wins over guarding against it.
+  getTimeScale: () => TIME_SCALE_STEPS[state.debug.timeScaleIndex] * (state.ui.speedX2 ? 2 : 1),
   simDtMs: SIM_DT_MS,
   maxFrameSkip: MAX_FRAME_SKIP,
 });

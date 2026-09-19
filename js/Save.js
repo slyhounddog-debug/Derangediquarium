@@ -36,10 +36,31 @@ export function loadSaveGame() {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || !parsed.meta || !parsed.level) return null;
+    migrateTurretAmmoFields(parsed.level);
     return { meta: parsed.meta, level: parsed.level };
   } catch (err) {
     console.error('Derangiquarium: load failed', err);
     return null;
+  }
+}
+
+// One-off migration: a turret's ammo used to be a single `ammo` number
+// before Biomass ammo split it into `ammoWaste`/`ammoBiomass` (Grid.js's
+// updateBuildings — Biomass deals more damage per shot, so it can't share a
+// pool with Waste ammo any more). A save written before that split still has
+// the old shape; without this, every turret's old ammo total would just
+// vanish (undefined + undefined = NaN, and a NaN ammo count blocks both
+// firing and refilling — see Grid.js's hasAmmo/intake-cap checks) the first
+// time an old save loads.
+function migrateTurretAmmoFields(level) {
+  if (!level || !level.buildingData) return;
+  for (const key in level.buildingData) {
+    const data = level.buildingData[key];
+    if (data && typeof data.ammo === 'number' && data.ammoWaste === undefined) {
+      data.ammoWaste = data.ammo;
+      data.ammoBiomass = 0;
+      delete data.ammo;
+    }
   }
 }
 

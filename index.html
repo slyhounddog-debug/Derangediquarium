@@ -90,6 +90,23 @@
   </div>
 </div>
 
+<!-- Minimal minimap, per direct request — sits directly under #hud, same
+     right-aligned corner. #minimap-canvas's own pixel size is driven live by
+     main.js's renderMinimap (it resizes the canvas's real width/height
+     attributes between the two display modes — "zoom to fit the whole tank"
+     when minimized vs "fit to width" when expanded — CSS alone can't do that
+     resize since a canvas's internal resolution and its CSS display size are
+     two different things). The 3 buttons directly beneath it — expand/
+     minimize, Pause Time, 2x Speed — sit in one row per direct request. -->
+<div id="minimap-wrap">
+  <canvas id="minimap-canvas" title="Click to jump there"></canvas>
+  <div id="minimap-controls">
+    <button id="minimap-expand-btn" class="minimap-ctrl-btn sheen-target" title="Expand minimap">⤢</button>
+    <button id="time-pause-btn" class="minimap-ctrl-btn sheen-target" title="Pause Time (Space)">⏸️</button>
+    <button id="time-speed-btn" class="minimap-ctrl-btn sheen-target" title="2x Speed (X)">⏩</button>
+  </div>
+</div>
+
 <div id="tutorial-overlay" class="hidden"></div>
 <div id="tutorial-text" class="hidden"></div>
 <!-- Deliberately NOT nested inside #bottom-bar-row (see that element's own
@@ -117,13 +134,13 @@
      that the dedicated pause button is gone. -->
 <div id="build-legend" class="hidden"></div>
 <div id="tutorial-skip-legend" class="hidden">(Esc) to skip tutorial</div>
-<!-- Right-click-to-move legend — same "plain top-level sibling, positioned
+<!-- Building-move legend — same "plain top-level sibling, positioned
      live off the Shop button" treatment as the two legends above (see their
      own comment for why), mutually exclusive with both: shown while
-     hovering a placed building on the Food tool with nothing else going on
-     ("Right-click to Adjust"/"Right-click to Move", plus "(R) to Rotate"
-     for a Platform and/or "(D) to Delete" for anything — lines 2/3 hidden
-     otherwise), or while a move (or a moved Fan's own angle step) is
+     hovering a placed building on the cursor/Food tool with nothing else
+     going on ("Middle-click to Adjust"/"Middle-click to Move", plus "(R) to
+     Rotate" for a Platform and/or "(D) to Delete" for anything — lines 2/3
+     hidden otherwise), or while a move (or a moved Fan's own angle step) is
      actually in progress ("Left-click to accept" / "Right-click to
      cancel" — line 3 always hidden then, deleting mid-move isn't a thing).
      Populated live by UI.js's updateHUD from state.ui.buildingMoveHoverLabel/
@@ -280,6 +297,7 @@
       <button id="pause-save-btn" class="pause-btn sheen-target">💾 Save</button>
       <button id="pause-restart-btn" class="pause-btn sheen-target">🔄 Restart</button>
       <button id="pause-settings-btn" class="pause-btn sheen-target">⚙️ Settings</button>
+      <button id="pause-main-menu-btn" class="pause-btn sheen-target">🏠 Main Menu</button>
     </div>
     <div id="pause-settings" class="hidden">
       <div id="pause-title">Settings</div>

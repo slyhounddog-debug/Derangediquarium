@@ -23,21 +23,22 @@ export const TILE_SIZE = 32; // px per tile — every coordinate transform is bu
 // bubble/seaweed density (per px of width) stays what it was before, rather
 // than reading 2.67x busier crammed into a much narrower column.
 export const WORLD_TILES_W = 60; // world width in tiles — was 160
-// World height in tiles — 47, up from 45 per direct request ("allow for 4
-// lines of buildings under the rocky shelf line instead of 2"). The water
-// column (SEABED_ROW_START and up) is untouched; the 2 extra rows are pure
-// seabed, added below the existing bottom edge specifically so ROCK_SHELF_Y
-// below lands at the exact same absolute pixel height it always has (see its
-// own comment) — the tank's visible silhouette doesn't shift at all, there's
-// just more real floor beneath the shelf now. CAMERA_BOTTOM_BUFFER_PX is
-// shrunk by the same 2 tiles' worth of px below so the combined scrollable
-// depth (WORLD_H + the buffer) stays exactly what it was before, per direct
-// request to "keep the height of the tank and visual buffer the same."
-export const WORLD_TILES_H = 47;
+// Per direct request ("shorter tank, 18 tile city and 20% shorter upper
+// tank, keeping the seaweed the same height") — both halves of the tank
+// shrink: the seabed city drops from 20 rows to 18 (SEABED_ROW_START..
+// WORLD_TILES_H-1), and the water column above it drops from 27 rows to 22
+// (27 * 0.8 = 21.6, rounded to the nearest whole tile — there's no such
+// thing as a fractional tile row). WORLD_TILES_H is just the sum of the two
+// (22 + 18 = 40). Seaweed itself needs no change to "keep the same height"
+// — Ambience.js's SEAWEED_MIN/MAX_HEIGHT are already fixed pixel values
+// anchored to SEABED_FLOOR_Y (the water/seabed boundary), not a fraction of
+// the water column, so they automatically stay exactly as tall as before;
+// they just now reach higher up the (now shorter) column in relative terms.
+export const WORLD_TILES_H = 40;
 export const WORLD_W = WORLD_TILES_W * TILE_SIZE; // 1920px
-export const WORLD_H = WORLD_TILES_H * TILE_SIZE; // 1504px
+export const WORLD_H = WORLD_TILES_H * TILE_SIZE; // 1280px
 
-export const SEABED_ROW_START = 27; // first seabed tile row; rows 0-26 are water column
+export const SEABED_ROW_START = 22; // first seabed tile row; rows 0-21 are water column
 export const SEABED_ROW_END = WORLD_TILES_H - 1; // last seabed tile row (46)
 export const SEABED_FLOOR_Y = SEABED_ROW_START * TILE_SIZE; // world-y of the water/seabed boundary — Phase 1 renders this as a flat floor, Phase 2 replaces it with real tiles, but everything reads this one constant
 // A pure-visual strip the camera can scroll past the world's real bottom
@@ -1119,10 +1120,14 @@ export const SPECIES = {
     // dropValue *= 1.25 and dropInterval /= 0.8 (same "rate-based" ÷X
     // convention this file already uses for "X% as often" — see e.g.
     // WASTE_POOP_INTERVAL_MS's own comment) across all 3 base feeders.
+    // Per direct request ("make the fish coin values 15-20% more, the game
+    // scales slightly too slowly right now") — a flat 1.2x on top of the
+    // prior pass's numbers, same convention as every other "% more" comment
+    // in this file (dropValue *= 1.2, dropInterval untouched).
     growthStages: [
-      { feedsRequired: 0, scale: 0.5, dropInterval: 24228, dropValue: 6.25 }, // stage 1: hatchling
-      { feedsRequired: 3, scale: 0.75, dropInterval: 24228, dropValue: 8.75 }, // stage 2: juvenile
-      { feedsRequired: 6, scale: 1.0, dropInterval: 24228, dropValue: 11.25 }, // stage 3: adult
+      { feedsRequired: 0, scale: 0.5, dropInterval: 24228, dropValue: 7.5 }, // stage 1: hatchling
+      { feedsRequired: 3, scale: 0.75, dropInterval: 24228, dropValue: 10.5 }, // stage 2: juvenile
+      { feedsRequired: 6, scale: 1.0, dropInterval: 24228, dropValue: 13.5 }, // stage 3: adult
     ],
     // Per-species multiplier on the flat WASTE_POOP_INTERVAL_MS fish-poop
     // timer (Entities.js's updateFish) — omitted here since Guppy IS the
@@ -1146,10 +1151,12 @@ export const SPECIES = {
     // (dropValue/dropInterval*60000) — still shared flatly across all 3
     // stages, same "same rate as adult the whole time, only value climbs"
     // mechanic every base feeder uses.
+    // Per direct request ("make the fish coin values 15-20% more") — flat
+    // 1.2x on dropValue, same as every other coin-dropping base feeder.
     growthStages: [
-      { feedsRequired: 0, scale: 0.5, dropInterval: 16500, dropValue: 3 }, // hatchling
-      { feedsRequired: 3, scale: 0.75, dropInterval: 16500, dropValue: 4 }, // juvenile
-      { feedsRequired: 6, scale: 1.0, dropInterval: 16500, dropValue: 5 }, // adult — still the high-frequency coin firehose of the three, just slightly less so
+      { feedsRequired: 0, scale: 0.5, dropInterval: 16500, dropValue: 3.6 }, // hatchling
+      { feedsRequired: 3, scale: 0.75, dropInterval: 16500, dropValue: 4.8 }, // juvenile
+      { feedsRequired: 6, scale: 1.0, dropInterval: 16500, dropValue: 6 }, // adult — still the high-frequency coin firehose of the three, just slightly less so
     ],
     // 10% slower waste production than Guppy, per direct request — same
     // "÷(1-x)" convention this codebase already uses for "X% slower"
@@ -1175,10 +1182,12 @@ export const SPECIES = {
     // 1.25 and dropInterval /= 0.8 across all 3 stages, same as every other
     // feeder — the effective $/min for each stage scales by the same net
     // 1.25/0.8 = 1.5625x this produces everywhere.
+    // Per direct request ("make the fish coin values 15-20% more") — flat
+    // 1.2x on dropValue, same as every other coin-dropping base feeder.
     growthStages: [
-      { feedsRequired: 0, scale: 0.6, dropInterval: 36574, dropValue: 15.875 }, // hatchling
-      { feedsRequired: 3, scale: 0.8, dropInterval: 36574, dropValue: 20.625 }, // juvenile
-      { feedsRequired: 6, scale: 1.0, dropInterval: 36574, dropValue: 27.5 }, // adult
+      { feedsRequired: 0, scale: 0.6, dropInterval: 36574, dropValue: 19.05 }, // hatchling
+      { feedsRequired: 3, scale: 0.8, dropInterval: 36574, dropValue: 24.75 }, // juvenile
+      { feedsRequired: 6, scale: 1.0, dropInterval: 36574, dropValue: 33 }, // adult
     ],
     // 5% faster waste production than Guppy, per direct request — same
     // per-species multiplier mechanism as Dartfin's own (slower) one above,
@@ -1653,6 +1662,19 @@ export const TURRET_FIRE_RATE_UPGRADE_MULTIPLIER = 1.2;
 export const WASTE_TURRET_SHOTS_PER_WASTE = 10;
 export const WASTE_TURRET_MAX_WASTE = 5; // -> 50 max stored shots
 export const WASTE_TURRET_MAX_AMMO = WASTE_TURRET_SHOTS_PER_WASTE * WASTE_TURRET_MAX_WASTE;
+// Biomass doubles as a premium ammo source for any TURRET_AMMO_TILES tier —
+// per direct request, it's strictly better than Waste ammo: 50% more damage
+// per shot and 15 shots per unit loaded instead of Waste's 10. Tracked as a
+// separate counter from Waste ammo (Grid.js's data.ammoBiomass alongside
+// data.ammoWaste) rather than one generic pool, since the two need to keep
+// dealing different damage per shot even once loaded — updateBuildings'
+// turret-fire branch spends from the Biomass pool first whenever it's
+// non-empty (using the better ammo you just loaded should feel immediate,
+// not saved for "later"), falling back to Waste once it runs dry. Both
+// pools share the same WASTE_TURRET_MAX_AMMO combined-shots cap so loading
+// stays a meaningful choice rather than just stacking two full reserves.
+export const BIOMASS_TURRET_SHOTS_PER_AMMO = 15;
+export const BIOMASS_TURRET_DAMAGE_MULTIPLIER = 1.5;
 // Retired in favor of a real circle-vs-tile touch test (Grid.js's
 // isTouchingBuildingTile) — per direct report, this fixed radius left the
 // tile's own corners (including the top edge) under-covered, so waste
@@ -2662,7 +2684,18 @@ export const ALIEN_FIRST_WAVE_EARLY_MS = 90000;
 // reaching the canvas below it. Clamping the first alien to the left portion
 // of the range keeps it clear of that corner regardless of its Y roll.
 export const ALIEN_FIRST_WAVE_SAFE_X_FRACTION = 0.6;
-export const ALIEN_WAVE_DIFFICULTY_RAMP_WAVES = 10;
+// Per direct request ("alien progression gets too hard too fast, it should
+// take hours before the last tier of alien shows up") — this is the same
+// progress axis ALIEN_TIER_MIX_KEYFRAMES rides (Systems.js's
+// alienDifficultyT = alienWavesSpawned / this), so raising it stretches out
+// both the wave-size/frequency ramp AND the tier mix together. At the old
+// value of 10, Tier 5 (Leviathan) already had a 5% spawn chance by wave 8
+// (t=0.75) — well under an hour in. At 48, with waves landing roughly every
+// ~4 minutes on average (ALIEN_WAVE_INTERVAL_EARLY_MS/_LATE_MS), that same
+// t=0.75 point (Tier 5's first appearance) lands around wave 36, ~2.5 hours
+// into a level, and the ramp doesn't fully max out (heavy Tier 4/5) until
+// close to 4 hours.
+export const ALIEN_WAVE_DIFFICULTY_RAMP_WAVES = 48;
 export const ALIEN_WAVE_COUNT_EARLY_MIN = 2;
 export const ALIEN_WAVE_COUNT_EARLY_MAX = 3;
 export const ALIEN_WAVE_COUNT_LATE_MIN = 10;
@@ -2694,12 +2727,19 @@ export const ALIEN_WAVE_COUNT_LATE_MAX = 15;
 // its name, Behemoth/Leviathan both bulk up), and `glow` (a soft outer aura
 // for the top two tiers only, so they read as visibly more dangerous at a
 // glance even in a mixed-tier wave, not just via the health bar).
+// Per direct request ("aliens do slightly too much damage" / "higher tiers
+// give too much bio-sludge"): fishDamagePerSec is cut a flat 20% across
+// every tier (5/12.5/20/27.5/35 -> 4/10/16/22/28, still evenly stepped) —
+// slightly softer without changing the relative tier-to-tier ramp. dnaYield
+// is flattened at the top end instead of a uniform cut, since the complaint
+// was specifically "higher tiers" (1/2/4/7/12 -> 1/2/3/5/7) — Tier 1/2 are
+// untouched, Tier 3-5 each pull back toward a gentler curve.
 export const ALIEN_ARCHETYPES = [
-  { id: 'alien_t1', tier: 1, name: 'Alien Scout', hpMin: 20, hpMax: 30, speed: 40, dnaYield: 1, radius: 16, color: '#5a2d6b', fishDamagePerSec: 5, spikes: 1, bodyWidthMul: 1.0, bodyHeightMul: 1.0, glow: false },
-  { id: 'alien_t2', tier: 2, name: 'Alien Brute', hpMin: 40, hpMax: 55, speed: 46, dnaYield: 2, radius: 18, color: '#3d4a8f', fishDamagePerSec: 12.5, spikes: 2, bodyWidthMul: 1.08, bodyHeightMul: 1.08, glow: false },
-  { id: 'alien_t3', tier: 3, name: 'Alien Stalker', hpMin: 65, hpMax: 85, speed: 54, dnaYield: 4, radius: 20, color: '#2d8f6e', fishDamagePerSec: 20, spikes: 3, bodyWidthMul: 1.3, bodyHeightMul: 0.8, glow: false },
-  { id: 'alien_t4', tier: 4, name: 'Alien Behemoth', hpMin: 95, hpMax: 130, speed: 62, dnaYield: 7, radius: 23, color: '#c4522a', fishDamagePerSec: 27.5, spikes: 4, bodyWidthMul: 1.18, bodyHeightMul: 1.18, glow: true },
-  { id: 'alien_t5', tier: 5, name: 'Alien Leviathan', hpMin: 150, hpMax: 220, speed: 70, dnaYield: 12, radius: 27, color: '#ff33dd', fishDamagePerSec: 35, spikes: 5, bodyWidthMul: 1.32, bodyHeightMul: 0.92, glow: true },
+  { id: 'alien_t1', tier: 1, name: 'Alien Scout', hpMin: 20, hpMax: 30, speed: 40, dnaYield: 1, radius: 16, color: '#5a2d6b', fishDamagePerSec: 4, spikes: 1, bodyWidthMul: 1.0, bodyHeightMul: 1.0, glow: false },
+  { id: 'alien_t2', tier: 2, name: 'Alien Brute', hpMin: 40, hpMax: 55, speed: 46, dnaYield: 2, radius: 18, color: '#3d4a8f', fishDamagePerSec: 10, spikes: 2, bodyWidthMul: 1.08, bodyHeightMul: 1.08, glow: false },
+  { id: 'alien_t3', tier: 3, name: 'Alien Stalker', hpMin: 65, hpMax: 85, speed: 54, dnaYield: 3, radius: 20, color: '#2d8f6e', fishDamagePerSec: 16, spikes: 3, bodyWidthMul: 1.3, bodyHeightMul: 0.8, glow: false },
+  { id: 'alien_t4', tier: 4, name: 'Alien Behemoth', hpMin: 95, hpMax: 130, speed: 62, dnaYield: 5, radius: 23, color: '#c4522a', fishDamagePerSec: 22, spikes: 4, bodyWidthMul: 1.18, bodyHeightMul: 1.18, glow: true },
+  { id: 'alien_t5', tier: 5, name: 'Alien Leviathan', hpMin: 150, hpMax: 220, speed: 70, dnaYield: 7, radius: 27, color: '#ff33dd', fishDamagePerSec: 28, spikes: 5, bodyWidthMul: 1.32, bodyHeightMul: 0.92, glow: true },
 ];
 // The rolling wave-mix weight curve — per direct spec's 5-phase description
 // (Early 100% T1 -> Mid-Early T1/T2 -> Mid T1/T2/T3 -> Late phases out T1,

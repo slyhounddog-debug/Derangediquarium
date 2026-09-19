@@ -59,6 +59,8 @@ import {
   TILE_TURRET_WASTE,
   WASTE_TURRET_SHOTS_PER_WASTE,
   WASTE_TURRET_MAX_WASTE,
+  BIOMASS_TURRET_SHOTS_PER_AMMO,
+  BIOMASS_TURRET_DAMAGE_MULTIPLIER,
   ACHIEVEMENTS,
   ACHIEVEMENT_LIST,
   ACHIEVEMENT_GEM_REWARD_BY_TIER,
@@ -90,7 +92,7 @@ import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
 import { playUpgrade, setMusicVolume, setSfxVolume, getMusicVolume, getSfxVolume, playPanelOpen, playPanelClose, playInsufficientFunds } from './Sound.js';
-import { hasSaveGame, saveGame, loadSaveGame } from './Save.js';
+import { hasSaveGame, saveGame, loadSaveGame, clearSaveGame } from './Save.js';
 import { pushGameNotification } from './Notifications.js';
 
 const MOUND_MENU_GAP_PX = 12; // screen px of breathing room between the popup's bottom edge and the Mound's top edge
@@ -304,6 +306,9 @@ export function initUI(state) {
     tutorialOverlay: document.getElementById('tutorial-overlay'),
     tutorialText: document.getElementById('tutorial-text'),
     powerGraphCanvas: document.getElementById('hud-power-graph-canvas'),
+    minimapExpandBtn: document.getElementById('minimap-expand-btn'),
+    timePauseBtn: document.getElementById('time-pause-btn'),
+    timeSpeedBtn: document.getElementById('time-speed-btn'),
     shopPanel: document.getElementById('shop-panel'),
     shopCollapseBtn: document.getElementById('shop-collapse-btn'),
     shopMoney: document.getElementById('shop-money'),
@@ -333,6 +338,7 @@ export function initUI(state) {
     pauseSaveBtn: document.getElementById('pause-save-btn'),
     pauseLoadSaveBtn: document.getElementById('pause-load-save-btn'),
     pauseRestartBtn: document.getElementById('pause-restart-btn'),
+    pauseMainMenuBtn: document.getElementById('pause-main-menu-btn'),
     pauseSettingsBtn: document.getElementById('pause-settings-btn'),
     pauseSettingsBackBtn: document.getElementById('pause-settings-back-btn'),
     musicVolumeSlider: document.getElementById('music-volume-slider'),
@@ -526,6 +532,10 @@ export function initUI(state) {
   els.pauseSaveBtn.addEventListener('click', () => saveGameFromPause(state));
   els.pauseLoadSaveBtn.addEventListener('click', () => loadLastSaveFromPause(state));
   els.pauseRestartBtn.addEventListener('click', () => restartLevel(state));
+  els.pauseMainMenuBtn.addEventListener('click', () => returnToMainMenuFromPause(state));
+  els.minimapExpandBtn.addEventListener('click', () => toggleMinimapExpanded(state));
+  els.timePauseBtn.addEventListener('click', () => toggleTimePause(state));
+  els.timeSpeedBtn.addEventListener('click', () => toggleSpeedX2(state));
   els.bossVictoryRestartBtn.addEventListener('click', () => {
     els.bossVictoryOverlay.classList.remove('visible');
     els.bossVictoryOverlay.classList.add('hidden');
@@ -626,7 +636,7 @@ function updateShopCollapse(state) {
   // it deselect the fish and default to the food") — checked here, the one
   // place every close path (the toggle button/S hotkey, opening the Tank
   // panel, closeSidePanels) funnels through, rather than duplicated at each
-  // call site. Idempotent: once deselected, selectedTool is 'food', so a
+  // call site. Idempotent: once deselected, selectedTool is 'cursor', so a
   // later call with the shop still collapsed is a no-op.
   if (state.ui.shopCollapsed && state.ui.selectedTool.startsWith('fish:')) {
     deselectShopSelection(state);
@@ -685,6 +695,41 @@ function closePauseMenu(state) {
   state.ui.paused = false;
   els.pauseOverlay.classList.add('hidden');
   playPanelClose();
+}
+
+// ---- Time-manipulation HUD buttons (Pause Time / 2x Speed) ----
+// Per direct request — both live under the minimap alongside its own
+// expand/minimize button. Each is a shared toggle (exported so main.js's
+// Space/KeyX hotkeys call the exact same function the button's own click
+// listener does below), so the button's icon/active-state can never drift
+// out of sync with whichever path actually flipped the flag. Unlike
+// togglePauseMenu, neither freezes/unfreezes via a DOM show/hide — main.js's
+// update()/createGameLoop read state.ui.timePaused/speedX2 directly every
+// tick (see update()'s and getTimeScale's own comments) — this function's
+// only job is the flag flip plus the button's own visual state.
+export function toggleTimePause(state) {
+  state.ui.timePaused = !state.ui.timePaused;
+  els.timePauseBtn.textContent = state.ui.timePaused ? '▶️' : '⏸️';
+  els.timePauseBtn.title = state.ui.timePaused ? 'Resume Time (Space)' : 'Pause Time (Space)';
+  els.timePauseBtn.classList.toggle('active', state.ui.timePaused);
+}
+
+export function toggleSpeedX2(state) {
+  state.ui.speedX2 = !state.ui.speedX2;
+  els.timeSpeedBtn.classList.toggle('active', state.ui.speedX2);
+}
+
+// ---- Minimap expand/minimize ----
+// The canvas's own real pixel size/redraw is main.js's job (renderMinimap,
+// called every render() frame) — this just flips the flag it reads and
+// swaps the button's own icon between the two directions it would now
+// switch to, per direct request ("a dynamically switching expand/minimize
+// button... that switches from zoom to fit for the whole tank, and fit to
+// width for the tank").
+export function toggleMinimapExpanded(state) {
+  state.ui.minimapExpanded = !state.ui.minimapExpanded;
+  els.minimapExpandBtn.textContent = state.ui.minimapExpanded ? '⤡' : '⤢';
+  els.minimapExpandBtn.title = state.ui.minimapExpanded ? 'Minimize minimap' : 'Expand minimap';
 }
 
 // Opened by main.js's click handler when isPointOnMound(...) hits — replaces
@@ -2068,6 +2113,28 @@ function restartLevel(state) {
   state.ui.replaySplashPending = true;
 }
 
+// Per direct request ("add a main menu button to the pause menu that resets
+// the game back to the start state minus any previous save") — unlike
+// Restart (which only wipes state.level, keeping state.meta's permanent
+// unlocks/gems/achievements intact), this is a genuine full wipe: the saved
+// game is erased and the whole page reloads. A real reload — rather than
+// hand-resetting every field of state.meta/state.level in place — is
+// deliberate: main.js's `const state = {...}` literal is the one true
+// definition of "the start state," and re-running it from scratch is the
+// only way to guarantee this stays byword-for-byword in sync with it as
+// that literal grows, instead of a second, easily-forgotten copy here
+// silently drifting out of date. Confirmed via a native browser confirm()
+// rather than this game's usual notification-ticker pattern (see
+// saveGameFromPause's own comment on why THAT one doesn't confirm) — every
+// other pause-menu action is either free of side effects or trivially
+// undoable; this one is not.
+function returnToMainMenuFromPause(state) {
+  const ok = window.confirm('Return to the main menu? This erases your saved game and all progress — there is no undo.');
+  if (!ok) return;
+  clearSaveGame();
+  window.location.reload();
+}
+
 // Highlights whichever single shop selection is active — Food, a species, or
 // a building (family-grouped ones included). All of these live off the
 // exact same state.ui.selectedTool string now, so setting it anywhere (a
@@ -2110,8 +2177,24 @@ export function selectTool(state, tool) {
   updateToolbar(state);
 }
 
-// Called by the Escape key (main.js): cancels an actively-armed build/fish/
-// merge/blueprint tool and defaults back to Food. A no-op while Food is
+// Per direct request ("right-click a universal cancel button... default
+// back to just a cursor") — the true, do-nothing default tool. 'food' is
+// its own separate, deliberately-ARMED tool now (only it drops Food on
+// click — see main.js's click handler), no longer doubling as the neutral
+// state the way it used to before this request. Every "is anything armed
+// right now" check in this file/main.js that used to mean "isn't 'food'"
+// needs to mean "isn't 'cursor'" instead; every "is this a safe/neutral
+// state to move-a-building/drag-an-item/D-delete from" check that used to
+// mean "is 'food'" now means "is 'food' OR 'cursor'" (exported as
+// isCursorOrFoodTool below) — Food keeps every non-food-dropping ability it
+// always had, cursor gains all of them except dropping Food itself.
+export function isCursorOrFoodTool(tool) {
+  return tool === 'food' || tool === 'cursor';
+}
+
+// Called by the Escape key AND the new universal right-click cancel (both
+// in main.js): cancels an actively-armed build/fish/merge/blueprint/food
+// tool and defaults back to the plain cursor. A no-op while the cursor is
 // already selected. Building AND fish selection both reuse
 // deselectShopSelection so the preview window clears too, exactly like
 // clicking the same shop icon a second time already does — fish selection
@@ -2119,14 +2202,14 @@ export function selectTool(state, tool) {
 // dedicated pause-menu button was removed), which meant Escape's own "(Esc)
 // to cancel" legend was actually a lie while a fish was armed; fixed as part
 // of making the new bottom-left Esc hotkey legend (see updateHUD) honest for
-// every tool it claims to clear. Merge/Blueprint have no preview to clear,
-// just the tool itself.
+// every tool it claims to clear. Merge/Blueprint/Food have no preview to
+// clear, just the tool itself.
 export function cancelActiveTool(state) {
   const tool = state.ui.selectedTool;
   if (tool.startsWith('build:') || tool.startsWith('fish:')) {
     deselectShopSelection(state);
-  } else if (tool === 'merge' || tool === 'blueprint') {
-    state.ui.selectedTool = 'food';
+  } else if (tool === 'merge' || tool === 'blueprint' || tool === 'food') {
+    state.ui.selectedTool = 'cursor';
     updateToolbar(state);
   }
 }
@@ -3158,11 +3241,11 @@ export function deselectShopSelection(state) {
   stopPreviewAnimation();
   els.previewEmpty.classList.remove('hidden');
   els.previewContent.classList.add('hidden');
-  // Deliberately NOT selectTool(state, 'food') — that also closes the Shop/
+  // Deliberately NOT selectTool(state, 'cursor') — that also closes the Shop/
   // Tank Upgrades panel (see its own closeSidePanels call, for the bottom
   // hotbar's Food/Merge/Blueprint buttons), which would be wrong here: the
   // player is still IN the shop, just with nothing picked any more.
-  state.ui.selectedTool = 'food';
+  state.ui.selectedTool = 'cursor';
   updateToolbar(state);
 }
 
@@ -3279,15 +3362,24 @@ function buildingStatsHtml(buildingId) {
     // player-facing number; powerCostPerSec is purely the derived rate
     // computeCurrentPowerDemand needs). Any ammo-consuming tier (Waste +
     // Electric Waste Turret — see TURRET_AMMO_TILES) shows the ammo stat;
-    // the Electric tier ALSO needs power, so it shows both.
-    const ammoText = `🗑️ <b>${WASTE_TURRET_SHOTS_PER_WASTE}</b>/waste, holds <b>${WASTE_TURRET_MAX_WASTE}</b>`;
+    // the Electric tier ALSO needs power, so it shows both. Per direct
+    // request ("add in the biomass on the turret description/stat line...
+    // by showing the damage and shots per ammo as a range") — Biomass is a
+    // second, better ammo option (see BIOMASS_TURRET_DAMAGE_MULTIPLIER/
+    // BIOMASS_TURRET_SHOTS_PER_AMMO), so both the damage and the shots-per-
+    // ammo figures show as a Waste-to-Biomass range on any ammo-consuming
+    // tier instead of one flat number.
+    const isAmmoTurret = TURRET_AMMO_TILES.has(buildingId);
+    const biomassDamage = Math.round(t.damage * BIOMASS_TURRET_DAMAGE_MULTIPLIER * 10) / 10;
+    const damageText = isAmmoTurret ? `${t.damage}-${biomassDamage}` : `${t.damage}`;
+    const ammoText = `🗑️🧫 <b>${WASTE_TURRET_SHOTS_PER_WASTE}-${BIOMASS_TURRET_SHOTS_PER_AMMO}</b>/ammo, holds <b>${WASTE_TURRET_MAX_WASTE}</b>`;
     const powerText = `⚡ <b>${t.powerCostPerShot}</b> mw/shot`;
     let line2;
-    if (TURRET_AMMO_TILES.has(buildingId) && t.powerCostPerShot > 0) line2 = `🗑️ <b>${WASTE_TURRET_SHOTS_PER_WASTE}</b>/waste · ${powerText}`;
-    else if (TURRET_AMMO_TILES.has(buildingId)) line2 = ammoText;
+    if (isAmmoTurret && t.powerCostPerShot > 0) line2 = `🗑️🧫 <b>${WASTE_TURRET_SHOTS_PER_WASTE}-${BIOMASS_TURRET_SHOTS_PER_AMMO}</b>/ammo · ${powerText}`;
+    else if (isAmmoTurret) line2 = ammoText;
     else line2 = powerText;
     return (
-      `<div class="building-stat">🔫 <b>${t.shotsPerSec}</b>/sec · 💥 <b>${t.damage}</b> dmg</div>` +
+      `<div class="building-stat">🔫 <b>${t.shotsPerSec}</b>/sec · 💥 <b>${damageText}</b> dmg</div>` +
       `<div class="building-stat">${line2}</div>`
     );
   }
@@ -3841,16 +3933,20 @@ export function updateHUD(state) {
   // button's real on-screen rect instead of plain CSS relative to a shared
   // positioned ancestor. Only bothers with the (layout-reading)
   // getBoundingClientRect call on a frame either one is actually visible.
-  // Right-click-to-move legend — replaces the old on-canvas hover tooltip
-  // (main.js used to draw a 🖱️ bubble over the cursor for Fans specifically)
-  // per direct request: "Right-click to Adjust" (Fan)/"Right-click to Move"
-  // (anything else) while just hovering a placed building with nothing else
-  // going on, or "Left-click to accept" + "Right-click to cancel" while a
-  // move (or a moved Fan's own angle-choosing step) is actually in progress.
-  // state.ui.buildingMoveHoverLabel/buildingMoveArmed are written fresh every
-  // render() frame by main.js — read-only here. Mutually exclusive with the
-  // purchase legend above (main.js only ever sets these two while the Food
-  // tool is selected, and a build:/fish: tool being armed is what makes
+  // Building-move legend — replaces the old on-canvas hover tooltip (main.js
+  // used to draw a 🖱️ bubble over the cursor for Fans specifically). Per
+  // direct request ("right-click to move is changed to middle-click to
+  // move"), arming a move is now "Middle-click to Adjust" (Fan)/"Middle-
+  // click to Move" (anything else) while just hovering a placed building
+  // with nothing else going on; cancelling an already-in-progress move
+  // stayed on right-click, per the later "make right-click a universal
+  // cancel button" request — "Left-click to accept" + "Right-click to
+  // cancel" while a move (or a moved Fan's own angle-choosing step) is
+  // actually in progress. state.ui.buildingMoveHoverLabel/buildingMoveArmed
+  // are written fresh every render() frame by main.js — read-only here.
+  // Mutually exclusive with the purchase legend above (main.js only ever
+  // sets these two while the cursor or Food tool is selected — see
+  // isCursorOrFoodTool — and a build:/fish: tool being armed is what makes
   // buildLegendVisible true), so it shares the same anchor position.
   const buildingMoveLegendVisible = !tutorialActive && (state.ui.buildingMoveArmed || state.ui.buildingMoveHoverLabel != null);
   if (state.ui.buildingMoveArmed) {
@@ -3859,7 +3955,7 @@ export function updateHUD(state) {
     els.buildingMoveLegendLine2.classList.remove('hidden');
     els.buildingMoveLegendLine3.classList.add('hidden'); // deleting mid-move isn't a thing
   } else if (state.ui.buildingMoveHoverLabel != null) {
-    els.buildingMoveLegendLine1.textContent = state.ui.buildingMoveHoverLabel === 'adjust' ? 'Right-click to Adjust' : 'Right-click to Move';
+    els.buildingMoveLegendLine1.textContent = state.ui.buildingMoveHoverLabel === 'adjust' ? 'Middle-click to Adjust' : 'Middle-click to Move';
     // Hovering a placed Platform (any of its 5 variants) also shows a
     // second "(R) to Rotate" line — per direct request — reusing this same
     // bubble's own line2 slot (normally only used for the armed "Right-
@@ -3894,8 +3990,9 @@ export function updateHUD(state) {
   // checks and selectedTool/panel-collapsed reads that branch itself uses,
   // so this can never drift out of sync with what Escape actually does.
   // buildingMoveArmed is included here too — a move/moved-Fan-aiming step
-  // never changes selectedTool away from 'food', so without this the hint
-  // would wrongly read "Pause Game" while Escape would actually cancel it.
+  // never changes selectedTool away from the cursor/Food tool it was armed
+  // from, so without this the hint would wrongly read "Pause Game" while
+  // Escape would actually cancel it.
   els.hotkeyLegendE.textContent = `E: ${state.ui.shopCollapsed ? 'Open Shop' : 'Close Shop'}`;
   // Q is a genuine toggle, per direct request — Clear Cursor while a build:/
   // fish: tool is already armed ("something is being held"), otherwise
@@ -3937,7 +4034,7 @@ export function updateHUD(state) {
     isMoundMenuOpen() || isRecipeMenuOpen() || isBuildingInfoMenuOpen() || isPlatformFilterMenuOpen() ||
     isLabPurchaseModalOpen() || isLabMenuOpen() ||
     state.ui.buildingMoveArmed ||
-    state.ui.selectedTool !== 'food' || !state.ui.shopCollapsed || !state.ui.tankPanelCollapsed
+    state.ui.selectedTool !== 'cursor' || !state.ui.shopCollapsed || !state.ui.tankPanelCollapsed
   );
   els.hotkeyLegendEsc.textContent = tutorialActive
     ? 'Esc: Skip Tutorial'

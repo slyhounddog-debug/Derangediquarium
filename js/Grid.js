@@ -63,6 +63,8 @@ import {
   WASTE_TURRET_SHOTS_PER_WASTE,
   WASTE_TURRET_MAX_AMMO,
   WASTE_TURRET_MAX_WASTE,
+  BIOMASS_TURRET_SHOTS_PER_AMMO,
+  BIOMASS_TURRET_DAMAGE_MULTIPLIER,
   TILE_REFUND_FRACTION,
   GRID_SWEEP_SUBSTEP,
   ITEM_HORIZONTAL_DAMPING,
@@ -706,8 +708,11 @@ export function placeTile(state, col, row, buildingId, angle = 0) {
     // empty, have to be fed, see updateBuildings' turret intake scan);
     // Advanced ignores it entirely (unlimited ammo, a power cost instead).
     // `cooldownMs` counts down to the next shot regardless of tier — see
-    // updateBuildings' turret-fire branch.
-    state.level.buildingData[buildingKey(col, row)] = { type: buildingId, ammo: 0, cooldownMs: 0, aimAngle: -Math.PI / 2 };
+    // updateBuildings' turret-fire branch. `ammoWaste`/`ammoBiomass` are two
+    // separate counters, not one pool, since Biomass ammo deals more damage
+    // per shot than Waste (see BIOMASS_TURRET_DAMAGE_MULTIPLIER) — both
+    // start empty.
+    state.level.buildingData[buildingKey(col, row)] = { type: buildingId, ammoWaste: 0, ammoBiomass: 0, cooldownMs: 0, aimAngle: -Math.PI / 2 };
   } else if (REFINERY_TILES.has(buildingId)) {
     // No `angle` — same fixed top-center output every recipe-driven building
     // shares (see updateBuildings). lockedRecipe is null while idle, else
@@ -928,7 +933,7 @@ export function cycleTileCheat(state, worldX, worldY) {
     // Cheat-cycled turrets start pre-loaded with max ammo (any ammo-consuming
     // tier — see TURRET_AMMO_TILES) so testing combat doesn't require
     // grinding real Waste first.
-    state.level.buildingData[buildingKey(col, row)] = { type: next, ammo: TURRET_AMMO_TILES.has(next) ? WASTE_TURRET_MAX_AMMO : 0, cooldownMs: 0, aimAngle: -Math.PI / 2 };
+    state.level.buildingData[buildingKey(col, row)] = { type: next, ammoWaste: TURRET_AMMO_TILES.has(next) ? WASTE_TURRET_MAX_AMMO : 0, ammoBiomass: 0, cooldownMs: 0, aimAngle: -Math.PI / 2 };
   } else if (REFINERY_TILES.has(next)) {
     state.level.buildingData[buildingKey(col, row)] = { type: next, lockedRecipe: null, progressMs: 0, heldItemId: null };
   } else if (MANUFACTURER_TILES.has(next)) {
@@ -1460,6 +1465,27 @@ function hasEnoughPowerToOperate(state, powerCostPerSec) {
   return powerCostPerSec <= 0 || state.level.powerEfficiency >= POWER_SHORTAGE_STALLED_THRESHOLD;
 }
 
+// Per direct request ("make sure the no power visual indicator is on the
+// building so the player knows why the building isn't accepting the
+// object") — getBuildingCurrentPowerDraw only reports power a building is
+// drawing THIS tick, which is 0 for a Collector/Refinery/Manufacturer
+// sitting idle specifically BECAUSE the intake gates above
+// (hasEnoughPowerToOperate) are refusing to start a new hold — exactly the
+// situation a player most needs the shortage overlay to explain, and the
+// one case the old `currentDraw > 0` render gate silently missed. This
+// checks "would this tile type ever draw power at all," not "is it
+// drawing right now," so the render call below can also light the overlay
+// up on a building that's idle only because it's blocked from accepting.
+function tileHasAnyPowerCost(type) {
+  if (COLLECTOR_TILES.has(type)) {
+    const stats = PROCESSOR_STATS[type];
+    return stats.powerCostPerSecCoin > 0 || stats.powerCostPerSecScience > 0;
+  }
+  if (REFINERY_TILES.has(type)) return REFINERY_STATS[type].powerCostPerSec > 0;
+  if (MANUFACTURER_TILES.has(type)) return true; // every ingredient type costs power, see MANUFACTURER_ITEM_POWER_COST_MW
+  return false;
+}
+
 // Starts the same pull-to-center hold stepCollectorProcessing eases through
 // every tick — previously only ever kicked off by a top-landing event
 // (handleLanding); now triggered by updateBuildings' intake scan below
@@ -1582,31 +1608,41 @@ export function updateBuildings(state, dtMs) {
     }
 
     if (TURRET_TILES.has(data.type)) {
-      // Refill — sucks in any Waste item touching it, same radius-from-center
-      // intake pattern the Collector/Auto-Feeder just got, converting it
-      // straight to WASTE_TURRET_SHOTS_PER_WASTE ammo instead of holding it
-      // for a timed process. Applies to any tile in TURRET_AMMO_TILES (the
-      // Waste Turret AND the Electric Waste Turret, per direct request — it
-      // "takes waste as ammo just like the waste turret"); the Advanced tier
-      // never reads `ammo` at all — unlimited ammo, a power cost instead.
-      if (TURRET_AMMO_TILES.has(data.type) && data.ammo < WASTE_TURRET_MAX_AMMO) {
+      // Refill — sucks in any Waste OR Biomass item touching it, same
+      // radius-from-center intake pattern the Collector/Auto-Feeder just
+      // got. Applies to any tile in TURRET_AMMO_TILES (the Waste Turret AND
+      // the Electric Waste Turret, per direct request — it "takes waste as
+      // ammo just like the waste turret"); the Advanced tier never reads
+      // ammo at all — unlimited ammo, a power cost instead. Waste and
+      // Biomass are tracked as two separate counters (ammoWaste/ammoBiomass)
+      // since Biomass is strictly better ammo — 50% more damage per shot and
+      // 15 shots per unit instead of Waste's 10 (BIOMASS_TURRET_SHOTS_PER_AMMO/
+      // BIOMASS_TURRET_DAMAGE_MULTIPLIER) — so the two can't just merge into
+      // one flat shot count. Both pools share the one combined-shots cap
+      // (WASTE_TURRET_MAX_AMMO) so stockpiling both isn't free.
+      const totalAmmo = data.ammoWaste + data.ammoBiomass;
+      if (TURRET_AMMO_TILES.has(data.type) && totalAmmo < WASTE_TURRET_MAX_AMMO) {
         for (let i = 0; i < items.length; i++) {
           const it = items[i];
-          if (it.type !== 'waste') continue;
+          if (it.type !== 'waste' && it.type !== 'biomass') continue;
           // A real touch test, not a fixed radius-from-center — see
           // isTouchingBuildingTile's own comment for why: a waste item
           // resting near a corner (including the top edge, which used to
           // sit just outside the old fixed-radius check) still counts.
           if (isTouchingBuildingTile(centerX, centerY, it.x, it.y, it.radius)) {
             items.splice(i, 1);
-            data.ammo = Math.min(WASTE_TURRET_MAX_AMMO, data.ammo + WASTE_TURRET_SHOTS_PER_WASTE);
+            if (it.type === 'biomass') {
+              data.ammoBiomass = Math.min(WASTE_TURRET_MAX_AMMO - data.ammoWaste, data.ammoBiomass + BIOMASS_TURRET_SHOTS_PER_AMMO);
+            } else {
+              data.ammoWaste = Math.min(WASTE_TURRET_MAX_AMMO - data.ammoBiomass, data.ammoWaste + WASTE_TURRET_SHOTS_PER_WASTE);
+            }
             playIntake();
             // Cross-module flag (UI.js reads/clears it next frame — see
             // main.js's state.ui.wasteTurretAmmoGainedPending for why this
             // isn't just a direct call) — advances the "drag Waste into the
             // Turret" guided-tutorial step, regardless of whether this
-            // particular Waste got here by an active drag or just drifted
-            // in naturally.
+            // particular ammo got here by an active drag or just drifted in
+            // naturally.
             state.ui.wasteTurretAmmoGainedPending = true;
             break;
           }
@@ -1643,7 +1679,7 @@ export function updateBuildings(state, dtMs) {
       // genuine bonus, not tied to grid power at all, so it doesn't
       // contradict "no efficiency reduction" above.
       data.cooldownMs = Math.max(0, data.cooldownMs - dtMs * getCatalystSpeedMultiplier(state, key));
-      const hasAmmo = !TURRET_AMMO_TILES.has(data.type) || data.ammo > 0;
+      const hasAmmo = !TURRET_AMMO_TILES.has(data.type) || data.ammoWaste + data.ammoBiomass > 0;
       const hasPower = turretStats.powerCostPerSec <= 0 || state.level.powerEfficiency >= 1;
       // Found every tick regardless of the firing gate below (cooldown/ammo/
       // power) — per direct request, the turret's own drawn arm pivots to
@@ -1679,10 +1715,19 @@ export function updateBuildings(state, dtMs) {
       if (nearestAlien) data.aimAngle = Math.atan2(nearestAlien.y - centerY, nearestAlien.x - centerX);
       if (data.cooldownMs <= 0 && hasAmmo && hasPower) {
         if (nearestAlien) {
-          turretShots.push({ x: centerX, y: centerY, targetId: nearestAlien.id, damage: turretStats.damage });
-          nearestAlien.reservedDamage = (nearestAlien.reservedDamage || 0) + turretStats.damage;
+          // Spends from the Biomass pool first whenever it's non-empty (see
+          // BIOMASS_TURRET_DAMAGE_MULTIPLIER's own comment) — the better
+          // ammo you just loaded takes effect immediately rather than
+          // sitting saved behind whatever Waste is already loaded.
+          const usingBiomass = TURRET_AMMO_TILES.has(data.type) && data.ammoBiomass > 0;
+          const shotDamage = usingBiomass ? turretStats.damage * BIOMASS_TURRET_DAMAGE_MULTIPLIER : turretStats.damage;
+          turretShots.push({ x: centerX, y: centerY, targetId: nearestAlien.id, damage: shotDamage });
+          nearestAlien.reservedDamage = (nearestAlien.reservedDamage || 0) + shotDamage;
           data.cooldownMs = 1000 / (turretStats.shotsPerSec * getTurretFireRateMultiplier(state));
-          if (TURRET_AMMO_TILES.has(data.type)) data.ammo -= 1;
+          if (TURRET_AMMO_TILES.has(data.type)) {
+            if (usingBiomass) data.ammoBiomass -= 1;
+            else data.ammoWaste -= 1;
+          }
           playTurretShoot();
           // A turret's own power draw is a single-tick pulse (one shot),
           // not a sustained state a once-a-second snapshot can reliably
@@ -1969,7 +2014,7 @@ function isBuildingActiveForUptime(state, type, data, centerX, centerY) {
   if (MANUFACTURER_TILES.has(type)) return !!data.processing;
   if (POWER_PLANT_TILES.has(type)) return !!data.fueled && data.recipeId !== null;
   if (TURRET_TILES.has(type)) {
-    const hasAmmo = !TURRET_AMMO_TILES.has(type) || data.ammo > 0;
+    const hasAmmo = !TURRET_AMMO_TILES.has(type) || data.ammoWaste + data.ammoBiomass > 0;
     return data.cooldownMs <= 0 && hasAmmo;
   }
   return false;
@@ -2396,7 +2441,7 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
           }
         }
         if (data && TURRET_AMMO_TILES.has(type)) {
-          renderTurretAmmoDots(ctx, screen.x, screen.y, size, data.ammo, camera.zoom);
+          renderTurretAmmoDots(ctx, screen.x, screen.y, size, data.ammoWaste, data.ammoBiomass, camera.zoom);
         }
         if (data && MANUFACTURER_TILES.has(type) && data.recipeId !== null) {
           renderManufacturerIngredientLights(ctx, screen.x, screen.y, size, data);
@@ -2426,10 +2471,12 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
         if (data && POWER_PLANT_TILES.has(type) && data.recipeId === null) {
           renderStalledBadge(ctx, screen.x, screen.y, size, camera.zoom, '⏳');
         }
-        if (data && TURRET_AMMO_TILES.has(type) && data.ammo <= 0) {
+        if (data && TURRET_AMMO_TILES.has(type) && data.ammoWaste + data.ammoBiomass <= 0) {
           renderStalledBadge(ctx, screen.x, screen.y, size, camera.zoom, '🗑️');
         }
-        if (getBuildingCurrentPowerDraw(state, type, data, col * TILE_SIZE + TILE_SIZE / 2, row * TILE_SIZE + TILE_SIZE / 2) > 0) {
+        const currentPowerDraw = getBuildingCurrentPowerDraw(state, type, data, col * TILE_SIZE + TILE_SIZE / 2, row * TILE_SIZE + TILE_SIZE / 2);
+        const blockedFromAccepting = tileHasAnyPowerCost(type) && state.level.powerEfficiency < POWER_SHORTAGE_STALLED_THRESHOLD;
+        if (currentPowerDraw > 0 || blockedFromAccepting) {
           renderPowerShortageOverlay(ctx, screen.x, screen.y, size, camera.zoom, state.level.powerEfficiency, state.level.elapsed);
         }
       }
@@ -3430,9 +3477,15 @@ function renderManufacturerIdleBadge(ctx, x, y, size, zoom) {
 // at a time (not in clean blocks of 10), so a dot stays "lit" until the very
 // last shot of its own 10-shot block is spent — Math.ceil, not a plain
 // division — reading as "how many loads are still stored" rather than
-// jumping to the next dot down mid-block.
-function renderTurretAmmoDots(ctx, x, y, size, ammo, zoom) {
-  const litDots = Math.ceil(ammo / WASTE_TURRET_SHOTS_PER_WASTE);
+// jumping to the next dot down mid-block. Now two pools (Waste/Biomass, see
+// BIOMASS_TURRET_SHOTS_PER_AMMO) — Biomass's own lit dots are drawn first
+// and tinted its own green (matching BIOMASS_COLOR) since the fire branch
+// spends that pool first, so the dot that's about to burn down next is
+// always the leftmost one.
+function renderTurretAmmoDots(ctx, x, y, size, ammoWaste, ammoBiomass, zoom) {
+  const biomassDots = Math.ceil(ammoBiomass / BIOMASS_TURRET_SHOTS_PER_AMMO);
+  const wasteDots = Math.ceil(ammoWaste / WASTE_TURRET_SHOTS_PER_WASTE);
+  const litDots = Math.min(WASTE_TURRET_MAX_WASTE, biomassDots + wasteDots);
   const dotRadius = Math.max(1.5, size * 0.055);
   const gap = dotRadius * 2.6;
   const totalWidth = (WASTE_TURRET_MAX_WASTE - 1) * gap;
@@ -3441,7 +3494,7 @@ function renderTurretAmmoDots(ctx, x, y, size, ammo, zoom) {
   for (let i = 0; i < WASTE_TURRET_MAX_WASTE; i++) {
     ctx.beginPath();
     ctx.arc(startX + i * gap, dotY, dotRadius, 0, Math.PI * 2);
-    ctx.fillStyle = i < litDots ? '#ffe066' : 'rgba(0, 0, 0, 0.35)';
+    ctx.fillStyle = i >= litDots ? 'rgba(0, 0, 0, 0.35)' : i < biomassDots ? BIOMASS_COLOR : '#ffe066';
     ctx.fill();
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
     ctx.lineWidth = Math.max(0.5, zoom * 0.5);
@@ -3492,7 +3545,7 @@ export function getBuildingCurrentPowerDraw(state, type, data, centerX, centerY)
     // nearest-alien search updateBuildings' own fire branch does (an
     // expensive scan this render pass shouldn't repeat per tile every
     // frame) — "ready to fire" is close enough to "trying."
-    const hasAmmo = !TURRET_AMMO_TILES.has(type) || (data && data.ammo > 0);
+    const hasAmmo = !TURRET_AMMO_TILES.has(type) || (data && data.ammoWaste + data.ammoBiomass > 0);
     return data && data.cooldownMs <= 0 && hasAmmo ? stats.powerCostPerSec : 0;
   }
   if (POWER_PLANT_TILES.has(type)) {

@@ -26,7 +26,8 @@ export function createInput(canvas) {
     mouse: { x: 0, y: 0, inside: false },
     mouseDown: false, // left button held — build-mode drag-placement reads this each tick, see main.js
     clickHandlers: [],
-    rightClickHandlers: [], // build-mode tile removal; contextmenu is prevented so it never opens the browser menu
+    rightClickHandlers: [], // now main.js's universal-cancel + in-progress-move/blueprint cancel; contextmenu is prevented so it never opens the browser menu
+    middleClickHandlers: [], // building-move pick-up — moved here from right-click per direct request ("right-click to move is changed to middle-click to move"); fired on mousedown (button 1) since there's no middle-click equivalent of the contextmenu event, with its own default (OS autoscroll) prevented below
     mouseDownHandlers: [], // fired once, at press — main.js uses this to arm an Economy Fish Combining drag when the press lands on a combinable fish
     mouseUpHandlers: [], // fired once, at release (screen coords are the last tracked in-canvas mouse position — see the window mouseup listener below) — main.js uses this to resolve a combining drag
     keydownHandlers: [],
@@ -58,6 +59,17 @@ export function createInput(canvas) {
     for (const handler of input.clickHandlers) handler(sx, sy, e);
   });
   canvas.addEventListener('mousedown', (e) => {
+    if (e.button === 1) {
+      // Middle-click — building-move pick-up (see middleClickHandlers' own
+      // comment). preventDefault stops the browser's own middle-click
+      // autoscroll mode from engaging at the same time.
+      e.preventDefault();
+      const rect = canvas.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      for (const handler of input.middleClickHandlers) handler(sx, sy, e);
+      return;
+    }
     if (e.button !== 0) return;
     input.mouseDown = true;
     const rect = canvas.getBoundingClientRect();

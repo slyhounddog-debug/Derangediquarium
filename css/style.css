@@ -165,6 +165,51 @@ html, body {
    pause menu now (see main.js's keydown handler and #hotkey-legend's
    dynamic Esc line below). */
 
+/* Minimap — sits directly under #hud, same right-aligned corner (same
+   --glass-wall-right-width offset #hud itself uses, so neither ever drifts
+   out of alignment with the other as the glass wall's own live width
+   changes). top: 64px clears #hud's own ~40px pill height (14px top offset
+   + ~38px tall + a 12px gap) without needing to read #hud's real rendered
+   height every frame. */
+#minimap-wrap {
+  position: fixed; top: 64px; right: calc(14px + var(--glass-wall-right-width, 22px));
+  display: flex; flex-direction: column; align-items: stretch; gap: 6px;
+  z-index: 10;
+}
+#minimap-canvas {
+  display: block;
+  border-radius: 10px;
+  border: 2px solid #ffffff;
+  box-shadow: 0 6px 16px rgba(107, 76, 107, 0.25), inset 0 2px 0 rgba(255, 255, 255, 0.5);
+  cursor: pointer;
+}
+#minimap-controls {
+  display: flex;
+  gap: 6px;
+}
+.minimap-ctrl-btn {
+  flex: 1;
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1;
+  color: #6b4c6b;
+  background: linear-gradient(160deg, #fffdf8 0%, #ffe9f4 100%);
+  border: 2px solid #ffffff;
+  border-radius: 10px;
+  padding: 6px 0;
+  cursor: pointer;
+  box-shadow: 0 3px 8px rgba(107, 76, 107, 0.2), inset 0 2px 0 rgba(255, 255, 255, 0.7);
+}
+.minimap-ctrl-btn:hover { transform: scale(1.05); }
+/* Pause Time / 2x Speed both show as visibly "engaged" while active — same
+   bright-pink-fill treatment .lab-filter-btn.selected already uses for "this
+   one's the active choice" elsewhere in this file. */
+.minimap-ctrl-btn.active {
+  background: linear-gradient(160deg, #ffb3d9 0%, #ff8fc7 100%);
+  color: #ffffff;
+  box-shadow: 0 3px 9px rgba(255, 90, 170, 0.35);
+}
+
 /* Build/fish legend — now just "Click to purchase" (see index.html's own
    comment for why the old "(Esc) to cancel" half moved into #hotkey-legend
    instead) — and the tutorial-skip legend — "(Esc) to skip tutorial" — per
@@ -1836,8 +1881,24 @@ html, body {
 /* A node not matching the active filter dims heavily, per direct request
    ("darkens all other nodes in the science lab a lot except for the chosen
    type") — grayscale on top of the opacity drop so it also reads as
-   visually "off," not just faded. */
-.lab-node.lab-node-dimmed { opacity: 0.22; filter: grayscale(0.6); }
+   visually "off," not just faded.
+   Per direct request ("still filter out unavailable science lab nodes, so
+   there's 4 distinct visual states for a lab node: locked, unlocked, locked
+   and filtered, unlocked and filtered") — .lab-node.locked (below) sets its
+   own opacity at equal (2-class) specificity, so without the explicit
+   3-class combo selector below, source order alone decided which opacity
+   won on a locked+dimmed node, silently collapsing "locked and filtered"
+   into looking identical to plain "locked" (or, depending on order,
+   erasing the filtered dim entirely) — losing one of the 4 states. The
+   3-class selector always outranks any 2-class rule regardless of source
+   order, so a locked, filtered node reliably reads as its own, dimmer-still
+   4th state instead of drifting depending on file order. .unaffordable
+   (prereqs met, just can't afford it yet) counts as "unlocked" here, same
+   bucket as an affordable or purchased node — it shares the plain 2-class
+   rule below since nothing else sets its opacity in a way that could
+   out-cascade it. */
+.lab-node.lab-node-dimmed { opacity: 0.4; filter: grayscale(0.6); }
+.lab-node.locked.lab-node-dimmed { opacity: 0.16; filter: grayscale(0.75); }
 
 /* Click-and-drag panning instead of scrolling, per direct request — the
    tree grew too large (the Gene-Splicing hybrid sub-tree) for scrollbars/
