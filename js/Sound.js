@@ -240,9 +240,32 @@ export function startGameMusic() {
 // every SFX below is built from. `when` is a delay in seconds from now, so a
 // short sequence of notes can be scheduled together without a chain of
 // setTimeouts drifting against the audio clock.
+// Per direct report ("when the tab/window isn't focused, it's stacking the
+// turret shot sound effects so that when you click back to focus the
+// window, they all play at once, really loud") — the real root cause: the
+// window 'blur' handler above suspends the AudioContext, and a suspended
+// context's own `currentTime` FREEZES at the moment it suspended (it does
+// NOT keep advancing with real wall-clock time) while the game's own
+// simulation keeps right on running in the background. Every SFX call made
+// while backgrounded — playTurretShoot included, but genuinely any of
+// them — was still computing `start = audioCtx.currentTime + when` off
+// that frozen clock, so a whole background session's worth of sounds all
+// landed at (near enough) the exact same scheduled instant; the moment
+// 'focus' resumes the context, that entire backlog becomes "now" all at
+// once. The turret shot cap (MAX_CONCURRENT_TURRET_SHOTS, below) didn't
+// help either — its own release timer is a real setTimeout, which keeps
+// ticking on wall-clock time regardless of the suspended AudioContext, so
+// it kept freeing up "slots" throughout the whole backgrounded period.
+// Fixed at the one shared root every tone/noise-based SFX in this file
+// already funnels through: if the context isn't actually `'running'` right
+// now, skip scheduling anything at all rather than queuing it up to burst
+// later — a sound the player can't hear anyway (this tab has no audio
+// output while backgrounded) doesn't need to be preserved for playback
+// once they return, and this is the only way to guarantee nothing skewed
+// by the frozen clock ever gets scheduled in the first place.
 function playTone(freq, duration, { type = 'square', gain = 0.2, attack = 0.006, release = 0.06, when = 0, destination = null } = {}) {
   const audioCtx = ensureContext();
-  if (!audioCtx) return;
+  if (!audioCtx || audioCtx.state !== 'running') return;
   const start = audioCtx.currentTime + when;
   const end = start + duration;
   const osc = audioCtx.createOscillator();
@@ -264,7 +287,7 @@ function playTone(freq, duration, { type = 'square', gain = 0.2, attack = 0.006,
 // oscillator tone would read as too musical.
 function playNoise(duration, { gain = 0.15, when = 0, destination = null } = {}) {
   const audioCtx = ensureContext();
-  if (!audioCtx) return;
+  if (!audioCtx || audioCtx.state !== 'running') return; // see playTone's own comment on why
   const start = audioCtx.currentTime + when;
   const frameCount = Math.max(1, Math.floor(audioCtx.sampleRate * duration));
   const buffer = audioCtx.createBuffer(1, frameCount, audioCtx.sampleRate);
@@ -450,7 +473,7 @@ export function playPanelClose() {
 // shot below; kept private (not exported) since nothing else needs it yet.
 function playSweep(freqFrom, freqTo, duration, { type = 'square', gain = 0.14, when = 0 } = {}) {
   const audioCtx = ensureContext();
-  if (!audioCtx) return;
+  if (!audioCtx || audioCtx.state !== 'running') return; // see playTone's own comment on why
   const start = audioCtx.currentTime + when;
   const end = start + duration;
   const osc = audioCtx.createOscillator();

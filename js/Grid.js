@@ -82,6 +82,8 @@ import {
   FAN_T3_MAX_FORCE, FAN_T3_MAX_RANGE, FAN_T3_POWER_COST,
   FAN_T4_MAX_FORCE, FAN_T4_MAX_RANGE, FAN_T4_POWER_COST,
   BUILDING_OUTPUT_PORT_OFFSET_FRACTION,
+  POWER_SHORTAGE_STALLED_THRESHOLD,
+  SUSTAINED_POWER_SHORTAGE_MS,
   PLATFORM_FLAT_COST,
   BUILDING_COST_GROWTH_RATE_TIER1,
   BUILDING_COST_GROWTH_RATE_TIER2,
@@ -390,6 +392,24 @@ function isSolid(tile) {
   return tile === BOUNDARY_WALL || SOLID_TILES.has(tile);
 }
 
+// Per direct request ("if there's multiple buildings stacked vertically
+// that all output objects, the object... needs to output from the top of
+// the top building, instead of getting stuck in the middle buildings") —
+// walks straight up from a building's own row while each cell directly
+// above it is ALSO solid (another building occupying it), stopping at the
+// first empty/non-solid cell (or the top of the seabed). Used by the
+// Refinery/Manufacturer output-point calculation below so an ejected item's
+// fixed spawn point anchors to the TOPMOST building in a vertical stack
+// instead of clipping straight into whatever's directly above the one
+// actually doing the ejecting.
+function topOfBuildingStackRow(state, col, row) {
+  let topRow = row;
+  while (topRow - 1 >= SEABED_ROW_START && isSolid(state.level.grid[topRow - 1][col])) {
+    topRow--;
+  }
+  return topRow;
+}
+
 // ---- Platform item filters ----
 // Per direct request: every Platform variant (the flat tile AND all 4 Half
 // Platform ramps) can be turned into a collision filter — UI.js's
@@ -449,16 +469,23 @@ export function getRecipeBuildingKeyAt(state, worldX, worldY) {
 }
 
 // Returns the "row,col" buildingData key of a placed Platform (any of its 5
-// variants) at this world point, or null — used by main.js's click handler
-// to open UI.js's item-filter pop-up (openPlatformFilterMenu) instead of the
-// generic building-info one every other placed building gets, per direct
-// request ("turn ALL the platforms into object filters... when you left
-// click a platform, it opens the filter modal").
+// variants) OR a Fan at this world point, or null — used by main.js's click
+// handler to open UI.js's item-filter pop-up (openPlatformFilterMenu)
+// instead of the generic building-info one every other placed building
+// gets, per direct request ("turn ALL the platforms into object filters...
+// when you left click a platform, it opens the filter modal"), later
+// extended to Fans too ("make fans work as filters the same as platforms,
+// with a filter modal when you click on them") — same `filterItems` field,
+// same pop-up, same drag-copy mechanic (copyPlatformFilter), just applied
+// to computeFanForce's per-item force loop for a Fan instead of collision
+// for a Platform. Kept under its original Platform-only name (this file has
+// a LOT of call sites already reading it) rather than a renamed/duplicated
+// pair of functions.
 export function getPlatformFilterKeyAt(state, worldX, worldY) {
   const { col, row } = worldToTile(worldX, worldY);
   if (row < SEABED_ROW_START || row >= WORLD_TILES_H || col < 0 || col >= WORLD_TILES_W) return null;
   const type = state.level.grid[row][col];
-  if (!PLATFORM_FLAT_COST_TILES.has(type)) return null;
+  if (!PLATFORM_FLAT_COST_TILES.has(type) && !FAN_TILES.has(type)) return null;
   return buildingKey(col, row);
 }
 
@@ -693,7 +720,13 @@ export function placeTile(state, col, row, buildingId, angle = 0) {
   state.meta.stats.buildingsPlaced += 1; // buildings_placed_10/50 achievements
   state.level.lastPurchaseAtMs = state.level.elapsed; // see Systems.js's updateIdlePurchaseHint
   if (FAN_TILES.has(buildingId)) {
-    state.level.buildingData[buildingKey(col, row)] = { type: buildingId, angle };
+    // filterItems: [] — per direct request ("make fans work as filters the
+    // same as platforms"), same whitelist-of-ignored-types shape/semantics
+    // as a Platform's own filterItems (see platformIgnoresItem's comment),
+    // just applied to computeFanForce's own per-item force loop instead of
+    // collision. Empty by default, so a fresh Fan blows every item type
+    // exactly as it always has until the player opens its filter pop-up.
+    state.level.buildingData[buildingKey(col, row)] = { type: buildingId, angle, filterItems: [] };
   } else if (COLLECTOR_TILES.has(buildingId)) {
     state.level.buildingData[buildingKey(col, row)] = { type: buildingId, angle };
   } else if (TURRET_TILES.has(buildingId)) {
@@ -784,16 +817,44 @@ export function removeTile(state, col, row) {
   return true;
 }
 
+// Sets a building's recipe to exactly `next` (null clears it), resetting
+// whatever was already absorbed/mid-process — ingredients only make sense
+// in the context of the recipe that wanted them. Shared by UI.js's
+// toggleBuildingRecipe (the recipe pop-up's own click-to-toggle) and
+// copyBuildingRecipe (the drag-to-copy mechanic), plus placeBlueprint below,
+// so none of the three can ever drift out of sync on what "picking a
+// recipe" actually resets. Lives here rather than in UI.js (which owns the
+// other two call sites) specifically so placeBlueprint can reach it too
+// without a circular import — UI.js already imports heavily from Grid.js,
+// so the dependency only works in this direction.
+export function applyRecipeToBuilding(data, next) {
+  data.recipeId = next;
+  if (data.type === TILE_MANUFACTURER) {
+    data.pendingInputs = next ? [...MANUFACTURER_RECIPES[next].inputs] : [];
+    data.processing = false;
+    data.currentItemType = null;
+    data.progressMs = 0;
+    data.ghostFlashTimerMs = 0;
+  } else {
+    data.fueled = false;
+    data.progressMs = 0;
+  }
+}
+
 // ---- Blueprint tool ("Stamp") — per direct request: click-and-drag a box
 // over a built area to copy every building inside it, then paste that whole
-// layout somewhere else in one click. Deliberately a LAYOUT copy, not an
-// instance copy — captureBlueprint records only each cell's building type
-// and (for a Fan specifically) its own aim angle, relative to the
-// selection box's own top-left corner; every other building's in-progress
-// state (a Manufacturer's recipe, a Turret's ammo) is NOT carried over,
-// since pasting a stamp is a genuine fresh purchase per building, the exact
-// opposite design choice the free right-click MOVE mechanic makes for the
-// SAME instance.
+// layout somewhere else in one click. Mostly a LAYOUT copy, not an instance
+// copy — captureBlueprint records each cell's building type, (for a Fan
+// specifically) its own aim angle, and (for a Manufacturer/Power Plant) its
+// currently-picked recipeId, relative to the selection box's own top-left
+// corner; every OTHER building's in-progress state (a Turret's ammo, a
+// Refinery's mid-hold item) is still NOT carried over, since pasting a
+// stamp is a genuine fresh purchase per building — recipes are the one
+// deliberate exception, per direct request ("make it so the blueprint tool
+// copies recipes to the newly placed buildings from their respective copied
+// building") — a freshly-stamped Manufacturer/Power Plant with no recipe
+// picked does nothing at all until you open its pop-up, which made a large
+// stamped factory layout tedious to re-configure by hand every single time.
 export function captureBlueprint(state, colA, rowA, colB, rowB) {
   const minCol = Math.min(colA, colB);
   const maxCol = Math.max(colA, colB);
@@ -805,7 +866,11 @@ export function captureBlueprint(state, colA, rowA, colB, rowB) {
       const type = getTile(state.level.grid, col, row);
       if (!type || type === TILE_EMPTY) continue;
       const data = state.level.buildingData[buildingKey(col, row)];
-      cells.push({ dCol: col - minCol, dRow: row - minRow, buildingId: type, angle: (data && data.angle) || 0 });
+      cells.push({
+        dCol: col - minCol, dRow: row - minRow, buildingId: type,
+        angle: (data && data.angle) || 0,
+        recipeId: (data && (MANUFACTURER_TILES.has(type) || POWER_PLANT_TILES.has(type))) ? data.recipeId : null,
+      });
     }
   }
   return cells;
@@ -863,6 +928,16 @@ export function placeBlueprint(state, baseCol, baseRow, cells) {
     const check = canPlaceTile(state, col, row, cell.buildingId);
     if (!check.ok) continue;
     if (placeTile(state, col, row, cell.buildingId, cell.angle)) {
+      // Carries the captured recipe over to the freshly-placed instance —
+      // see captureBlueprint's own comment. placeTile already gave it a
+      // fresh, recipe-less buildingData entry; applyRecipeToBuilding both
+      // sets recipeId and resets the same pendingInputs/fueled/progress
+      // fields a real recipe pick always does, so the new building starts
+      // exactly as if the player had just picked it by hand.
+      if (cell.recipeId) {
+        const data = state.level.buildingData[buildingKey(col, row)];
+        if (data) applyRecipeToBuilding(data, cell.recipeId);
+      }
       placedCells.push({ col, row, buildingId: cell.buildingId });
     }
   }
@@ -926,7 +1001,7 @@ export function cycleTileCheat(state, worldX, worldY) {
   state.level.grid[row][col] = next;
   delete state.level.buildingData[buildingKey(col, row)];
   if (FAN_TILES.has(next)) {
-    state.level.buildingData[buildingKey(col, row)] = { type: next, angle: CHEAT_DEFAULT_ANGLE };
+    state.level.buildingData[buildingKey(col, row)] = { type: next, angle: CHEAT_DEFAULT_ANGLE, filterItems: [] };
   } else if (COLLECTOR_TILES.has(next)) {
     state.level.buildingData[buildingKey(col, row)] = { type: next, angle: CHEAT_DEFAULT_ANGLE };
   } else if (TURRET_TILES.has(next)) {
@@ -996,6 +1071,13 @@ export function computeFanForce(state, item) {
     const data = state.level.buildingData[key];
     const stats = FAN_STATS[data.type];
     if (!stats) continue; // not a fan (e.g. the Auto-Feeder's own buildingData entry)
+    // Per direct request ("make fans work as filters the same as
+    // platforms") — a Fan whitelists which item types it IGNORES, same
+    // filterItems shape/semantics as a Platform's own (see
+    // platformIgnoresItem's comment): empty by default (blows everything,
+    // exactly like a Fan always has), and an item type only stops being
+    // affected once the player explicitly checks it into the pop-up.
+    if (data.filterItems && data.filterItems.includes(item.type)) continue;
     const [row, col] = key.split(',').map(Number);
     const fanX = col * TILE_SIZE + TILE_SIZE / 2;
     const fanY = row * TILE_SIZE + TILE_SIZE / 2;
@@ -1195,12 +1277,13 @@ function stepCollectorProcessing(item, state, dt) {
     return 'falling';
   }
   const powerCost = getCollectorPowerCostForItem(PROCESSOR_STATS[tileType], item.type);
-  if (!hasEnoughPowerToOperate(state, powerCost)) {
-    // Genuinely out of power (not merely running slower) — per direct
-    // request ("collectors should spit out objects if they don't have
-    // enough energy to run"), spit the held item back out to normal physics
-    // instead of leaving it stuck mid-hold forever. The intake scan in
-    // updateBuildings below won't re-grab it (or anything else) while the
+  if (hasSustainedPowerShortage(state, powerCost)) {
+    // Genuinely, SUSTAINEDLY out of power (not merely running slower, and
+    // not just a 1-second blip — see hasSustainedPowerShortage's own
+    // comment) — per direct request ("collectors should spit out objects if
+    // they don't have enough energy to run"), spit the held item back out
+    // to normal physics instead of leaving it stuck mid-hold forever. The
+    // intake scan in updateBuildings below won't re-grab it (or anything else) while the
     // grid's still this short, so it can't just get sucked right back in
     // and re-ejected every tick.
     item.mass = item.collectorOriginalMass;
@@ -1463,6 +1546,21 @@ function getCollectorPowerCostForItem(stats, itemType) {
 // running slower," so the two can't disagree about what counts as "enough."
 function hasEnoughPowerToOperate(state, powerCostPerSec) {
   return powerCostPerSec <= 0 || state.level.powerEfficiency >= POWER_SHORTAGE_STALLED_THRESHOLD;
+}
+
+// The EJECT-side counterpart to hasEnoughPowerToOperate above, per direct
+// request ("buildings should only spit out objects if they have under 50%
+// power in the grid for 2 full seconds — 1 second outlier shouldn't
+// immediately spit out the objects"). Deliberately a SEPARATE function
+// (not just `!hasEnoughPowerToOperate`) even though they share the exact
+// same POWER_SHORTAGE_STALLED_THRESHOLD — this one also requires
+// state.level.powerShortageStreakMs (main.js's once-a-second power sampler)
+// to have reached SUSTAINED_POWER_SHORTAGE_MS, so a single brief dip below
+// the threshold doesn't immediately fling an in-progress item back into
+// physics the way the un-debounced intake gate is fine doing for a NOT-yet-
+// accepted one.
+function hasSustainedPowerShortage(state, powerCostPerSec) {
+  return powerCostPerSec > 0 && state.level.powerShortageStreakMs >= SUSTAINED_POWER_SHORTAGE_MS;
 }
 
 // Per direct request ("make sure the no power visual indicator is on the
@@ -1742,9 +1840,15 @@ export function updateBuildings(state, dtMs) {
     }
 
     // Refinery/Manufacturer both eject items straight up from their own
-    // center, same fixed point the old Auto-Feeder always used.
+    // center, same fixed point the old Auto-Feeder always used — EXCEPT the
+    // anchor row is the TOPMOST building in this tile's own vertical stack
+    // (topOfBuildingStackRow), not necessarily this tile's own row, so a
+    // stack of several buildings on top of each other ejects clear above
+    // all of them instead of spawning the item inside/against whatever's
+    // directly above the one actually processing it.
+    const outputAnchorRow = topOfBuildingStackRow(state, col, row);
     const bioOutputX = centerX;
-    const bioOutputY = centerY - TILE_SIZE * BUILDING_OUTPUT_PORT_OFFSET_FRACTION;
+    const bioOutputY = outputAnchorRow * TILE_SIZE + TILE_SIZE / 2 - TILE_SIZE * BUILDING_OUTPUT_PORT_OFFSET_FRACTION;
 
     if (REFINERY_TILES.has(data.type)) {
       const stats = REFINERY_STATS[data.type];
@@ -1808,11 +1912,12 @@ export function updateBuildings(state, dtMs) {
             playIntake();
           }
         }
-      } else if (!hasEnoughPowerToOperate(state, stats.powerCostPerSec)) {
-        // Genuinely out of power mid-cycle — per direct request, spit the
-        // held item back out to normal physics instead of stalling it here
-        // forever. Just nulling heldItemId is enough: stepHeldItem's own
-        // defensive release check (data.heldItemId !== item.id) notices this
+      } else if (hasSustainedPowerShortage(state, stats.powerCostPerSec)) {
+        // Genuinely, SUSTAINEDLY out of power mid-cycle (see
+        // hasSustainedPowerShortage's own comment) — per direct request,
+        // spit the held item back out to normal physics instead of stalling
+        // it here forever. Just nulling heldItemId is enough: stepHeldItem's
+        // own defensive release check (data.heldItemId !== item.id) notices this
         // on the item's very next per-tick step and restores its real mass/
         // physics automatically — no need to duplicate that release logic
         // here.
@@ -1889,9 +1994,10 @@ export function updateBuildings(state, dtMs) {
             break;
           }
         }
-      } else if (!hasEnoughPowerToOperate(state, MANUFACTURER_ITEM_POWER_COST_MW[data.currentItemType] || 0)) {
-        // Genuinely out of power mid-process — per direct request, spit the
-        // ingredient back out instead of stalling forever. It wasn't
+      } else if (hasSustainedPowerShortage(state, MANUFACTURER_ITEM_POWER_COST_MW[data.currentItemType] || 0)) {
+        // Genuinely, SUSTAINEDLY out of power mid-process (see
+        // hasSustainedPowerShortage's own comment) — per direct request,
+        // spit the ingredient back out instead of stalling forever. It wasn't
         // actually consumed, so its type goes back into pendingInputs (the
         // Manufacturer still needs one) rather than being dropped — the
         // item's own physics/mass get restored automatically by
@@ -3238,6 +3344,12 @@ export function renderTileShape(ctx, type, color, x, y, size, data) {
   } else if (FAN_TILES.has(type)) {
     renderFanVentBase(ctx, x, y, size, color);
     renderTierBadge(ctx, type, x, y, size);
+    // Per direct request ("add a matching visual to the fans that are
+    // filtering items") — the exact same green-checkmark badge a filtering
+    // Platform already gets; renderPlatformFilterBadge is a pure function of
+    // data.filterItems, nothing Platform-specific in it, so it works
+    // unchanged here.
+    renderPlatformFilterBadge(ctx, x, y, size, data);
   } else if (REFINERY_TILES.has(type)) {
     renderRefineryIcon(ctx, x, y, size, color);
     renderTierBadge(ctx, type, x, y, size);
@@ -3559,11 +3671,6 @@ export function getBuildingCurrentPowerDraw(state, type, data, centerX, centerY)
   return 0;
 }
 
-// Below this live grid efficiency, a power-costing building has genuinely
-// stopped doing useful work (not just running a bit slower) — see Grid.js's
-// computePowerEfficiency and every applied-efficiency gate above (Fan force,
-// Processor/Refinery/Manufacturer progress, Turret cooldown).
-const POWER_SHORTAGE_STALLED_THRESHOLD = 0.15;
 
 // A visibly obvious cue that a power-costing building is under-supplied —
 // per direct request ("make it visually obvious when buildings aren't

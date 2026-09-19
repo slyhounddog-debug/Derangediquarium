@@ -51,6 +51,7 @@ import {
   DIAMOND_GEM_COLOR_EDGE,
   POWER_HISTORY_MAX,
   ACHIEVEMENT_POWER_SURPLUS_RATIO,
+  POWER_SHORTAGE_STALLED_THRESHOLD,
   SCIENCE_CAP_BY_LEVEL,
   MOUND_MAX_TIER,
   ALIEN_CLICK_DAMAGE,
@@ -246,8 +247,18 @@ minimapCanvas.addEventListener('click', (e) => {
 // least once — tankZoomMode stays null until then, and fitCameraZoom below
 // keeps using its original formula in that case.
 let tankZoomMode = null; // null | 'whole' | 'width'
+// Per direct report ("the zoom to fit isn't completely zoom to fit, I can
+// still scroll... zoom out enough that you can't scroll up or down at
+// all") — the real scrollable range Engine.js's updateCamera clamps
+// against is WORLD_H + CAMERA_BOTTOM_BUFFER_PX (the extra buffer strip
+// reserved for the fixed bottom tool-bar — see that constant's own
+// comment), NOT just WORLD_H on its own. Fitting zoom to WORLD_H alone left
+// viewH just short of the buffer's own height, so maxY (WORLD_H + buffer -
+// viewH) stayed slightly positive — a small but real amount of scroll was
+// still possible. Using the full scrollable height here instead makes
+// viewH >= that whole range, which drives maxY to (clamped) exactly 0.
 function computeFitWholeTankZoom() {
-  return Math.min(canvas.width / WORLD_W, canvas.height / WORLD_H);
+  return Math.min(canvas.width / WORLD_W, canvas.height / (WORLD_H + CAMERA_BOTTOM_BUFFER_PX));
 }
 function computeFitWidthZoom() {
   return canvas.width / WORLD_W;
@@ -1048,21 +1059,23 @@ function updateRecipeDrag() {
   recipeDragHoverKey = hoverData && hoverData.type === recipeDragType && hoverKey !== recipeDragSourceKey ? hoverKey : null;
 }
 
-// Platform drag-to-copy-filter — per direct request ("make it so you can
+// Platform/Fan drag-to-copy-filter — per direct request ("make it so you can
 // click and drag active filters from one platform to another... the same
-// way the recipe copying works between buildings"). An exact mirror of the
-// Manufacturer/Power Plant recipe-drag mechanic just above — the SOURCE
-// tile never moves, only a small ghost follows the cursor (render()'s own
-// draw call below) until the release lands on a genuinely different
-// Platform tile (UI.js's copyPlatformFilter). Deliberately does NOT require
-// the same Platform variant on both ends — "even from a full platform to
-// half platform" — getPlatformFilterKeyAt already only ever matches a
-// Platform-family tile at all, with no type-equality check the way the
-// recipe-drag's own hover check has. A plain click (no real drag) still
-// opens the normal filter pop-up as before — platformFilterDragMoved is
-// what the click handler checks to tell the two gestures apart, same
-// "move-distance threshold" pattern recipeDragMoved/itemDragMoved already
-// established.
+// way the recipe copying works between buildings"), later extended to Fans
+// ("allow filter recipe drag and drop sharing between fans and platforms").
+// An exact mirror of the Manufacturer/Power Plant recipe-drag mechanic just
+// above — the SOURCE tile never moves, only a small ghost follows the
+// cursor (render()'s own draw call below) until the release lands on a
+// genuinely different filterable tile (UI.js's copyPlatformFilter).
+// Deliberately does NOT require the same tile type on both ends — not even
+// Platform vs Fan — "even from a full platform to half platform" (and, per
+// the later request, a Fan and a Platform share the exact same plain-array
+// filterItems shape too) — getPlatformFilterKeyAt matches ANY Platform-
+// family tile OR Fan, with no type-equality check the way the recipe-drag's
+// own hover check has. A plain click (no real drag) still opens the normal
+// filter pop-up as before — platformFilterDragMoved is what the click
+// handler checks to tell the two gestures apart, same "move-distance
+// threshold" pattern recipeDragMoved/itemDragMoved already established.
 let platformFilterDragSourceKey = null;
 let platformFilterDragStartSx = 0;
 let platformFilterDragStartSy = 0;
@@ -2577,6 +2590,15 @@ function update(dtMs) {
     }
     state.meta.stats.powerDeficitStreakBestMs = Math.max(state.meta.stats.powerDeficitStreakBestMs, state.level.powerDeficitStreakMs);
     state.meta.stats.powerSurplusStreakBestMs = Math.max(state.meta.stats.powerSurplusStreakBestMs, state.level.powerSurplusStreakMs);
+    // Per direct request — Grid.js's hasSustainedPowerShortage's own "under
+    // 50% for 2 full seconds" eject gate. Tracked here (not derived from
+    // powerDeficitStreakMs above, which uses a different condition — ANY
+    // shortfall at all, not specifically below the 50% stalled threshold)
+    // since this is the one place a real, settled efficiency number for
+    // "this second" actually exists.
+    state.level.powerShortageStreakMs = state.level.powerEfficiency < POWER_SHORTAGE_STALLED_THRESHOLD
+      ? state.level.powerShortageStreakMs + 1000
+      : 0;
     state.level.powerGenAccumMw = 0; // reset for the next window — generated MW that goes unused (and isn't stored) this second is gone, not carried forward
     state.level.turretPowerDemandAccumMw = 0; // reset alongside it — see its own comment in Levels.js
   }
@@ -2887,8 +2909,11 @@ function drawAlienBody(ctx, x, y, radius, facing, color, gazeAngle, spikes = 3, 
 // same hotspot sitting relatively closer to the glyph's own top-left corner
 // than before, without having to re-guess where the hotspot number itself
 // should land.
-function emojiCursorCss(emoji, hotspotX = 4, hotspotY = 26, glyphX = 0, glyphY = 26) {
-  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32'><text x='${glyphX}' y='${glyphY}' font-size='26'>${emoji}</text></svg>`;
+// boxW/boxH let a caller widen the SVG canvas beyond the default 32x32 —
+// needed when glyphX is shifted far enough right that the glyph would
+// otherwise clip against a fixed 32px-wide box (see the shell cursor below).
+function emojiCursorCss(emoji, hotspotX = 4, hotspotY = 26, glyphX = 0, glyphY = 26, boxW = 32, boxH = 32) {
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${boxW}' height='${boxH}'><text x='${glyphX}' y='${glyphY}' font-size='26'>${emoji}</text></svg>`;
   return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${hotspotX} ${hotspotY}, auto`;
 }
 // The Food tool's cursor is a plain colored dot instead of an emoji — per
@@ -2938,12 +2963,18 @@ const CURSOR_BY_TOOL = {
   // right and the flared opening toward the lower left).
   // Per direct follow-up report ("move the cursor point more towards the top
   // left of the emoji by moving the emoji down and right") — the hotspot
-  // itself (24, 6) is unchanged; instead the glyph is drawn shifted (+5, +4)
-  // from the other two cursors' default draw position, which leaves that
-  // same fixed hotspot sitting closer to the glyph's own top-left corner
-  // than before. Nudge glyphX/glyphY (not the hotspot) further if the real
-  // rendered glyph still doesn't line up.
-  cursor: emojiCursorCss('🐚', 24, 6, 5, 30),
+  // itself (24, 6) is unchanged; instead the glyph is drawn shifted from the
+  // other two cursors' default draw position, which leaves that same fixed
+  // hotspot sitting closer to the glyph's own top-left corner than before.
+  // Per a second direct follow-up ("still too far left of where the actual
+  // cursor is... vertical placement is good, but move the shell icon to the
+  // right so the cursor pointer position moves from the top right to the
+  // top left") — glyphY (vertical) is untouched from that first pass;
+  // glyphX pushed further right still (5 -> 16), which needed the SVG's own
+  // canvas widened past the default 32px (boxW: 44) so the shifted glyph
+  // doesn't clip against the right edge. Nudge glyphX/boxW further if the
+  // real rendered glyph still doesn't line up.
+  cursor: emojiCursorCss('🐚', 24, 6, 16, 30, 44, 32),
 };
 let lastCursorTool = null;
 function updateCanvasCursor() {

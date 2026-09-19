@@ -86,7 +86,7 @@ import { getFishPurchaseCost, effectiveCoinCapacity, effectiveScienceCapacity, c
 import {
   getTile, worldToTile, getBuildingCost, FAN_STATS,
   findNearestWasteTurretAndWaste, getRecipeBuildingKeyAt, renderTileShape,
-  getBuildingCurrentPowerDraw, getBuildingUptimeFraction,
+  getBuildingCurrentPowerDraw, getBuildingUptimeFraction, applyRecipeToBuilding,
 } from './Grid.js';
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
@@ -371,8 +371,10 @@ export function initUI(state) {
     platformFilterOverlay: document.getElementById('platform-filter-overlay'),
     platformFilterAnchor: document.getElementById('platform-filter-anchor'),
     platformFilterMenu: document.getElementById('platform-filter-menu'),
+    platformFilterTitle: document.getElementById('platform-filter-title'),
     platformFilterClearBtn: document.getElementById('platform-filter-clear-btn'),
     platformFilterItems: document.getElementById('platform-filter-items'),
+    platformFilterHint: document.getElementById('platform-filter-hint'),
     labOverlay: document.getElementById('lab-overlay'),
     labModal: document.getElementById('lab-modal'),
     labScienceReadout: document.getElementById('lab-science-readout'),
@@ -1003,6 +1005,20 @@ function refreshPlatformFilterMenu(state) {
   const data = state.level.buildingData[platformFilterTileKey];
   if (!data) { closePlatformFilterMenu(); return; }
 
+  // Per direct request ("make fans work as filters the same as
+  // platforms") — the pop-up itself is fully shared (same fields, same
+  // buttons), but a Platform "blocks" an item (collision) while a Fan
+  // "blows" one (force) — different enough verbs that the static
+  // Platform-only copy would read oddly reused verbatim for a Fan.
+  const isFan = BUILDING_FAMILIES.fan.includes(data.type);
+  els.platformFilterTitle.textContent = isFan ? 'Fan Filter' : 'Item Filter';
+  els.platformFilterHint.textContent = isFan
+    ? 'Everything is blown by default — click an item to exclude it from this fan’s force.'
+    : 'Everything is blocked by default — click an item to let it pass through.';
+  els.platformFilterClearBtn.title = isFan
+    ? 'Back to a plain Fan — blows everything again'
+    : 'Back to a plain, always-solid Platform — everything blocked';
+
   els.platformFilterItems.innerHTML = '';
   for (const itemDef of PLATFORM_FILTER_ITEM_TYPES) {
     const isListed = data.filterItems.includes(itemDef.id);
@@ -1159,25 +1175,12 @@ function manufacturerPowerBreakdownHtml() {
   );
 }
 
-// Sets a building's recipe to exactly `next` (null clears it), resetting
-// whatever was already absorbed/mid-process — ingredients only make sense
-// in the context of the recipe that wanted them. Shared by
-// toggleBuildingRecipe (the recipe pop-up's own click-to-toggle) and
-// copyBuildingRecipe (the drag-to-copy mechanic) below, so the two can never
-// drift out of sync on what "picking a recipe" actually resets.
-function applyRecipeToBuilding(data, next) {
-  data.recipeId = next;
-  if (data.type === TILE_MANUFACTURER) {
-    data.pendingInputs = next ? [...MANUFACTURER_RECIPES[next].inputs] : [];
-    data.processing = false;
-    data.currentItemType = null;
-    data.progressMs = 0;
-    data.ghostFlashTimerMs = 0;
-  } else {
-    data.fueled = false;
-    data.progressMs = 0;
-  }
-}
+// applyRecipeToBuilding moved to Grid.js (and exported from there) per
+// direct request ("make it so the blueprint tool copies recipes to the
+// newly placed buildings") — Grid.js's placeBlueprint needs to call it too
+// now, and Grid.js can't import FROM UI.js (UI.js already imports heavily
+// from Grid.js — the reverse would be circular), so the shared logic lives
+// on the Grid.js side of that boundary instead. See its own comment there.
 
 // Clicking an already-selected recipe icon clears it back to "nothing," per
 // direct spec ("toggle-able... could be set back to nothing, but never

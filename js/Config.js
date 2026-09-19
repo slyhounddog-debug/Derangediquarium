@@ -3145,6 +3145,30 @@ export const HAT_LIST = Object.values(HATS).filter((h) => h.id !== 'none');
 // second timer. ACHIEVEMENT_POWER_SURPLUS_RATIO is the "at least double"
 // threshold power_surplus_60s's own description names directly.
 export const ACHIEVEMENT_POWER_SURPLUS_RATIO = 2;
+
+// Below this live grid efficiency, a power-costing building has genuinely
+// stopped doing useful work (not just running a bit slower) — see Grid.js's
+// computePowerEfficiency and every applied-efficiency gate (Fan force,
+// Processor/Refinery/Manufacturer progress, Turret cooldown). Moved here
+// from Grid.js (was module-private) since main.js's own once-a-second power
+// sampler needs to read it too, for the sustained-shortage streak below.
+// Per direct request ("buildings should only pull in objects if they have
+// enough power to process the object, and they should only spit out
+// objects if they have under 50% power in the grid") — raised from an
+// earlier 0.15 to 0.5; the intake gate (Grid.js's hasEnoughPowerToOperate)
+// and the eject gate (hasSustainedPowerShortage, below) have to share this
+// exact same threshold or a building sitting in between the two would
+// accept an item only to immediately become eligible to spit it back out.
+export const POWER_SHORTAGE_STALLED_THRESHOLD = 0.5;
+// How long powerEfficiency has to have sat continuously below the
+// threshold above before a building mid-process actually ejects its held
+// item — per direct request ("only spit out objects if they have under 50%
+// power in the grid for 2 full seconds — 1 second outlier shouldn't
+// immediately spit out the objects"). Deliberately NOT applied to the
+// intake gate, which stays an instant, un-debounced check — nothing is
+// lost by simply not yet accepting an item, so there's no flicker to guard
+// against the way there is for kicking an already-in-progress one back out.
+export const SUSTAINED_POWER_SHORTAGE_MS = 2000;
 // Spring Cleaning's own two thresholds, named directly in its description —
 // "drop below 90%" arms it, "back up to 99%" completes it.
 export const ACHIEVEMENT_CLEANLINESS_ARM_THRESHOLD = 90;
