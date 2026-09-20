@@ -83,7 +83,6 @@ import {
   FAN_T4_MAX_FORCE, FAN_T4_MAX_RANGE, FAN_T4_POWER_COST,
   BUILDING_OUTPUT_PORT_OFFSET_FRACTION,
   POWER_SHORTAGE_STALLED_THRESHOLD,
-  SUSTAINED_POWER_SHORTAGE_MS,
   PLATFORM_FLAT_COST,
   BUILDING_COST_GROWTH_RATE_TIER1,
   BUILDING_COST_GROWTH_RATE_TIER2,
@@ -343,6 +342,98 @@ function resolveRampCollision(item, state) {
       const tile = grid[row][col];
       if (!RAMP_TRIANGLE_LOCAL_VERTS[tile]) continue;
       if (resolveRampCollisionAt(item, state, tile, col, row)) resolvedAny = true;
+    }
+  }
+  return resolvedAny;
+}
+
+// ---- Full Platform (TILE_PLATFORM) side/bottom collision ----
+// Per direct report ("the full platforms should work the same as the half
+// platforms where objects can't pass through the bottom or sides of them —
+// right now objects will glitch only on the full platforms if they touch
+// the sides and bottoms of a full platform, but the half platforms work
+// correctly"). Root cause is the exact same one the big comment above this
+// ramp section already documents as "Bug #1" for ramps, just never also
+// fixed for the plain rectangular case: sweepVertical/sweepHorizontal's own
+// SOLID_TILES-based flat checks only ever test ONE point — the bottom of
+// the circle (for landing on TOP) or the item's own center row (for a
+// horizontal block) — so an item approaching from below (its LEADING edge
+// is its own TOP, never tested) or sliding in at a height one row above a
+// platform (same "resting fish's center row is the EMPTY row above the
+// floor" gap ramps already had) sails straight through with zero collision
+// on those two edges. TILE_PLATFORM deliberately stays in SOLID_TILES
+// itself (isSolid()/building-placement/every other non-physics use of it
+// elsewhere in this file is untouched) — this only ADDS a genuine circle-
+// vs-rectangle resolution alongside the existing flat check, exactly
+// mirroring resolveRampCollision/resolveRampCollisionAt's own real-geometry
+// approach but for a full square instead of a triangle. The existing flat
+// top-landing check still runs first and returns early on a normal fall
+// from directly above, so this never fights it over a routine landing —
+// it only ever fires for the side/bottom contacts the flat check misses.
+function resolvePlatformCollisionAt(item, state, tileType, col, row) {
+  if (tileType !== TILE_PLATFORM) return false;
+  if (platformIgnoresItem(state, tileType, col, row, item.type)) return false;
+  const left = col * TILE_SIZE;
+  const top = row * TILE_SIZE;
+  const right = left + TILE_SIZE;
+  const bottom = top + TILE_SIZE;
+  const closestX = Math.min(Math.max(item.x, left), right);
+  const closestY = Math.min(Math.max(item.y, top), bottom);
+  const dx = item.x - closestX;
+  const dy = item.y - closestY;
+  const distSq = dx * dx + dy * dy;
+  let nx;
+  let ny;
+  let penetration;
+  if (distSq > 1e-9) {
+    if (distSq >= item.radius * item.radius) return false; // not touching this tile's square at all
+    const dist = Math.sqrt(distSq);
+    nx = dx / dist;
+    ny = dy / dist;
+    penetration = item.radius - dist;
+  } else {
+    // Center is exactly inside the rectangle (a big single step, or an item
+    // spawned inside) — escape along whichever of the 4 edges is nearest,
+    // the standard AABB-vs-circle "deeply embedded" resolution.
+    const distLeft = item.x - left;
+    const distRight = right - item.x;
+    const distTop = item.y - top;
+    const distBottom = bottom - item.y;
+    const minDist = Math.min(distLeft, distRight, distTop, distBottom);
+    if (minDist === distLeft) { nx = -1; ny = 0; penetration = item.radius + distLeft; }
+    else if (minDist === distRight) { nx = 1; ny = 0; penetration = item.radius + distRight; }
+    else if (minDist === distTop) { nx = 0; ny = -1; penetration = item.radius + distTop; }
+    else { nx = 0; ny = 1; penetration = item.radius + distBottom; }
+  }
+  item.x += nx * penetration;
+  item.y += ny * penetration;
+  const tx = -ny;
+  const ty = nx;
+  const vNormal = item.vx * nx + item.vy * ny;
+  const vTangent = item.vx * tx + item.vy * ty;
+  const newVNormal = vNormal < 0 ? -vNormal * RAMP_BOUNCE_RESTITUTION : vNormal;
+  item.vx = vTangent * tx + newVNormal * nx;
+  item.vy = vTangent * ty + newVNormal * ny;
+  return true;
+}
+
+// Same neighborhood-scan shape as resolveRampCollision, checking every
+// TILE_PLATFORM tile whose square footprint could overlap the item's
+// circular body — not just whatever single tile/row a naive point check
+// would happen to land on.
+function resolvePlatformCollision(item, state) {
+  const grid = state.level.grid;
+  const minCol = colAt(item.x - item.radius);
+  const maxCol = colAt(item.x + item.radius);
+  const minRow = rowAt(item.y - item.radius);
+  const maxRow = rowAt(item.y + item.radius);
+  let resolvedAny = false;
+  for (let row = minRow; row <= maxRow; row++) {
+    if (!grid[row]) continue;
+    for (let col = minCol; col <= maxCol; col++) {
+      if (col < 0 || col >= grid[row].length) continue;
+      if (grid[row][col] !== TILE_PLATFORM) continue;
+      if (resolvePlatformCollisionAt(item, state, grid[row][col], col, row)) resolvedAny = true;
     }
   }
   return resolvedAny;
@@ -1182,6 +1273,12 @@ function sweepVertical(item, state, dy) {
     // whole tick) so a fast fall can't tunnel past a ramp's own surface
     // within a single big step the way a plain end-of-tick check could.
     resolveRampCollision(item, state);
+    // Full Platform side/bottom collision — see resolvePlatformCollision's
+    // own comment. This is what catches an item rising into a platform's
+    // underside (the flat check just above only ever tests the item's
+    // BOTTOM edge, so a moving-up item's real leading edge, its own top,
+    // was never being tested against anything).
+    resolvePlatformCollision(item, state);
   }
   return { landed: false };
 }
@@ -1212,6 +1309,13 @@ function sweepHorizontal(item, state, dx) {
     }
     item.x = nextX;
     resolveRampCollision(item, state);
+    // Full Platform side/bottom collision — see resolvePlatformCollision's
+    // own comment. This is what catches an item sliding in at a height one
+    // row above a platform (its own center-row-based flat check above,
+    // `rowAt(item.y)`, misses the platform's row entirely in exactly that
+    // case, the same "resting item's center is one row above the floor it's
+    // resting on" gap Half Platform ramps used to have too).
+    resolvePlatformCollision(item, state);
   }
 }
 
@@ -1277,19 +1381,16 @@ function stepCollectorProcessing(item, state, dt) {
     return 'falling';
   }
   const powerCost = getCollectorPowerCostForItem(PROCESSOR_STATS[tileType], item.type);
-  if (hasSustainedPowerShortage(state, powerCost)) {
-    // Genuinely, SUSTAINEDLY out of power (not merely running slower, and
-    // not just a 1-second blip — see hasSustainedPowerShortage's own
-    // comment) — per direct request ("collectors should spit out objects if
-    // they don't have enough energy to run"), spit the held item back out
-    // to normal physics instead of leaving it stuck mid-hold forever. The
-    // intake scan in updateBuildings below won't re-grab it (or anything else) while the
-    // grid's still this short, so it can't just get sucked right back in
-    // and re-ejected every tick.
-    item.mass = item.collectorOriginalMass;
-    item.collectorProgressMs = null;
-    return 'falling';
-  }
+  // Per direct request ("if a building accepts an object for processing and
+  // then runs out of power, keep the object in the building — the only way
+  // to get that object out is for the building to be moved") — no ejection
+  // here at all any more, sustained shortage or not. appliedEfficiency
+  // below already drops to 0 (zero progress this tick) once powerEfficiency
+  // falls under POWER_SHORTAGE_STALLED_THRESHOLD, which is what actually
+  // stalls a held item's processing; intake (hasEnoughPowerToOperate, at
+  // this Collector's OWN scan in updateBuildings below) is the only place
+  // power still gates anything, so an item is never accepted in the first
+  // place without at least 50% grid power.
   item.x += (item.collectorCenterX - item.x) * COLLECTOR_PULL_STRENGTH * dt;
   item.y += (item.collectorCenterY - item.y) * COLLECTOR_PULL_STRENGTH * dt;
   // A free base Collector (both power rates 0) always finishes at full
@@ -1546,21 +1647,6 @@ function getCollectorPowerCostForItem(stats, itemType) {
 // running slower," so the two can't disagree about what counts as "enough."
 function hasEnoughPowerToOperate(state, powerCostPerSec) {
   return powerCostPerSec <= 0 || state.level.powerEfficiency >= POWER_SHORTAGE_STALLED_THRESHOLD;
-}
-
-// The EJECT-side counterpart to hasEnoughPowerToOperate above, per direct
-// request ("buildings should only spit out objects if they have under 50%
-// power in the grid for 2 full seconds — 1 second outlier shouldn't
-// immediately spit out the objects"). Deliberately a SEPARATE function
-// (not just `!hasEnoughPowerToOperate`) even though they share the exact
-// same POWER_SHORTAGE_STALLED_THRESHOLD — this one also requires
-// state.level.powerShortageStreakMs (main.js's once-a-second power sampler)
-// to have reached SUSTAINED_POWER_SHORTAGE_MS, so a single brief dip below
-// the threshold doesn't immediately fling an in-progress item back into
-// physics the way the un-debounced intake gate is fine doing for a NOT-yet-
-// accepted one.
-function hasSustainedPowerShortage(state, powerCostPerSec) {
-  return powerCostPerSec > 0 && state.level.powerShortageStreakMs >= SUSTAINED_POWER_SHORTAGE_MS;
 }
 
 // Per direct request ("make sure the no power visual indicator is on the
@@ -1912,19 +1998,17 @@ export function updateBuildings(state, dtMs) {
             playIntake();
           }
         }
-      } else if (hasSustainedPowerShortage(state, stats.powerCostPerSec)) {
-        // Genuinely, SUSTAINEDLY out of power mid-cycle (see
-        // hasSustainedPowerShortage's own comment) — per direct request,
-        // spit the held item back out to normal physics instead of stalling
-        // it here forever. Just nulling heldItemId is enough: stepHeldItem's
-        // own defensive release check (data.heldItemId !== item.id) notices this
-        // on the item's very next per-tick step and restores its real mass/
-        // physics automatically — no need to duplicate that release logic
-        // here.
-        data.heldItemId = null;
-        data.lockedRecipe = null;
-        data.progressMs = 0;
       } else {
+        // Per direct request ("if a building accepts an object for
+        // processing and then runs out of power, keep the object in the
+        // building — the only way to get that object out is for the
+        // building to be moved") — no mid-cycle ejection any more. Running
+        // out of power mid-hold just stalls progress at 0 (efficiency below
+        // drops to 0 once powerEfficiency falls under
+        // POWER_SHORTAGE_STALLED_THRESHOLD) rather than releasing the held
+        // item back to physics; intake (hasEnoughPowerToOperate, just above)
+        // is still the only place power gates anything, so a hold is never
+        // even started without at least 50% grid power in the first place.
         const efficiency = stats.powerCostPerSec > 0 ? state.level.powerEfficiency : 1;
         data.progressMs += dtMs * efficiency * getCatalystSpeedMultiplier(state, key);
         // Bio-Sludge -> Biomass takes ALIEN_DNA_REFINERY_TIME_MULTIPLIER
@@ -1994,25 +2078,17 @@ export function updateBuildings(state, dtMs) {
             break;
           }
         }
-      } else if (hasSustainedPowerShortage(state, MANUFACTURER_ITEM_POWER_COST_MW[data.currentItemType] || 0)) {
-        // Genuinely, SUSTAINEDLY out of power mid-process (see
-        // hasSustainedPowerShortage's own comment) — per direct request,
-        // spit the ingredient back out instead of stalling forever. It wasn't
-        // actually consumed, so its type goes back into pendingInputs (the
-        // Manufacturer still needs one) rather than being dropped — the
-        // item's own physics/mass get restored automatically by
-        // stepHeldItem's defensive release check, the same way the
-        // Refinery's identical branch above works.
-        data.pendingInputs.push(data.currentItemType);
-        data.heldItemId = null;
-        data.processing = false;
-        data.currentItemType = null;
-        data.progressMs = 0;
       } else {
-        // Every ingredient type now costs SOME power to process (10-35mw,
-        // see MANUFACTURER_ITEM_POWER_COST_MW) — unlike before, there's no
-        // "unpowered" case left to special-case here, so this always
-        // applies the grid's live efficiency while actively processing.
+        // Per direct request ("if a building accepts an object for
+        // processing and then runs out of power, keep the object in the
+        // building — the only way to get that object out is for the
+        // building to be moved") — no mid-process ejection any more; running
+        // out of power just stalls progress (efficiency 0 below) instead of
+        // spitting the ingredient back out. Every ingredient type now costs
+        // SOME power to process (10-35mw, see MANUFACTURER_ITEM_POWER_COST_MW)
+        // — unlike before, there's no "unpowered" case left to special-case
+        // here, so this always applies the grid's live efficiency while
+        // actively processing.
         const efficiency = state.level.powerEfficiency;
         data.progressMs += dtMs * efficiency * getCatalystSpeedMultiplier(state, key);
         // Per direct spec: a flat duration by ITEM TYPE, not by recipe —

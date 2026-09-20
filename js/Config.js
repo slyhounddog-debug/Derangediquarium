@@ -903,6 +903,17 @@ export const HUNGER_MAX = 100;
 export const HUNGER_SEEK_THRESHOLD = 47; // hunger value at which a fish starts hunting for food instead of wandering — shows the "!" indicator
 export const HUNGER_CRITICAL_FRACTION = 0.6; // how far from HUNGER_SEEK_THRESHOLD to HUNGER_MAX the second, more urgent indicator kicks in
 export const HUNGER_CRITICAL_THRESHOLD = HUNGER_SEEK_THRESHOLD + HUNGER_CRITICAL_FRACTION * (HUNGER_MAX - HUNGER_SEEK_THRESHOLD); // hunger value at which the fish is close enough to starving to need immediate attention — shows the escalated indicator
+// Per direct request ("have the hunger sound that plays when they first
+// enter the second stage of hunger play 3 more times before the fish dies,
+// with less time in-between each of the 4 chimes as the starvation death
+// gets closer") — 4 total chimes (index 0 is the original "just entered
+// critical" one), each value a fraction of the way from
+// HUNGER_CRITICAL_THRESHOLD (0) to HUNGER_MAX (1). Gaps between successive
+// fractions shrink (0.45, 0.30, 0.18) so the chimes audibly speed up as
+// death nears; the last one sits at 0.93, not 1.0, so it doesn't land right
+// on top of playFishDeath's own distinct death sound. See Entities.js's
+// updateFish.
+export const FISH_HUNGER_CHIME_FRACTIONS = [0, 0.45, 0.75, 0.93];
 // A pellet relieves a flat amount of hunger, looked up by the current Food
 // Quality upgrade level (state.level.upgrades.foodQuality, 0-4 — see Tank
 // Points & Tank Upgrades below). Index 0 is the un-upgraded baseline; each
@@ -3151,24 +3162,17 @@ export const ACHIEVEMENT_POWER_SURPLUS_RATIO = 2;
 // computePowerEfficiency and every applied-efficiency gate (Fan force,
 // Processor/Refinery/Manufacturer progress, Turret cooldown). Moved here
 // from Grid.js (was module-private) since main.js's own once-a-second power
-// sampler needs to read it too, for the sustained-shortage streak below.
+// sampler needs to read it too, for the power-shortage visual overlay.
 // Per direct request ("buildings should only pull in objects if they have
-// enough power to process the object, and they should only spit out
-// objects if they have under 50% power in the grid") — raised from an
-// earlier 0.15 to 0.5; the intake gate (Grid.js's hasEnoughPowerToOperate)
-// and the eject gate (hasSustainedPowerShortage, below) have to share this
-// exact same threshold or a building sitting in between the two would
-// accept an item only to immediately become eligible to spit it back out.
+// enough power to process the object") — raised from an earlier 0.15 to
+// 0.5. Gates ONLY intake (Grid.js's hasEnoughPowerToOperate) — per a later
+// direct follow-up ("if a building accepts an object for processing and
+// then runs out of power, keep the object in the building — the only way
+// to get that object out is for the building to be moved"), running out of
+// power mid-hold no longer ejects anything; it just stalls progress at 0
+// (every processing loop's own applied-efficiency multiplier already does
+// that for free) until either power recovers or the building is moved.
 export const POWER_SHORTAGE_STALLED_THRESHOLD = 0.5;
-// How long powerEfficiency has to have sat continuously below the
-// threshold above before a building mid-process actually ejects its held
-// item — per direct request ("only spit out objects if they have under 50%
-// power in the grid for 2 full seconds — 1 second outlier shouldn't
-// immediately spit out the objects"). Deliberately NOT applied to the
-// intake gate, which stays an instant, un-debounced check — nothing is
-// lost by simply not yet accepting an item, so there's no flicker to guard
-// against the way there is for kicking an already-in-progress one back out.
-export const SUSTAINED_POWER_SHORTAGE_MS = 2000;
 // Spring Cleaning's own two thresholds, named directly in its description —
 // "drop below 90%" arms it, "back up to 99%" completes it.
 export const ACHIEVEMENT_CLEANLINESS_ARM_THRESHOLD = 90;

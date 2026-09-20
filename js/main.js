@@ -51,7 +51,6 @@ import {
   DIAMOND_GEM_COLOR_EDGE,
   POWER_HISTORY_MAX,
   ACHIEVEMENT_POWER_SURPLUS_RATIO,
-  POWER_SHORTAGE_STALLED_THRESHOLD,
   SCIENCE_CAP_BY_LEVEL,
   MOUND_MAX_TIER,
   ALIEN_CLICK_DAMAGE,
@@ -2520,7 +2519,7 @@ function update(dtMs) {
   updatePlatformFilterDrag();
   updateBuildingMove();
   if (!state.ui.timePaused) {
-    updateStoryTriggers(state);
+    updateStoryTriggers(state, dtMs);
     state.level.elapsed += dtMs;
   }
 
@@ -2597,15 +2596,6 @@ function update(dtMs) {
     }
     state.meta.stats.powerDeficitStreakBestMs = Math.max(state.meta.stats.powerDeficitStreakBestMs, state.level.powerDeficitStreakMs);
     state.meta.stats.powerSurplusStreakBestMs = Math.max(state.meta.stats.powerSurplusStreakBestMs, state.level.powerSurplusStreakMs);
-    // Per direct request — Grid.js's hasSustainedPowerShortage's own "under
-    // 50% for 2 full seconds" eject gate. Tracked here (not derived from
-    // powerDeficitStreakMs above, which uses a different condition — ANY
-    // shortfall at all, not specifically below the 50% stalled threshold)
-    // since this is the one place a real, settled efficiency number for
-    // "this second" actually exists.
-    state.level.powerShortageStreakMs = state.level.powerEfficiency < POWER_SHORTAGE_STALLED_THRESHOLD
-      ? state.level.powerShortageStreakMs + 1000
-      : 0;
     state.level.powerGenAccumMw = 0; // reset for the next window — generated MW that goes unused (and isn't stored) this second is gone, not carried forward
     state.level.turretPowerDemandAccumMw = 0; // reset alongside it — see its own comment in Levels.js
   }

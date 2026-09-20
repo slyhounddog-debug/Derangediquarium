@@ -190,19 +190,6 @@ export function loadLevel(state, levelId) {
     // attempt, never real progress already banked.
     powerDeficitStreakMs: 0, // real-ms a continuous demand>supply streak has held, sampled once/real-second alongside the existing HUD power history
     powerSurplusStreakMs: 0, // same, for supply >= demand*ACHIEVEMENT_POWER_SURPLUS_RATIO
-    // Real-ms powerEfficiency has continuously sat below POWER_SHORTAGE_
-    // STALLED_THRESHOLD, sampled once/real-second alongside the two streaks
-    // above (main.js's own once-a-second power-sample block). Per direct
-    // request ("buildings should only spit out objects if they have under
-    // 50% power in the grid for 2 full seconds — 1 second outlier shouldn't
-    // immediately spit out the objects") — Grid.js's hasSustainedPowerShortage
-    // reads this to gate a building's mid-process EJECT specifically
-    // (unlike the instant, un-debounced INTAKE gate, hasEnoughPowerToOperate,
-    // which shares the exact same threshold but no sustained-duration
-    // requirement — nothing is lost by simply not yet accepting an item, so
-    // there's no flicker to guard against the way there is for kicking one
-    // back out mid-process).
-    powerShortageStreakMs: 0,
     cleanlinessRecoveryArmed: false, // set true the moment cleanliness first drops below ACHIEVEMENT_CLEANLINESS_ARM_THRESHOLD; the achievement completes (and this clears back to false) the moment it's true AND cleanliness reaches ACHIEVEMENT_CLEANLINESS_COMPLETE_THRESHOLD
     lastPurchaseAtMs: 0, // real elapsed timestamp of the last fish bought OR building placed — see Entities.js's trySpawnPurchasedFish/Grid.js's placeTile (both update this on success) and Systems.js's updateIdlePurchaseHint (reads it to fire a one-time "check the Achievements tab" nudge after 60s of inactivity)
     bankruptcyActive: false, // true while "no fish + can't afford anything" is CURRENTLY true, so the bailout/game-over response only fires once per fresh occurrence of that condition, not every tick it holds — see Systems.js's updateStoryTriggers

@@ -343,12 +343,34 @@ function spawnAlienWave(state) {
 // not a countdown-from value. Portal/alien creation itself lives in
 // Entities.js (see spawnAlienWave's own comment) — this function only ever
 // decides WHEN a wave should start and pushes the resulting portal data.
-function updateAlienWaves(state) {
+function updateAlienWaves(state, dtMs) {
   // Normal wave spawning is suspended entirely once the Mother Alien Fish
   // sequence has started (any phase — 'intro_wait' through 'gameover') so a
   // routine wave can't spawn on top of/immediately after the boss fight and
   // muddy what's supposed to be a dedicated final encounter.
   if (state.level.bossPhase) return;
+  // Per direct request ("pause the alien timer during tutorials so that
+  // aliens don't spawn during tutorials — the only exceptions being the
+  // first alien tutorial and the turret tutorial"). Most guided-tutorial
+  // flows already freeze the ENTIRE simulation, elapsed time included (see
+  // main.js's update(), the `if (state.level.tutorialFlow) { ...; return; }`
+  // block) — this function genuinely can't run during those at all, so
+  // nothing further is needed for them. The exceptions are the few flows
+  // main.js deliberately keeps running full-speed because their own step
+  // needs live simulation to detect its completion: 'postalien'/'wastedrag'
+  // (the turret tutorial, entered either way) NEED aliens to keep coming —
+  // that's the whole point of both. 'mergefish' (drag-to-merge) has no such
+  // need, so its own live-simulation window is exactly when this DOES need
+  // an explicit block: pushing alienNextWaveAtMs forward by the same amount
+  // elapsed just advanced keeps the countdown's remaining gap frozen (a real
+  // pause, not just a skipped check that would otherwise let a whole
+  // tutorial's worth of elapsed time count against the timer and dump a
+  // wave the instant it ends).
+  const flow = state.level.tutorialFlow;
+  if (flow && flow.id !== 'alienintro' && flow.id !== 'postalien' && flow.id !== 'wastedrag') {
+    state.level.alienNextWaveAtMs += dtMs;
+    return;
+  }
   const elapsed = state.level.elapsed;
 
   // Per direct request, the countdown to the NEXT wave doesn't even start
@@ -526,9 +548,9 @@ function updateIdlePurchaseHint(state) {
   pushNotification(state, IDLE_PURCHASE_HINT_MESSAGE);
 }
 
-export function updateStoryTriggers(state) {
+export function updateStoryTriggers(state, dtMs) {
   updateBankruptcy(state);
-  updateAlienWaves(state);
+  updateAlienWaves(state, dtMs);
   updateAlienIntroTrigger(state);
   updateTurretTutorialTrigger(state);
   updatePostAlienTutorial(state);

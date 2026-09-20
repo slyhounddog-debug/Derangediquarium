@@ -16,6 +16,7 @@ import {
   HUNGER_MAX,
   HUNGER_SEEK_THRESHOLD,
   HUNGER_CRITICAL_THRESHOLD,
+  FISH_HUNGER_CHIME_FRACTIONS,
   FOOD_HUNGER_RELIEF_BY_LEVEL,
   FISH_VERTICAL_DAMPING,
   WANDER_INTERVAL_MIN_S,
@@ -875,7 +876,7 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
     powerTextAccumMw: 0, // pure-Generator only — MW banked toward the next once-per-second floating text, see updateFish's GENERATOR branch
     powerTextTimerMs: 0, // pure-Generator only — counts up to 1000ms before flushing powerTextAccumMw into a floating text
     researchTickIndex: 0, // pure-Researcher only — which tenth of the current brew cycle's "+0.1" progress bubbles have already fired, see updateFish's RESEARCHER branch
-    hungerCriticalSfxPlayed: false, // plays playHunger() once per crossing into HUNGER_CRITICAL_THRESHOLD, reset once hunger drops back below it (e.g. after eating) — see updateFish
+    hungerChimesPlayed: 0, // how many of FISH_HUNGER_CHIME_FRACTIONS' 4 hunger-chime thresholds have fired since crossing into HUNGER_CRITICAL_THRESHOLD, reset to 0 once hunger drops back below it (e.g. after eating) — see updateFish
     hungerSeekBubbleEmitted: false, // guaranteed mouth bubble once per crossing into HUNGER_SEEK_THRESHOLD (the first "!" stage), reset once hunger drops back below it — see updateFish
     // Mouth bubbles, per direct request — counts DOWN, re-rolled to a fresh
     // random FISH_BUBBLE_INTERVAL_MIN/MAX_MS span every time it fires
@@ -2272,24 +2273,37 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
 
   // Plays playHunger() once per crossing INTO the second, more urgent
   // hunger stage (HUNGER_CRITICAL_THRESHOLD — the same threshold that shows
-  // the "!!" indicator in main.js's render), per direct request. Edge-
-  // triggered, not per-frame: the flag resets once hunger drops back below
-  // the threshold (feeding, typically), so the growl can fire again next
-  // time this fish gets that hungry, but doesn't repeat every tick while it
-  // stays hungry.
+  // the "!!" indicator in main.js's render), per direct request — then 3
+  // MORE times as hunger keeps climbing toward HUNGER_MAX, per a later
+  // direct follow-up ("play 3 more times before the fish dies, with less
+  // time in-between each of the 4 chimes as the starvation death gets
+  // closer"). FISH_HUNGER_CHIME_FRACTIONS' shrinking gaps are what makes the
+  // rhythm speed up. The `while` (not `if`) defensively covers a single
+  // large dt tick (e.g. a backgrounded-tab catch-up) crossing more than one
+  // threshold at once, so no chime is ever silently skipped. Edge-triggered
+  // overall, not per-frame: hungerChimesPlayed resets to 0 once hunger drops
+  // back below the threshold (feeding, typically), so the whole sequence can
+  // fire again next time this fish gets that hungry.
   if (fish.hunger >= HUNGER_CRITICAL_THRESHOLD) {
-    if (!fish.hungerCriticalSfxPlayed) {
-      fish.hungerCriticalSfxPlayed = true;
+    const chimesBefore = fish.hungerChimesPlayed;
+    while (
+      fish.hungerChimesPlayed < FISH_HUNGER_CHIME_FRACTIONS.length
+      && fish.hunger >= HUNGER_CRITICAL_THRESHOLD + FISH_HUNGER_CHIME_FRACTIONS[fish.hungerChimesPlayed] * (HUNGER_MAX - HUNGER_CRITICAL_THRESHOLD)
+    ) {
+      fish.hungerChimesPlayed += 1;
       playHunger();
-      // Per direct request, ALWAYS let out a bubble the instant a fish hits
-      // the second (more urgent) hunger stage — a guaranteed emission, on
-      // top of (not instead of) the fish's own independent periodic timer
-      // below, and never itself rolls a chance at a second bubble (that's
-      // only ever off the periodic timer's own emissions).
+    }
+    // Per direct request, ALWAYS let out a bubble the instant a fish hits
+    // the second (more urgent) hunger stage — a guaranteed emission, on
+    // top of (not instead of) the fish's own independent periodic timer
+    // below, and never itself rolls a chance at a second bubble (that's
+    // only ever off the periodic timer's own emissions). Still only on the
+    // very FIRST chime, not the 3 follow-up ones.
+    if (chimesBefore === 0 && fish.hungerChimesPlayed > 0) {
       emitFishBubble(state, fish, def);
     }
   } else {
-    fish.hungerCriticalSfxPlayed = false;
+    fish.hungerChimesPlayed = 0;
   }
 
   // Per direct request, also ALWAYS let out a bubble the instant a fish

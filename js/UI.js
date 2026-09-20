@@ -1776,6 +1776,33 @@ function fishEconomyStatsHtml(speciesId) {
     // dollar range doesn't need fractional-cent precision to be useful.
     html += `<div class="building-stat">${itemIconImgHtml('coin')} Money: <b>$${Math.round(babyMoneyPerMin)} - $${Math.round(adultMoneyPerMin)}/min</b></div>`;
   }
+  // Per direct request ("add in a stat line for the electric eels in the
+  // shop showing the range of electricity they produce"). A pure Generator
+  // (GENERATOR without also FEEDER — mirrors isPureGenerator's own check in
+  // Entities.js) generates MW off distance actually swum, not a flat
+  // dropInterval/dropValue timer (see Entities.js's updateFish GENERATOR
+  // branch) — pixelsPerMW is "pixels swum per 1 MW," so MW/pixel is its
+  // reciprocal. Uses the same baseline swimSpeed (not the live upgraded
+  // one) the Speed stat line below already does, for the same "fixed
+  // comparison figure" reason, and the same baby -> adult range shape the
+  // Money line above uses.
+  if (s.behavior.includes('GENERATOR') && !s.behavior.includes('FEEDER')) {
+    const baseSpeed = s.swimSpeed * FISH_SPEED_MULTIPLIER;
+    const babyMwPerMin = (baseSpeed / baby.pixelsPerMW) * 60;
+    const adultMwPerMin = (baseSpeed / adult.pixelsPerMW) * 60;
+    html += `<div class="building-stat">⚡ Power: <b>${Math.round(babyMwPerMin)} - ${Math.round(adultMwPerMin)} mw/min</b></div>`;
+  }
+  // Per direct request ("add in a stat line for the octopus in the shop for
+  // how much blue science it makes"). A pure Researcher (RESEARCHER without
+  // also FEEDER, same isPureResearcher shape) uses a real dropInterval/
+  // dropValue timer same as a Feeder's coin drop — same baby -> adult
+  // range/min shape as the Money line above, just for Science instead of
+  // coin.
+  if (s.behavior.includes('RESEARCHER') && !s.behavior.includes('FEEDER')) {
+    const babySciencePerMin = (baby.dropValue / baby.dropInterval) * 60000;
+    const adultSciencePerMin = (adult.dropValue / adult.dropInterval) * 60000;
+    html += `<div class="building-stat">${itemIconImgHtml('science')} Science: <b>${babySciencePerMin.toFixed(1)} - ${adultSciencePerMin.toFixed(1)}/min</b></div>`;
+  }
   if (!s.behavior.includes('SCAVENGER')) {
     // Real bug fix: this used to read the flat global WASTE_POOP_INTERVAL_MS
     // directly, so every species showed the exact same waste/min regardless
