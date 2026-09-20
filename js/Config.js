@@ -877,12 +877,13 @@ export const ALIEN_EGG_RISE_SPEED = 40;
 // Quality Tank Upgrade tree (same reasoning as WASTE_HUNGER_RELIEF: that
 // tree is themed around player-BOUGHT Food specifically), and generous
 // enough to actually read as "high-value" against FOOD_HUNGER_RELIEF_BY_LEVEL's
-// own unupgraded 55.
+// own unupgraded 60.
 export const MUTAGEN_PASTE_HUNGER_RELIEF = 90;
-// Non-Adult fish that eat Mutagen Paste instantly advance ONE growth stage
-// instead of the usual gradual feeds-required climb; an Adult instead gets
-// a temporary coin-drop multiplier with a glowing visual — both per direct
-// spec, see Entities.js's updateFish eat branch.
+// Non-Adult fish that eat Mutagen Paste instantly become an Adult, no matter
+// what stage they were at (per direct request — a full replacement of the
+// old "advance ONE growth stage" behavior); an Adult instead gets a
+// temporary coin-drop multiplier with a glowing visual — see Entities.js's
+// updateFish eat branch.
 export const MUTAGEN_PASTE_COIN_MULTIPLIER = 2;
 // Per direct request ("make mutagen paste last until fed again or the
 // second stage of hunger, instead of the first hunger stage") —
@@ -1013,20 +1014,32 @@ export const HUNGER_ICON_BOUNCE_FAST_PERIOD_MS = 220;
 export const HUNGER_ICON_BOUNCE_FAST_AMPLITUDE_PX = 7;
 // A pellet relieves a flat amount of hunger, looked up by the current Food
 // Quality upgrade level (state.level.upgrades.foodQuality, 0-4 — see Tank
-// Points & Tank Upgrades below). Index 0 is the un-upgraded baseline; each
-// level after that is roughly a 20-25% bump, capping at level 4 (100 — a
-// single feed can fully clear even max hunger). Relief is no longer clamped
-// to the fish's current hunger — if it exceeds what's left, hunger goes
-// negative, an "overfed" state Entities.js leaves alone for now (no bonus
-// wired up yet; a future phase can read a negative value as a buff).
-export const FOOD_HUNGER_RELIEF_BY_LEVEL = [55, 65, 75, 85, 100, 115]; // index 0 = unupgraded; 6 entries now that Food Quality goes to level 5, see FOOD_QUALITY_UPGRADE_COSTS
+// Points & Tank Upgrades below). Index 0 is the un-upgraded baseline (60 —
+// bumped up from 55 to compensate for the flat rate having no scaling with
+// current hunger); each level after that is roughly a 20-25% bump, capping
+// at level 4 (100 — a single feed can fully clear even max hunger). Relief
+// is not clamped to the fish's current hunger — if it exceeds what's left,
+// hunger goes negative, an "overfed" state (see FISH_OVERFEED_STREAK_TARGET
+// below — 3 overfeeds in a row instantly grows the fish to adult).
+export const FOOD_HUNGER_RELIEF_BY_LEVEL = [60, 65, 75, 85, 100, 115]; // index 0 = unupgraded; 6 entries now that Food Quality goes to level 5, see FOOD_QUALITY_UPGRADE_COSTS
 // Eating a pellet also advances that fish's coin-drop timer by this fraction
 // of its current stage's dropInterval — e.g. a 20s cycle fed at the 10s mark
 // (50% of 20s) immediately drops a coin and restarts the 20s cycle. Makes
 // feeding feel like it's what produces the coins, not just a side effect of
-// waiting. TODO(later phase): restrict this bonus to manually-dropped food
-// only, once automated feeders exist, to keep active play worth doing.
-export const COIN_TIMER_FEED_BONUS_FRACTION = 0.5;
+// waiting. Now scales with the Food Quality upgrade level instead of the
+// upgrade slowing food's fall speed — starts at 25%, +10% per level, capping
+// at 75% at max level. The coin-drop timer itself is allowed to overfill
+// past its threshold (Entities.js's updateFish subtracts the interval rather
+// than resetting to 0 on a drop), so a big feed-bonus jump can both trigger
+// an instant coin AND leave the next one arriving sooner, the same way
+// hunger is allowed to go negative from an overfed pellet.
+export const COIN_TIMER_FEED_BONUS_FRACTION_BY_LEVEL = [0.25, 0.35, 0.45, 0.55, 0.65, 0.75];
+// How many Food-fed "overfeeds" in a row (a feed whose flat relief pushes
+// hunger negative) instantly grow a non-adult fish straight to adult on that
+// same feed — per direct request, rewards feeding a fish before it's really
+// hungry. Resets to 0 on any feed that doesn't overfeed. See Entities.js's
+// updateFish (fish.overfeedStreak) and FOOD_HUNGER_RELIEF_BY_LEVEL above.
+export const FISH_OVERFEED_STREAK_TARGET = 3;
 // Same idea, for a non-Scavenger fish's Waste poop timer — per direct
 // request ("make it so that food fills up the waste meter of a fish by
 // 25%, if the fish produces waste, similar to how food also makes money
@@ -1088,8 +1101,10 @@ export const TANK_POINT_COLOR = '#ffcc4d'; // floating "+1 Tank Point!" text col
 // node's own level-1 discount used.
 export const FOOD_QUALITY_UPGRADE_COSTS = [1, 5, 15, 30, 50]; // Tank Points
 export const FOOD_QUALITY_UPGRADE_MAX_LEVEL = FOOD_QUALITY_UPGRADE_COSTS.length;
-export const FOOD_QUALITY_SINK_SPEED_REDUCTION_PER_LEVEL = 0.10; // 10% slower fall per level (both FOOD_GRAVITY and FOOD_MAX_FALL_SPEED scale down) — doubled from 5%, part of the same slower-pacing pass as FOOD_GRAVITY/FOOD_MAX_FALL_SPEED above; applied live in Entities.js's updateFood
-// FOOD_HUNGER_RELIEF_BY_LEVEL above is the other half of Food Quality.
+// FOOD_HUNGER_RELIEF_BY_LEVEL and COIN_TIMER_FEED_BONUS_FRACTION_BY_LEVEL
+// above are the other two halves of Food Quality — food no longer falls
+// slower per level (per direct request, replaced by the coin-timer bonus
+// scaling instead).
 
 // Fish Movement and Food Capacity share a separate, much longer and cheaper
 // 9-level ladder — per direct request, several more levels than Food
@@ -1239,8 +1254,8 @@ export const SPECIES = {
     // in this file (dropValue *= 1.2, dropInterval untouched).
     growthStages: [
       { feedsRequired: 0, scale: 0.5, dropInterval: 24228, dropValue: 7.5 }, // stage 1: hatchling
-      { feedsRequired: 3, scale: 0.75, dropInterval: 24228, dropValue: 10.5 }, // stage 2: juvenile
-      { feedsRequired: 6, scale: 1.0, dropInterval: 24228, dropValue: 13.5 }, // stage 3: adult
+      { feedsRequired: 2, scale: 0.75, dropInterval: 24228, dropValue: 10.5 }, // stage 2: juvenile
+      { feedsRequired: 4, scale: 1.0, dropInterval: 24228, dropValue: 13.5 }, // stage 3: adult
     ],
     // Per-species multiplier on the flat WASTE_POOP_INTERVAL_MS fish-poop
     // timer (Entities.js's updateFish) — omitted here since Guppy IS the
@@ -1268,8 +1283,8 @@ export const SPECIES = {
     // 1.2x on dropValue, same as every other coin-dropping base feeder.
     growthStages: [
       { feedsRequired: 0, scale: 0.5, dropInterval: 16500, dropValue: 3.6 }, // hatchling
-      { feedsRequired: 3, scale: 0.75, dropInterval: 16500, dropValue: 4.8 }, // juvenile
-      { feedsRequired: 6, scale: 1.0, dropInterval: 16500, dropValue: 6 }, // adult — still the high-frequency coin firehose of the three, just slightly less so
+      { feedsRequired: 2, scale: 0.75, dropInterval: 16500, dropValue: 4.8 }, // juvenile
+      { feedsRequired: 4, scale: 1.0, dropInterval: 16500, dropValue: 6 }, // adult — still the high-frequency coin firehose of the three, just slightly less so
     ],
     // 10% slower waste production than Guppy, per direct request — same
     // "÷(1-x)" convention this codebase already uses for "X% slower"
@@ -1299,8 +1314,8 @@ export const SPECIES = {
     // 1.2x on dropValue, same as every other coin-dropping base feeder.
     growthStages: [
       { feedsRequired: 0, scale: 0.6, dropInterval: 36574, dropValue: 19.05 }, // hatchling
-      { feedsRequired: 3, scale: 0.8, dropInterval: 36574, dropValue: 24.75 }, // juvenile
-      { feedsRequired: 6, scale: 1.0, dropInterval: 36574, dropValue: 33 }, // adult
+      { feedsRequired: 2, scale: 0.8, dropInterval: 36574, dropValue: 24.75 }, // juvenile
+      { feedsRequired: 4, scale: 1.0, dropInterval: 36574, dropValue: 33 }, // adult
     ],
     // 5% faster waste production than Guppy, per direct request — same
     // per-species multiplier mechanism as Dartfin's own (slower) one above,
@@ -1315,7 +1330,7 @@ export const SPECIES = {
   // None of these are in speciesUnlocked yet (unlockedByDefault: false), so
   // they're inert until a later phase's unlock logic adds them.
   // The 3 utility species now grow up through the same feed-driven 3-stage
-  // ladder the base feeders use (baby/mid/adult, feedsRequired 0/3/6) instead
+  // ladder the base feeders use (baby/mid/adult, feedsRequired 0/2/4) instead
   // of a single fixed-adult stage — per direct request ("utility fish should
   // grow up too"). Only the numbers FishRenderer.js's growth-shape switch and
   // Entities.js's behavior-scaling read differ from a base feeder: baby and
@@ -1342,8 +1357,8 @@ export const SPECIES = {
     // "make it take just as long as it currently does to die from starvation."
     growthStages: [
       { feedsRequired: 0, scale: 0.5, dropInterval: 20000, dropValue: 0 },
-      { feedsRequired: 3, scale: 0.75, dropInterval: 20000, dropValue: 0 },
-      { feedsRequired: 6, scale: 1.0, dropInterval: 20000, dropValue: 0 },
+      { feedsRequired: 2, scale: 0.75, dropInterval: 20000, dropValue: 0 },
+      { feedsRequired: 4, scale: 1.0, dropInterval: 20000, dropValue: 0 },
     ],
     unlockedByDefault: false,
   },
@@ -1363,8 +1378,8 @@ export const SPECIES = {
     // Entities.js's updateFish GENERATOR branch/fish.distanceAccumPx.
     growthStages: [
       { feedsRequired: 0, scale: 0.5, pixelsPerMW: 1 },
-      { feedsRequired: 3, scale: 0.75, pixelsPerMW: 1 },
-      { feedsRequired: 6, scale: 1.0, pixelsPerMW: 0.5 },
+      { feedsRequired: 2, scale: 0.75, pixelsPerMW: 1 },
+      { feedsRequired: 4, scale: 1.0, pixelsPerMW: 0.5 },
     ],
     unlockedByDefault: false,
   },
@@ -1382,8 +1397,8 @@ export const SPECIES = {
     // every tenth of the way through.
     growthStages: [
       { feedsRequired: 0, scale: 0.5, dropInterval: 70000, dropValue: 1 },
-      { feedsRequired: 3, scale: 0.75, dropInterval: 70000, dropValue: 1 },
-      { feedsRequired: 6, scale: 1.0, dropInterval: 50000, dropValue: 1 },
+      { feedsRequired: 2, scale: 0.75, dropInterval: 70000, dropValue: 1 },
+      { feedsRequired: 4, scale: 1.0, dropInterval: 50000, dropValue: 1 },
     ],
     unlockedByDefault: false,
   },
@@ -1477,8 +1492,8 @@ export const SPECIES = {
     swimSpeed: 25, lifespan: 300000, hungerRate: 0.468,
     growthStages: [
       { feedsRequired: 0, scale: 0.5, dropInterval: 70000, dropValue: 1 },
-      { feedsRequired: 3, scale: 0.75, dropInterval: 70000, dropValue: 1 },
-      { feedsRequired: 6, scale: 1.0, dropInterval: 50000, dropValue: 1 },
+      { feedsRequired: 2, scale: 0.75, dropInterval: 70000, dropValue: 1 },
+      { feedsRequired: 4, scale: 1.0, dropInterval: 50000, dropValue: 1 },
     ],
     unlockedByDefault: false,
   },

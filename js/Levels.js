@@ -115,6 +115,7 @@ export function loadLevel(state, levelId) {
       alienFoodDistractionTipShown: false, // fires a one-time chat tip right after the FIRST alien wave is fully cleared, explaining that Food distracts aliens off fish — see Systems.js's updateAlienWaves
       firstTankPanelOpened: false, // gates the one-time bounce on the Achievements tab (#tank-tab-achievements) to the very first time the Tank panel is ever opened, however it's opened — see UI.js's maybeBounceAchievementTabFirstOpen
       idlePurchaseHintShown: false, // fires a one-time chat tip suggesting the Achievements tab once 60 real seconds pass with no fish bought or building placed — see Systems.js's updateIdlePurchaseHint
+      criticalHungerFeedMessageShown: false, // gates the "feed your fish quicker" nudge to the first-ever feed (any source) that lands while a fish is at HUNGER_CRITICAL_THRESHOLD or beyond — see Entities.js's maybeAnnounceCriticalHungerFeed
     },
     // Cinematic first-alien intro — per direct request, the very first alien
     // to ever spawn gets a dedicated teaching moment: once it's been alive

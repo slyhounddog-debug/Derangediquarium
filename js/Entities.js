@@ -33,7 +33,6 @@ import {
   STORAGE_CHEST_SCATTER_LAUNCH_SPEED,
   CHEST_TUTORIAL_WASTE_X,
   CHEST_TUTORIAL_WASTE_Y,
-  FOOD_QUALITY_SINK_SPEED_REDUCTION_PER_LEVEL,
   FOOD_SWAY_AMPLITUDE,
   FOOD_SWAY_FREQUENCY,
   FOOD_SWAY_ENVELOPE_FREQUENCY,
@@ -46,8 +45,9 @@ import {
   FISH_MOVEMENT_UPGRADE_SPEED_BONUS,
   FISH_SPEED_MULTIPLIER,
   TAIL_WAG_RATE,
-  COIN_TIMER_FEED_BONUS_FRACTION,
+  COIN_TIMER_FEED_BONUS_FRACTION_BY_LEVEL,
   WASTE_TIMER_FEED_BONUS_FRACTION,
+  FISH_OVERFEED_STREAK_TARGET,
   SEABED_FLOOR_Y,
   FISH_MIN_X,
   FISH_MAX_X,
@@ -1027,6 +1027,7 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
     deathFacing: 1, // frozen facing direction at the moment death began — see beginFishDeathAnimation
     hp: maxHp, // starts full; damaged by a living alien touching it (updateAlien), regenerates over FISH_HEALTH_REGEN_DURATION_MS once no aliens are alive at all (updateFish) — never regenerates while any alien is alive anywhere. main.js's render only draws a health bar while hp < maxHp, per direct request ("health bars only when they are damaged").
     dropTimer: 0,
+    overfeedStreak: 0, // consecutive plain-Food feeds in a row that pushed hunger negative — 3 in a row (FISH_OVERFEED_STREAK_TARGET) instantly grows a non-adult fish to adult on that 3rd feed; reset to 0 by any feed that doesn't overfeed. See updateFish's plain-Food eat branch.
     poopTimer: 0, // WASTE_POOP_INTERVAL_MS — a non-Scavenger fish poops out Waste directly on this timer, see updateFish
     eatCooldownRemainingMs: 0, // Scavenger only — see updateFish's SCAVENGER eat branch; a growth-stage's dropInterval is reused as the eat cooldown
     distanceAccumPx: 0, // pure-Generator only — pixels swum since the last MW produced, see updateFish's GENERATOR branch
@@ -1189,6 +1190,22 @@ function triggerProductionBlocked(state, fish, stageDef, resource) {
 }
 
 const FOOD_ROT_WARNING_MESSAGE = "Careful now, food that's chilling too long rots into waste";
+
+const CRITICAL_HUNGER_FEED_MESSAGE = "Feed your fish quicker and they'll grow up quicker!";
+
+// One-shot tutorial nudge — per direct request, fires the FIRST time ever
+// (across the whole playthrough) any fish gets fed — Food, Waste, or
+// Mutagen Paste — after it had already reached HUNGER_CRITICAL_THRESHOLD
+// (the "!!" urgent, second hunger stage), since a hungrier fish still only
+// gets the same flat relief and so takes longer to reach its next feeds-
+// required growth stage. Called from updateFish's shared eat branch,
+// alongside the fish_saved_10 achievement check that reads the same
+// condition.
+function maybeAnnounceCriticalHungerFeed(state) {
+  if (state.level.tutorialFlags.criticalHungerFeedMessageShown) return;
+  state.level.tutorialFlags.criticalHungerFeedMessageShown = true;
+  pushStoryNotification(state, CRITICAL_HUNGER_FEED_MESSAGE);
+}
 
 // One-shot tutorial nudge for the stationary-to-Waste mechanic — per direct
 // request, fires the FIRST time either of two things happens: 5 Food items
@@ -1803,13 +1820,11 @@ function clampItemToWorldWalls(item) {
 
 function updateFood(item, state, dtMs) {
   const dt = dtMs / 1000;
-  // Food Quality Tank Upgrade: each purchased level sinks 5% slower (both
-  // the acceleration and the terminal velocity scale down together, so the
-  // whole fall profile shrinks rather than just capping speed later).
-  const sinkMultiplier = 1 - FOOD_QUALITY_SINK_SPEED_REDUCTION_PER_LEVEL * state.level.upgrades.foodQuality;
-  const gravity = FOOD_GRAVITY * sinkMultiplier;
-  const maxFallSpeed = FOOD_MAX_FALL_SPEED * sinkMultiplier;
-  const physics = { gravity, maxFallSpeed };
+  // Food Quality Tank Upgrade no longer slows food's fall — per direct
+  // request, that half of the upgrade was replaced by the coin-drop timer
+  // bonus scaling with level instead (see COIN_TIMER_FEED_BONUS_FRACTION_BY_LEVEL
+  // below). Fall physics are now always the flat base values.
+  const physics = { gravity: FOOD_GRAVITY, maxFallSpeed: FOOD_MAX_FALL_SPEED };
   if (item.y < SEABED_FLOOR_Y) {
     // Fan force applies everywhere, not just the seabed band — see Grid.js's
     // computeFanForce/integrateItemForces. The continuous sway is a
@@ -2581,8 +2596,12 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
         // reads as "right at the brink of starving," so successfully eating
         // from there counts as a save. Checked BEFORE any hunger relief is
         // applied below, off whatever the fish's real hunger was the instant
-        // it landed this bite.
-        if (fish.hunger >= HUNGER_CRITICAL_THRESHOLD) state.meta.stats.fishSaved += 1;
+        // it landed this bite. The one-shot "feed quicker" nudge shares the
+        // same condition.
+        if (fish.hunger >= HUNGER_CRITICAL_THRESHOLD) {
+          state.meta.stats.fishSaved += 1;
+          maybeAnnounceCriticalHungerFeed(state);
+        }
         const idx = state.level.items.indexOf(target);
         if (idx !== -1) state.level.items.splice(idx, 1);
         playEat();
@@ -2619,17 +2638,18 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
             fish.eatCooldownRemainingMs = stage.eatCooldownMs ?? stage.dropInterval;
           }
         } else if (isMutagenPaste) {
-          // Per direct spec: a Non-Adult fish instantly advances ONE growth
-          // stage (not straight to adult); an Adult instead gets a
-          // temporary 2x coin-drop buff with a glowing visual
-          // (mutagenBuffActive, read by main.js's render and the coin-drop
-          // branch further below) — cleared the moment the fish transitions
-          // back to the hungry state (checked at the top of this function).
+          // Per direct spec: a Non-Adult fish instantly becomes an Adult, no
+          // matter what stage it's at (a full replacement of the old "one
+          // stage at a time" behavior); an Adult instead gets a temporary 2x
+          // coin-drop buff with a glowing visual (mutagenBuffActive, read by
+          // main.js's render and the coin-drop branch further below) —
+          // cleared the moment the fish transitions back to the hungry
+          // state (checked at the top of this function).
           fish.hunger -= MUTAGEN_PASTE_HUNGER_RELIEF;
           skipStandardGrowth = true;
           const wasAdultAlready = fish.stage === def.growthStages.length - 1;
           if (!wasAdultAlready) {
-            fish.stage = Math.min(fish.stage + 1, def.growthStages.length - 1);
+            fish.stage = def.growthStages.length - 1;
             // Keeps totalFeeds consistent with the stage this just jumped
             // to, so a later ordinary Food feed's own stageIndexForFeeds
             // recompute can't accidentally walk the stage back down.
@@ -2637,27 +2657,42 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
             fish.shimmerStartedAt = state.level.elapsed; // a real stage advance, same "shimmers when it grows" rule every other growth path follows
             fish.maxHp = maxHpForStage(def, fish.stage); // growing up is a full heal too, same as the ordinary feed-driven path below
             fish.hp = fish.maxHp;
-            const reachedAdult = fish.stage === def.growthStages.length - 1;
-            if (reachedAdult) playGrowToAdult(); else playGrowToMid();
-            if (reachedAdult) awardTankPoint(state, fish);
+            playGrowToAdult();
+            awardTankPoint(state, fish);
           } else {
             fish.mutagenBuffActive = true;
           }
         } else {
           // Food Quality Tank Upgrade: relief is a flat lookup by purchased
-          // level, no longer clamped to the fish's current hunger — a
-          // higher-quality pellet than the fish actually needed pushes hunger
-          // negative (an "overfed" state; no bonus effect reads it yet).
+          // level, not clamped to the fish's current hunger — a higher-
+          // quality pellet than the fish actually needed pushes hunger
+          // negative, an "overfed" state. 3 overfeeds in a row
+          // (FISH_OVERFEED_STREAK_TARGET) grows a non-adult fish straight to
+          // adult on that 3rd feed, per direct request — done by just
+          // maxing out totalFeeds before the standard feeds-required tail
+          // below runs, so the usual stageIndexForFeeds recompute,
+          // shimmer/sound, full heal, and Tank Point award all fire exactly
+          // like a normal stage advance would.
           const relief = FOOD_HUNGER_RELIEF_BY_LEVEL[state.level.upgrades.foodQuality];
+          const wasOverfed = fish.hunger - relief < 0;
           fish.hunger -= relief;
+          // (fish.overfeedStreak || 0): a fish loaded from a save written
+          // before this field existed has it as undefined, not 0.
+          fish.overfeedStreak = wasOverfed ? (fish.overfeedStreak || 0) + 1 : 0;
+          if (wasOverfed && fish.overfeedStreak >= FISH_OVERFEED_STREAK_TARGET) {
+            fish.overfeedStreak = 0;
+            fish.totalFeeds = def.growthStages[def.growthStages.length - 1].feedsRequired;
+          }
         }
         if (!skipStandardGrowth) {
           // Eating fills the coin-drop timer too, so feeding feels like it's
           // what produces the coins — a 20s cycle fed halfway through jumps
-          // straight to a drop and restarts the cycle. Not meaningful for a
-          // Scavenger (it doesn't use dropTimer at all — see the eat-cooldown
-          // branch above), so skipped for it.
-          if (!isScavenger) fish.dropTimer += def.growthStages[fish.stage].dropInterval * COIN_TIMER_FEED_BONUS_FRACTION;
+          // straight to a drop and restarts the cycle. The fraction scales
+          // with the Food Quality upgrade level now (25% base, +10%/level),
+          // replacing that upgrade's old food-fall-speed effect. Not
+          // meaningful for a Scavenger (it doesn't use dropTimer at all —
+          // see the eat-cooldown branch above), so skipped for it.
+          if (!isScavenger) fish.dropTimer += def.growthStages[fish.stage].dropInterval * COIN_TIMER_FEED_BONUS_FRACTION_BY_LEVEL[state.level.upgrades.foodQuality];
           // Same idea for the Waste poop timer, per direct request ("food
           // fills up the waste meter of a fish by 25%, if the fish produces
           // waste") — only meaningful for a fish that actually poops
@@ -2869,7 +2904,13 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
     if (fish.dropTimer >= effectiveDropInterval && fish.alienNearby) {
       fish.dropTimer = 0;
     } else if (fish.dropTimer >= effectiveDropInterval) {
-      fish.dropTimer = 0;
+      // Subtracting (not resetting to 0) lets the coin-drop timer overfill
+      // the same way hunger can go negative from an overfed pellet — a big
+      // feed-bonus jump (COIN_TIMER_FEED_BONUS_FRACTION_BY_LEVEL) can push
+      // dropTimer well past effectiveDropInterval in one bite, and whatever
+      // carries over past the threshold means the NEXT coin arrives sooner
+      // too, per direct request.
+      fish.dropTimer -= effectiveDropInterval;
       // A hybrid's dropValueOverride (T5 value carry-over pipeline) already
       // reflects its economy parent's tier-scaled value in full — using it
       // directly, not layering the starTier multiplier on top again, since a

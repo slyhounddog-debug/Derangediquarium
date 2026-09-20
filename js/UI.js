@@ -14,7 +14,7 @@ import {
   FOOD_QUALITY_UPGRADE_COSTS,
   FOOD_QUALITY_UPGRADE_MAX_LEVEL,
   FOOD_HUNGER_RELIEF_BY_LEVEL,
-  FOOD_QUALITY_SINK_SPEED_REDUCTION_PER_LEVEL,
+  COIN_TIMER_FEED_BONUS_FRACTION_BY_LEVEL,
   FISH_MOVEMENT_UPGRADE_COSTS,
   FISH_MOVEMENT_UPGRADE_MAX_LEVEL,
   FISH_MOVEMENT_UPGRADE_SPEED_BONUS,
@@ -2976,15 +2976,15 @@ function buildBuildPalette(state) {
 // every value going in is a computed number, nothing user-supplied.
 function describeFoodQualityLevel(level) {
   const relief = FOOD_HUNGER_RELIEF_BY_LEVEL[level];
-  const sinkPct = Math.round(FOOD_QUALITY_SINK_SPEED_REDUCTION_PER_LEVEL * level * 100);
+  const coinFillPct = Math.round(COIN_TIMER_FEED_BONUS_FRACTION_BY_LEVEL[level] * 100);
   if (level >= FOOD_QUALITY_UPGRADE_MAX_LEVEL) {
-    return `Food fills ${relief} hunger, sinks ${sinkPct}% slower.`;
+    return `Food fills ${relief} hunger, fills the coin meter ${coinFillPct}%.`;
   }
   const nextRelief = FOOD_HUNGER_RELIEF_BY_LEVEL[level + 1];
-  const nextSinkPct = Math.round(FOOD_QUALITY_SINK_SPEED_REDUCTION_PER_LEVEL * (level + 1) * 100);
+  const nextCoinFillPct = Math.round(COIN_TIMER_FEED_BONUS_FRACTION_BY_LEVEL[level + 1] * 100);
   return (
     `Food fills <span class="stat-current">${relief} hunger</span> → <span class="stat-next">${nextRelief} hunger</span>, ` +
-    `sinks <span class="stat-current">${sinkPct}% slower</span> → <span class="stat-next">${nextSinkPct}% slower</span>.`
+    `fills the coin meter <span class="stat-current">${coinFillPct}%</span> → <span class="stat-next">${nextCoinFillPct}%</span>.`
   );
 }
 
