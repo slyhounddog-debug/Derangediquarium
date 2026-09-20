@@ -103,6 +103,7 @@ import {
   TURRET_TUTORIAL_GOLD_GRANT_MESSAGE,
   TILE_MANUFACTURER,
   TILE_POWER_PLANT,
+  TILE_STORAGE_CHEST,
 } from './Config.js';
 import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop } from './Engine.js';
 import { pushGameNotification } from './Notifications.js';
@@ -134,6 +135,7 @@ import {
   spliceOctopusWithAlien,
   createMotherAlienFish,
   spawnTurretTutorialWaste,
+  spawnChestTutorialWaste,
 } from './Entities.js';
 import {
   renderSeabedGrid,
@@ -162,6 +164,8 @@ import {
   placeBlueprint,
   computeBlueprintCost,
   cyclePlatformAt,
+  getChestKeyAt,
+  armChestTrickle,
 } from './Grid.js';
 import { isPointOnMound, crackMound, renderMound, centerCameraOnMound, isPointOnScienceLab, renderScienceLab } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
@@ -180,6 +184,7 @@ import {
   openBuildingInfoMenu,
   openPlatformFilterMenu,
   copyPlatformFilter,
+  openStorageChestModal,
   toggleFavoriteForSelectedTool,
   removeFavoriteAtHoveredSlot,
   selectFavorite,
@@ -554,6 +559,11 @@ const state = {
     // updateHUD to advance the 'postalien'/'wastedrag' guided-tutorial
     // flows' "drag Waste into the Turret" step.
     wasteTurretAmmoGainedPending: false,
+    // Same cross-module-flag pattern as wasteTurretAmmoGainedPending above,
+    // set by Grid.js's Storage Chest intake scan — read and cleared by
+    // UI.js's updateHUD to advance the 'chest' guided-tutorial flow's own
+    // "drag Waste into the Chest" step.
+    chestItemAbsorbedPending: false,
     // Same cross-module-flag pattern — UI.js's buyLabUpgrade sets this the
     // instant the Mother Alien Fish node is purchased (UI.js can't own the
     // actual gameplay-state transition itself, per this file's own
@@ -754,6 +764,20 @@ function isMergeDragTutorialStepActive(state) {
   return state.level.tutorialFlow?.id === 'mergefish' && state.level.tutorialFlow.step === 'drag';
 }
 
+// Same idea again, for the 'chest' guided flow's own two drag steps — kept
+// as two separate checks (not folded into isWasteDragTutorialStepActive
+// above) since they gate two DIFFERENT mechanics: 'feedwaste' is an ordinary
+// item drag (the ITEM_DRAG mousedown handler's own tutorial gate needs to
+// recognize it too, same as isWasteDragTutorialStepActive), while 'trickle'
+// is the chest's own dedicated aim-drag gesture below, nothing to do with
+// the generic item-drag system at all.
+function isChestFeedWasteStepActive(state) {
+  return state.level.tutorialFlow?.id === 'chest' && state.level.tutorialFlow.step === 'feedwaste';
+}
+function isChestTrickleStepActive(state) {
+  return state.level.tutorialFlow?.id === 'chest' && state.level.tutorialFlow.step === 'trickle';
+}
+
 // Item dragging — generalized from a Waste-only mechanic to every item type
 // (coin/food/waste/science), per direct request ("make it so that every
 // object can be clicked and dragged around, just like waste. Make sure the
@@ -837,7 +861,7 @@ input.mouseDownHandlers.push((sx, sy) => {
   // otherwise make the step's own mechanic completely unusable while it's
   // active. Per direct report ("make it so the waste can actually be
   // dragged during the tutorial").
-  if (state.ui.paused || (state.level.tutorialFlow && !isWasteDragTutorialStepActive(state))) return;
+  if (state.ui.paused || (state.level.tutorialFlow && !isWasteDragTutorialStepActive(state) && !isChestFeedWasteStepActive(state))) return;
   if (draggedFishId != null) return; // a fish-drag already claimed this press
   const world = screenToWorld(sx, sy, state.camera);
   // Per direct request ("objects can't be dragged when a building or fish
@@ -1011,6 +1035,88 @@ function updateItemDrag() {
   dragged.x = clampedX;
   dragged.y = clampedY;
   dragged.resting = false;
+}
+
+// Storage Chest aim-drag — per direct request ("make it so the player has
+// to drag and drop in the direction they want the objects to spit, with the
+// cursor turning into an arrow animation in the direction of the line
+// between the storage chest and the cursor. When they release, have the
+// storage chest trickle the output in the chosen direction"). Mirrors the
+// item-drag gesture's own "mousedown arms it, a per-tick update tracks the
+// live state, mouseup commits or falls back to an ordinary click" shape —
+// the same ITEM_DRAG_MOVE_THRESHOLD_PX distance check decides whether a
+// press-release was a real drag (arms the trickle) or just a plain click
+// (falls through to main.js's click handler, which opens the chest's own
+// info popup instead — see chestAimDragMoved's own check there).
+let chestAimDragKey = null; // "row,col" buildingKey of whichever chest is currently being aimed, or null
+let chestAimDragMoved = false;
+let chestAimDragStartSx = 0;
+let chestAimDragStartSy = 0;
+
+input.mouseDownHandlers.push((sx, sy) => {
+  // Same tutorial-freeze gate every other drag-arming mousedown handler in
+  // this file uses — EXCEPT for the 'chest' flow's own 'trickle' step,
+  // which this exact gesture exists to teach in the first place (mirrors
+  // isWasteDragTutorialStepActive's own carve-out above).
+  if (state.ui.paused || (state.level.tutorialFlow && !isChestTrickleStepActive(state))) return;
+  if (draggedFishId != null || draggedItemId != null) return; // another drag already claimed this press
+  const world = screenToWorld(sx, sy, state.camera);
+  if (!isCursorOrFoodTool(effectiveToolAt(world.y))) return;
+  const key = getChestKeyAt(state, world.x, world.y);
+  if (!key) return;
+  chestAimDragKey = key;
+  chestAimDragStartSx = sx;
+  chestAimDragStartSy = sy;
+  chestAimDragMoved = false;
+});
+
+input.mouseUpHandlers.push(() => {
+  if (chestAimDragKey == null) return;
+  const movedPx = Math.hypot(input.mouse.x - chestAimDragStartSx, input.mouse.y - chestAimDragStartSy);
+  chestAimDragMoved = movedPx >= ITEM_DRAG_MOVE_THRESHOLD_PX;
+  if (chestAimDragMoved) {
+    const [row, col] = chestAimDragKey.split(',').map(Number);
+    const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
+    const angle = angleFromTileToPoint(col, row, world.x, world.y);
+    armChestTrickle(state, chestAimDragKey, angle);
+    advanceTutorialFlow(state, 'chest', 'trickle');
+  }
+  chestAimDragKey = null;
+  lastCursorTool = null; // force updateCanvasCursor to re-apply the ordinary tool cursor next frame, since this gesture was overriding it directly
+});
+
+// Called every tick from update() while a chest-aim drag is in progress —
+// recomputes the live angle from the chest's own tile center to wherever
+// the cursor currently is, and points the OS cursor glyph itself in that
+// exact direction (rotatingArrowCursorCss below), per direct request.
+function updateChestAimDrag() {
+  if (chestAimDragKey == null) return;
+  const [row, col] = chestAimDragKey.split(',').map(Number);
+  const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
+  const angle = angleFromTileToPoint(col, row, world.x, world.y);
+  // Rounded to the nearest 5deg — a real per-pixel-of-mouse-movement cursor
+  // rewrite would mean re-encoding a fresh SVG data URI on nearly every
+  // frame this drag is active; this keeps the visual plenty smooth while
+  // only actually touching canvas.style.cursor when the angle has moved
+  // enough to matter.
+  const angleDeg = Math.round((angle * 180) / Math.PI / 5) * 5;
+  if (angleDeg !== lastChestAimCursorDeg) {
+    lastChestAimCursorDeg = angleDeg;
+    canvas.style.cursor = rotatingArrowCursorCss(angleDeg);
+  }
+}
+let lastChestAimCursorDeg = null;
+
+// A simple triangular arrow, rotated in-place around its own center — same
+// data-URI-SVG-as-cursor technique emojiCursorCss (below) already
+// established, just a hand-drawn shape instead of an emoji glyph (which
+// can't be rotated cleanly/legibly at cursor size) so it can point in any
+// of the drag's continuous angles, not just a fixed image.
+function rotatingArrowCursorCss(angleDeg) {
+  const size = 28;
+  const c = size / 2;
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${size}' height='${size}'><g transform='rotate(${angleDeg} ${c} ${c})'><polygon points='${c + 11},${c} ${c - 7},${c - 7} ${c - 7},${c + 7}' fill='#ffffff' stroke='#1a1a1a' stroke-width='1.5' stroke-linejoin='round'/></g></svg>`;
+  return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${c} ${c}, auto`;
 }
 
 // Manufacturer/Power Plant drag-to-copy-recipe — per direct request ("click
@@ -1406,6 +1512,7 @@ input.clickHandlers.push((sx, sy) => {
   if (itemDragMoved) { itemDragMoved = false; return; } // this click followed a genuine item-drag gesture — don't also bank/feed/place at the release point. An unmoved press-release leaves itemDragMoved false, so a plain click on a Coin/Science item still banks it normally
   if (recipeDragMoved) { recipeDragMoved = false; return; } // this click followed a genuine Manufacturer/Power Plant recipe-copy drag — don't also open the recipe pop-up at the release point
   if (platformFilterDragMoved) { platformFilterDragMoved = false; return; } // this click followed a genuine Platform filter-copy drag — don't also open the filter pop-up at the release point
+  if (chestAimDragMoved) { chestAimDragMoved = false; return; } // this click followed a genuine Storage Chest aim-drag — don't also open the chest's info popup at the release point
   if (blueprintJustCaptured) { blueprintJustCaptured = false; return; } // this click is the tail end of the mouseup that just captured a Blueprint selection — don't also try to paste it at that same point
   if (suppressTutorialTurretPlacementClick) {
     // The same native mouseup/click that just placed the tutorial's own
@@ -1668,6 +1775,12 @@ input.clickHandlers.push((sx, sy) => {
     // first so a Platform never falls through to the generic info popup.
     const platformFilterKey = getPlatformFilterKeyAt(state, world.x, world.y);
     if (platformFilterKey) { openPlatformFilterMenu(state, platformFilterKey); return; }
+    // A placed Storage Chest opens its own readout popup the same way — per
+    // direct request ("the player should still be able to click the storage
+    // chest for the building modal to popup"), also checked ahead of the
+    // generic info popup below.
+    const chestKey = getChestKeyAt(state, world.x, world.y);
+    if (chestKey) { openStorageChestModal(state, chestKey); return; }
     const buildingInfo = getBuildingInfoKeyAt(state, world.x, world.y);
     if (buildingInfo) { openBuildingInfoMenu(state, buildingInfo.key); return; }
   }
@@ -1842,6 +1955,7 @@ input.keydownHandlers.push((e) => {
     if (!state.ui.shopCollapsed) {
       advanceTutorialFlow(state, 'start', 'shop');
       advanceTutorialFlow(state, 'postalien', 'shop');
+      advanceTutorialFlow(state, 'chest', 'shop');
     }
     return;
   }
@@ -2255,6 +2369,26 @@ function updateBuildDrag() {
       spawnTurretTutorialWaste(state);
     }
   }
+  // The 'chest' guided flow's own 'place' step — same shape/reasoning as the
+  // turret block just above (checked by family membership, gated on the
+  // tutorial's own exact step, deselects the tool afterward, and suppresses
+  // the same click's own building-info-popup side effect). Reuses
+  // suppressRecipeMenuAfterPlacementClick — it's already a generic "the
+  // native click tail of this exact placement gesture shouldn't ALSO open
+  // this tile's own popup" flag, not actually Manufacturer/Power-Plant-
+  // specific despite its name.
+  if (placed && BUILDING_FAMILIES.chest.includes(buildingId)) {
+    const isChestTutorialPlaceStep = state.level.tutorialFlow?.id === 'chest' && state.level.tutorialFlow.step === 'place';
+    advanceTutorialFlow(state, 'chest', 'place');
+    if (isChestTutorialPlaceStep) {
+      deselectShopSelection(state);
+      suppressRecipeMenuAfterPlacementClick = true;
+      // Guarantee the very next step ("drag the Waste into the Chest") has
+      // something real to drag — same reasoning/precedent as
+      // spawnTurretTutorialWaste above.
+      spawnChestTutorialWaste(state);
+    }
+  }
 }
 
 // D-hotkey delete, including hold-and-drag — see lastKeyDDeleteCell's own
@@ -2493,11 +2627,14 @@ function update(dtMs) {
     // other" merge-tutorial step needs the same exemption, for the same
     // reason — updateFishDrag (which makes the grabbed fish actually follow
     // the cursor) only ever runs as part of this same normal-simulation
-    // path. Falls through to the normal path below instead of freezing —
-    // updateStoryTriggers' own tutorial triggers all self-gate on
-    // state.level.tutorialFlow already being set (this exact flow), so
-    // nothing else can start while this runs.
-    if (!isWasteDragTutorialStepActive(state) && !isMergeDragTutorialStepActive(state)) return;
+    // path. The 'chest' flow's own "drag away to aim the trickle" step needs
+    // it too, for the same reason again — updateChestAimDrag below (and the
+    // chest's own Grid.js intake scan for its EARLIER 'feedwaste' step) only
+    // run as part of this same normal path. Falls through to the normal
+    // path below instead of freezing — updateStoryTriggers' own tutorial
+    // triggers all self-gate on state.level.tutorialFlow already being set
+    // (this exact flow), so nothing else can start while this runs.
+    if (!isWasteDragTutorialStepActive(state) && !isMergeDragTutorialStepActive(state) && !isChestFeedWasteStepActive(state) && !isChestTrickleStepActive(state)) return;
   }
   if (state.ui.buildErrorText) {
     state.ui.buildErrorElapsedMs += dtMs;
@@ -2519,6 +2656,7 @@ function update(dtMs) {
   if (!state.ui.timePaused) updateEntities(state, dtMs);
   updateFishDrag();
   updateItemDrag();
+  updateChestAimDrag();
   updateRecipeDrag();
   updatePlatformFilterDrag();
   updateBuildingMove();
@@ -2979,6 +3117,12 @@ const CURSOR_BY_TOOL = {
 };
 let lastCursorTool = null;
 function updateCanvasCursor() {
+  // The Storage Chest aim-drag (updateChestAimDrag, above) owns the cursor
+  // directly while it's active, rotating it live to match the drag's own
+  // angle — this function's normal tool-based lookup would otherwise
+  // immediately stomp that back to the plain cursor/food glyph the very
+  // next frame, since lastCursorTool has no way to know about the override.
+  if (chestAimDragKey != null) return;
   const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
   const effectiveTool = effectiveToolAt(world.y);
   // Per direct request ("built into the food cursor tool via the D

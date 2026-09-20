@@ -135,6 +135,27 @@ export const TILE_FAN_T4 = 'fan_t4'; // solid — Turbo Fan (Tier 4, draws power
 export const TILE_TURRET_WASTE = 'turret_waste'; // solid — free from the start; ammo comes from consumed Waste, see WASTE_TURRET_SHOTS_PER_WASTE/WASTE_TURRET_MAX_WASTE
 export const TILE_TURRET_ELECTRIC = 'turret_electric'; // solid — Science Lab purchase (requires the Eel), unlimited ammo, draws power per shot
 export const TILE_TURRET_ADVANCED = 'turret_advanced'; // solid — Science Lab purchase (requires the Electric Turret), strongest tier
+// ---- Storage Chest ----
+// Per direct request — a pure buffer building: auto-locks onto whichever
+// item type first touches it (like the Refinery's own first-touch recipe
+// lock), holds up to STORAGE_CHEST_CAPACITY[type] of that ONE type, and only
+// ever gives them back via a player-armed auto-trickle (a drag gesture, see
+// main.js) or the chest popup's "Clear Chest" button — never automatically.
+// Tier 1 is the reward for the Mound's own $75 "tease" step, no longer a
+// pure joke (see Mound.js's crackMound); Tiers 2/3 are Science Lab
+// purchases gated on Bubble Cap 20/40 respectively (see SCIENCE_LAB_UPGRADES'
+// storage_chest_t2/_t3 below).
+export const TILE_STORAGE_CHEST = 'storage_chest';
+export const TILE_STORAGE_CHEST_T2 = 'storage_chest_t2';
+export const TILE_STORAGE_CHEST_T3 = 'storage_chest_t3';
+// Per direct spec (30/60/100) — Grid.js's updateBuildings reads this by the
+// tile's own type for its intake cap; UI.js's chest popup reads it too, for
+// the live "N / Capacity" readout.
+export const STORAGE_CHEST_CAPACITY = {
+  [TILE_STORAGE_CHEST]: 30,
+  [TILE_STORAGE_CHEST_T2]: 60,
+  [TILE_STORAGE_CHEST_T3]: 100,
+};
 
 // ---- Bio-Building production chain (Bio-Sludge -> Biomass -> Mutagen Paste / Blue Science) ----
 // Four new buildings, each a single standalone tier (no family stacking).
@@ -348,6 +369,35 @@ export const PRODUCTION_LAUNCH_MIN_TILES = 1; // the heaviest current output (ma
 export const PRODUCTION_LAUNCH_MAX_TILES = 3; // the lightest current output (mass <= PRODUCTION_LAUNCH_MASS_MIN)
 export const PRODUCTION_LAUNCH_MASS_MIN = 0.3; // Food/Mutagen Paste's own mass — see ITEM_MASS_BY_TYPE
 export const PRODUCTION_LAUNCH_MASS_MAX = 4; // Biomass/Bio-Sludge's own mass — see ITEM_MASS_BY_TYPE
+
+// ---- Storage Chest trickle/clear physics ----
+// A Chest's own auto-trickle ejects with "the same force the other
+// buildings have when outputting an object," per direct request — reuses
+// applyProductionLaunch's exact mass-based speed magnitude (see Entities.js's
+// applyDirectionalLaunch, which factors that speed calc out of
+// applyProductionLaunch so both can share it), just aimed along the
+// player-chosen trickleAngle instead of always straight up.
+// Interpolated by fill fraction (count/capacity) — a nearly-empty chest
+// barely trickles, a full one drains fast, so a player watching it fill back
+// up doesn't have to babysit an on/off switch.
+export const STORAGE_CHEST_TRICKLE_INTERVAL_MAX_MS = 4000; // at ~0% full
+export const STORAGE_CHEST_TRICKLE_INTERVAL_MIN_MS = 500; // at 100% full
+// "Clear Chest" (the popup's manual dump-everything button) staggers its
+// ejections at this fixed interval per item, per direct request ("space out
+// the spitting slightly so it happens over a second or two instead of all
+// the objects clipping together") — a max-capacity Tier 3 chest (100) at
+// 20ms apart finishes in ~2s; a smaller chest finishes proportionally
+// faster, which is fine — there's nothing wrong with a small dump being
+// quick too.
+export const STORAGE_CHEST_CLEAR_INTERVAL_MS = 20;
+// If the player has never armed a trickle direction (trickleAngle is still
+// null) by the time "Clear Chest" is pressed, per direct request the dump
+// scatters in a fresh random direction PER ITEM instead of one shared
+// aimed direction, at a small fixed speed — deliberately NOT the mass-based
+// applyProductionLaunch/applyDirectionalLaunch speed used everywhere else,
+// since the point here is just "don't let them all clip together," not a
+// real launch.
+export const STORAGE_CHEST_SCATTER_LAUNCH_SPEED = 50;
 
 // A Collector doesn't bank an item the instant it lands any more — it visibly
 // draws it in toward the tile's center and holds it there for that tile's
@@ -1571,6 +1621,24 @@ export const BUILDING_TYPES = {
     description: 'Pick a fuel recipe by clicking it once placed: Food (20mw/15s), Biomass (40mw/20s), or Blue Science (100mw/30s). Does nothing until a recipe is chosen.',
     color: '#6fff8a', unlockedByDefault: false,
   },
+  // Granted by the Mound's $75 tease (see Mound.js's crackMound) rather than
+  // unlockedByDefault — the whole point of that step is for THIS to be what
+  // finally comes out of it.
+  [TILE_STORAGE_CHEST]: {
+    id: TILE_STORAGE_CHEST, name: 'Storage Chest', icon: '📦', cost: 20,
+    description: `Auto-locks onto the first item type that touches it, holding up to ${STORAGE_CHEST_CAPACITY[TILE_STORAGE_CHEST]}. Drag away from it to aim, then release to start trickling its contents back out.`,
+    color: '#c9915a', unlockedByDefault: false,
+  },
+  [TILE_STORAGE_CHEST_T2]: {
+    id: TILE_STORAGE_CHEST_T2, name: 'Storage Chest II', icon: '📦', cost: 60,
+    description: `Same as the Storage Chest, just bigger — holds up to ${STORAGE_CHEST_CAPACITY[TILE_STORAGE_CHEST_T2]}.`,
+    color: '#8fa8c9', unlockedByDefault: false,
+  },
+  [TILE_STORAGE_CHEST_T3]: {
+    id: TILE_STORAGE_CHEST_T3, name: 'Storage Chest III', icon: '📦', cost: 120,
+    description: `The largest Storage Chest — holds up to ${STORAGE_CHEST_CAPACITY[TILE_STORAGE_CHEST_T3]}.`,
+    color: '#c9a8ff', unlockedByDefault: false,
+  },
 };
 export const BUILDING_LIST = Object.values(BUILDING_TYPES);
 // Buildings that share one shop slot instead of each getting their own icon
@@ -1587,6 +1655,7 @@ export const BUILDING_FAMILIES = {
   collector: [TILE_COLLECTOR, TILE_COLLECTOR_ELECTRIC, TILE_COLLECTOR_ADVANCED],
   refinery: [TILE_REFINERY, TILE_REFINERY_ELECTRIC, TILE_REFINERY_ADVANCED],
   turret: [TILE_TURRET_WASTE, TILE_TURRET_ELECTRIC, TILE_TURRET_ADVANCED],
+  chest: [TILE_STORAGE_CHEST, TILE_STORAGE_CHEST_T2, TILE_STORAGE_CHEST_T3],
   // Not a cost/power tier ladder like the 4 families above — all 5 variants
   // are unlocked from level start and cost the same flat $3 (see
   // getBuildingCost's own PLATFORM_FLAT_COST check). Ordered so the plain
@@ -2062,6 +2131,20 @@ export const SCIENCE_LAB_UPGRADES = {
   advanced_collector: {
     id: 'advanced_collector', name: 'Bio Collector', icon: '🧲', scienceCost: 250, goldCost: 25000,
     requires: ['electric_collector'], grants: { buildings: [TILE_COLLECTOR_ADVANCED] },
+  },
+  // Per direct request — Tier 1 Storage Chest is granted by the Mound's own
+  // $75 tease (see Mound.js), not the Lab; these 2 nodes are its only
+  // further upgrades, each gated behind a single Bubble Cap milestone and
+  // nothing else, same single-requirement shape as electric_collector/
+  // hybrid_catalyst_fish above (both already precedent for "gated on just
+  // one science_cap_N node").
+  storage_chest_t2: {
+    id: 'storage_chest_t2', name: 'Storage Chest II', icon: '📦', scienceCost: 40, goldCost: 4500,
+    requires: ['science_cap_2'], grants: { buildings: [TILE_STORAGE_CHEST_T2] },
+  },
+  storage_chest_t3: {
+    id: 'storage_chest_t3', name: 'Storage Chest III', icon: '📦', scienceCost: 70, goldCost: 16000,
+    requires: ['science_cap_4'], grants: { buildings: [TILE_STORAGE_CHEST_T3] },
   },
   // The Waste Turret needs no node at all — it's unlockedByDefault: true,
   // same as Platform (see BUILDING_TYPES), free from the very start.
@@ -2647,6 +2730,23 @@ export const ALIEN_FOOD_BLOCK_DURATION_MS = 1000; // per direct request ("so you
 export const WASTE_DRAG_TUTORIAL_WAIT_MS = 1000; // per direct request — if the player already placed a Waste Turret before the post-alien tutorial would fire, it waits this long after Waste first appears in the city before teaching just the "drag Waste into it" step — see Systems.js's updatePostAlienTutorial
 export const WASTE_DRAG_GHOST_CYCLE_MS = 1400; // one full waste->turret sweep of the "drag me here" ghost animation shown during that tutorial step — see main.js's render()
 export const POST_ALIEN_TUTORIAL_MESSAGE = "Now that's I'm talking about. A little firepower never hurt no one."; // per direct request's exact wording — posted once the player finishes placing the guided Waste Turret
+// ---- Storage Chest guided tutorial ("chest" flow, UI.js's TUTORIAL_FLOWS) ----
+// Triggered once, directly from Mound.js's crackMound the moment the $75
+// tease grants the Tier 1 chest — same "shop -> select -> place -> drag"
+// shape as the postalien/turret tutorial, minus its 'scroll' step (the
+// player's camera is already centered on the Mound right where this fires,
+// so there's nothing to scroll to first). See UI.js's POST_MOUND_CHEST_SPOT
+// for where the tutorial's own chest gets placed.
+export const CHEST_TUTORIAL_GOLD_GRANT = 20; // per direct request — matches the Tier 1 chest's own $20 cost exactly, same "always affordable regardless of how the player already spent their starting money" reasoning TURRET_TUTORIAL_GOLD_GRANT uses
+export const CHEST_TUTORIAL_GOLD_GRANT_MESSAGE = "Here's 20 gold — go place that chest.";
+// A few tiles left of POST_MOUND_CHEST_SPOT (UI.js) — same "deterministic
+// spawn, locked as the tutorial's own drag target" reasoning as
+// TURRET_TUTORIAL_WASTE_X/Y above, so the "drag Waste into the Chest" step
+// always has something real to grab regardless of whether organic Waste
+// happens to be nearby.
+export const CHEST_TUTORIAL_WASTE_X = WORLD_W / 2 + TILE_SIZE;
+export const CHEST_TUTORIAL_WASTE_Y = SEABED_FLOOR_Y + TILE_SIZE * 2;
+export const CHEST_TUTORIAL_MESSAGE = "Now you've got somewhere to stash the overflow — drag away from any chest and let go whenever you want it trickling back out.";
 // Per direct request ("add in a chat a one time message when a fish or
 // building hasn't been purchased for 60 seconds that they should check out
 // the achievements to get ideas on how to progress") — see Systems.js's

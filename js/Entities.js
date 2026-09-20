@@ -30,6 +30,9 @@ import {
   PRODUCTION_LAUNCH_MAX_TILES,
   PRODUCTION_LAUNCH_MASS_MIN,
   PRODUCTION_LAUNCH_MASS_MAX,
+  STORAGE_CHEST_SCATTER_LAUNCH_SPEED,
+  CHEST_TUTORIAL_WASTE_X,
+  CHEST_TUTORIAL_WASTE_Y,
   FOOD_QUALITY_SINK_SPEED_REDUCTION_PER_LEVEL,
   FOOD_SWAY_AMPLITUDE,
   FOOD_SWAY_FREQUENCY,
@@ -349,6 +352,17 @@ export function spawnTurretTutorialWaste(state) {
   const item = createWaste(TURRET_TUTORIAL_WASTE_X, TURRET_TUTORIAL_WASTE_Y);
   state.level.items.push(item);
   state.level.wasteDragTutorialTargetId = item.id;
+}
+
+// Same deterministic-spawn-plus-locked-target precedent as
+// spawnTurretTutorialWaste above, for the 'chest' guided flow's own
+// "drag Waste into the Chest" step — see UI.js's TUTORIAL_FLOWS.chest and
+// Config.js's CHEST_TUTORIAL_WASTE_X/Y (a few tiles left of the tutorial's
+// own fixed chest spot, POST_MOUND_CHEST_SPOT).
+export function spawnChestTutorialWaste(state) {
+  const item = createWaste(CHEST_TUTORIAL_WASTE_X, CHEST_TUTORIAL_WASTE_Y);
+  state.level.items.push(item);
+  state.level.chestDragTutorialTargetId = item.id;
 }
 
 // A physical Science Bubble — falls/routes exactly like a coin (straight
@@ -935,6 +949,20 @@ export function countTankItemsByType(state, type) {
   let n = 0;
   for (const item of state.level.items) {
     if (item.type === type) n++;
+  }
+  // Per direct request ("objects in chest should still count towards a coin
+  // cap/bubble cap/tank dirtiness") — a Storage Chest's own stored count
+  // still counts here, so parking overflow in a chest can never be used to
+  // sneak past a cap that would otherwise have blocked it as a loose item.
+  // Every cap this function backs (the Coin Cap HUD/production-block, the
+  // Bubble Cap via countScienceCapacityUsed, the Waste/Biomass/Alien DNA
+  // safety caps via canSpawnMore*) picks this up automatically, with no
+  // separate chest-aware check needed at any of those call sites. Only a
+  // chest's OWN buildingData ever has a `lockedItemType` field at all, so
+  // this needs no extra tile-type check to avoid matching anything else.
+  for (const key in state.level.buildingData) {
+    const data = state.level.buildingData[key];
+    if (data.lockedItemType === type) n += data.count;
   }
   return n;
 }
@@ -2925,23 +2953,52 @@ function launchSpeedForHeight(targetHeight, g, k) {
   return (lo + hi) / 2;
 }
 
-// Per direct request: an item freshly ejected by a Refinery or Manufacturer
-// launches slightly upward instead of just appearing at its output point
-// with zero velocity — 1-3 tiles high depending on the item's own mass (see
-// Config.js's PRODUCTION_LAUNCH_* comment for the full rationale), using
-// whichever gravity/drag profile this item type actually falls under
-// (Food/Mutagen Paste's own gentler FOOD_GRAVITY/FOOD_MAX_FALL_SPEED,
-// everything else the shared GRAVITY/MAX_FALL_SPEED) so the resulting rise
-// actually reaches the intended tile height once real per-tick physics
-// (gravity AND drag — see Grid.js's integrateItemForces) takes back over.
-function applyProductionLaunch(item) {
+// Factored out of applyProductionLaunch below so Storage Chest's own
+// directional trickle (applyDirectionalLaunch) can reuse the exact same
+// mass-based speed magnitude "the other buildings have when outputting an
+// object" (per direct request), just aimed along a chosen angle instead of
+// always straight up. 1-3 tiles' worth of rise depending on the item's own
+// mass (see Config.js's PRODUCTION_LAUNCH_* comment for the full rationale),
+// under whichever gravity/drag profile this item type actually falls under.
+function productionLaunchSpeed(item) {
   const t = Math.max(0, Math.min(1, (item.mass - PRODUCTION_LAUNCH_MASS_MIN) / (PRODUCTION_LAUNCH_MASS_MAX - PRODUCTION_LAUNCH_MASS_MIN)));
   const heightTiles = PRODUCTION_LAUNCH_MAX_TILES - t * (PRODUCTION_LAUNCH_MAX_TILES - PRODUCTION_LAUNCH_MIN_TILES);
   const isFoodLike = item.type === 'food' || item.type === 'mutagen_paste';
   const gravity = isFoodLike ? FOOD_GRAVITY : GRAVITY;
   const maxFallSpeed = isFoodLike ? FOOD_MAX_FALL_SPEED : MAX_FALL_SPEED;
   const drag = gravity / maxFallSpeed;
-  item.vy = -launchSpeedForHeight(heightTiles * TILE_SIZE, gravity, drag);
+  return launchSpeedForHeight(heightTiles * TILE_SIZE, gravity, drag);
+}
+
+// Per direct request: an item freshly ejected by a Refinery or Manufacturer
+// launches slightly upward instead of just appearing at its output point
+// with zero velocity — see productionLaunchSpeed above for the magnitude;
+// this is always straight up (matching every existing bioSpawnPoints output
+// port, which is always the topmost point of a building stack).
+function applyProductionLaunch(item) {
+  item.vy = -productionLaunchSpeed(item);
+}
+
+// Storage Chest's own auto-trickle/aimed "Clear Chest" — same magnitude as
+// applyProductionLaunch above, just aimed along `angle` (atan2 convention,
+// matching Grid.js's angleFromTileToPoint/Fan aiming) instead of always
+// straight up, since the player chooses the direction via main.js's chest-
+// aim drag gesture.
+function applyDirectionalLaunch(item, angle) {
+  const speed = productionLaunchSpeed(item);
+  item.vx = Math.cos(angle) * speed;
+  item.vy = Math.sin(angle) * speed;
+}
+
+// The "Clear Chest" popup button's fallback when no direction has ever been
+// armed (data.trickleAngle still null) — per direct request, scatters each
+// item in its OWN fresh random direction at a small fixed speed, "just
+// enough force to prevent all the objects from clipping together," not the
+// mass-based applyDirectionalLaunch force a real aimed trickle uses.
+function applyScatterLaunch(item) {
+  const angle = Math.random() * Math.PI * 2;
+  item.vx = Math.cos(angle) * STORAGE_CHEST_SCATTER_LAUNCH_SPEED;
+  item.vy = Math.sin(angle) * STORAGE_CHEST_SCATTER_LAUNCH_SPEED;
 }
 
 export function updateEntities(state, dtMs) {
@@ -2976,7 +3033,7 @@ export function updateEntities(state, dtMs) {
   // router) so it needs no spawn-point handling here. All of this returns
   // spawn points rather than constructing the items itself, to avoid a
   // circular import (createFood/createWaste/etc. live here).
-  const { foodSpawnPoints, wasteSpawnPoints, turretShots, bioSpawnPoints } = updateBuildings(state, dtMs);
+  const { foodSpawnPoints, wasteSpawnPoints, turretShots, bioSpawnPoints, chestSpawnPoints } = updateBuildings(state, dtMs);
   for (const point of foodSpawnPoints) state.level.items.push(createFood(point.x, point.y));
   // canSpawnMoreWaste checked per-item (not once before the loop) so a
   // batch of several at once still respects the cap precisely — see
@@ -3008,6 +3065,37 @@ export function updateEntities(state, dtMs) {
     else if (point.itemType === 'science') { if (countScienceCapacityUsed(state) < effectiveScienceCapacity(state)) { const item = createScience(point.x, point.y); applyProductionLaunch(item); state.level.items.push(item); } }
     else if (point.itemType === 'science_green') { if (countScienceCapacityUsed(state) < effectiveScienceCapacity(state)) { const item = createScienceGreen(point.x, point.y); applyProductionLaunch(item); state.level.items.push(item); } }
     else if (point.itemType === 'alien_egg') { const item = createAlienEgg(point.x, point.y); applyProductionLaunch(item); state.level.items.push(item); }
+  }
+  // Storage Chest trickle/"Clear Chest" output — per direct request, "the
+  // same force the other buildings have when outputting an object" (aimed
+  // mode, applyDirectionalLaunch) or a low-force random scatter if no
+  // direction's ever been armed (Clear Chest's own fallback,
+  // applyScatterLaunch) — see Grid.js's ejectOneFromChest for how each
+  // point's mode/angle/coinValue was decided. Every applicable world-wide
+  // cap (the Waste/Biomass/Alien DNA safety caps, the Bubble Cap) still
+  // applies on the way back out, same as any other spawn path here — a
+  // chest's own still-stored contents already count toward every one of
+  // these via countTankItemsByType itself (see that function's own
+  // comment), so a chest can never be used to bypass a cap that would
+  // otherwise have blocked the item as a loose one. Coin has no cap of its
+  // own to check (only a HUD warning), but does need its stored value
+  // (Grid.js already averaged it per unit) instead of a fixed constructor
+  // arg every other type gets away without.
+  for (const point of chestSpawnPoints) {
+    let item = null;
+    if (point.itemType === 'coin') item = createCoin(point.x, point.y, point.coinValue);
+    else if (point.itemType === 'food') item = createFood(point.x, point.y);
+    else if (point.itemType === 'waste') { if (canSpawnMoreWaste(state)) item = createWaste(point.x, point.y); }
+    else if (point.itemType === 'science') { if (countScienceCapacityUsed(state) < effectiveScienceCapacity(state)) item = createScience(point.x, point.y); }
+    else if (point.itemType === 'science_green') { if (countScienceCapacityUsed(state) < effectiveScienceCapacity(state)) item = createScienceGreen(point.x, point.y); }
+    else if (point.itemType === 'biomass') { if (canSpawnMoreBiomass(state)) item = createBiomass(point.x, point.y); }
+    else if (point.itemType === 'alien_dna') { if (canSpawnMoreAlienDna(state)) item = createAlienDna(point.x, point.y); }
+    else if (point.itemType === 'mutagen_paste') item = createMutagenPaste(point.x, point.y);
+    else if (point.itemType === 'alien_egg') item = createAlienEgg(point.x, point.y);
+    if (!item) continue;
+    if (point.mode === 'aimed') applyDirectionalLaunch(item, point.angle);
+    else applyScatterLaunch(item);
+    state.level.items.push(item);
   }
   for (const shot of turretShots) state.level.turretProjectiles.push(createTurretProjectile(shot));
   // Runs before the entities filter loop below, same as the old direct-

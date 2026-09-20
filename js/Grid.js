@@ -29,6 +29,13 @@ import {
   TILE_REFINERY_ADVANCED,
   TILE_MANUFACTURER,
   TILE_POWER_PLANT,
+  TILE_STORAGE_CHEST,
+  TILE_STORAGE_CHEST_T2,
+  TILE_STORAGE_CHEST_T3,
+  STORAGE_CHEST_CAPACITY,
+  STORAGE_CHEST_TRICKLE_INTERVAL_MAX_MS,
+  STORAGE_CHEST_TRICKLE_INTERVAL_MIN_MS,
+  STORAGE_CHEST_CLEAR_INTERVAL_MS,
   BUILDING_TYPES,
   PROCESSOR_STATS,
   TURRET_STATS,
@@ -129,10 +136,15 @@ const MANUFACTURER_TILES = new Set([TILE_MANUFACTURER]);
 // hold mechanism of its own.
 const HOLDABLE_ITEM_TILES = new Set([...COLLECTOR_TILES, ...REFINERY_TILES, ...MANUFACTURER_TILES]);
 const POWER_PLANT_TILES = new Set([TILE_POWER_PLANT]);
+// The 3 Storage Chest tiers — see this file's own "Storage Chest" section
+// further down (placeTile's buildingData branch, updateBuildings' intake/
+// trickle/clear scan) for the full mechanic.
+const STORAGE_CHEST_TILES = new Set([TILE_STORAGE_CHEST, TILE_STORAGE_CHEST_T2, TILE_STORAGE_CHEST_T3]);
 const SOLID_TILES = new Set([
   TILE_PLATFORM, TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4,
   ...COLLECTOR_TILES, ...TURRET_TILES,
   ...REFINERY_TILES, ...MANUFACTURER_TILES, ...POWER_PLANT_TILES,
+  ...STORAGE_CHEST_TILES,
 ]);
 const FAN_TILES = new Set([TILE_FAN_T2, TILE_FAN_T3, TILE_FAN_T4]);
 // All 5 Platform variants share the same flat cost — see getBuildingCost/
@@ -580,6 +592,51 @@ export function getPlatformFilterKeyAt(state, worldX, worldY) {
   return buildingKey(col, row);
 }
 
+// A placed Storage Chest tile (any tier) at this world point, or null — used
+// by main.js's click handler to open UI.js's chest popup, and by its own
+// chest-aim mousedown handler to tell whether a press landed on one at all.
+export function getChestKeyAt(state, worldX, worldY) {
+  const { col, row } = worldToTile(worldX, worldY);
+  if (row < SEABED_ROW_START || row >= WORLD_TILES_H || col < 0 || col >= WORLD_TILES_W) return null;
+  const type = state.level.grid[row][col];
+  if (!STORAGE_CHEST_TILES.has(type)) return null;
+  return buildingKey(col, row);
+}
+
+// Arms (or re-aims) a chest's auto-trickle — called once, at mouseup, by
+// main.js's chest-aim drag gesture. Resets trickleTimerMs to 0 so the very
+// first ejection along the newly-chosen direction fires almost immediately
+// rather than waiting out a stale leftover countdown from before this call.
+export function armChestTrickle(state, key, angle) {
+  const data = state.level.buildingData[key];
+  if (!data) return;
+  data.trickleActive = true;
+  data.trickleAngle = angle;
+  data.trickleTimerMs = 0;
+}
+
+// The chest popup's "Stop Trickle" button — per direct design, only ever
+// pauses trickleActive; trickleAngle is deliberately left alone so a later
+// re-drag (or a "Clear Chest" press) still has a real remembered direction
+// to reuse instead of falling back to the random scatter.
+export function stopChestTrickle(state, key) {
+  const data = state.level.buildingData[key];
+  if (!data) return;
+  data.trickleActive = false;
+}
+
+// The chest popup's "Clear Chest" button — per direct request, doesn't dump
+// everything on the same tick; just arms `clearing`, which updateBuildings'
+// own chest branch above drains at STORAGE_CHEST_CLEAR_INTERVAL_MS per item
+// (aimed along trickleAngle if one's ever been set, otherwise a random
+// low-force scatter — see ejectOneFromChest).
+export function clearChestContents(state, key) {
+  const data = state.level.buildingData[key];
+  if (!data || data.count <= 0) return;
+  data.clearing = true;
+  data.clearTimerMs = 0;
+}
+
 // Returns { key, type } for ANY placed building tile at this world point
 // (Manufacturer/Power Plant included), or null — used by main.js's click
 // handler to open UI.js's generic building-info pop-up (openBuildingInfoMenu)
@@ -874,6 +931,22 @@ export function placeTile(state, col, row, buildingId, angle = 0) {
     // starts empty (a plain, always-solid Platform) until the player opens
     // UI.js's openPlatformFilterMenu and whitelists something.
     state.level.buildingData[buildingKey(col, row)] = { type: buildingId, filterItems: [] };
+  } else if (STORAGE_CHEST_TILES.has(buildingId)) {
+    // lockedItemType stays null until the first item actually touches it —
+    // see updateBuildings' own chest scan below, same first-touch-locks
+    // precedent the Refinery's lockedRecipe already established. trickleAngle
+    // is null (not 0, a real rightward angle) specifically so "has the
+    // player ever armed a direction" is its own distinguishable state, read
+    // by UI.js's chest popup and Grid.js's clearChestContents (the random-
+    // scatter-vs-aimed fallback for "Clear Chest"). coinValueSum only ever
+    // matters while lockedItemType === 'coin' (a coin's own value varies per
+    // instance, unlike every other storable type) — kept on every chest
+    // uniformly rather than conditionally, harmless dead weight otherwise.
+    state.level.buildingData[buildingKey(col, row)] = {
+      type: buildingId, lockedItemType: null, count: 0, coinValueSum: 0,
+      trickleActive: false, trickleAngle: null,
+      clearing: false, clearTimerMs: 0,
+    };
   }
   if (!state.level.tutorialFlags.firstBuildingPlaced) {
     state.level.tutorialFlags.firstBuildingPlaced = true;
@@ -1720,6 +1793,7 @@ export function updateBuildings(state, dtMs) {
   const wasteSpawnPoints = [];
   const turretShots = [];
   const bioSpawnPoints = [];
+  const chestSpawnPoints = [];
   const items = state.level.items;
   for (const key in state.level.buildingData) {
     const data = state.level.buildingData[key];
@@ -2169,8 +2243,98 @@ export function updateBuildings(state, dtMs) {
       }
       continue;
     }
+
+    // ---- Storage Chest: intake, auto-trickle, and "Clear Chest" ----
+    // Per direct request. Three independent things happen here every tick:
+    // (1) intake — instantly absorbs (no hold/disintegrate delay, it
+    // "slurps") any touching item of its locked type, or locks onto
+    // whichever type touches first if still empty/unlocked, up to capacity;
+    // (2) auto-trickle — while armed (main.js's drag gesture sets
+    // trickleActive/trickleAngle), ejects one stored item at a time on a
+    // timer that speeds up the fuller the chest is; (3) "Clear Chest" — a
+    // manual dump, staggered at a fixed interval rather than all at once,
+    // aimed the same way the trickle would be if a direction's ever been
+    // armed, otherwise scattered randomly at low force (see
+    // clearChestContents below for how `clearing` gets armed).
+    if (STORAGE_CHEST_TILES.has(data.type)) {
+      const capacity = STORAGE_CHEST_CAPACITY[data.type];
+      if (data.count < capacity) {
+        for (let i = 0; i < items.length; i++) {
+          const it = items[i];
+          if (it.collectorProgressMs != null || it.heldByKey != null) continue; // already claimed by another building's own hold this tick
+          if (data.lockedItemType !== null && it.type !== data.lockedItemType) continue;
+          if (!isTouchingBuildingTile(centerX, centerY, it.x, it.y, it.radius)) continue;
+          if (data.lockedItemType === null) data.lockedItemType = it.type;
+          if (it.type === 'coin') data.coinValueSum += it.value;
+          items.splice(i, 1);
+          data.count += 1;
+          playIntake();
+          // Cross-module flag — Grid.js can't call UI.js's advanceTutorialFlow
+          // directly (same reasoning main.js's own state.ui.wasteTurretAmmoGainedPending
+          // already documents), so this is polled and consumed by UI.js's
+          // updateHUD instead. A no-op unless the 'chest' flow's own
+          // 'feedwaste' step happens to be active right now.
+          state.ui.chestItemAbsorbedPending = true;
+          break; // one absorb per tick per chest — same "don't eat 3 at once" pacing every other intake scan in this file already follows
+        }
+      }
+      // Auto-trickle — armed by main.js's armChestTrickle (the drag gesture),
+      // stopped by stopChestTrickle. Interval interpolates between the MAX
+      // (near-empty) and MIN (full) constants by fill fraction, recomputed
+      // fresh each time an item actually ejects so it keeps pace as the
+      // chest drains.
+      if (data.trickleActive && data.count > 0) {
+        data.trickleTimerMs = (data.trickleTimerMs || 0) - dtMs;
+        if (data.trickleTimerMs <= 0) {
+          const fillFraction = data.count / capacity;
+          const intervalMs = STORAGE_CHEST_TRICKLE_INTERVAL_MAX_MS
+            - fillFraction * (STORAGE_CHEST_TRICKLE_INTERVAL_MAX_MS - STORAGE_CHEST_TRICKLE_INTERVAL_MIN_MS);
+          data.trickleTimerMs = intervalMs;
+          chestSpawnPoints.push(ejectOneFromChest(data, centerX, centerY, 'aimed'));
+        }
+      }
+      // "Clear Chest" — staggers every currently-held item out at a fixed
+      // interval (STORAGE_CHEST_CLEAR_INTERVAL_MS) instead of dumping them
+      // all on the same tick, per direct request ("space out the spitting
+      // slightly so it happens over a second or two"). Runs independently of
+      // (and can overlap with) the auto-trickle above — nothing stops both
+      // draining the chest at once if a player triggers Clear mid-trickle.
+      if (data.clearing && data.count > 0) {
+        data.clearTimerMs -= dtMs;
+        if (data.clearTimerMs <= 0) {
+          data.clearTimerMs = STORAGE_CHEST_CLEAR_INTERVAL_MS;
+          chestSpawnPoints.push(ejectOneFromChest(data, centerX, centerY, data.trickleAngle === null ? 'scatter' : 'aimed'));
+        }
+      }
+      if (data.count <= 0) {
+        data.clearing = false;
+        data.lockedItemType = null; // fully empty — free to auto-lock onto a fresh type next
+      }
+      continue;
+    }
   }
-  return { foodSpawnPoints, wasteSpawnPoints, turretShots, bioSpawnPoints };
+  return { foodSpawnPoints, wasteSpawnPoints, turretShots, bioSpawnPoints, chestSpawnPoints };
+}
+
+// Shared by the auto-trickle and "Clear Chest" branches above — decrements
+// the chest's own count (and, for a coin, its value pool) by exactly one
+// unit and returns the spawn-point record Entities.js's updateEntities
+// consumes to actually materialize it (see this file's own header comment
+// on why item construction itself lives there, not here — avoiding a
+// circular import). `mode` is 'aimed' (launches along data.trickleAngle,
+// production-launch force) or 'scatter' (a fresh random angle, low fixed
+// force) — see Entities.js's applyDirectionalLaunch/applyScatterLaunch.
+function ejectOneFromChest(data, centerX, centerY, mode) {
+  const angle = mode === 'aimed' ? data.trickleAngle : Math.random() * Math.PI * 2;
+  const spawnX = centerX + Math.cos(angle) * TILE_SIZE * 0.8;
+  const spawnY = centerY + Math.sin(angle) * TILE_SIZE * 0.8;
+  let coinValue = null;
+  if (data.lockedItemType === 'coin') {
+    coinValue = Math.max(1, Math.round(data.coinValueSum / data.count));
+    data.coinValueSum -= coinValue;
+  }
+  data.count -= 1;
+  return { x: spawnX, y: spawnY, itemType: data.lockedItemType, mode, angle, coinValue };
 }
 
 // Whether a tile is genuinely "doing work" this tick, for uptime tracking —
@@ -2849,6 +3013,65 @@ function renderSquareBevel(ctx, x, y, size) {
 // shape (square+bevel, plus the Processor's own center circle) rather than a
 // bespoke silhouette per tier, which is what keeps each tier reading as
 // "still a Processor/Refinery" at a glance.
+// A plain bevelled square (same base every un-special-cased building tile
+// already gets) plus 3 pieces of live state: a dark "lid seam" so it reads
+// as a chest at a glance, a fill-level bar along the bottom (count/capacity
+// — empty until something's actually stored), and a small triangle arrow
+// rotated to trickleAngle while the auto-trickle is armed, the same
+// at-a-glance "this is actively doing something" language the pulsing
+// time-control buttons already use elsewhere in this game.
+function renderChestIcon(ctx, x, y, size, color, data) {
+  ctx.fillStyle = color;
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+  ctx.beginPath();
+  ctx.rect(x, y, size, size);
+  ctx.fill();
+  ctx.stroke();
+  renderSquareBevel(ctx, x, y, size);
+
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
+  ctx.lineWidth = Math.max(1, size * 0.05);
+  ctx.beginPath();
+  ctx.moveTo(x + size * 0.08, y + size * 0.38);
+  ctx.lineTo(x + size * 0.92, y + size * 0.38);
+  ctx.stroke();
+
+  if (data) {
+    const capacity = STORAGE_CHEST_CAPACITY[data.type];
+    const fillFraction = capacity > 0 ? Math.min(1, data.count / capacity) : 0;
+    const barX = x + size * 0.12;
+    const barY = y + size * 0.62;
+    const barW = size * 0.76;
+    const barH = size * 0.18;
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
+    ctx.fillRect(barX, barY, barW, barH);
+    if (fillFraction > 0) {
+      ctx.fillStyle = '#ffe066';
+      ctx.fillRect(barX, barY, barW * fillFraction, barH);
+    }
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(barX, barY, barW, barH);
+
+    if (data.trickleActive && data.trickleAngle !== null) {
+      const cx = x + size / 2;
+      const cy = y + size * 0.2;
+      const r = size * 0.15;
+      ctx.save();
+      ctx.translate(cx, cy);
+      ctx.rotate(data.trickleAngle);
+      ctx.fillStyle = '#4dff88';
+      ctx.beginPath();
+      ctx.moveTo(r, 0);
+      ctx.lineTo(-r * 0.6, -r * 0.6);
+      ctx.lineTo(-r * 0.6, r * 0.6);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+}
+
 function renderTierBadge(ctx, type, x, y, size) {
   if (type === TILE_COLLECTOR_ELECTRIC || type === TILE_REFINERY_ELECTRIC || type === TILE_TURRET_ELECTRIC) {
     ctx.fillStyle = '#fff04d';
@@ -3435,6 +3658,12 @@ export function renderTileShape(ctx, type, color, x, y, size, data) {
   } else if (type === TILE_POWER_PLANT) {
     renderPowerPlantIcon(ctx, x, y, size, color);
     renderRecipeIcon(ctx, type, x, y, size, data);
+  } else if (STORAGE_CHEST_TILES.has(type)) {
+    // No renderTierBadge here — it only knows the Collector/Refinery/Turret
+    // families' own tile constants, and each chest tier already reads as
+    // distinct from its own BUILDING_TYPES color (bronze/steel/purple)
+    // without needing one.
+    renderChestIcon(ctx, x, y, size, color, data);
   } else {
     ctx.fillStyle = color;
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';

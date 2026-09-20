@@ -136,6 +136,7 @@ export function loadLevel(state, levelId) {
     wasteDragTutorialWaitStartMs: null, // set the instant Waste first appears in the city while waiting to start the 'wastedrag' guided-tutorial flow (a Waste Turret already existed before the normal post-alien tutorial would fire) — see Systems.js's updatePostAlienTutorial
     wasteDragTutorialTargetId: null, // the specific Waste item locked in as the "drag this into the Turret" tutorial target, once one's been picked — per direct report, re-picking "nearest Waste" fresh every frame let a piece that fell closer to the Turret steal the spotlight/ghost-animation target away from whatever the player was already lining up to grab; see Grid.js's findNearestWasteTurretAndWaste
     mergeTutorialTargetIds: null, // [fishId, fishId] locked in as the "drag these two together" merge-tutorial target pair, once one's been picked — same locking rationale/pattern as wasteDragTutorialTargetId above; see Entities.js's resolveMergeTutorialPair
+    chestDragTutorialTargetId: null, // the specific Waste item locked in as the 'chest' guided flow's own "drag this into the Chest" target — same locking rationale/pattern as wasteDragTutorialTargetId above; see Entities.js's spawnChestTutorialWaste
     // Guided tutorial flows (Shop->Guppy->buy fish at game start; Tank
     // Upgrades->Coin Capacity on the first Tank Point; Shop->Waste Turret->
     // scroll->place ~10s after the first alien kill) — see UI.js's

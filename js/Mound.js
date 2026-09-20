@@ -20,6 +20,7 @@ import {
   MOUND_WIDTH_TILES,
   MOUND_HEIGHT_PX,
   TIER_UNLOCKS,
+  TILE_STORAGE_CHEST,
 } from './Config.js';
 import { worldToScreen } from './Engine.js';
 import { createShimmerTimer, updateShimmerTimer, drawShimmerSweep, UI_SHEEN_SWEEP_DURATION_MS } from './Shimmer.js';
@@ -48,13 +49,16 @@ export function centerCameraOnMound(camera) {
   camera.x = Math.max(0, Math.min(MOUND_X - camera.viewWidth / 2, maxX));
 }
 
-// The Tier 1.5 "tease" — a pure joke, per direct request: the Rudimentary
-// Fan is granted from level start now (BUILDING_TYPES[TILE_FAN_T2].
-// unlockedByDefault, alongside Platform/Waste Turret — see Config.js), so
-// there's no longer a paid "Tier 1.75" step to grant it separately. The
-// very first "throw money" attempt is still just a punchline, at the
-// reduced MOUND_TEASE_COST ($75, cut from $150 per direct request).
-const MOUND_TEASE_MESSAGE = `You throw $${MOUND_TEASE_COST} at a suspicious lump of dirt. Nothing happens. Absolutely nothing. You have been scammed by a rock.`;
+// The Tier 1.5 "tease" — per direct request ("no more trick mound upgrades,
+// they all should unlock something"), this is no longer a pure joke: it now
+// grants the Tier 1 Storage Chest and kicks off its own guided tutorial
+// (UI.js's TUTORIAL_FLOWS.chest). The Rudimentary Fan is still granted from
+// level start (BUILDING_TYPES[TILE_FAN_T2].unlockedByDefault, alongside
+// Platform/Waste Turret — see Config.js), so there's no separate paid
+// "Tier 1.75" step for it — this step exists purely for the Chest now, at
+// the same MOUND_TEASE_COST ($75, cut from $150 per direct request, back
+// when it really was a joke).
+const MOUND_TEASE_MESSAGE = `You throw $${MOUND_TEASE_COST} at a suspicious lump of dirt. It splits open — a sturdy Storage Chest tumbles out, somehow undamaged.`;
 
 // Per direct request, the Mound is a short on-ramp now, not the game's
 // whole arc — it only ever grants Electric Eel/Collector/Electric Refinery
@@ -109,8 +113,22 @@ export function crackMound(state) {
 
   if (state.level.tier === 1 && !state.level.moundTeased) {
     state.level.moundTeased = true;
+    // Tier itself still does NOT advance — this remains a sub-step within
+    // Tier 1, not a real crack (see getMoundCrackCount's own comment on why
+    // the dome's crack lines don't count it either). Only the GRANT changed,
+    // per direct request.
+    if (!state.meta.buildingsUnlocked.includes(TILE_STORAGE_CHEST)) {
+      state.meta.buildingsUnlocked.push(TILE_STORAGE_CHEST);
+    }
     pushNotification(state, MOUND_TEASE_MESSAGE);
-    return true; // money spent, nothing granted — the tier does NOT advance
+    // Kicks off the 'chest' guided-tutorial flow directly, the same plain-
+    // data cross-module flag pattern Systems.js's own tutorial triggers
+    // already use (Mound.js can't import UI.js — see this file's own header
+    // comment — but state.level.tutorialFlow is just data main.js/UI.js poll
+    // every frame regardless of who set it). Naturally one-shot: this whole
+    // branch can never run again once moundTeased is true.
+    if (!state.level.tutorialFlow) state.level.tutorialFlow = { id: 'chest', step: 'shop' };
+    return true;
   }
 
   state.level.tier += 1;

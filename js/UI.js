@@ -49,6 +49,11 @@ import {
   TILE_SIZE,
   ALIEN_RADIUS,
   POST_ALIEN_TUTORIAL_MESSAGE,
+  CHEST_TUTORIAL_MESSAGE,
+  CHEST_TUTORIAL_GOLD_GRANT,
+  CHEST_TUTORIAL_GOLD_GRANT_MESSAGE,
+  TILE_STORAGE_CHEST,
+  STORAGE_CHEST_CAPACITY,
   SPECIES,
   WASTE_POOP_INTERVAL_MS,
   FISH_SPEED_MULTIPLIER,
@@ -87,6 +92,7 @@ import {
   getTile, worldToTile, getBuildingCost, FAN_STATS,
   findNearestWasteTurretAndWaste, getRecipeBuildingKeyAt, renderTileShape,
   getBuildingCurrentPowerDraw, getBuildingUptimeFraction, applyRecipeToBuilding,
+  getChestKeyAt, armChestTrickle, stopChestTrickle, clearChestContents,
 } from './Grid.js';
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
@@ -130,6 +136,10 @@ let platformFilterMenuOpen = false;
 let platformFilterMenuClosing = false;
 let platformFilterMenuCloseTimer = null;
 let platformFilterTileKey = null; // "row,col" key of whichever placed Platform this item-filter pop-up is currently open for
+let storageChestMenuOpen = false;
+let storageChestMenuClosing = false;
+let storageChestMenuCloseTimer = null;
+let storageChestTileKey = null; // "row,col" key of whichever placed Storage Chest this popup is currently open for
 let labMenuOpen = false;
 let labMenuClosing = false;
 let labMenuCloseTimer = null;
@@ -375,6 +385,15 @@ export function initUI(state) {
     platformFilterClearBtn: document.getElementById('platform-filter-clear-btn'),
     platformFilterItems: document.getElementById('platform-filter-items'),
     platformFilterHint: document.getElementById('platform-filter-hint'),
+    storageChestOverlay: document.getElementById('storage-chest-overlay'),
+    storageChestAnchor: document.getElementById('storage-chest-anchor'),
+    storageChestMenu: document.getElementById('storage-chest-menu'),
+    storageChestTitle: document.getElementById('storage-chest-title'),
+    storageChestIcon: document.getElementById('storage-chest-icon'),
+    storageChestCount: document.getElementById('storage-chest-count'),
+    storageChestStopBtn: document.getElementById('storage-chest-stop-btn'),
+    storageChestClearBtn: document.getElementById('storage-chest-clear-btn'),
+    storageChestHint: document.getElementById('storage-chest-hint'),
     labOverlay: document.getElementById('lab-overlay'),
     labModal: document.getElementById('lab-modal'),
     labScienceReadout: document.getElementById('lab-science-readout'),
@@ -442,6 +461,19 @@ export function initUI(state) {
     if (e.target === els.platformFilterOverlay) closePlatformFilterMenu(); // same "click anywhere else closes it" precedent as every other fly-out pop-up here
   });
   els.platformFilterClearBtn.addEventListener('click', () => clearPlatformFilter(state));
+  els.storageChestOverlay.addEventListener('click', (e) => {
+    if (e.target === els.storageChestOverlay) closeStorageChestModal(); // same "click anywhere else closes it" precedent as every other fly-out pop-up here
+  });
+  els.storageChestStopBtn.addEventListener('click', () => {
+    if (!storageChestTileKey) return;
+    stopChestTrickle(state, storageChestTileKey);
+    refreshStorageChestModal(state);
+  });
+  els.storageChestClearBtn.addEventListener('click', () => {
+    if (!storageChestTileKey) return;
+    clearChestContents(state, storageChestTileKey);
+    refreshStorageChestModal(state);
+  });
 
   // Gene-Splicing moved to the Tank Upgrades panel (see buildTankPanel) — no
   // longer purchased here, per direct request ("unlocked through the tank
@@ -522,6 +554,7 @@ export function initUI(state) {
     if (!state.ui.shopCollapsed) {
       advanceTutorialFlow(state, 'start', 'shop');
       advanceTutorialFlow(state, 'postalien', 'shop');
+      advanceTutorialFlow(state, 'chest', 'shop');
     }
   });
   els.tankCollapseBtn.addEventListener('click', () => {
@@ -1048,6 +1081,81 @@ function refreshPlatformFilterMenu(state) {
     btn.addEventListener('click', () => togglePlatformFilterItem(state, itemDef.id));
     els.platformFilterItems.appendChild(btn);
   }
+}
+
+// ---- Storage Chest popup ----
+// Opened by main.js's click handler (getChestKeyAt) when a placed chest is
+// clicked WITHOUT a real aim-drag having just happened. Same anchored-
+// flyout open/close/position shape as the Platform filter menu above.
+const STORAGE_CHEST_MENU_TRANSITION_MS = 220; // must match #storage-chest-menu's CSS transition duration
+
+export function openStorageChestModal(state, tileKey) {
+  storageChestMenuOpen = true;
+  storageChestMenuClosing = false;
+  storageChestTileKey = tileKey;
+  if (storageChestMenuCloseTimer !== null) { clearTimeout(storageChestMenuCloseTimer); storageChestMenuCloseTimer = null; }
+  closeSidePanels(state);
+  els.storageChestOverlay.classList.remove('hidden');
+  refreshStorageChestModal(state);
+  updateStorageChestModalPosition(state);
+
+  els.storageChestMenu.classList.add('storage-chest-menu-closed');
+  void els.storageChestMenu.offsetWidth; // forced reflow — same retrigger trick every other one-shot transition in this file uses
+  els.storageChestMenu.classList.remove('storage-chest-menu-closed');
+  playPanelOpen();
+}
+
+export function closeStorageChestModal() {
+  if (!storageChestMenuOpen) return;
+  storageChestMenuOpen = false;
+  storageChestMenuClosing = true;
+  storageChestTileKey = null;
+  els.storageChestMenu.classList.add('storage-chest-menu-closed');
+  storageChestMenuCloseTimer = setTimeout(() => {
+    els.storageChestOverlay.classList.add('hidden');
+    storageChestMenuClosing = false;
+    storageChestMenuCloseTimer = null;
+  }, STORAGE_CHEST_MENU_TRANSITION_MS);
+  playPanelClose();
+}
+
+function updateStorageChestModalPosition(state) {
+  if (!storageChestTileKey) return;
+  const [row, col] = storageChestTileKey.split(',').map(Number);
+  const worldX = col * TILE_SIZE + TILE_SIZE / 2;
+  const worldY = row * TILE_SIZE;
+  const screen = worldToScreen(worldX, worldY, state.camera);
+  els.storageChestAnchor.style.left = `${screen.x}px`;
+  els.storageChestAnchor.style.top = `${screen.y - MOUND_MENU_GAP_PX}px`;
+}
+
+// Re-run on open and after every button press (not every frame — same
+// "don't tear down the DOM/reset scroll under a real click" reasoning
+// refreshPlatformFilterMenu's own comment documents; updateHUD's much
+// lighter per-frame check below just closes the popup if the tile
+// disappears out from under it). Real item art (itemIconImgHtml), per
+// direct request ("make sure to use real object icons for the chest popup
+// modal, no emojis") — the same real-art renderer the Platform filter/shop
+// stat lines already use, not a Unicode glyph standing in for the item.
+function refreshStorageChestModal(state) {
+  if (!storageChestTileKey) return;
+  const data = state.level.buildingData[storageChestTileKey];
+  if (!data) { closeStorageChestModal(); return; }
+  const capacity = STORAGE_CHEST_CAPACITY[data.type];
+  els.storageChestTitle.textContent = BUILDING_TYPES[data.type].name;
+  if (data.lockedItemType === null) {
+    els.storageChestIcon.innerHTML = '';
+    els.storageChestCount.textContent = `Empty — 0 / ${capacity}`;
+  } else {
+    const label = PLATFORM_FILTER_ITEM_TYPES.find((t) => t.id === data.lockedItemType)?.label || data.lockedItemType;
+    els.storageChestIcon.innerHTML = itemIconImgHtml(data.lockedItemType, 26);
+    els.storageChestCount.textContent = `${data.count} / ${capacity} ${label}`;
+  }
+  els.storageChestStopBtn.disabled = !data.trickleActive;
+  els.storageChestClearBtn.disabled = data.count <= 0;
+  els.storageChestHint.textContent = data.trickleActive
+    ? 'Trickling out on its own. Drag away from the chest again to re-aim it.'
+    : 'Drag away from the chest to aim, then let go to start trickling it back out.';
 }
 
 // Toggled from red x's to green checks and back — re-clicking an already-
@@ -2718,6 +2826,21 @@ function applyFamilySelection(state, familyId, tierId) {
   // it's moved to the middle of the city (see POST_ALIEN_TURRET_SPOT),
   // where it would otherwise sit right behind the fly-out panel.
   if (isPostAlienTurretStep) closeSidePanels(state);
+  // The 'chest' flow's own equivalent of the turret tutorial's scroll->place
+  // gold grant, per direct request ("give the player 20 gold during the
+  // chest tutorial") — granted right here instead, since this flow has no
+  // 'scroll' step of its own to hang it off; this IS the exact moment
+  // 'select' resolves into 'place' for this flow. Guarded to fire only once
+  // (advanceTutorialFlow itself already no-ops on a repeat call once the
+  // step's moved on, but the money grant needs its own explicit guard so
+  // re-selecting the same chest tile afterward doesn't grant it again).
+  const isChestSelectStep = familyId === 'chest' && state.level.tutorialFlow?.id === 'chest' && state.level.tutorialFlow.step === 'select';
+  if (isChestSelectStep) {
+    advanceTutorialFlow(state, 'chest', 'select');
+    state.level.money += CHEST_TUTORIAL_GOLD_GRANT;
+    pushUiNotification(state, CHEST_TUTORIAL_GOLD_GRANT_MESSAGE);
+    closeSidePanels(state);
+  }
 }
 
 // Cycles a family slot to its next unlocked tier — shared by a shop slot's
@@ -3852,6 +3975,10 @@ export function updateHUD(state) {
     advanceTutorialFlow(state, 'postalien', 'dragwaste');
     advanceTutorialFlow(state, 'wastedrag', 'drag');
   }
+  if (state.ui.chestItemAbsorbedPending) {
+    state.ui.chestItemAbsorbedPending = false;
+    advanceTutorialFlow(state, 'chest', 'feedwaste');
+  }
 
   // Science Cap — hidden until the Science Octopus is unlocked, same
   // "hidden until relevant" precedent as the electricity readout below.
@@ -3954,6 +4081,15 @@ export function updateHUD(state) {
   // frame; this just closes the popup if the underlying tile is gone.
   if (platformFilterMenuOpen && !state.level.buildingData[platformFilterTileKey]) closePlatformFilterMenu();
   if (platformFilterMenuOpen || platformFilterMenuClosing) updatePlatformFilterMenuPosition(state);
+  if (storageChestMenuOpen && !state.level.buildingData[storageChestTileKey]) closeStorageChestModal(); // the tile it's showing got demolished (or moved) out from under it
+  // Unlike the Platform filter menu above, this DOES refresh every frame
+  // it's open — its own count/trickle state changes continuously in the
+  // background (intake, the auto-trickle's own timer) rather than only in
+  // response to a click here, and refreshStorageChestModal is cheap (a
+  // couple of textContent/innerHTML swaps, not a grid of buttons to tear
+  // down and rebuild).
+  if (storageChestMenuOpen) refreshStorageChestModal(state);
+  if (storageChestMenuOpen || storageChestMenuClosing) updateStorageChestModalPosition(state);
   if (labMenuOpen) refreshLabTree(state); // no position-tracking needed any more — it's a centered modal now, not anchored to the Mound's screen position
   if (!state.ui.tankPanelCollapsed) refreshTankPanelView(state);
 
@@ -4250,6 +4386,15 @@ function startTutorialFishSpotWorld(state) {
 // it at any reasonable viewport size, while staying comfortably inside the
 // "scrolled to the bottom" view the previous step already established.
 const POST_ALIEN_TURRET_SPOT = { x: WORLD_W / 2, y: WORLD_H - TILE_SIZE * 3 };
+// Where the 'chest' guided flow's own Storage Chest gets placed — per direct
+// design, deliberately near the Mound itself (MOUND_X, already imported for
+// the Mound's own click-target/camera-centering) rather than the bottom of
+// the tank like POST_ALIEN_TURRET_SPOT above, since the camera is already
+// centered there right as this flow fires (Mound.js's crackMound) and there
+// is nothing to scroll to first — this flow has no 'scroll' step at all.
+// Offset clear of the Mound's own MOUND_WIDTH_TILES (4.4, so ~2.2 tiles
+// either side of MOUND_X) footprint so the two click targets never overlap.
+const POST_MOUND_CHEST_SPOT = { x: MOUND_X + TILE_SIZE * 4, y: SEABED_FLOOR_Y + TILE_SIZE * 2 };
 
 // Shared by the post-alien flow's final step AND the standalone 'wastedrag'
 // flow below (used when a Waste Turret already existed before the tutorial
@@ -4260,6 +4405,23 @@ const POST_ALIEN_TURRET_SPOT = { x: WORLD_W / 2, y: WORLD_H - TILE_SIZE * 3 };
 // drag yet — both should be unreachable given each flow's own trigger
 // conditions, but this avoids a crash if the turret gets demolished or the
 // Waste gets absorbed by something else mid-step.
+// The 'chest' flow's own "drag Waste into the Chest" step spotlight — same
+// "one circle encompassing both endpoints" shape as wasteDragStepCircle
+// below, simplified since both endpoints here are fixed, known constants
+// (POST_MOUND_CHEST_SPOT and the deterministic Waste spawned by
+// Entities.js's spawnChestTutorialWaste) rather than needing a "nearest"
+// search — there's always exactly one chest and one Waste this flow could
+// mean. Returns null (hides the spotlight) if the locked Waste is somehow
+// already gone.
+function chestDragStepCircle(state) {
+  const waste = state.level.items.find((it) => it.id === state.level.chestDragTutorialTargetId && it.type === 'waste');
+  if (!waste) return null;
+  const a = worldToScreen(POST_MOUND_CHEST_SPOT.x, POST_MOUND_CHEST_SPOT.y, state.camera);
+  const b = worldToScreen(waste.x, waste.y, state.camera);
+  const r = Math.hypot(a.x - b.x, a.y - b.y) / 2 + 40;
+  return { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, r };
+}
+
 function wasteDragStepCircle(state) {
   const target = findNearestWasteTurretAndWaste(state);
   if (!target || !target.waste) return null;
@@ -4376,6 +4538,38 @@ const TUTORIAL_FLOWS = {
     { id: 'switch', text: 'Two matching fish! Switch to the Merge tool.', tool: 'food', getCircle: () => tutorialCircleForDom(els.toolMergeBtn) },
     { id: 'drag', text: 'Drag one fish onto the other to merge them!', tool: 'merge', getCircle: mergeFishStepCircle },
   ],
+  // Fires once, directly from Mound.js's crackMound, the instant the $75
+  // Mound "tease" grants the Tier 1 Storage Chest — per direct request
+  // ("have a chest tutorial start that's like the turret tutorial"). Same
+  // shop -> select -> place -> drag shape as 'postalien' above, minus its
+  // 'scroll' step — the camera's already centered on the Mound right where
+  // this fires, so there's nothing to scroll to first. 'trickle' is the one
+  // step advanced directly from main.js (its own chest-aim drag gesture
+  // calls advanceTutorialFlow itself, same as every OTHER non-drag click in
+  // this game already does) rather than through a cross-module flag.
+  chest: [
+    { id: 'shop', text: 'Time to store some supplies — open the Shop!', tool: 'food', getCircle: () => tutorialCircleForDom(els.shopCollapseBtn) },
+    { id: 'select', text: 'Grab the Storage Chest!', tool: 'food', getCircle: () => tutorialCircleForDom(familyButtons.chest?.btn) },
+    {
+      id: 'place',
+      text: 'Place the Storage Chest down here! (Here’s 20 gold to cover it.)',
+      tool: `build:${TILE_STORAGE_CHEST}`,
+      getCircle: (state) => {
+        const screen = worldToScreen(POST_MOUND_CHEST_SPOT.x, POST_MOUND_CHEST_SPOT.y, state.camera);
+        return { cx: screen.x, cy: screen.y, r: 70 };
+      },
+    },
+    { id: 'feedwaste', text: 'Drag the Waste into the Chest!', tool: 'food', getCircle: chestDragStepCircle },
+    {
+      id: 'trickle',
+      text: 'Drag away from the Chest to aim, then let go to start trickling it back out!',
+      tool: 'food',
+      getCircle: (state) => {
+        const screen = worldToScreen(POST_MOUND_CHEST_SPOT.x, POST_MOUND_CHEST_SPOT.y, state.camera);
+        return { cx: screen.x, cy: screen.y, r: 70 };
+      },
+    },
+  ],
 };
 
 // Fires once a flow finishes its last step — id-specific rewards/messages,
@@ -4406,6 +4600,8 @@ function onTutorialFlowComplete(state, id) {
     // separately from postAlienTutorialShown).
     state.level.tutorialFlags.wasteDragTutorialShown = true;
     pushUiNotification(state, POST_ALIEN_TUTORIAL_MESSAGE);
+  } else if (id === 'chest') {
+    pushUiNotification(state, CHEST_TUTORIAL_MESSAGE);
   }
 }
 
