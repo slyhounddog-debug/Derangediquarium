@@ -464,6 +464,25 @@ export function initUI(state) {
   els.storageChestOverlay.addEventListener('click', (e) => {
     if (e.target === els.storageChestOverlay) closeStorageChestModal(); // same "click anywhere else closes it" precedent as every other fly-out pop-up here
   });
+  // Right-click-to-close, per direct request — these 4 overlays are
+  // `position: fixed; inset: 0` backdrops that sit ON TOP of the game
+  // canvas while open (z-index 190), so a right-click anywhere on screen
+  // lands on the backdrop itself, never reaching main.js's own canvas
+  // `contextmenu` listener (Engine.js's rightClickHandlers) at all — the
+  // existing left-click "click the backdrop closes it" listeners above
+  // don't cover this at all, since `contextmenu` is a separate event.
+  // preventDefault stops the browser's own right-click context menu from
+  // popping up in its place, same as Engine.js already does for the canvas.
+  for (const overlay of [els.recipeOverlay, els.buildingInfoOverlay, els.platformFilterOverlay, els.storageChestOverlay]) {
+    overlay.addEventListener('contextmenu', (e) => {
+      if (e.target !== overlay) return; // right-clicked the card itself, not empty backdrop space — leave it open
+      e.preventDefault();
+      closeRecipeMenu();
+      closeBuildingInfoMenu();
+      closePlatformFilterMenu();
+      closeStorageChestModal();
+    });
+  }
   els.storageChestStopBtn.addEventListener('click', () => {
     if (!storageChestTileKey) return;
     toggleChestTrickle(state, storageChestTileKey);

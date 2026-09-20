@@ -994,14 +994,18 @@ export function placeTile(state, col, row, buildingId, angle = 0) {
     // precedent the Refinery's lockedRecipe already established. trickleAngle/
     // trickleDistanceTiles are null (not real values) specifically so "has
     // the player ever armed a direction" is its own distinguishable state,
-    // read by UI.js's chest popup. coinValueSum only ever matters while
+    // read by UI.js's chest popup. coinQueue only ever matters while
     // lockedItemType === 'coin' (a coin's own value varies per instance,
     // unlike every other storable type) — kept on every chest uniformly
-    // rather than conditionally, harmless dead weight otherwise.
+    // rather than conditionally, harmless dead weight otherwise. It's a real
+    // FIFO queue of each coin's own exact value (push on intake, shift on
+    // ejection — see this section's own comment further down for why),
+    // NOT a pooled sum/average — per direct bug report, averaging let a
+    // high-value coin's worth quietly leak into a bunch of low-value ones.
     // recentEjections ({id, expiresAtMs}[]) is the regrab-cooldown list —
     // see updateBuildings' own intake scan and ejectOneFromChest below.
     state.level.buildingData[buildingKey(col, row)] = {
-      type: buildingId, lockedItemType: null, count: 0, coinValueSum: 0,
+      type: buildingId, lockedItemType: null, count: 0, coinQueue: [],
       trickleActive: false, trickleAngle: null, trickleDistanceTiles: null,
       clearing: false, clearTimerMs: 0, clearAngle: null, clearDistanceTiles: null,
       recentEjections: [],
@@ -1802,6 +1806,25 @@ function tileHasAnyPowerCost(type) {
   return false;
 }
 
+// Whether a placed building is currently "stalled or without power" — per
+// direct request, drives the minimap's own red pulsing dots (main.js's
+// renderMinimap) rather than inventing a separate notion of "stalled": reuses
+// the EXACT same per-type conditions renderTileShape's own on-tile badges
+// already check (idle Refinery/Power Plant/dry ammo Turret/idle
+// Manufacturer — see renderStalledBadge/renderManufacturerIdleBadge's own
+// call sites above) plus the grid-wide "blocked from accepting due to low
+// power" condition renderPowerShortageOverlay's own call site checks, so the
+// minimap can never disagree with what the on-tile badges are showing.
+export function isBuildingStalledOrPowerless(state, type, data) {
+  if (!data) return false;
+  if (REFINERY_TILES.has(type) && data.lockedRecipe === null) return true;
+  if (POWER_PLANT_TILES.has(type) && data.recipeId === null) return true;
+  if (TURRET_AMMO_TILES.has(type) && data.ammoWaste + data.ammoBiomass <= 0) return true;
+  if (MANUFACTURER_TILES.has(type) && !data.processing) return true;
+  if (tileHasAnyPowerCost(type) && state.level.powerEfficiency < POWER_SHORTAGE_STALLED_THRESHOLD) return true;
+  return false;
+}
+
 // Starts the same pull-to-center hold stepCollectorProcessing eases through
 // every tick — previously only ever kicked off by a top-landing event
 // (handleLanding); now triggered by updateBuildings' intake scan below
@@ -2334,7 +2357,12 @@ export function updateBuildings(state, dtMs) {
           if (!isTouchingBuildingTile(centerX, centerY, it.x, it.y, it.radius)) continue;
           if (data.recentEjections.some((e) => e.id === it.id)) continue; // still on its own regrab cooldown — see this section's own comment
           if (data.lockedItemType === null) data.lockedItemType = it.type;
-          if (it.type === 'coin') data.coinValueSum += it.value;
+          // FIFO — pushed onto the back of the queue, per direct request
+          // ("preserve the exact list of coins that goes into the chest and
+          // have FIFO for them, so that you get the same coins out that you
+          // put in"); ejectOneFromChest below shifts from the FRONT, so the
+          // oldest deposited coin is always the next one out.
+          if (it.type === 'coin') data.coinQueue.push(it.value);
           items.splice(i, 1);
           data.count += 1;
           playIntake();
@@ -2393,26 +2421,34 @@ export function updateBuildings(state, dtMs) {
 }
 
 // Shared by the auto-trickle and clear branches above — decrements the
-// chest's own count (and, for a coin, its value pool) by exactly one unit
-// and returns the spawn-point record Entities.js's updateEntities consumes
-// to actually materialize it (see this file's own header comment on why
-// item construction itself lives there, not here — avoiding a circular
-// import). `angle`/`distanceTiles` come from whichever gesture is currently
-// driving this ejection (trickle or clear) — both always real values in
-// practice now (both left- and right-drag inherently produce them), with a
-// defensive random-angle/no-distance fallback (Entities.js's
-// applyScatterLaunch) only if `angle` somehow arrives null. `cooldownMs` is
-// how long Entities.js should register this specific item as un-re-
-// absorbable once it's actually constructed (see this file's own regrab-
-// cooldown comment above) — different for a trickle vs. a full clear.
+// chest's own count (and, for a coin, shifts the oldest value off its FIFO
+// queue) by exactly one unit and returns the spawn-point record Entities.js's
+// updateEntities consumes to actually materialize it (see this file's own
+// header comment on why item construction itself lives there, not here —
+// avoiding a circular import). `angle`/`distanceTiles` come from whichever
+// gesture is currently driving this ejection (trickle or clear) — both
+// always real values in practice now (both left- and right-drag inherently
+// produce them), with a defensive random-angle/no-distance fallback
+// (Entities.js's applyScatterLaunch) only if `angle` somehow arrives null.
+// `cooldownMs` is how long Entities.js should register this specific item as
+// un-re-absorbable once it's actually constructed (see this file's own
+// regrab-cooldown comment above) — different for a trickle vs. a full clear.
 function ejectOneFromChest(state, data, key, centerX, centerY, angle, distanceTiles, cooldownMs) {
   const resolvedAngle = angle !== null ? angle : Math.random() * Math.PI * 2;
   const spawnX = centerX + Math.cos(resolvedAngle) * TILE_SIZE * 0.8;
   const spawnY = centerY + Math.sin(resolvedAngle) * TILE_SIZE * 0.8;
   let coinValue = null;
   if (data.lockedItemType === 'coin') {
-    coinValue = Math.max(1, Math.round(data.coinValueSum / data.count));
-    data.coinValueSum -= coinValue;
+    // FIFO — the oldest deposited coin (front of the queue) comes back out
+    // first, at its own real original value, per direct bug report ("we
+    // need to preserve the exact list of coins that goes into the chest and
+    // have FIFO for them, so that you get the same coins out that you put
+    // in") — replaces the old pooled-average approach, which let a single
+    // high-value coin's worth quietly bleed into every low-value coin
+    // ejected alongside it. Math.max(1, ...) is a defensive floor only —
+    // every real coin value is already >= 1, this just guards against the
+    // queue somehow running dry before `count` does (shouldn't happen).
+    coinValue = Math.max(1, data.coinQueue.shift() ?? 1);
   }
   data.count -= 1;
   return {
@@ -3575,8 +3611,10 @@ function renderRecipeItemIcon(ctx, itemType, cx, cy, r) {
 // (Waste, Coin) with the identical flat-fill-plus-rim-and-highlight look —
 // per direct request ("real object icons... no emojis"), same reasoning as
 // UI.js's own drawItemIconCanvas/FLAT_ICON_COLOR_BY_TYPE. Coin gets a fixed
-// gold tone (COIN_TIERS' own gold tier), not any particular pooled coin
-// value's real tier, since a chest's coinValueSum has no single "the" coin.
+// gold tone (COIN_TIERS' own gold tier) rather than any one held coin's own
+// real tier — even though a chest's coinQueue now tracks each coin's exact
+// individual value (FIFO, see ejectOneFromChest), there's still no single
+// "the" coin this one small generic indicator icon could represent.
 function renderChestContentsIcon(ctx, itemType, cx, cy, r) {
   if (itemType === 'waste' || itemType === 'coin') {
     ctx.beginPath();

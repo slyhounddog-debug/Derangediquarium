@@ -171,6 +171,7 @@ import {
   getChestKeyNear,
   armChestTrickle,
   clearChestContents,
+  isBuildingStalledOrPowerless,
 } from './Grid.js';
 import { isPointOnMound, crackMound, renderMound, centerCameraOnMound, isPointOnScienceLab, renderScienceLab } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
@@ -292,6 +293,29 @@ minimapExpandBtnEl.addEventListener('click', toggleTankZoomMode);
 // is the wave right now" during a scrolled-away fight). Nothing else: no
 // buildings/fish/items, keeping it genuinely minimal rather than a second
 // full render pass. Called once a frame from render(), below.
+//
+// Later extended, per direct request, with a small red PULSING dot for
+// anything that actually needs attention right now: a fish at (or past) its
+// second/critical hunger stage (HUNGER_CRITICAL_THRESHOLD — the same
+// threshold that shows the on-screen "!!" indicator, see updateFish), and a
+// building that's stalled or without power (Grid.js's
+// isBuildingStalledOrPowerless — the exact same conditions already driving
+// the on-tile stalled badges/power-shortage overlay, reused here so the
+// minimap can never disagree with what those already show). Deliberately
+// NOT every fish/building — that would defeat the whole "minimal, glance at
+// what needs attention" point the alien dots already established.
+const MINIMAP_ALERT_DOT_COLOR = '#ff3b30';
+function renderMinimapAlertDot(mctx, cx, cy, elapsedMs) {
+  const pulse = 0.55 + 0.45 * Math.sin(elapsedMs / 220);
+  const r = 2 + pulse * 1.2;
+  mctx.save();
+  mctx.globalAlpha = pulse;
+  mctx.fillStyle = MINIMAP_ALERT_DOT_COLOR;
+  mctx.beginPath();
+  mctx.arc(cx, cy, r, 0, Math.PI * 2);
+  mctx.fill();
+  mctx.restore();
+}
 function renderMinimap(state) {
   const { w, h, scale } = minimapScaleAndSize();
   const wPx = Math.max(1, Math.round(w));
@@ -313,6 +337,20 @@ function renderMinimap(state) {
     mctx.beginPath();
     mctx.arc(entity.x * scale, entity.y * scale, 2, 0, Math.PI * 2);
     mctx.fill();
+  }
+  for (const entity of state.level.entities) {
+    if (entity.type !== 'fish' || entity.dying) continue;
+    if (entity.hunger < HUNGER_CRITICAL_THRESHOLD) continue;
+    renderMinimapAlertDot(mctx, entity.x * scale, entity.y * scale, state.level.elapsed);
+  }
+  for (const key in state.level.buildingData) {
+    const data = state.level.buildingData[key];
+    const [row, col] = key.split(',').map(Number);
+    const type = state.level.grid[row]?.[col];
+    if (type == null || !isBuildingStalledOrPowerless(state, type, data)) continue;
+    const cx = (col * TILE_SIZE + TILE_SIZE / 2) * scale;
+    const cy = (row * TILE_SIZE + TILE_SIZE / 2) * scale;
+    renderMinimapAlertDot(mctx, cx, cy, state.level.elapsed);
   }
   const viewX = Math.max(0, state.camera.x * scale);
   const viewY = Math.max(0, state.camera.y * scale);

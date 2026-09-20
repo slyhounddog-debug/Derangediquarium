@@ -2287,7 +2287,21 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
   const alienHungerMultiplier = (fish.speciesId === 'suckerfish' && fish.alienNearby) ? 0.5 : 1;
   const hungerRate = def.hungerRate * Math.pow(FISH_STAR_TIER_HUNGER_MULTIPLIER, (fish.starTier || 1) - 1)
     * (1 + stress * (CLEANLINESS_STRESS_MAX_HUNGER_MULTIPLIER - 1)) * alienHungerMultiplier;
-  fish.hunger = Math.min(HUNGER_MAX, fish.hunger + hungerRate * dt);
+  // Per direct request ("make it so the game is paused during tutorials, so
+  // my fish doesn't die while I'm placing a turret or chest") — hunger
+  // itself stays frozen for as long as ANY guided tutorial is active, full
+  // stop. Every tutorial STEP except 4 (the turret/merge/chest flows' own
+  // drag steps) already freezes the whole simulation outright via main.js's
+  // own tutorialFlow early-return in update(), so updateFish never even runs
+  // during those — this check only ever actually matters for those 4
+  // exempted steps, which deliberately keep the REST of the simulation
+  // (item physics, building intake, fish/item dragging) running live since
+  // that's the exact mechanic each one is teaching. Eating (further down)
+  // still works normally regardless — only the passive climb toward
+  // starvation pauses, so a fish can't die of neglect while the player's
+  // hands are tied up in a multi-step guided flow they can't rush through.
+  const hungerDt = state.level.tutorialFlow ? 0 : dt;
+  fish.hunger = Math.min(HUNGER_MAX, fish.hunger + hungerRate * hungerDt);
   if (fish.hunger >= HUNGER_MAX) {
     playFishDeath();
     state.level.fishDiedCount += 1; // end-game stats modal only — see main.js's showGameOverModal

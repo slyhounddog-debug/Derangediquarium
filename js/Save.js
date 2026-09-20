@@ -37,6 +37,7 @@ export function loadSaveGame() {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || !parsed.meta || !parsed.level) return null;
     migrateTurretAmmoFields(parsed.level);
+    migrateChestCoinFields(parsed.level);
     return { meta: parsed.meta, level: parsed.level };
   } catch (err) {
     console.error('Derangiquarium: load failed', err);
@@ -60,6 +61,33 @@ function migrateTurretAmmoFields(level) {
       data.ammoWaste = data.ammo;
       data.ammoBiomass = 0;
       delete data.ammo;
+    }
+  }
+}
+
+// One-off migration: a Storage Chest used to pool every held coin's value
+// into one plain number (`coinValueSum`), dispensing the running average per
+// unit ejected — per direct bug report, that let a single high-value coin's
+// worth quietly leak into a bunch of low-value ones. Grid.js now tracks a
+// real FIFO queue of each coin's own exact value (`coinQueue`) instead. A
+// save written before that change has the old field and no queue at all;
+// without this, the very first coin ejection from a save-loaded chest would
+// throw calling `.shift()` on `undefined`. The original individual coin
+// values are unrecoverable at this point (only their pooled sum survived),
+// so this approximates by re-expanding the sum into `count` equal-average
+// entries — a one-time best-effort backfill, not a claim that FIFO order
+// held for coins deposited before this migration ever ran.
+function migrateChestCoinFields(level) {
+  if (!level || !level.buildingData) return;
+  for (const key in level.buildingData) {
+    const data = level.buildingData[key];
+    if (data && typeof data.coinValueSum === 'number' && data.coinQueue === undefined) {
+      data.coinQueue = [];
+      if (data.lockedItemType === 'coin' && data.count > 0) {
+        const avg = Math.max(1, Math.round(data.coinValueSum / data.count));
+        for (let i = 0; i < data.count; i++) data.coinQueue.push(avg);
+      }
+      delete data.coinValueSum;
     }
   }
 }
