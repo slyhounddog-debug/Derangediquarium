@@ -12,6 +12,10 @@ import {
   FISH_BASE_SIZE,
   HUNGER_SEEK_THRESHOLD,
   HUNGER_CRITICAL_THRESHOLD,
+  HUNGER_ICON_BOUNCE_SLOW_PERIOD_MS,
+  HUNGER_ICON_BOUNCE_SLOW_AMPLITUDE_PX,
+  HUNGER_ICON_BOUNCE_FAST_PERIOD_MS,
+  HUNGER_ICON_BOUNCE_FAST_AMPLITUDE_PX,
   TIME_SCALE_STEPS,
   DEFAULT_TIME_SCALE_INDEX,
   CHEAT_GRANT_AMOUNT,
@@ -3706,9 +3710,18 @@ function render() {
     }
 
     if (fish.hunger >= HUNGER_CRITICAL_THRESHOLD) {
+      // Per direct request — bounces slowly at first, then much more
+      // aggressively once the 2nd of the 4 hunger chimes has played (see
+      // Config.js's own comment on the 4 constants below). A repeating
+      // half-sine, always jumping UP from the resting position rather than
+      // floating symmetrically, is what reads as a genuine "bounce."
+      const aggressiveBounce = fish.hungerChimesPlayed >= 2;
+      const bouncePeriodMs = aggressiveBounce ? HUNGER_ICON_BOUNCE_FAST_PERIOD_MS : HUNGER_ICON_BOUNCE_SLOW_PERIOD_MS;
+      const bounceAmplitudePx = aggressiveBounce ? HUNGER_ICON_BOUNCE_FAST_AMPLITUDE_PX : HUNGER_ICON_BOUNCE_SLOW_AMPLITUDE_PX;
+      const bounceOffset = -Math.abs(Math.sin((state.level.elapsed / bouncePeriodMs) * Math.PI)) * bounceAmplitudePx;
       ctx.fillStyle = '#ff3b3b';
       ctx.font = 'bold 15px sans-serif';
-      ctx.fillText('!!', pos.x - 6, pos.y - size * 0.5 - 4);
+      ctx.fillText('!!', pos.x - 6, pos.y - size * 0.5 - 4 + bounceOffset);
     } else if (fish.hunger >= HUNGER_SEEK_THRESHOLD) {
       ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
       ctx.font = '10px sans-serif';

@@ -914,6 +914,20 @@ export const HUNGER_CRITICAL_THRESHOLD = HUNGER_SEEK_THRESHOLD + HUNGER_CRITICAL
 // on top of playFishDeath's own distinct death sound. See Entities.js's
 // updateFish.
 export const FISH_HUNGER_CHIME_FRACTIONS = [0, 0.45, 0.75, 0.93];
+// Per direct request ("have the second hunger visual exclamation marks
+// bounce, slowly at first, and then after the second hunger warning chime
+// of the 4 that play, have the bouncing get much more aggressive so the
+// eyes are drawn to the fish") — the "!!" critical-hunger indicator
+// (main.js's render) bounces on a repeating half-sine (always jumping UP
+// from its rest position, like a real bounce, not a symmetric float).
+// Slow/gentle while fish.hungerChimesPlayed is still 1 (the first chime,
+// which fires the instant hunger crosses into critical, already happened by
+// then), switching to fast/big once it reaches 2 (right as the SECOND chime
+// plays) — see Entities.js's updateFish for hungerChimesPlayed itself.
+export const HUNGER_ICON_BOUNCE_SLOW_PERIOD_MS = 900;
+export const HUNGER_ICON_BOUNCE_SLOW_AMPLITUDE_PX = 2;
+export const HUNGER_ICON_BOUNCE_FAST_PERIOD_MS = 220;
+export const HUNGER_ICON_BOUNCE_FAST_AMPLITUDE_PX = 7;
 // A pellet relieves a flat amount of hunger, looked up by the current Food
 // Quality upgrade level (state.level.upgrades.foodQuality, 0-4 — see Tank
 // Points & Tank Upgrades below). Index 0 is the un-upgraded baseline; each
