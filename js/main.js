@@ -104,6 +104,8 @@ import {
   TILE_MANUFACTURER,
   TILE_POWER_PLANT,
   TILE_STORAGE_CHEST,
+  STORAGE_CHEST_MIN_TRICKLE_DISTANCE_TILES,
+  STORAGE_CHEST_MAX_TRICKLE_DISTANCE_TILES,
 } from './Config.js';
 import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop } from './Engine.js';
 import { pushGameNotification } from './Notifications.js';
@@ -166,6 +168,7 @@ import {
   cyclePlatformAt,
   getChestKeyAt,
   armChestTrickle,
+  clearChestContents,
 } from './Grid.js';
 import { isPointOnMound, crackMound, renderMound, centerCameraOnMound, isPointOnScienceLab, renderScienceLab } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
@@ -1041,13 +1044,42 @@ function updateItemDrag() {
 // to drag and drop in the direction they want the objects to spit, with the
 // cursor turning into an arrow animation in the direction of the line
 // between the storage chest and the cursor. When they release, have the
-// storage chest trickle the output in the chosen direction"). Mirrors the
-// item-drag gesture's own "mousedown arms it, a per-tick update tracks the
-// live state, mouseup commits or falls back to an ordinary click" shape —
-// the same ITEM_DRAG_MOVE_THRESHOLD_PX distance check decides whether a
-// press-release was a real drag (arms the trickle) or just a plain click
-// (falls through to main.js's click handler, which opens the chest's own
-// info popup instead — see chestAimDragMoved's own check there).
+// storage chest trickle the output in the chosen direction"), later
+// extended ("make the distance the chests spits out objects variable based
+// on the distance away the cursor gets from the chest") to also drive
+// launch distance, and mirrored by a SECOND, right-button gesture ("add a
+// right click and drag mechanic... that mimics the click and drag mechanic
+// exactly, but clears all the contents of the chest") that replaces the old
+// Clear Chest button outright. Both gestures share this one helper for the
+// "read the live angle/distance/fraction from a chest to the cursor" math,
+// so the two can never drift apart — left-drag arms an ongoing trickle
+// (armChestTrickle), right-drag immediately triggers a full staggered dump
+// (clearChestContents), and BOTH drive the identical glowing/stretching/
+// color-shifting cursor via chestAimCursorCss below.
+//
+// distanceTiles is a straight 1:1 mapping of the drag's own live WORLD-
+// space distance (zoom-independent) into tiles, clamped into
+// [STORAGE_CHEST_MIN_TRICKLE_DISTANCE_TILES, ...MAX...[this chest's own
+// tier]] — see Config.js's own comment on those constants for the full
+// physics rationale. fraction (0-1) is that same distance normalized
+// against THIS chest's own max, purely for the cursor's visual stretch/glow/
+// color, so a Tier 1 chest's cursor reads "fully charged" at 8 tiles while a
+// Tier 3's needs a full 16.
+function computeChestAimState(state, key, worldX, worldY) {
+  const [row, col] = key.split(',').map(Number);
+  const angle = angleFromTileToPoint(col, row, worldX, worldY);
+  const cx = col * TILE_SIZE + TILE_SIZE / 2;
+  const cy = row * TILE_SIZE + TILE_SIZE / 2;
+  const distanceWorldPx = Math.hypot(worldX - cx, worldY - cy);
+  const chestType = state.level.grid[row]?.[col];
+  const maxTiles = STORAGE_CHEST_MAX_TRICKLE_DISTANCE_TILES[chestType] || STORAGE_CHEST_MAX_TRICKLE_DISTANCE_TILES.storage_chest;
+  const rawTiles = distanceWorldPx / TILE_SIZE;
+  const distanceTiles = Math.max(STORAGE_CHEST_MIN_TRICKLE_DISTANCE_TILES, Math.min(maxTiles, rawTiles));
+  const fraction = Math.max(0, Math.min(1, (distanceTiles - STORAGE_CHEST_MIN_TRICKLE_DISTANCE_TILES) / (maxTiles - STORAGE_CHEST_MIN_TRICKLE_DISTANCE_TILES)));
+  return { angle, distanceTiles, fraction };
+}
+
+// ---- Left-drag: arm the auto-trickle ----
 let chestAimDragKey = null; // "row,col" buildingKey of whichever chest is currently being aimed, or null
 let chestAimDragMoved = false;
 let chestAimDragStartSx = 0;
@@ -1075,47 +1107,128 @@ input.mouseUpHandlers.push(() => {
   const movedPx = Math.hypot(input.mouse.x - chestAimDragStartSx, input.mouse.y - chestAimDragStartSy);
   chestAimDragMoved = movedPx >= ITEM_DRAG_MOVE_THRESHOLD_PX;
   if (chestAimDragMoved) {
-    const [row, col] = chestAimDragKey.split(',').map(Number);
     const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
-    const angle = angleFromTileToPoint(col, row, world.x, world.y);
-    armChestTrickle(state, chestAimDragKey, angle);
+    const { angle, distanceTiles } = computeChestAimState(state, chestAimDragKey, world.x, world.y);
+    armChestTrickle(state, chestAimDragKey, angle, distanceTiles);
     advanceTutorialFlow(state, 'chest', 'trickle');
   }
   chestAimDragKey = null;
   lastCursorTool = null; // force updateCanvasCursor to re-apply the ordinary tool cursor next frame, since this gesture was overriding it directly
 });
 
-// Called every tick from update() while a chest-aim drag is in progress —
-// recomputes the live angle from the chest's own tile center to wherever
-// the cursor currently is, and points the OS cursor glyph itself in that
-// exact direction (rotatingArrowCursorCss below), per direct request.
+// ---- Right-drag: an immediate, fully-staggered clear ----
+// Uses Engine.js's new rightMouseDownHandlers/rightMouseUpHandlers (added
+// specifically for this — the pre-existing rightClickHandlers only ever
+// fires once per gesture, off the browser's own contextmenu event, with no
+// down/move/up granularity of its own). Deliberately NOT exempted during
+// any tutorial step — clearing a chest isn't something the guided flow ever
+// asks the player to do, so it stays blocked like any other non-essential
+// interaction while one is active, same as the item-drag mousedown's own
+// default (non-carved-out) tutorial gate.
+let chestClearDragKey = null;
+let chestClearDragStartSx = 0;
+let chestClearDragStartSy = 0;
+
+input.rightMouseDownHandlers.push((sx, sy) => {
+  if (state.ui.paused || state.level.tutorialFlow) return;
+  if (draggedFishId != null || draggedItemId != null || chestAimDragKey != null) return;
+  const world = screenToWorld(sx, sy, state.camera);
+  if (!isCursorOrFoodTool(effectiveToolAt(world.y))) return;
+  const key = getChestKeyAt(state, world.x, world.y);
+  if (!key) return;
+  chestClearDragKey = key;
+  chestClearDragStartSx = sx;
+  chestClearDragStartSy = sy;
+});
+
+input.rightMouseUpHandlers.push(() => {
+  if (chestClearDragKey == null) return;
+  const movedPx = Math.hypot(input.mouse.x - chestClearDragStartSx, input.mouse.y - chestClearDragStartSy);
+  if (movedPx >= ITEM_DRAG_MOVE_THRESHOLD_PX) {
+    const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
+    const { angle, distanceTiles } = computeChestAimState(state, chestClearDragKey, world.x, world.y);
+    clearChestContents(state, chestClearDragKey, angle, distanceTiles);
+  }
+  chestClearDragKey = null;
+  lastCursorTool = null;
+});
+
+// Called every tick from update() while either chest-aim drag is in
+// progress — recomputes the live angle/distance from whichever chest is
+// being dragged from to wherever the cursor currently is, and points the OS
+// cursor glyph itself in that exact direction, stretching/glowing/changing
+// color with distance (chestAimCursorCss below), per direct request. Both
+// gestures share one cursor treatment — the player is aiming the same way
+// either time, just choosing left (trickle) or right (clear) for what
+// happens on release.
 function updateChestAimDrag() {
-  if (chestAimDragKey == null) return;
-  const [row, col] = chestAimDragKey.split(',').map(Number);
+  const activeKey = chestAimDragKey ?? chestClearDragKey;
+  if (activeKey == null) return;
   const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
-  const angle = angleFromTileToPoint(col, row, world.x, world.y);
-  // Rounded to the nearest 5deg — a real per-pixel-of-mouse-movement cursor
-  // rewrite would mean re-encoding a fresh SVG data URI on nearly every
-  // frame this drag is active; this keeps the visual plenty smooth while
-  // only actually touching canvas.style.cursor when the angle has moved
-  // enough to matter.
+  const { angle, fraction } = computeChestAimState(state, activeKey, world.x, world.y);
+  // Rounded to the nearest 5deg / 5% — a real per-pixel-of-mouse-movement
+  // cursor rewrite would mean re-encoding a fresh SVG data URI on nearly
+  // every frame this drag is active; this keeps the visual plenty smooth
+  // while only actually touching canvas.style.cursor when either value has
+  // moved enough to matter.
   const angleDeg = Math.round((angle * 180) / Math.PI / 5) * 5;
-  if (angleDeg !== lastChestAimCursorDeg) {
+  const fractionBucket = Math.round(fraction * 20) / 20;
+  if (angleDeg !== lastChestAimCursorDeg || fractionBucket !== lastChestAimCursorFraction) {
     lastChestAimCursorDeg = angleDeg;
-    canvas.style.cursor = rotatingArrowCursorCss(angleDeg);
+    lastChestAimCursorFraction = fractionBucket;
+    canvas.style.cursor = chestAimCursorCss(angleDeg, fractionBucket);
   }
 }
 let lastChestAimCursorDeg = null;
+let lastChestAimCursorFraction = null;
 
-// A simple triangular arrow, rotated in-place around its own center — same
-// data-URI-SVG-as-cursor technique emojiCursorCss (below) already
-// established, just a hand-drawn shape instead of an emoji glyph (which
-// can't be rotated cleanly/legibly at cursor size) so it can point in any
-// of the drag's continuous angles, not just a fixed image.
-function rotatingArrowCursorCss(angleDeg) {
-  const size = 28;
+// Three RGB stops (near -> mid -> far) the arrow's fill/glow color
+// interpolates across as `fraction` (0-1, this chest's own distance divided
+// by its own tier max) climbs — white reads as "just barely armed," through
+// yellow, to a hot red-orange at the tier's own maximum reach. Per direct
+// request ("have the arrow animation glow, and have it stretch and change
+// color the further away the cursor gets from the storage chest").
+const CHEST_AIM_COLOR_STOPS = [
+  [255, 255, 255], // fraction 0
+  [255, 214, 64], // fraction 0.5
+  [255, 68, 40], // fraction 1
+];
+function chestAimArrowColor(fraction) {
+  const scaled = fraction * (CHEST_AIM_COLOR_STOPS.length - 1);
+  const i = Math.min(CHEST_AIM_COLOR_STOPS.length - 2, Math.floor(scaled));
+  const t = scaled - i;
+  const a = CHEST_AIM_COLOR_STOPS[i];
+  const b = CHEST_AIM_COLOR_STOPS[i + 1];
+  const r = Math.round(a[0] + (b[0] - a[0]) * t);
+  const g = Math.round(a[1] + (b[1] - a[1]) * t);
+  const bch = Math.round(a[2] + (b[2] - a[2]) * t);
+  return `rgb(${r},${g},${bch})`;
+}
+
+// The Storage Chest aim cursor — a triangular arrow (same rotate-an-SVG-
+// around-its-own-center technique the shell cursor's box widening already
+// established, just with a real <filter> glow instead of a plain glyph) that
+// STRETCHES longer and shifts color hotter the further the current drag sits
+// from the chest, normalized against that chest's own tier max — per direct
+// request. The SVG canvas is sized for the longest possible stretch
+// regardless of the current fraction so the hotspot (always the box center)
+// never shifts as the arrow grows.
+function chestAimCursorCss(angleDeg, fraction) {
+  const size = 64;
   const c = size / 2;
-  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${size}' height='${size}'><g transform='rotate(${angleDeg} ${c} ${c})'><polygon points='${c + 11},${c} ${c - 7},${c - 7} ${c - 7},${c + 7}' fill='#ffffff' stroke='#1a1a1a' stroke-width='1.5' stroke-linejoin='round'/></g></svg>`;
+  const minLen = 10;
+  const maxLen = size / 2 - 4;
+  const length = minLen + (maxLen - minLen) * fraction;
+  const color = chestAimArrowColor(fraction);
+  const glowStdDev = 1.5 + fraction * 3.5;
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${size}' height='${size}'>` +
+    `<defs><filter id='g' x='-100%' y='-100%' width='300%' height='300%'>` +
+    `<feGaussianBlur stdDeviation='${glowStdDev}' result='b'/>` +
+    `<feMerge><feMergeNode in='b'/><feMergeNode in='b'/><feMergeNode in='SourceGraphic'/></feMerge>` +
+    `</filter></defs>` +
+    `<g transform='rotate(${angleDeg} ${c} ${c})'>` +
+    `<polygon points='${c + length},${c} ${c - length * 0.35},${c - 7} ${c - length * 0.35},${c + 7}' fill='${color}' stroke='#1a1a1a' stroke-width='1.5' stroke-linejoin='round' filter='url(#g)'/>` +
+    `</g></svg>`;
   return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${c} ${c}, auto`;
 }
 
@@ -3117,12 +3230,14 @@ const CURSOR_BY_TOOL = {
 };
 let lastCursorTool = null;
 function updateCanvasCursor() {
-  // The Storage Chest aim-drag (updateChestAimDrag, above) owns the cursor
-  // directly while it's active, rotating it live to match the drag's own
-  // angle — this function's normal tool-based lookup would otherwise
-  // immediately stomp that back to the plain cursor/food glyph the very
-  // next frame, since lastCursorTool has no way to know about the override.
-  if (chestAimDragKey != null) return;
+  // The Storage Chest aim-drag (updateChestAimDrag, above — either the
+  // left-drag trickle-arm or the right-drag clear) owns the cursor directly
+  // while it's active, rotating/stretching/coloring it live to match the
+  // drag's own angle/distance — this function's normal tool-based lookup
+  // would otherwise immediately stomp that back to the plain cursor/food
+  // glyph the very next frame, since lastCursorTool has no way to know
+  // about the override.
+  if (chestAimDragKey != null || chestClearDragKey != null) return;
   const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
   const effectiveTool = effectiveToolAt(world.y);
   // Per direct request ("built into the food cursor tool via the D

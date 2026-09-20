@@ -30,6 +30,15 @@ export function createInput(canvas) {
     middleClickHandlers: [], // building-move pick-up — moved here from right-click per direct request ("right-click to move is changed to middle-click to move"); fired on mousedown (button 1) since there's no middle-click equivalent of the contextmenu event, with its own default (OS autoscroll) prevented below
     mouseDownHandlers: [], // fired once, at press — main.js uses this to arm an Economy Fish Combining drag when the press lands on a combinable fish
     mouseUpHandlers: [], // fired once, at release (screen coords are the last tracked in-canvas mouse position — see the window mouseup listener below) — main.js uses this to resolve a combining drag
+    // Right-button press/release, per direct request (the Storage Chest's
+    // own right-click-drag "clear" gesture) — separate from rightClickHandlers
+    // above, which only ever fires once per gesture off the browser's own
+    // `contextmenu` event (no down/move/up granularity of its own). This
+    // pair mirrors mouseDown/mouseDownHandlers/mouseUpHandlers exactly, just
+    // gated on e.button === 2 instead of 0.
+    rightMouseDown: false,
+    rightMouseDownHandlers: [],
+    rightMouseUpHandlers: [],
     keydownHandlers: [],
     wheelDeltaX: 0, // accumulated scroll since the last updateCamera consumed it
     wheelDeltaY: 0,
@@ -70,6 +79,14 @@ export function createInput(canvas) {
       for (const handler of input.middleClickHandlers) handler(sx, sy, e);
       return;
     }
+    if (e.button === 2) {
+      input.rightMouseDown = true;
+      const rect = canvas.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+      for (const handler of input.rightMouseDownHandlers) handler(sx, sy, e);
+      return; // the browser's own contextmenu event still fires separately below on release — rightClickHandlers is unaffected by this
+    }
     if (e.button !== 0) return;
     input.mouseDown = true;
     const rect = canvas.getBoundingClientRect();
@@ -83,6 +100,11 @@ export function createInput(canvas) {
     // mouseUpHandlers fire with the last tracked in-canvas mouse position
     // (input.mouse.x/y) rather than this event's own coordinates, since a
     // release outside the canvas has no canvas-relative position to give.
+    if (e.button === 2) {
+      input.rightMouseDown = false;
+      for (const handler of input.rightMouseUpHandlers) handler(input.mouse.x, input.mouse.y, e);
+      return;
+    }
     if (e.button !== 0) return;
     input.mouseDown = false;
     for (const handler of input.mouseUpHandlers) handler(input.mouse.x, input.mouse.y, e);

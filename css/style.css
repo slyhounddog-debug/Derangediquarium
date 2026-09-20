@@ -1893,7 +1893,7 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
   font-size: 13px; font-weight: 800;
 }
 #storage-chest-icon img { width: 26px; height: 26px; display: block; }
-#storage-chest-stop-btn, #storage-chest-clear-btn {
+#storage-chest-stop-btn {
   width: 100%;
   font-size: 10.5px; font-weight: 800; color: #6b4c6b;
   background: #f3e9dd; border: 2px solid transparent; border-radius: 14px;
@@ -1901,9 +1901,9 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
   cursor: pointer;
   margin-bottom: 8px;
 }
-#storage-chest-stop-btn:hover, #storage-chest-clear-btn:hover { background: #ebdccb; }
-#storage-chest-stop-btn:disabled, #storage-chest-clear-btn:disabled { opacity: 0.45; cursor: default; }
-#storage-chest-stop-btn:disabled:hover, #storage-chest-clear-btn:disabled:hover { background: #f3e9dd; }
+#storage-chest-stop-btn:hover { background: #ebdccb; }
+#storage-chest-stop-btn:disabled { opacity: 0.45; cursor: default; }
+#storage-chest-stop-btn:disabled:hover { background: #f3e9dd; }
 #storage-chest-hint { font-size: 10px; color: #8a7a8a; line-height: 1.3; }
 
 /* Science Lab: a real branching tech tree now, per direct request — a

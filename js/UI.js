@@ -92,7 +92,7 @@ import {
   getTile, worldToTile, getBuildingCost, FAN_STATS,
   findNearestWasteTurretAndWaste, getRecipeBuildingKeyAt, renderTileShape,
   getBuildingCurrentPowerDraw, getBuildingUptimeFraction, applyRecipeToBuilding,
-  getChestKeyAt, armChestTrickle, stopChestTrickle, clearChestContents,
+  getChestKeyAt, armChestTrickle, stopChestTrickle,
 } from './Grid.js';
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
@@ -392,7 +392,6 @@ export function initUI(state) {
     storageChestIcon: document.getElementById('storage-chest-icon'),
     storageChestCount: document.getElementById('storage-chest-count'),
     storageChestStopBtn: document.getElementById('storage-chest-stop-btn'),
-    storageChestClearBtn: document.getElementById('storage-chest-clear-btn'),
     storageChestHint: document.getElementById('storage-chest-hint'),
     labOverlay: document.getElementById('lab-overlay'),
     labModal: document.getElementById('lab-modal'),
@@ -469,11 +468,10 @@ export function initUI(state) {
     stopChestTrickle(state, storageChestTileKey);
     refreshStorageChestModal(state);
   });
-  els.storageChestClearBtn.addEventListener('click', () => {
-    if (!storageChestTileKey) return;
-    clearChestContents(state, storageChestTileKey);
-    refreshStorageChestModal(state);
-  });
+  // No Clear Chest button any more — per direct request, replaced entirely
+  // by the right-click-drag gesture (main.js's chestClearDragKey/
+  // clearChestContents call), which mimics the left-drag trickle-arm
+  // gesture exactly but fires an immediate staggered dump instead.
 
   // Gene-Splicing moved to the Tank Upgrades panel (see buildTankPanel) — no
   // longer purchased here, per direct request ("unlocked through the tank
@@ -1152,10 +1150,13 @@ function refreshStorageChestModal(state) {
     els.storageChestCount.textContent = `${data.count} / ${capacity} ${label}`;
   }
   els.storageChestStopBtn.disabled = !data.trickleActive;
-  els.storageChestClearBtn.disabled = data.count <= 0;
-  els.storageChestHint.textContent = data.trickleActive
+  // Per direct request — mentions the right-click-drag clear gesture that
+  // replaced the old Clear Chest button, alongside the existing left-drag
+  // trickle instructions.
+  els.storageChestHint.textContent = (data.trickleActive
     ? 'Trickling out on its own. Drag away from the chest again to re-aim it.'
-    : 'Drag away from the chest to aim, then let go to start trickling it back out.';
+    : 'Drag away from the chest to aim, then let go to start trickling it back out.')
+    + ' Right click and drag to clear the chest.';
 }
 
 // Toggled from red x's to green checks and back — re-clicking an already-

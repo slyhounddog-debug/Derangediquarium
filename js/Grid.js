@@ -36,6 +36,10 @@ import {
   STORAGE_CHEST_TRICKLE_INTERVAL_MAX_MS,
   STORAGE_CHEST_TRICKLE_INTERVAL_MIN_MS,
   STORAGE_CHEST_CLEAR_INTERVAL_MS,
+  STORAGE_CHEST_MIN_TRICKLE_DISTANCE_TILES,
+  STORAGE_CHEST_MAX_TRICKLE_DISTANCE_TILES,
+  STORAGE_CHEST_TRICKLE_REGRAB_COOLDOWN_MS,
+  STORAGE_CHEST_CLEAR_REGRAB_COOLDOWN_MS,
   BUILDING_TYPES,
   PROCESSOR_STATS,
   TURRET_STATS,
@@ -604,37 +608,46 @@ export function getChestKeyAt(state, worldX, worldY) {
 }
 
 // Arms (or re-aims) a chest's auto-trickle — called once, at mouseup, by
-// main.js's chest-aim drag gesture. Resets trickleTimerMs to 0 so the very
-// first ejection along the newly-chosen direction fires almost immediately
-// rather than waiting out a stale leftover countdown from before this call.
-export function armChestTrickle(state, key, angle) {
+// main.js's chest-aim (left-drag) gesture, with the live drag's own final
+// angle and distance (already clamped into
+// [STORAGE_CHEST_MIN_TRICKLE_DISTANCE_TILES, ...MAX...[tier]] by the caller
+// — see that constant's own comment for why distance is what drives launch
+// speed now, not a fixed mass-based force). Resets trickleTimerMs to 0 so
+// the very first ejection along the newly-chosen direction fires almost
+// immediately rather than waiting out a stale leftover countdown.
+export function armChestTrickle(state, key, angle, distanceTiles) {
   const data = state.level.buildingData[key];
   if (!data) return;
   data.trickleActive = true;
   data.trickleAngle = angle;
+  data.trickleDistanceTiles = distanceTiles;
   data.trickleTimerMs = 0;
 }
 
 // The chest popup's "Stop Trickle" button — per direct design, only ever
-// pauses trickleActive; trickleAngle is deliberately left alone so a later
-// re-drag (or a "Clear Chest" press) still has a real remembered direction
-// to reuse instead of falling back to the random scatter.
+// pauses trickleActive; trickleAngle/trickleDistanceTiles are deliberately
+// left alone so a later re-drag still has real remembered values to fall
+// back to display-wise, though nothing currently reads them while inactive.
 export function stopChestTrickle(state, key) {
   const data = state.level.buildingData[key];
   if (!data) return;
   data.trickleActive = false;
 }
 
-// The chest popup's "Clear Chest" button — per direct request, doesn't dump
-// everything on the same tick; just arms `clearing`, which updateBuildings'
-// own chest branch above drains at STORAGE_CHEST_CLEAR_INTERVAL_MS per item
-// (aimed along trickleAngle if one's ever been set, otherwise a random
-// low-force scatter — see ejectOneFromChest).
-export function clearChestContents(state, key) {
+// The right-click-drag "clear" gesture's own trigger — per direct request,
+// replaces the old Clear Chest button entirely. Always takes a FRESH angle/
+// distance from the gesture that just triggered it (unlike the old button,
+// which reused whatever trickleAngle happened to already be armed) — doesn't
+// dump everything on the same tick; just arms `clearing` plus this
+// gesture's own aim, which updateBuildings' own chest branch drains at
+// STORAGE_CHEST_CLEAR_INTERVAL_MS per item (see ejectOneFromChest).
+export function clearChestContents(state, key, angle, distanceTiles) {
   const data = state.level.buildingData[key];
   if (!data || data.count <= 0) return;
   data.clearing = true;
   data.clearTimerMs = 0;
+  data.clearAngle = angle;
+  data.clearDistanceTiles = distanceTiles;
 }
 
 // Returns { key, type } for ANY placed building tile at this world point
@@ -934,18 +947,20 @@ export function placeTile(state, col, row, buildingId, angle = 0) {
   } else if (STORAGE_CHEST_TILES.has(buildingId)) {
     // lockedItemType stays null until the first item actually touches it —
     // see updateBuildings' own chest scan below, same first-touch-locks
-    // precedent the Refinery's lockedRecipe already established. trickleAngle
-    // is null (not 0, a real rightward angle) specifically so "has the
-    // player ever armed a direction" is its own distinguishable state, read
-    // by UI.js's chest popup and Grid.js's clearChestContents (the random-
-    // scatter-vs-aimed fallback for "Clear Chest"). coinValueSum only ever
-    // matters while lockedItemType === 'coin' (a coin's own value varies per
-    // instance, unlike every other storable type) — kept on every chest
-    // uniformly rather than conditionally, harmless dead weight otherwise.
+    // precedent the Refinery's lockedRecipe already established. trickleAngle/
+    // trickleDistanceTiles are null (not real values) specifically so "has
+    // the player ever armed a direction" is its own distinguishable state,
+    // read by UI.js's chest popup. coinValueSum only ever matters while
+    // lockedItemType === 'coin' (a coin's own value varies per instance,
+    // unlike every other storable type) — kept on every chest uniformly
+    // rather than conditionally, harmless dead weight otherwise.
+    // recentEjections ({id, expiresAtMs}[]) is the regrab-cooldown list —
+    // see updateBuildings' own intake scan and ejectOneFromChest below.
     state.level.buildingData[buildingKey(col, row)] = {
       type: buildingId, lockedItemType: null, count: 0, coinValueSum: 0,
-      trickleActive: false, trickleAngle: null,
-      clearing: false, clearTimerMs: 0,
+      trickleActive: false, trickleAngle: null, trickleDistanceTiles: null,
+      clearing: false, clearTimerMs: 0, clearAngle: null, clearDistanceTiles: null,
+      recentEjections: [],
     };
   }
   if (!state.level.tutorialFlags.firstBuildingPlaced) {
@@ -2244,26 +2259,36 @@ export function updateBuildings(state, dtMs) {
       continue;
     }
 
-    // ---- Storage Chest: intake, auto-trickle, and "Clear Chest" ----
+    // ---- Storage Chest: intake, auto-trickle, and the right-drag "clear" ----
     // Per direct request. Three independent things happen here every tick:
     // (1) intake — instantly absorbs (no hold/disintegrate delay, it
     // "slurps") any touching item of its locked type, or locks onto
-    // whichever type touches first if still empty/unlocked, up to capacity;
-    // (2) auto-trickle — while armed (main.js's drag gesture sets
-    // trickleActive/trickleAngle), ejects one stored item at a time on a
-    // timer that speeds up the fuller the chest is; (3) "Clear Chest" — a
-    // manual dump, staggered at a fixed interval rather than all at once,
-    // aimed the same way the trickle would be if a direction's ever been
-    // armed, otherwise scattered randomly at low force (see
-    // clearChestContents below for how `clearing` gets armed).
+    // whichever type touches first if still empty/unlocked, up to capacity —
+    // skipping anything still on its own post-ejection regrab cooldown (see
+    // recentEjections below, and this section's own bugfix comment); (2)
+    // auto-trickle — while armed (main.js's left-drag gesture sets
+    // trickleActive/trickleAngle/trickleDistanceTiles), ejects one stored
+    // item at a time on a timer that speeds up the fuller the chest is; (3)
+    // the right-drag "clear" — a manual dump armed by clearChestContents
+    // (main.js's right-drag mouseup), staggered at a fixed interval rather
+    // than all at once, aimed along that gesture's OWN clearAngle/
+    // clearDistanceTiles.
     if (STORAGE_CHEST_TILES.has(data.type)) {
       const capacity = STORAGE_CHEST_CAPACITY[data.type];
+      // Per direct report ("if you choose the direct corners as the spit
+      // direction, the storage chest will grab the object immediately back
+      // in after shooting it") — prune any regrab-cooldown entry that's
+      // expired, once per tick, before the intake scan below reads the list.
+      if (data.recentEjections.length > 0) {
+        data.recentEjections = data.recentEjections.filter((e) => e.expiresAtMs > state.level.elapsed);
+      }
       if (data.count < capacity) {
         for (let i = 0; i < items.length; i++) {
           const it = items[i];
           if (it.collectorProgressMs != null || it.heldByKey != null) continue; // already claimed by another building's own hold this tick
           if (data.lockedItemType !== null && it.type !== data.lockedItemType) continue;
           if (!isTouchingBuildingTile(centerX, centerY, it.x, it.y, it.radius)) continue;
+          if (data.recentEjections.some((e) => e.id === it.id)) continue; // still on its own regrab cooldown — see this section's own comment
           if (data.lockedItemType === null) data.lockedItemType = it.type;
           if (it.type === 'coin') data.coinValueSum += it.value;
           items.splice(i, 1);
@@ -2278,11 +2303,11 @@ export function updateBuildings(state, dtMs) {
           break; // one absorb per tick per chest — same "don't eat 3 at once" pacing every other intake scan in this file already follows
         }
       }
-      // Auto-trickle — armed by main.js's armChestTrickle (the drag gesture),
-      // stopped by stopChestTrickle. Interval interpolates between the MAX
-      // (near-empty) and MIN (full) constants by fill fraction, recomputed
-      // fresh each time an item actually ejects so it keeps pace as the
-      // chest drains.
+      // Auto-trickle — armed by main.js's armChestTrickle (the left-drag
+      // gesture), stopped by stopChestTrickle. Interval interpolates between
+      // the MAX (near-empty) and MIN (full) constants by fill fraction,
+      // recomputed fresh each time an item actually ejects so it keeps pace
+      // as the chest drains.
       if (data.trickleActive && data.count > 0) {
         data.trickleTimerMs = (data.trickleTimerMs || 0) - dtMs;
         if (data.trickleTimerMs <= 0) {
@@ -2290,20 +2315,27 @@ export function updateBuildings(state, dtMs) {
           const intervalMs = STORAGE_CHEST_TRICKLE_INTERVAL_MAX_MS
             - fillFraction * (STORAGE_CHEST_TRICKLE_INTERVAL_MAX_MS - STORAGE_CHEST_TRICKLE_INTERVAL_MIN_MS);
           data.trickleTimerMs = intervalMs;
-          chestSpawnPoints.push(ejectOneFromChest(data, centerX, centerY, 'aimed'));
+          chestSpawnPoints.push(ejectOneFromChest(
+            state, data, key, centerX, centerY,
+            data.trickleAngle, data.trickleDistanceTiles, STORAGE_CHEST_TRICKLE_REGRAB_COOLDOWN_MS
+          ));
         }
       }
-      // "Clear Chest" — staggers every currently-held item out at a fixed
-      // interval (STORAGE_CHEST_CLEAR_INTERVAL_MS) instead of dumping them
-      // all on the same tick, per direct request ("space out the spitting
-      // slightly so it happens over a second or two"). Runs independently of
-      // (and can overlap with) the auto-trickle above — nothing stops both
-      // draining the chest at once if a player triggers Clear mid-trickle.
+      // The right-drag "clear" — stages every currently-held item out at a
+      // fixed interval (STORAGE_CHEST_CLEAR_INTERVAL_MS) instead of dumping
+      // them all on the same tick, per direct request ("space out the
+      // spitting... over a second or two"). Runs independently of (and can
+      // overlap with) the auto-trickle above — nothing stops both draining
+      // the chest at once. Gets the longer CLEAR regrab cooldown, per direct
+      // request ("a full second delay... if the chest is cleared out").
       if (data.clearing && data.count > 0) {
         data.clearTimerMs -= dtMs;
         if (data.clearTimerMs <= 0) {
           data.clearTimerMs = STORAGE_CHEST_CLEAR_INTERVAL_MS;
-          chestSpawnPoints.push(ejectOneFromChest(data, centerX, centerY, data.trickleAngle === null ? 'scatter' : 'aimed'));
+          chestSpawnPoints.push(ejectOneFromChest(
+            state, data, key, centerX, centerY,
+            data.clearAngle, data.clearDistanceTiles, STORAGE_CHEST_CLEAR_REGRAB_COOLDOWN_MS
+          ));
         }
       }
       if (data.count <= 0) {
@@ -2316,25 +2348,33 @@ export function updateBuildings(state, dtMs) {
   return { foodSpawnPoints, wasteSpawnPoints, turretShots, bioSpawnPoints, chestSpawnPoints };
 }
 
-// Shared by the auto-trickle and "Clear Chest" branches above — decrements
-// the chest's own count (and, for a coin, its value pool) by exactly one
-// unit and returns the spawn-point record Entities.js's updateEntities
-// consumes to actually materialize it (see this file's own header comment
-// on why item construction itself lives there, not here — avoiding a
-// circular import). `mode` is 'aimed' (launches along data.trickleAngle,
-// production-launch force) or 'scatter' (a fresh random angle, low fixed
-// force) — see Entities.js's applyDirectionalLaunch/applyScatterLaunch.
-function ejectOneFromChest(data, centerX, centerY, mode) {
-  const angle = mode === 'aimed' ? data.trickleAngle : Math.random() * Math.PI * 2;
-  const spawnX = centerX + Math.cos(angle) * TILE_SIZE * 0.8;
-  const spawnY = centerY + Math.sin(angle) * TILE_SIZE * 0.8;
+// Shared by the auto-trickle and clear branches above — decrements the
+// chest's own count (and, for a coin, its value pool) by exactly one unit
+// and returns the spawn-point record Entities.js's updateEntities consumes
+// to actually materialize it (see this file's own header comment on why
+// item construction itself lives there, not here — avoiding a circular
+// import). `angle`/`distanceTiles` come from whichever gesture is currently
+// driving this ejection (trickle or clear) — both always real values in
+// practice now (both left- and right-drag inherently produce them), with a
+// defensive random-angle/no-distance fallback (Entities.js's
+// applyScatterLaunch) only if `angle` somehow arrives null. `cooldownMs` is
+// how long Entities.js should register this specific item as un-re-
+// absorbable once it's actually constructed (see this file's own regrab-
+// cooldown comment above) — different for a trickle vs. a full clear.
+function ejectOneFromChest(state, data, key, centerX, centerY, angle, distanceTiles, cooldownMs) {
+  const resolvedAngle = angle !== null ? angle : Math.random() * Math.PI * 2;
+  const spawnX = centerX + Math.cos(resolvedAngle) * TILE_SIZE * 0.8;
+  const spawnY = centerY + Math.sin(resolvedAngle) * TILE_SIZE * 0.8;
   let coinValue = null;
   if (data.lockedItemType === 'coin') {
     coinValue = Math.max(1, Math.round(data.coinValueSum / data.count));
     data.coinValueSum -= coinValue;
   }
   data.count -= 1;
-  return { x: spawnX, y: spawnY, itemType: data.lockedItemType, mode, angle, coinValue };
+  return {
+    x: spawnX, y: spawnY, itemType: data.lockedItemType, coinValue,
+    angle: angle !== null ? resolvedAngle : null, distanceTiles, key, cooldownMs,
+  };
 }
 
 // Whether a tile is genuinely "doing work" this tick, for uptime tracking —

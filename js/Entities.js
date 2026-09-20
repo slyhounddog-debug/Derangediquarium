@@ -2979,22 +2979,34 @@ function applyProductionLaunch(item) {
   item.vy = -productionLaunchSpeed(item);
 }
 
-// Storage Chest's own auto-trickle/aimed "Clear Chest" — same magnitude as
-// applyProductionLaunch above, just aimed along `angle` (atan2 convention,
-// matching Grid.js's angleFromTileToPoint/Fan aiming) instead of always
-// straight up, since the player chooses the direction via main.js's chest-
-// aim drag gesture.
-function applyDirectionalLaunch(item, angle) {
-  const speed = productionLaunchSpeed(item);
+// Storage Chest's own auto-trickle/right-drag "clear" launch — per direct
+// request ("make the distance the chests spits out objects variable based
+// on the distance away the cursor gets from the chest during the drag"),
+// replacing the earlier fixed mass-based force entirely. `angle` is atan2
+// convention (matching Grid.js's angleFromTileToPoint/Fan aiming);
+// `distanceTiles` is the chest-aim drag's own live distance, already
+// clamped by main.js into this chest's tier range. Speed is derived from
+// the drag-only "total distance traveled under pure exponential decay"
+// model (distance = speed / drag, i.e. speed = distance * drag) rather than
+// the gravity-inclusive rise-height inversion productionLaunchSpeed uses —
+// see Config.js's own comment on STORAGE_CHEST_MAX_TRICKLE_DISTANCE_TILES
+// for why a vertical-only formula doesn't fit an arbitrary launch angle.
+function applyDistanceLaunch(item, angle, distanceTiles) {
+  const isFoodLike = item.type === 'food' || item.type === 'mutagen_paste';
+  const gravity = isFoodLike ? FOOD_GRAVITY : GRAVITY;
+  const maxFallSpeed = isFoodLike ? FOOD_MAX_FALL_SPEED : MAX_FALL_SPEED;
+  const drag = gravity / maxFallSpeed;
+  const speed = distanceTiles * TILE_SIZE * drag;
   item.vx = Math.cos(angle) * speed;
   item.vy = Math.sin(angle) * speed;
 }
 
-// The "Clear Chest" popup button's fallback when no direction has ever been
-// armed (data.trickleAngle still null) — per direct request, scatters each
-// item in its OWN fresh random direction at a small fixed speed, "just
-// enough force to prevent all the objects from clipping together," not the
-// mass-based applyDirectionalLaunch force a real aimed trickle uses.
+// Defensive fallback inside Grid.js's ejectOneFromChest for the (no longer
+// practically reachable — every real caller always supplies a fresh angle
+// now) case of a null angle — scatters in a fresh random direction at a
+// small fixed speed, "just enough force to prevent all the objects from
+// clipping together," not the distance-based applyDistanceLaunch force a
+// real aimed ejection uses.
 function applyScatterLaunch(item) {
   const angle = Math.random() * Math.PI * 2;
   item.vx = Math.cos(angle) * STORAGE_CHEST_SCATTER_LAUNCH_SPEED;
@@ -3066,21 +3078,25 @@ export function updateEntities(state, dtMs) {
     else if (point.itemType === 'science_green') { if (countScienceCapacityUsed(state) < effectiveScienceCapacity(state)) { const item = createScienceGreen(point.x, point.y); applyProductionLaunch(item); state.level.items.push(item); } }
     else if (point.itemType === 'alien_egg') { const item = createAlienEgg(point.x, point.y); applyProductionLaunch(item); state.level.items.push(item); }
   }
-  // Storage Chest trickle/"Clear Chest" output — per direct request, "the
-  // same force the other buildings have when outputting an object" (aimed
-  // mode, applyDirectionalLaunch) or a low-force random scatter if no
-  // direction's ever been armed (Clear Chest's own fallback,
-  // applyScatterLaunch) — see Grid.js's ejectOneFromChest for how each
-  // point's mode/angle/coinValue was decided. Every applicable world-wide
-  // cap (the Waste/Biomass/Alien DNA safety caps, the Bubble Cap) still
-  // applies on the way back out, same as any other spawn path here — a
-  // chest's own still-stored contents already count toward every one of
-  // these via countTankItemsByType itself (see that function's own
-  // comment), so a chest can never be used to bypass a cap that would
-  // otherwise have blocked the item as a loose one. Coin has no cap of its
-  // own to check (only a HUD warning), but does need its stored value
-  // (Grid.js already averaged it per unit) instead of a fixed constructor
-  // arg every other type gets away without.
+  // Storage Chest trickle/right-drag "clear" output — per direct request,
+  // distance-based (applyDistanceLaunch, point.angle/distanceTiles) or a
+  // low-force random scatter in the defensive null-angle case
+  // (applyScatterLaunch) — see Grid.js's ejectOneFromChest for how each
+  // point's fields were decided. Every applicable world-wide cap (the
+  // Waste/Biomass/Alien DNA safety caps, the Bubble Cap) still applies on
+  // the way back out, same as any other spawn path here — a chest's own
+  // still-stored contents already count toward every one of these via
+  // countTankItemsByType itself (see that function's own comment), so a
+  // chest can never be used to bypass a cap that would otherwise have
+  // blocked the item as a loose one. Coin has no cap of its own to check
+  // (only a HUD warning), but does need its stored value (Grid.js already
+  // averaged it per unit) instead of a fixed constructor arg every other
+  // type gets away without. Per direct report ("the storage chest will grab
+  // the object immediately back in after shooting it" at corner angles) —
+  // once the item actually exists, its id is registered on the SAME chest's
+  // own recentEjections for point.cooldownMs, so Grid.js's intake scan
+  // skips re-absorbing it until that window passes, regardless of how close
+  // the spawn point geometrically sits to the chest's own touch radius.
   for (const point of chestSpawnPoints) {
     let item = null;
     if (point.itemType === 'coin') item = createCoin(point.x, point.y, point.coinValue);
@@ -3093,9 +3109,11 @@ export function updateEntities(state, dtMs) {
     else if (point.itemType === 'mutagen_paste') item = createMutagenPaste(point.x, point.y);
     else if (point.itemType === 'alien_egg') item = createAlienEgg(point.x, point.y);
     if (!item) continue;
-    if (point.mode === 'aimed') applyDirectionalLaunch(item, point.angle);
+    if (point.angle !== null) applyDistanceLaunch(item, point.angle, point.distanceTiles);
     else applyScatterLaunch(item);
     state.level.items.push(item);
+    const chestData = state.level.buildingData[point.key];
+    if (chestData) chestData.recentEjections.push({ id: item.id, expiresAtMs: state.level.elapsed + point.cooldownMs });
   }
   for (const shot of turretShots) state.level.turretProjectiles.push(createTurretProjectile(shot));
   // Runs before the entities filter loop below, same as the old direct-

@@ -371,33 +371,66 @@ export const PRODUCTION_LAUNCH_MASS_MIN = 0.3; // Food/Mutagen Paste's own mass 
 export const PRODUCTION_LAUNCH_MASS_MAX = 4; // Biomass/Bio-Sludge's own mass — see ITEM_MASS_BY_TYPE
 
 // ---- Storage Chest trickle/clear physics ----
-// A Chest's own auto-trickle ejects with "the same force the other
-// buildings have when outputting an object," per direct request — reuses
-// applyProductionLaunch's exact mass-based speed magnitude (see Entities.js's
-// applyDirectionalLaunch, which factors that speed calc out of
-// applyProductionLaunch so both can share it), just aimed along the
-// player-chosen trickleAngle instead of always straight up.
+// Per direct request ("make the distance the chests spits out objects
+// variable based on the distance away the cursor gets from the chest during
+// the drag") — replaces the earlier "same force the other buildings have"
+// fixed-magnitude launch entirely. main.js's aim-drag gesture (both the
+// left-drag auto-trickle arm and the right-drag instant-clear) measures its
+// own live WORLD-space drag distance in tiles and clamps it into
+// [STORAGE_CHEST_MIN_TRICKLE_DISTANCE_TILES, STORAGE_CHEST_MAX_TRICKLE_
+// DISTANCE_TILES[tier]] — a straight 1:1 mapping (drag 5 tiles away, it
+// spits 5 tiles away), no separate "how far is a full-power drag" constant
+// needed. Entities.js's applyDistanceLaunch converts that tile count into an
+// actual launch speed via the drag-only "total distance traveled under pure
+// exponential decay" formula (distance = speed / drag, so speed = distance *
+// drag) — deliberately NOT the full gravity-inclusive rise-height inversion
+// applyProductionLaunch/launchSpeedForHeight use elsewhere in this file,
+// since that formula is specifically a VERTICAL-only model; a chest can aim
+// any angle, and gravity's effect on total travel distance varies by angle
+// in a way that formula doesn't account for. This is a simplification (real
+// gravity still curves the actual trajectory after launch), consistent with
+// every other launch calc in this game already being an approximation, not
+// full projectile simulation.
+export const STORAGE_CHEST_MIN_TRICKLE_DISTANCE_TILES = 1;
+export const STORAGE_CHEST_MAX_TRICKLE_DISTANCE_TILES = {
+  [TILE_STORAGE_CHEST]: 8,
+  [TILE_STORAGE_CHEST_T2]: 12,
+  [TILE_STORAGE_CHEST_T3]: 16,
+};
 // Interpolated by fill fraction (count/capacity) — a nearly-empty chest
 // barely trickles, a full one drains fast, so a player watching it fill back
 // up doesn't have to babysit an on/off switch.
 export const STORAGE_CHEST_TRICKLE_INTERVAL_MAX_MS = 4000; // at ~0% full
 export const STORAGE_CHEST_TRICKLE_INTERVAL_MIN_MS = 500; // at 100% full
-// "Clear Chest" (the popup's manual dump-everything button) staggers its
-// ejections at this fixed interval per item, per direct request ("space out
-// the spitting slightly so it happens over a second or two instead of all
-// the objects clipping together") — a max-capacity Tier 3 chest (100) at
-// 20ms apart finishes in ~2s; a smaller chest finishes proportionally
-// faster, which is fine — there's nothing wrong with a small dump being
-// quick too.
+// The right-click-drag "clear" gesture (replacing the old Clear Chest
+// button entirely, per direct request) staggers its ejections at this fixed
+// interval per item rather than all at once — "spitting them as fast as
+// possible without colliding with themselves." A max-capacity Tier 3 chest
+// (100) at 20ms apart finishes in ~2s; a smaller chest finishes
+// proportionally faster.
 export const STORAGE_CHEST_CLEAR_INTERVAL_MS = 20;
-// If the player has never armed a trickle direction (trickleAngle is still
-// null) by the time "Clear Chest" is pressed, per direct request the dump
-// scatters in a fresh random direction PER ITEM instead of one shared
-// aimed direction, at a small fixed speed — deliberately NOT the mass-based
-// applyProductionLaunch/applyDirectionalLaunch speed used everywhere else,
-// since the point here is just "don't let them all clip together," not a
-// real launch.
+// Defensive-only fallback inside Grid.js's ejectOneFromChest — every real
+// caller now always supplies a fresh angle (both the trickle and the
+// right-drag clear are only ever armed BY a drag, which inherently produces
+// one), so this should never actually fire in normal play any more. Kept as
+// a "don't let items clip together" no-direction escape hatch regardless —
+// small, fixed, and deliberately NOT distance/mass-based like a real launch.
 export const STORAGE_CHEST_SCATTER_LAUNCH_SPEED = 50;
+// Per direct report ("if you choose the direct corners as the spit
+// direction, the storage chest will grab the object immediately back in
+// after shooting it") — a diagonal ejection's spawn point sits much closer
+// to the chest's own touch radius than a cardinal one does (a square's
+// corner-to-edge geometry), so a purely geometric spawn-offset fix would
+// need re-tuning per angle. A time-based cooldown sidesteps that entirely:
+// Grid.js's intake scan now skips re-absorbing any item still within this
+// window of its own ejection (tracked per-item-id on the chest itself, see
+// buildingData's recentEjections). The "Clear Chest" gesture gets a longer
+// cooldown, per direct request ("a full second delay on the same object if
+// the chest is cleared out") — a full dump ejects many items in quick
+// succession along a shared-ish direction, so they need more room to
+// separate before any one of them could plausibly drift back into range.
+export const STORAGE_CHEST_TRICKLE_REGRAB_COOLDOWN_MS = 500;
+export const STORAGE_CHEST_CLEAR_REGRAB_COOLDOWN_MS = 1000;
 
 // A Collector doesn't bank an item the instant it lands any more — it visibly
 // draws it in toward the tile's center and holds it there for that tile's
