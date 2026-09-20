@@ -303,6 +303,7 @@ export function initUI(state) {
     scrollHintText: document.getElementById('scroll-hint-text'),
     scrollHintArrows: document.querySelectorAll('.scroll-hint-arrow'),
     buildLegend: document.getElementById('build-legend'),
+    buildReplaceLegend: document.getElementById('build-replace-legend'),
     tutorialSkipLegend: document.getElementById('tutorial-skip-legend'),
     buildingMoveLegend: document.getElementById('building-move-legend'),
     buildingMoveLegendLine1: document.getElementById('building-move-legend-line1'),
@@ -4120,13 +4121,33 @@ export function updateHUD(state) {
   // direct request, the same bubble the Blueprint tool's own cost readout
   // already uses (the two are mutually exclusive, so sharing it needs no
   // extra UI), now showing the real price of whichever building/fish is
-  // currently armed instead of a generic instruction.
+  // currently armed instead of a generic instruction. Shift-click Replace
+  // (per direct request) can make this net cost negative (a profit) — shown
+  // as "Profit: $N" instead of a nonsensical negative "Cost" — and, whenever
+  // the hovered/pasted tile(s) are actually replacing something, shows the
+  // "Shift+Click: Replace" pill above it (see positionBottomLeftLegends).
   let buildLegendText = '';
-  if (blueprintCostVisible) buildLegendText = `Cost: $${state.ui.blueprintCost}`;
-  else if (state.ui.selectedTool.startsWith('build:')) buildLegendText = `Cost: $${getBuildingCost(state, state.ui.selectedTool.slice('build:'.length))}`;
-  else if (state.ui.selectedTool.startsWith('fish:')) buildLegendText = `Cost: $${getFishPurchaseCost(state, state.ui.selectedTool.slice('fish:'.length))}`;
+  let showReplaceLabel = false;
+  if (blueprintCostVisible) {
+    buildLegendText = formatBuildCostLegendText(state.ui.blueprintCost);
+    showReplaceLabel = !!(state.ui.blueprintReplaceInfo && state.ui.blueprintReplaceInfo.replacing);
+  } else if (state.ui.selectedTool.startsWith('build:')) {
+    // An 'occupied' rejection (hovering a placed building with Shift NOT
+    // held) has a meaningless netCost of 0 — falls back to the tool's own
+    // flat base cost instead of showing a misleading "Cost: $0", same as
+    // every other reason buildReplaceInfo isn't usable here.
+    if (state.ui.buildReplaceInfo && state.ui.buildReplaceInfo.reason !== 'occupied') {
+      buildLegendText = formatBuildCostLegendText(state.ui.buildReplaceInfo.netCost);
+      showReplaceLabel = !!state.ui.buildReplaceInfo.replacing;
+    } else {
+      buildLegendText = `Cost: $${getBuildingCost(state, state.ui.selectedTool.slice('build:'.length))}`;
+    }
+  } else if (state.ui.selectedTool.startsWith('fish:')) {
+    buildLegendText = `Cost: $${getFishPurchaseCost(state, state.ui.selectedTool.slice('fish:'.length))}`;
+  }
   els.buildLegend.textContent = buildLegendText;
   els.buildLegend.classList.toggle('hidden', !buildLegendVisible);
+  els.buildReplaceLegend.classList.toggle('hidden', !(buildLegendVisible && showReplaceLabel));
   // Tutorial-skip legend — "(Esc) to skip tutorial" — shown for the whole
   // duration of any guided tutorial flow, per direct request; main.js's
   // Escape handler now actually honors this (see its own comment).
@@ -4235,6 +4256,14 @@ export function updateHUD(state) {
   // that's still real, distinct Escape behavior during a guided tutorial.
 }
 
+// Shift-click Replace's own cost-legend text — a negative net cost (the
+// refund from whatever's being replaced exceeded the new building's own
+// price) reads as "Profit: $N" rather than a confusing "Cost: $-N".
+function formatBuildCostLegendText(netCost) {
+  if (netCost < 0) return `Profit: $${-netCost}`;
+  return `Cost: $${netCost}`;
+}
+
 function positionBottomLeftLegends() {
   const rect = els.shopCollapseBtn.getBoundingClientRect();
   const right = `${window.innerWidth - rect.left + 12}px`;
@@ -4245,6 +4274,17 @@ function positionBottomLeftLegends() {
   els.tutorialSkipLegend.style.bottom = bottom;
   els.buildingMoveLegend.style.right = right;
   els.buildingMoveLegend.style.bottom = bottom;
+  // "Shift+Click: Replace" sits directly above the cost legend, per direct
+  // request — stacked off the cost legend's own live measured height (a
+  // separate top-level sibling, not a DOM parent/child, same as every other
+  // legend here) plus a small gap, so it tracks correctly regardless of the
+  // cost legend's own current text length. Only ever measured/positioned
+  // while #build-legend itself is genuinely visible (this function is only
+  // called when buildLegendVisible is true — see updateHUD) so its
+  // getBoundingClientRect() height is never a stale/zero hidden-element read.
+  els.buildReplaceLegend.style.right = right;
+  const legendHeight = els.buildLegend.getBoundingClientRect().height || 0;
+  els.buildReplaceLegend.style.bottom = `${window.innerHeight - rect.bottom + legendHeight + 6}px`;
 }
 
 // A row of bouncing down-arrows nudging the player to pan the camera down,

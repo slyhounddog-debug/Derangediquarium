@@ -142,6 +142,14 @@
      the persistent bottom-left #hotkey-legend below (as a dynamic Esc
      line), since Escape's own job doubles as the pause-menu hotkey now
      that the dedicated pause button is gone. -->
+<!-- Shift-click Replace's own label, per direct request ("Add in
+     'Shift+Click: Replace' above the cost legend when overlapping a placed
+     building") — shown above #build-legend whenever the currently-armed
+     build:/fish: tool or Blueprint stamp is hovering an occupied,
+     Shift-replaceable tile. UI.js's updateHUD toggles it and
+     positionBottomLeftLegends stacks it live above #build-legend's own
+     measured height. -->
+<div id="build-replace-legend" class="hidden">Shift+Click: Replace</div>
 <div id="build-legend" class="hidden"></div>
 <div id="tutorial-skip-legend" class="hidden">(Esc) to skip tutorial</div>
 <!-- Building-move legend — same "plain top-level sibling, positioned

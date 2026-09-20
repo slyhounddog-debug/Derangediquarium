@@ -38,6 +38,11 @@ export function loadSaveGame() {
     if (!parsed || typeof parsed !== 'object' || !parsed.meta || !parsed.level) return null;
     migrateTurretAmmoFields(parsed.level);
     migrateChestCoinFields(parsed.level);
+    // A save written before Shift-click Replace won't have this array at
+    // all — Grid.js's applyReplacementMutation pushes straight into it with
+    // no existence check of its own (every other transient level array is
+    // always guaranteed present by Levels.js's own fresh-level factory).
+    if (!Array.isArray(parsed.level.pendingChestEjectSpawnPoints)) parsed.level.pendingChestEjectSpawnPoints = [];
     return { meta: parsed.meta, level: parsed.level };
   } catch (err) {
     console.error('Derangiquarium: load failed', err);

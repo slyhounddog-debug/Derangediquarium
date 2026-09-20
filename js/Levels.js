@@ -73,6 +73,7 @@ export function loadLevel(state, levelId) {
     entities: [],
     items: [],
     floatingTexts: [], // transient "+$N" pickup readouts — not physics items, never touched by Grid.js routing
+    pendingChestEjectSpawnPoints: [], // Shift-click Replace's cross-family Storage Chest eject — Grid.js's applyReplacementMutation queues real spawn-point records here (it can't construct items itself), drained and materialized by Entities.js's updateEntities the very next tick, same shape/pipeline the chest's own trickle/clear gesture already uses
     grid: createGrid(), // 2D tile array, all TILE_EMPTY — see Grid.js
     buildingData: {}, // sparse "row,col" -> { type, angle, ... } map for buildings that need per-instance data the grid's bare type-id strings can't hold (Fans' aim angle, Refinery/Manufacturer/Power Plant's absorb/process/recipe state) — see Grid.js's placeTile/removeTile
     gridStats: { itemsRoutedTotal: 0 }, // lifetime count of items consumed by a Collector tile, for the debug overlay's throughput readout

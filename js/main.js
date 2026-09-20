@@ -112,7 +112,7 @@ import { pushGameNotification } from './Notifications.js';
 import { loadLevel, LEVELS } from './Levels.js';
 import { updateStoryTriggers } from './Systems.js';
 import { updateAmbience, renderAmbience } from './Ambience.js';
-import { resumeAudio, startGameMusic, playAlienHit, setBattleMusicActive, triggerBossMusic } from './Sound.js';
+import { resumeAudio, startGameMusic, playAlienHit, setBattleMusicActive, triggerBossMusic, playBuildPlace, playDemolish } from './Sound.js';
 import {
   updateEntities,
   trySpawnFood,
@@ -171,6 +171,10 @@ import {
   armChestTrickle,
   clearChestContents,
   isBuildingStalledOrPowerless,
+  describeReplacement,
+  placeTileWithReplace,
+  computeBlueprintCostWithReplace,
+  placeBlueprintWithReplace,
 } from './Grid.js';
 import { isPointOnMound, crackMound, renderMound, centerCameraOnMound, isPointOnScienceLab, renderScienceLab } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
@@ -682,6 +686,18 @@ centerCameraOnMound(state.camera); // one-time — not inside resizeCanvas, so a
 
 // ---- Input wiring ----
 const input = createInput(canvas);
+
+// Shift-click Replace — per direct request, buying/pasting a building on top
+// of an already-placed one while Shift is held refunds the old one and
+// charges only the difference. Polled off input.keysDown (kept live by
+// Engine.js's own keydown/keyup listeners regardless of mouse state) rather
+// than a click event's own e.shiftKey, so it works uniformly whether Shift
+// was already held before the click or pressed mid-drag, and for
+// updateBuildDrag's own per-tick polling (which has no event object at all)
+// the same way it does for a real click handler.
+function isShiftHeld() {
+  return input.keysDown.has('ShiftLeft') || input.keysDown.has('ShiftRight');
+}
 
 // Economy Fish Combining (Tier 2) drag state — see Entities.js's
 // isCombinableFish/canCombineFish/combineFish and CLAUDE.md's "Economy Fish
@@ -1594,6 +1610,7 @@ function undoActionLabel(type) {
   if (type === 'place') return 'Undo Place';
   if (type === 'move') return 'Undo Move';
   if (type === 'demolish') return 'Undo Sell';
+  if (type === 'replace') return 'Undo Replace';
   return 'Undo';
 }
 
@@ -1625,6 +1642,18 @@ function performUndo() {
   } else if (entry.type === 'demolish') {
     const result = putDownMovedBuilding(state, entry.col, entry.row, entry.buildingId, entry.data);
     if (result.ok) state.level.money = Math.max(0, state.level.money - entry.refund);
+  } else if (entry.type === 'replace') {
+    // Silently clears whatever the new building is now (pickUpBuildingForMove
+    // — no sound, no refund, unlike removeTile) before restoring the OLD
+    // building+data in its place, then reversing exactly the net cost the
+    // replace itself charged (which can itself have been negative, i.e. a
+    // profit at the time — reversing it here correctly takes that back too).
+    pickUpBuildingForMove(state, entry.col, entry.row);
+    const result = putDownMovedBuilding(state, entry.col, entry.row, entry.oldBuildingId, entry.oldData);
+    // The forward action did `money -= netCost` — reversing it is `+=`, not
+    // another `-=` (which would silently apply the SAME delta a second time
+    // instead of cancelling it out; a real sign bug caught in testing).
+    if (result.ok) state.level.money += entry.netCost;
   }
 }
 
@@ -1781,9 +1810,42 @@ input.clickHandlers.push((sx, sy) => {
   // Grid.js's placeBlueprint. One Ctrl+Z undo entry per building actually
   // placed, same as any other individual purchase. The clipboard clears
   // after commit, ready for a fresh drag-select — the tool itself stays
-  // selected.
+  // selected. Shift-click Replace (per direct request) routes the exact
+  // same click through placeBlueprintWithReplace instead — still genuinely
+  // all-or-nothing, just netting each occupied cell's refund against the
+  // stamp's total cost first ("the player still needs to be able to afford
+  // the whole cost of the blueprint with the added funds of the replaced
+  // buildings for any of the blueprint to paste").
   if (blueprintClipboard != null) {
     const { col, row } = worldToTile(world.x, world.y);
+    const blueprintShiftHeld = isShiftHeld();
+    if (blueprintShiftHeld) {
+      const result = placeBlueprintWithReplace(state, col, row, blueprintClipboard, true);
+      if (!result.affordable) {
+        flashMoneyInsufficient(state);
+        showBuildError("Can't afford");
+        return;
+      }
+      for (const p of result.placedCells) {
+        if (p.replaced) {
+          pushUndoEntry({ type: 'replace', col: p.col, row: p.row, oldBuildingId: p.oldBuildingId, oldData: p.oldData, netCost: p.netCost });
+        } else {
+          pushUndoEntry({ type: 'place', col: p.col, row: p.row, buildingId: p.buildingId });
+        }
+      }
+      // Combined sound effects and floating refund number, per direct
+      // request — ONE demolish (only if any cell actually replaced
+      // something) and ONE build-place, not one pair per replaced tile;
+      // ONE floating net-cost readout for the whole paste, at the click
+      // point, rather than a separate number per cell.
+      if (result.placedCells.length > 0) {
+        if (result.anyReplace) playDemolish();
+        playBuildPlace();
+        showReplaceNetCostText(col * TILE_SIZE + TILE_SIZE / 2, row * TILE_SIZE + TILE_SIZE / 2, result.netCost);
+      }
+      blueprintClipboard = null;
+      return;
+    }
     const totalCost = computeBlueprintCost(state, col, row, blueprintClipboard);
     if (totalCost > state.level.money) {
       // All-or-nothing: an unaffordable paste attempt is rejected outright,
@@ -1924,9 +1986,18 @@ input.clickHandlers.push((sx, sy) => {
       fanAimingMoveOrigin = null;
       return;
     }
-    const confirmCheck = canPlaceTile(state, fanAimingCell.col, fanAimingCell.row, buildingId);
-    if (!confirmCheck.ok) handleBuildPlacementFailure(confirmCheck.reason);
-    if (placeTile(state, fanAimingCell.col, fanAimingCell.row, buildingId, angle)) {
+    // Shift-click Replace applies to a Fan's own confirm click too, per
+    // direct request ("preserve... fan angle") — re-reads Shift live rather
+    // than remembering whatever it was on click 1, so the player can decide
+    // right up to the confirming click.
+    const fanShiftHeld = isShiftHeld();
+    const fanBuildResult = placeTileWithReplace(state, fanAimingCell.col, fanAimingCell.row, buildingId, angle, fanShiftHeld);
+    if (!fanBuildResult.placed) {
+      handleBuildPlacementFailure(fanBuildResult.info.reason);
+    } else if (fanBuildResult.replaced) {
+      pushUndoEntry({ type: 'replace', col: fanAimingCell.col, row: fanAimingCell.row, oldBuildingId: fanBuildResult.oldBuildingId, oldData: fanBuildResult.oldData, netCost: fanBuildResult.info.netCost });
+      showReplaceNetCostText(fanAimingCell.col * TILE_SIZE + TILE_SIZE / 2, fanAimingCell.row * TILE_SIZE + TILE_SIZE / 2, fanBuildResult.info.netCost);
+    } else {
       pushUndoEntry({ type: 'place', col: fanAimingCell.col, row: fanAimingCell.row, buildingId });
     }
     fanAimingCell = null;
@@ -1942,9 +2013,12 @@ input.clickHandlers.push((sx, sy) => {
     const buildingId = effectiveTool.slice('build:'.length);
     if (FAN_BUILDING_IDS.includes(buildingId)) {
       // Click 1: arm aiming at this cell if it's actually a legal placement —
-      // no tile placed yet, no money spent yet.
+      // no tile placed yet, no money spent yet. Shift-aware (describeReplacement)
+      // so an occupied-but-replaceable tile still arms the aiming phase —
+      // the real replace (refund + charge) only happens on the confirming
+      // click 2 above, same as every other Fan placement's cost.
       const { col, row } = worldToTile(world.x, world.y);
-      const check = canPlaceTile(state, col, row, buildingId);
+      const check = describeReplacement(state, col, row, buildingId, isShiftHeld());
       if (check.ok) fanAimingCell = { col, row, buildingId };
       else handleBuildPlacementFailure(check.reason);
       return; // either way, a fan-tool click never falls through to mound/coin/food
@@ -2128,6 +2202,26 @@ const BUILD_ERROR_TEXT_DURATION_MS = 1100; // how long the cursor text stays up 
 function showBuildError(text) {
   state.ui.buildErrorText = text;
   state.ui.buildErrorElapsedMs = 0;
+}
+
+// One combined floating readout for a Shift-click Replace's net cost — per
+// direct request ("make the sound effects and floating refund numbers
+// combine together"), a single number rather than a separate "-$cost" and
+// "+$refund" pair. Negative netCost means the player profited (refund
+// exceeded the new building's cost) — shown as a green-tinted "+$", same
+// getCoinColor value-tier convention every other coin/refund readout uses;
+// a positive netCost is the amount actually charged, shown as a flat red
+// "-$"; exactly $0 (a same-family free tier-swap, or a lucky exact wash)
+// just reads "$0".
+function showReplaceNetCostText(worldX, worldY, netCost) {
+  if (netCost === 0) {
+    state.level.floatingTexts.push(createPickupText(worldX, worldY, '$0', '#cfd8e3'));
+  } else if (netCost < 0) {
+    const gain = -netCost;
+    state.level.floatingTexts.push(createPickupText(worldX, worldY, `+$${gain}`, getCoinColor(gain)));
+  } else {
+    state.level.floatingTexts.push(createPickupText(worldX, worldY, `-$${netCost}`, '#ff6b6b'));
+  }
 }
 
 function handleBuildPlacementFailure(reason) {
@@ -2548,10 +2642,22 @@ function updateBuildDrag() {
   // at the moment it's placed — see Grid.js's angleFromTileToPoint. Ignored
   // for every other building type.
   const angle = angleFromTileToPoint(col, row, world.x, world.y);
-  const check = canPlaceTile(state, col, row, buildingId);
-  if (!check.ok) handleBuildPlacementFailure(check.reason);
-  const placed = placeTile(state, col, row, buildingId, angle);
-  if (placed) pushUndoEntry({ type: 'place', col, row, buildingId });
+  // Shift-click Replace, per direct request — placeTileWithReplace behaves
+  // exactly like plain placeTile when the tile's empty or Shift isn't held;
+  // it only takes the replace path (refund the old, charge the difference)
+  // when the tile's occupied AND Shift is down.
+  const shiftHeld = isShiftHeld();
+  const buildResult = placeTileWithReplace(state, col, row, buildingId, angle, shiftHeld);
+  if (!buildResult.placed) handleBuildPlacementFailure(buildResult.info.reason);
+  const placed = buildResult.placed;
+  if (placed) {
+    if (buildResult.replaced) {
+      pushUndoEntry({ type: 'replace', col, row, oldBuildingId: buildResult.oldBuildingId, oldData: buildResult.oldData, netCost: buildResult.info.netCost });
+      showReplaceNetCostText(col * TILE_SIZE + TILE_SIZE / 2, row * TILE_SIZE + TILE_SIZE / 2, buildResult.info.netCost);
+    } else {
+      pushUndoEntry({ type: 'place', col, row, buildingId });
+    }
+  }
   if (placed && (buildingId === TILE_MANUFACTURER || buildingId === TILE_POWER_PLANT)) {
     suppressRecipeMenuAfterPlacementClick = true;
   }
@@ -3405,6 +3511,11 @@ function render() {
   // own comment for the full rationale).
   const hoverWorld = input.mouse.inside ? screenToWorld(input.mouse.x, input.mouse.y, state.camera) : null;
   const hoverEffectiveTool = hoverWorld ? effectiveToolAt(hoverWorld.y) : state.ui.selectedTool;
+  // Shift-click Replace's own live preview info — per direct request, read
+  // by UI.js's updateHUD for the build-mode cost legend's net-cost text and
+  // "Shift+Click: Replace" label. Defaults null (not shown) unless one of
+  // the build-ghost branches below actually sets it.
+  state.ui.buildReplaceInfo = null;
 
   if (isFanAimingActive() && input.mouse.inside && !state.ui.paused) {
     // Click 1 already happened — the ghost stays fixed at the armed cell
@@ -3419,12 +3530,17 @@ function render() {
     // the ghost would wrongly show red (unaffordable) if the player's
     // current balance happens to be below the fan's ordinary shop cost,
     // even though the real confirm (see the click handler) never charges it.
-    renderBuildGhost(ctx, state, cellCenterX, cellCenterY, fanAimingCell.buildingId, angle, true, fanAimingMoveData != null);
+    const fanShiftHeld = fanAimingMoveData == null && isShiftHeld();
+    renderBuildGhost(ctx, state, cellCenterX, cellCenterY, fanAimingCell.buildingId, angle, true, fanAimingMoveData != null, fanShiftHeld);
+    if (fanAimingMoveData == null) {
+      state.ui.buildReplaceInfo = describeReplacement(state, fanAimingCell.col, fanAimingCell.row, fanAimingCell.buildingId, fanShiftHeld);
+    }
   } else if (hoverEffectiveTool.startsWith('build:') && input.mouse.inside && !state.ui.paused) {
     const world = hoverWorld;
     const buildingId = hoverEffectiveTool.slice('build:'.length);
     const { col, row } = worldToTile(world.x, world.y);
     const angle = angleFromTileToPoint(col, row, world.x, world.y);
+    const shiftHeld = isShiftHeld();
     // showCone: false — this is the plain-hover phase, before a Fan's
     // placement cell has actually been armed by click 1 (see the
     // isFanAimingActive() branch above for that real aiming step). The
@@ -3433,7 +3549,8 @@ function render() {
     // so per direct report ("visually confusing to have the cone moving
     // around while trying to choose the fan location") no cone shows until
     // the location itself is actually confirmed.
-    renderBuildGhost(ctx, state, world.x, world.y, buildingId, angle, false);
+    renderBuildGhost(ctx, state, world.x, world.y, buildingId, angle, false, false, shiftHeld);
+    state.ui.buildReplaceInfo = describeReplacement(state, col, row, buildingId, shiftHeld);
   } else if (isCursorOrFoodTool(hoverEffectiveTool) && input.keysDown.has('KeyD') && input.mouse.inside && !state.ui.paused) {
     // Ghost-mode preview of whatever's under the cursor, plus the refund
     // it'll pay out — TILE_REFUND_FRACTION is 1.0 (a full refund) per
@@ -3525,7 +3642,8 @@ function render() {
   if (blueprintClipboard != null && input.mouse.inside && !state.ui.paused) {
     const hoverWorld = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
     const { col: baseCol, row: baseRow } = worldToTile(hoverWorld.x, hoverWorld.y);
-    renderBlueprintGhost(ctx, state, baseCol, baseRow, blueprintClipboard);
+    const blueprintShiftHeld = isShiftHeld();
+    renderBlueprintGhost(ctx, state, baseCol, baseRow, blueprintClipboard, blueprintShiftHeld);
     // Live cost bubble, per direct request — read by UI.js's updateHUD,
     // which shows it in the same bottom-left bubble a build:/fish: tool's
     // own "Click to purchase" legend already uses (the two are mutually
@@ -3533,10 +3651,21 @@ function render() {
     // since it depends on exactly where the stamp is currently hovering —
     // Grid.js's computeBlueprintCost already skips any cell that would be
     // rejected (occupied/out of bounds), matching what a real paste would
-    // actually charge.
-    state.ui.blueprintCost = computeBlueprintCost(state, baseCol, baseRow, blueprintClipboard);
+    // actually charge. Shift-held swaps in computeBlueprintCostWithReplace's
+    // own net (cost minus every occupied cell's refund, can go negative) —
+    // state.ui.blueprintReplaceInfo alongside it drives the "Shift+Click:
+    // Replace" label, same as a single build tool's buildReplaceInfo above.
+    if (blueprintShiftHeld) {
+      const preview = computeBlueprintCostWithReplace(state, baseCol, baseRow, blueprintClipboard, true);
+      state.ui.blueprintCost = preview.netCost;
+      state.ui.blueprintReplaceInfo = { replacing: preview.anyReplace };
+    } else {
+      state.ui.blueprintCost = computeBlueprintCost(state, baseCol, baseRow, blueprintClipboard);
+      state.ui.blueprintReplaceInfo = null;
+    }
   } else {
     state.ui.blueprintCost = null;
+    state.ui.blueprintReplaceInfo = null;
   }
 
   for (const item of state.level.items) {

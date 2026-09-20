@@ -3278,7 +3278,16 @@ export function updateEntities(state, dtMs) {
   // own recentEjections for point.cooldownMs, so Grid.js's intake scan
   // skips re-absorbing it until that window passes, regardless of how close
   // the spawn point geometrically sits to the chest's own touch radius.
-  for (const point of chestSpawnPoints) {
+  // Shift-click Replace's cross-family Storage Chest eject (Grid.js's
+  // applyReplacementMutation) queues its own spawn-point records onto
+  // state.level.pendingChestEjectSpawnPoints, in the exact same shape as a
+  // trickle/clear ejection — drained and materialized through this SAME
+  // loop (its target chest's own buildingData entry is already gone by now,
+  // so the recentEjections registration below just harmlessly no-ops for
+  // these) rather than a second, driftable copy of this dispatch.
+  const replaceEjectPoints = state.level.pendingChestEjectSpawnPoints;
+  state.level.pendingChestEjectSpawnPoints = [];
+  for (const point of [...chestSpawnPoints, ...replaceEjectPoints]) {
     let item = null;
     if (point.itemType === 'coin') item = createCoin(point.x, point.y, point.coinValue);
     else if (point.itemType === 'food') item = createFood(point.x, point.y);
@@ -3293,8 +3302,13 @@ export function updateEntities(state, dtMs) {
     if (point.angle !== null) applyDistanceLaunch(item, point.angle, point.distanceTiles);
     else applyScatterLaunch(item);
     state.level.items.push(item);
-    const chestData = state.level.buildingData[point.key];
-    if (chestData) chestData.recentEjections.push({ id: item.id, expiresAtMs: state.level.elapsed + point.cooldownMs });
+    // point.key is null for a Shift-click Replace's own chest eject (see
+    // Grid.js's applyReplacementMutation) — that exact "row,col" key may
+    // already belong to a brand-new, non-chest building's data by now, so
+    // this also confirms recentEjections itself exists (not just any truthy
+    // buildingData entry) before pushing onto it.
+    const chestData = point.key != null ? state.level.buildingData[point.key] : null;
+    if (chestData && chestData.recentEjections) chestData.recentEjections.push({ id: item.id, expiresAtMs: state.level.elapsed + point.cooldownMs });
   }
   for (const shot of turretShots) state.level.turretProjectiles.push(createTurretProjectile(shot));
   // Runs before the entities filter loop below, same as the old direct-

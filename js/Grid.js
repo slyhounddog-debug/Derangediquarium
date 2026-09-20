@@ -103,6 +103,7 @@ import {
   CLEANLINESS_MAX,
   CLEANLINESS_PER_WASTE_EVENT,
   CAMERA_BOTTOM_BUFFER_PX,
+  BUILDING_FAMILIES,
 } from './Config.js';
 import { worldToScreen } from './Engine.js';
 import { playBuildPlace, playDemolish, playTurretShoot, playIntake, playDispense } from './Sound.js';
@@ -917,13 +918,11 @@ export function putDownMovedBuilding(state, col, row, buildingId, data) {
 // for historical/shape consistency — it has no directional intake/output of
 // its own any more (removed along with the Auto-Feeder's own aim, see
 // updateBuildings' collector intake scan below.
-export function placeTile(state, col, row, buildingId, angle = 0) {
-  const check = canPlaceTile(state, col, row, buildingId);
-  if (!check.ok) return false;
-  state.level.money -= getBuildingCost(state, buildingId);
-  state.level.grid[row][col] = buildingId;
-  state.meta.stats.buildingsPlaced += 1; // buildings_placed_10/50 achievements
-  state.level.lastPurchaseAtMs = state.level.elapsed; // see Systems.js's updateIdlePurchaseHint
+// The buildingData-shape branch chain a fresh placement always writes —
+// extracted out of placeTile so placeTileWithReplace's own different-family
+// replacement path (below) can reuse the EXACT same shapes for the new
+// building's fresh instance data, instead of a second, driftable copy.
+function writeFreshBuildingData(state, col, row, buildingId, angle) {
   if (FAN_TILES.has(buildingId)) {
     // filterItems: [] — per direct request ("make fans work as filters the
     // same as platforms"), same whitelist-of-ignored-types shape/semantics
@@ -1011,6 +1010,15 @@ export function placeTile(state, col, row, buildingId, angle = 0) {
       recentEjections: [],
     };
   }
+}
+
+// Bumps the shared placement stats/tutorial-notification bookkeeping every
+// successful placement needs — extracted so placeTile and
+// placeTileWithReplace/placeBlueprintWithReplace's own commit paths (below)
+// can't drift on what "a building was placed" means to the rest of the game.
+function bumpPlacementBookkeeping(state, buildingId) {
+  state.meta.stats.buildingsPlaced += 1; // buildings_placed_10/50 achievements
+  state.level.lastPurchaseAtMs = state.level.elapsed; // see Systems.js's updateIdlePurchaseHint
   if (!state.level.tutorialFlags.firstBuildingPlaced) {
     state.level.tutorialFlags.firstBuildingPlaced = true;
     pushGridNotification(state, FIRST_BUILDING_PLACED_MESSAGE);
@@ -1019,6 +1027,15 @@ export function placeTile(state, col, row, buildingId, angle = 0) {
     state.level.tutorialFlags.firstFanPlaced = true;
     pushGridNotification(state, FIRST_FAN_PLACED_MESSAGE);
   }
+}
+
+export function placeTile(state, col, row, buildingId, angle = 0) {
+  const check = canPlaceTile(state, col, row, buildingId);
+  if (!check.ok) return false;
+  state.level.money -= getBuildingCost(state, buildingId);
+  state.level.grid[row][col] = buildingId;
+  writeFreshBuildingData(state, col, row, buildingId, angle);
+  bumpPlacementBookkeeping(state, buildingId);
   playBuildPlace();
   return true;
 }
@@ -1042,6 +1059,172 @@ export function removeTile(state, col, row) {
   if (building) state.level.money += Math.floor(liveCost * TILE_REFUND_FRACTION);
   playDemolish();
   return true;
+}
+
+// ---- Shift-click Replace (buying a building/blueprint on top of an
+// existing one) ----
+// Per direct request: Shift-clicking a build tool (or pasting a Blueprint)
+// onto an occupied tile refunds the tile being replaced and charges only the
+// difference (can be negative — the player profits). Two buildings of the
+// SAME FAMILY (Fan any tier, Turret any tier, Refinery any tier, Storage
+// Chest any tier, Platform any variant, or the exact same Manufacturer/Power
+// Plant) are a free in-place tier-swap that genuinely never interrupts
+// whatever's mid-process — see applyReplacementMutation below. A precomputed
+// FAMILY_BY_TYPE lookup (built once off Config.js's own BUILDING_FAMILIES,
+// the same grouping the shop palette itself uses) is the single source of
+// truth for "family," so this can never disagree with what the shop already
+// considers the same building line.
+const FAMILY_BY_TYPE = (() => {
+  const map = {};
+  for (const [familyName, members] of Object.entries(BUILDING_FAMILIES)) {
+    for (const type of members) map[type] = familyName;
+  }
+  // Manufacturer/Power Plant have no BUILDING_FAMILIES entry at all (each is
+  // its own single-tile family, no tier ladder) — added here so "family"
+  // still resolves for them (only ever matching themselves).
+  map[TILE_MANUFACTURER] = 'manufacturer';
+  map[TILE_POWER_PLANT] = 'power_plant';
+  return map;
+})();
+function buildingFamilyOf(type) { return FAMILY_BY_TYPE[type] || null; }
+function sameBuildingFamily(a, b) {
+  const fa = buildingFamilyOf(a);
+  return fa !== null && fa === buildingFamilyOf(b);
+}
+
+// getBuildingCost, but pretending the tile at (excludeCol, excludeRow) is
+// already empty — what buildingId would actually cost to place AFTER the
+// building being replaced there is gone. Only meaningful for a genuine
+// cross-family replacement; a same-family swap is always free (see
+// describeReplacement) so this is never called for that case.
+function getBuildingCostExcluding(state, buildingId, excludeCol, excludeRow) {
+  const building = BUILDING_TYPES[buildingId];
+  if (!building) return Infinity;
+  if (PLATFORM_FLAT_COST_TILES.has(buildingId)) return PLATFORM_FLAT_COST;
+  let n = 0;
+  for (let r = SEABED_ROW_START; r < WORLD_TILES_H; r++) {
+    for (let c = 0; c < WORLD_TILES_W; c++) {
+      if (r === excludeRow && c === excludeCol) continue;
+      if (state.level.grid[r][c] === buildingId) n++;
+    }
+  }
+  return Math.ceil(building.cost * Math.pow(buildingCostGrowthRate(building.cost), n));
+}
+
+// Pure preview — no mutation — of what Shift-clicking buildingId at (col,
+// row) would do: a fresh placement if the tile's empty, a same-family free
+// swap, a cross-family paid replacement (refund the old, charge the new, net
+// the difference — can be negative), or an outright rejection (occupied
+// without Shift, unaffordable, out of bounds). Read every frame by the ghost
+// preview and the build-mode cost legend (UI.js/main.js), and re-used as the
+// single source of truth placeTileWithReplace/placeBlueprintWithReplace
+// actually commit against, so the legend can never show a number the real
+// purchase wouldn't honor.
+export function describeReplacement(state, col, row, buildingId, shiftHeld, ignoreCost = false) {
+  if (row < SEABED_ROW_START || row >= WORLD_TILES_H || col < 0 || col >= WORLD_TILES_W) {
+    return { ok: false, reason: 'out of bounds', replacing: false, netCost: 0 };
+  }
+  const building = BUILDING_TYPES[buildingId];
+  if (!building) return { ok: false, reason: 'unknown building', replacing: false, netCost: 0 };
+  const existingType = state.level.grid[row][col];
+  if (existingType === TILE_EMPTY) {
+    const cost = getBuildingCost(state, buildingId);
+    const affordable = ignoreCost || state.level.money >= cost;
+    return { ok: affordable, reason: affordable ? null : 'cannot afford', replacing: false, replacedType: null, sameFamily: false, refund: 0, newCost: cost, netCost: cost };
+  }
+  if (!shiftHeld) return { ok: false, reason: 'occupied', replacing: false, netCost: 0 };
+  if (sameBuildingFamily(existingType, buildingId)) {
+    // Always exactly free, regardless of the two tiers' own price gap —
+    // deliberately NOT run through the real cost formula (which would let
+    // downgrading-then-upgrading-in-place quietly farm a small profit off
+    // the compounding cost curve). A genuine tier swap, not a sale.
+    return { ok: true, reason: null, replacing: true, replacedType: existingType, sameFamily: true, refund: 0, newCost: 0, netCost: 0 };
+  }
+  const refund = Math.floor(getBuildingCost(state, existingType) * TILE_REFUND_FRACTION);
+  const newCost = getBuildingCostExcluding(state, buildingId, col, row);
+  const netCost = newCost - refund;
+  const affordable = ignoreCost || netCost <= state.level.money;
+  return { ok: affordable, reason: affordable ? null : 'cannot afford', replacing: true, replacedType: existingType, sameFamily: false, refund, newCost, netCost };
+}
+
+// The actual grid/buildingData/money mutation for one cell, given an already
+// -computed `info` (describeReplacement). No sound, no stats/tutorial
+// bookkeeping — placeTileWithReplace (a single purchase) and
+// placeBlueprintWithReplace (a multi-cell paste) each handle those exactly
+// ONCE for the whole gesture, not once per cell, per direct request ("make
+// the sound effects and floating refund numbers combine together").
+function applyReplacementMutation(state, col, row, buildingId, angle, info) {
+  const key = buildingKey(col, row);
+  if (!info.replacing) {
+    state.level.grid[row][col] = buildingId;
+    writeFreshBuildingData(state, col, row, buildingId, angle);
+    state.level.money -= info.netCost;
+    return { replaced: false, oldBuildingId: null, oldData: null };
+  }
+  const existingType = info.replacedType;
+  const existingData = state.level.buildingData[key] || null;
+  const snapshot = existingData ? JSON.parse(JSON.stringify(existingData)) : null;
+  if (info.sameFamily) {
+    // The key stays claimed by whatever's mid-process (a held item's own
+    // stepHeldItem/stepCollectorProcessing check key off buildingKey +
+    // heldItemId, neither of which change here) — so recipe/ammo/fan angle/
+    // chest contents/trickle aim/held-item progress all genuinely keep
+    // running uninterrupted, not just "surviving a reset."
+    state.level.grid[row][col] = buildingId;
+    if (existingData) existingData.type = buildingId;
+    else state.level.buildingData[key] = { type: buildingId };
+  } else {
+    // Cross-family: nothing here can mean anything to the new building (a
+    // Fan's angle to a Turret, a locked recipe to a Storage Chest). Any item
+    // a Refinery/Manufacturer/Collector was physically holding self-heals
+    // back to normal falling physics the instant buildingData[key] is gone
+    // below — see stepHeldItem/stepCollectorProcessing's own defensive
+    // "the tile got torn down mid-hold" checks, the same safety net an
+    // ordinary demolish already relies on; nothing extra needed here for
+    // that. A Storage Chest's own count/coinQueue is NOT backed by real
+    // items though, so it's drained into real spawn-point records here
+    // (Grid.js can't construct items itself — see this file's own header
+    // comment) and queued for Entities.js's updateEntities to materialize
+    // next tick, same shape/pipeline the chest's own trickle/clear gesture
+    // already uses.
+    if (STORAGE_CHEST_TILES.has(existingType) && existingData && existingData.count > 0) {
+      const centerX = col * TILE_SIZE + TILE_SIZE / 2;
+      const centerY = row * TILE_SIZE + TILE_SIZE / 2;
+      // key: null, not the real buildingKey — this exact "row,col" key is
+      // about to belong to the NEW building (written right below), not this
+      // dying chest, by the time Entities.js materializes these spawn points
+      // next tick. Passing the real key would wrongly tag the regrab-cooldown
+      // registration onto whatever building now occupies it (a real crash if
+      // that building's own data shape has no recentEjections array at all)
+      // — harmless to skip that registration entirely here anyway, since
+      // there's no chest left to protect from re-absorbing its own ejection.
+      while (existingData.count > 0) {
+        state.level.pendingChestEjectSpawnPoints.push(
+          ejectOneFromChest(state, existingData, null, centerX, centerY, null, null, STORAGE_CHEST_CLEAR_REGRAB_COOLDOWN_MS)
+        );
+      }
+    }
+    delete state.level.buildingData[key];
+    state.level.grid[row][col] = buildingId;
+    writeFreshBuildingData(state, col, row, buildingId, angle);
+  }
+  state.level.money -= info.netCost;
+  return { replaced: true, oldBuildingId: existingType, oldData: snapshot };
+}
+
+// Single-building convenience entry point — main.js's build-drag calls this
+// instead of canPlaceTile+placeTile whenever a build tool is armed, passing
+// through whatever Shift currently reads. Plays exactly one demolish sound
+// (only if a replacement actually happened) plus one build sound, same
+// "combine, don't spam" rule the Blueprint path below follows.
+export function placeTileWithReplace(state, col, row, buildingId, angle, shiftHeld) {
+  const info = describeReplacement(state, col, row, buildingId, shiftHeld);
+  if (!info.ok) return { placed: false, info };
+  const result = applyReplacementMutation(state, col, row, buildingId, angle, info);
+  bumpPlacementBookkeeping(state, buildingId);
+  if (result.replaced) playDemolish();
+  playBuildPlace();
+  return { placed: true, info, replaced: result.replaced, oldBuildingId: result.oldBuildingId, oldData: result.oldData };
 }
 
 // Sets a building's recipe to exactly `next` (null clears it), resetting
@@ -1111,12 +1294,18 @@ export function captureBlueprint(state, colA, rowA, colB, rowB) {
 // afford the entire blueprint, don't allow any of it to be placed"), so the
 // ghost never shows a misleadingly all-green preview for a paste that's
 // about to be silently rejected in full by placeBlueprint below.
-export function renderBlueprintGhost(ctx, state, baseCol, baseRow, cells) {
-  const canAffordWhole = computeBlueprintCost(state, baseCol, baseRow, cells) <= state.level.money;
+// `shiftHeld` (per direct request, Shift-paste-to-replace) swaps in
+// describeReplacement/computeBlueprintCostWithReplace instead — an occupied
+// cell tints blue (replacing) rather than red whenever the WHOLE stamp's own
+// net cost is currently affordable.
+export function renderBlueprintGhost(ctx, state, baseCol, baseRow, cells, shiftHeld = false) {
+  const canAffordWhole = shiftHeld
+    ? computeBlueprintCostWithReplace(state, baseCol, baseRow, cells, true).netCost <= state.level.money
+    : computeBlueprintCost(state, baseCol, baseRow, cells) <= state.level.money;
   for (const cell of cells) {
     const col = baseCol + cell.dCol;
     const row = baseRow + cell.dRow;
-    const check = canPlaceTile(state, col, row, cell.buildingId, true);
+    const info = shiftHeld ? describeReplacement(state, col, row, cell.buildingId, true, true) : canPlaceTile(state, col, row, cell.buildingId, true);
     const screen = worldToScreen(col * TILE_SIZE, row * TILE_SIZE, state.camera);
     const size = TILE_SIZE * state.camera.zoom;
     const color = BUILDING_TYPES[cell.buildingId].color;
@@ -1126,7 +1315,9 @@ export function renderBlueprintGhost(ctx, state, baseCol, baseRow, cells) {
     ctx.restore();
     ctx.save();
     ctx.globalAlpha = 0.4;
-    ctx.fillStyle = check.ok && canAffordWhole ? '#7cff5a' : '#ff5a5a';
+    let fill = '#ff5a5a';
+    if (info.ok && canAffordWhole) fill = (shiftHeld && info.replacing) ? '#5ab0ff' : '#7cff5a';
+    ctx.fillStyle = fill;
     ctx.fillRect(screen.x, screen.y, size, size);
     ctx.restore();
   }
@@ -1203,6 +1394,118 @@ export function computeBlueprintCost(state, baseCol, baseRow, cells) {
     extraCounts[cell.buildingId] = extra + 1;
   }
   return total;
+}
+
+// computeBlueprintCost's Shift-Replace-aware sibling — per direct request,
+// walks the SAME cell list but, for a cell that's occupied AND shiftHeld,
+// nets that cell's refund against its new cost instead of silently excluding
+// it. Tracks TWO running virtual counts per building type as it walks
+// (mirroring computeBlueprintCost's own single `extraCounts` walk): how many
+// of that type have already been virtually PLACED so far this stamp
+// (extraCounts, raises the next one's price) and how many have already been
+// virtually REMOVED so far (removedCounts, lowers it) — per direct request
+// ("ensure the refund calculation evaluates the dynamic cost increment
+// correctly for every tile in the replaced set before deducting the
+// blueprint cost"), so a stamp replacing several of the same building type
+// prices each removal/placement exactly as if they'd happened one at a time,
+// in order, same as a real hand-by-hand replace would. A same-family swap
+// cell contributes $0 either way (see describeReplacement) but its type
+// change still has to shift both running counts for any LATER cell in the
+// same stamp to price correctly.
+export function computeBlueprintCostWithReplace(state, baseCol, baseRow, cells, shiftHeld) {
+  let totalCost = 0;
+  let totalRefund = 0;
+  let anyReplace = false;
+  const extraCounts = {};
+  const removedCounts = {};
+  for (const cell of cells) {
+    const col = baseCol + cell.dCol;
+    const row = baseRow + cell.dRow;
+    if (row < SEABED_ROW_START || row >= WORLD_TILES_H || col < 0 || col >= WORLD_TILES_W) continue;
+    const building = BUILDING_TYPES[cell.buildingId];
+    if (!building) continue;
+    const existingType = state.level.grid[row][col];
+    const occupied = existingType !== TILE_EMPTY;
+    if (occupied && !shiftHeld) continue; // same silent-skip precedent computeBlueprintCost already has
+    let freeSwap = false;
+    if (occupied) {
+      anyReplace = true;
+      freeSwap = sameBuildingFamily(existingType, cell.buildingId);
+      if (!freeSwap) {
+        const existingBuilding = BUILDING_TYPES[existingType];
+        if (existingBuilding) {
+          const removedSoFar = removedCounts[existingType] || 0;
+          const placedSoFar = extraCounts[existingType] || 0;
+          const nExisting = Math.max(0, countPlacedOfType(state.level.grid, existingType) - removedSoFar + placedSoFar);
+          totalRefund += Math.floor(Math.ceil(existingBuilding.cost * Math.pow(buildingCostGrowthRate(existingBuilding.cost), nExisting)) * TILE_REFUND_FRACTION);
+        }
+      }
+      removedCounts[existingType] = (removedCounts[existingType] || 0) + 1;
+      if (freeSwap) {
+        extraCounts[cell.buildingId] = (extraCounts[cell.buildingId] || 0) + 1;
+        continue;
+      }
+    }
+    if (PLATFORM_FLAT_COST_TILES.has(cell.buildingId)) {
+      totalCost += PLATFORM_FLAT_COST;
+      extraCounts[cell.buildingId] = (extraCounts[cell.buildingId] || 0) + 1;
+      continue;
+    }
+    const removedSoFarOfNew = removedCounts[cell.buildingId] || 0;
+    const extra = extraCounts[cell.buildingId] || 0;
+    const n = Math.max(0, countPlacedOfType(state.level.grid, cell.buildingId) - removedSoFarOfNew + extra);
+    totalCost += Math.ceil(building.cost * Math.pow(buildingCostGrowthRate(building.cost), n));
+    extraCounts[cell.buildingId] = extra + 1;
+  }
+  return { totalCost, totalRefund, netCost: totalCost - totalRefund, anyReplace };
+}
+
+// placeBlueprint's Shift-Replace-aware sibling. The whole-stamp affordability
+// gate (netCost <= money) is checked ONCE upfront against
+// computeBlueprintCostWithReplace's own total — per direct request ("the
+// player still needs to be able to afford the whole cost of the blueprint
+// with the added funds of the replaced buildings for any of the blueprint to
+// paste"), genuinely all-or-nothing including the refunds, same as the plain
+// Blueprint tool already is on cost alone. The per-cell walk below then
+// mirrors the preview's exact same order/logic via describeReplacement +
+// applyReplacementMutation, so what actually gets charged cell-by-cell can
+// never drift from what the upfront total promised. No sound/stats bookkeeping
+// per cell — see applyReplacementMutation's own comment; the caller (main.js)
+// plays ONE demolish sound (only if anyReplace) and ONE build sound for the
+// whole paste, and combines every cell's own net into ONE floating number.
+export function placeBlueprintWithReplace(state, baseCol, baseRow, cells, shiftHeld) {
+  const preview = computeBlueprintCostWithReplace(state, baseCol, baseRow, cells, shiftHeld);
+  if (preview.netCost > state.level.money) return { placedCells: [], netCost: preview.netCost, anyReplace: preview.anyReplace, affordable: false };
+  const placedCells = [];
+  let anyReplace = false;
+  let anyFanPlaced = false;
+  for (const cell of cells) {
+    const col = baseCol + cell.dCol;
+    const row = baseRow + cell.dRow;
+    const info = describeReplacement(state, col, row, cell.buildingId, shiftHeld);
+    if (!info.ok) continue; // occupied-without-shift/out-of-bounds/unknown — same silent-skip precedent placeBlueprint already has (a real 'cannot afford' is impossible here, the whole-stamp gate above already covers it)
+    const result = applyReplacementMutation(state, col, row, cell.buildingId, cell.angle, info);
+    if (cell.recipeId) {
+      const data = state.level.buildingData[buildingKey(col, row)];
+      if (data) applyRecipeToBuilding(data, cell.recipeId);
+    }
+    if (result.replaced) anyReplace = true;
+    if (FAN_TILES.has(cell.buildingId)) anyFanPlaced = true;
+    placedCells.push({ col, row, buildingId: cell.buildingId, replaced: result.replaced, oldBuildingId: result.oldBuildingId, oldData: result.oldData, netCost: info.netCost });
+  }
+  if (placedCells.length > 0) {
+    state.meta.stats.buildingsPlaced += placedCells.length;
+    state.level.lastPurchaseAtMs = state.level.elapsed;
+    if (!state.level.tutorialFlags.firstBuildingPlaced) {
+      state.level.tutorialFlags.firstBuildingPlaced = true;
+      pushGridNotification(state, FIRST_BUILDING_PLACED_MESSAGE);
+    }
+    if (anyFanPlaced && !state.level.tutorialFlags.firstFanPlaced) {
+      state.level.tutorialFlags.firstFanPlaced = true;
+      pushGridNotification(state, FIRST_FAN_PLACED_MESSAGE);
+    }
+  }
+  return { placedCells, netCost: preview.netCost, anyReplace, affordable: true };
 }
 
 // T debug key — cycles the tile under the cursor through every building type
@@ -4251,14 +4554,17 @@ function renderDirectionIndicator(ctx, type, x, y, size, angle, zoom, showCone =
 // own comment) draw the same aim cone the placed version gets, live-
 // following the cursor's exact position within the tile. `showCone`
 // defaults true; main.js passes false specifically for a Fan's plain-hover
-// ghost, before a placement cell has actually been armed.
-export function renderBuildGhost(ctx, state, worldX, worldY, buildingId, angle, showCone = true, ignoreCost = false) {
+// ghost, before a placement cell has actually been armed. `shiftHeld` (per
+// direct request, Shift-click to replace) swaps in describeReplacement
+// instead of the plain canPlaceTile — an occupied, Shift-replaceable tile
+// tints blue rather than red.
+export function renderBuildGhost(ctx, state, worldX, worldY, buildingId, angle, showCone = true, ignoreCost = false, shiftHeld = false) {
   const { col, row } = worldToTile(worldX, worldY);
-  const check = canPlaceTile(state, col, row, buildingId, ignoreCost);
+  const check = shiftHeld ? describeReplacement(state, col, row, buildingId, true, ignoreCost) : canPlaceTile(state, col, row, buildingId, ignoreCost);
   const screen = worldToScreen(col * TILE_SIZE, row * TILE_SIZE, state.camera);
   const size = TILE_SIZE * state.camera.zoom;
   ctx.globalAlpha = 0.45;
-  ctx.fillStyle = check.ok ? '#8fe0b8' : '#ff6b6b';
+  ctx.fillStyle = check.ok ? (shiftHeld && check.replacing ? '#5ab0ff' : '#8fe0b8') : '#ff6b6b';
   const localVerts = RAMP_TRIANGLE_LOCAL_VERTS[buildingId];
   if (localVerts) {
     // A Half Platform occupies only half its tile — the old plain fillRect
