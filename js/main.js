@@ -106,6 +106,7 @@ import {
   TILE_STORAGE_CHEST,
   STORAGE_CHEST_MIN_TRICKLE_DISTANCE_TILES,
   STORAGE_CHEST_MAX_TRICKLE_DISTANCE_TILES,
+  CHEST_TUTORIAL_DRAG_CLICK_RADIUS_TILES,
 } from './Config.js';
 import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop } from './Engine.js';
 import { pushGameNotification } from './Notifications.js';
@@ -167,6 +168,7 @@ import {
   computeBlueprintCost,
   cyclePlatformAt,
   getChestKeyAt,
+  getChestKeyNear,
   armChestTrickle,
   clearChestContents,
 } from './Grid.js';
@@ -1106,7 +1108,14 @@ input.mouseDownHandlers.push((sx, sy) => {
   if (draggedFishId != null || draggedItemId != null) return; // another drag already claimed this press
   const world = screenToWorld(sx, sy, state.camera);
   if (!isCursorOrFoodTool(effectiveToolAt(world.y))) return;
-  const key = getChestKeyAt(state, world.x, world.y);
+  // During the tutorial's own 'trickle' step, a press anywhere within
+  // CHEST_TUTORIAL_DRAG_CLICK_RADIUS_TILES of a placed chest grabs it — per
+  // direct request — rather than requiring an exact hit on its own (small)
+  // tile, since this is the very first time the player's ever attempting
+  // this gesture. Every other time, an exact hit is still required.
+  const key = isChestTrickleStepActive(state)
+    ? getChestKeyNear(state, world.x, world.y, CHEST_TUTORIAL_DRAG_CLICK_RADIUS_TILES)
+    : getChestKeyAt(state, world.x, world.y);
   if (!key) return;
   chestAimDragKey = key;
   chestAimDragStartSx = sx;
@@ -1196,6 +1205,7 @@ function updateChestAimDrag() {
     if (lastChestAimCursorFraction !== -1) {
       lastChestAimCursorDeg = null;
       lastChestAimCursorFraction = -1;
+      lastChestAimCursorTimeBucket = null;
       canvas.style.cursor = 'not-allowed';
     }
     return;
@@ -1204,18 +1214,27 @@ function updateChestAimDrag() {
   // Rounded to the nearest 5deg / 5% — a real per-pixel-of-mouse-movement
   // cursor rewrite would mean re-encoding a fresh SVG data URI on nearly
   // every frame this drag is active; this keeps the visual plenty smooth
-  // while only actually touching canvas.style.cursor when either value has
-  // moved enough to matter.
+  // while only actually touching canvas.style.cursor when any of the three
+  // values has moved/ticked enough to matter. The time bucket (40ms, ~25fps)
+  // is what drives the arrow's own continuous stretch/squish "bounce" and
+  // alpha "shimmer" (chestAimCursorCss) — per direct follow-up request ("I
+  // dont see any bouncing/shimmering on the trickle/release drag arrow. It
+  // stretches and changes color, that's all.") — without it, this cursor
+  // would only ever redraw when the mouse itself moved, which reads as
+  // static between actual drag adjustments.
   const angleDeg = Math.round((angle * 180) / Math.PI / 5) * 5;
   const fractionBucket = Math.round(fraction * 20) / 20;
-  if (angleDeg !== lastChestAimCursorDeg || fractionBucket !== lastChestAimCursorFraction) {
+  const timeBucket = Math.round(state.level.elapsed / 40) * 40;
+  if (angleDeg !== lastChestAimCursorDeg || fractionBucket !== lastChestAimCursorFraction || timeBucket !== lastChestAimCursorTimeBucket) {
     lastChestAimCursorDeg = angleDeg;
     lastChestAimCursorFraction = fractionBucket;
-    canvas.style.cursor = chestAimCursorCss(angleDeg, fractionBucket);
+    lastChestAimCursorTimeBucket = timeBucket;
+    canvas.style.cursor = chestAimCursorCss(angleDeg, fractionBucket, state.level.elapsed);
   }
 }
 let lastChestAimCursorDeg = null;
 let lastChestAimCursorFraction = null;
+let lastChestAimCursorTimeBucket = null;
 
 // Three RGB stops (near -> mid -> far) the arrow's fill/glow color
 // interpolates across as `fraction` (0-1, this chest's own distance divided
@@ -1247,22 +1266,37 @@ function chestAimArrowColor(fraction) {
 // from the chest, normalized against that chest's own tier max — per direct
 // request. The SVG canvas is sized for the longest possible stretch
 // regardless of the current fraction so the hotspot (always the box center)
-// never shifts as the arrow grows.
-function chestAimCursorCss(angleDeg, fraction) {
+// never shifts as the arrow grows. On TOP of that distance-driven stretch,
+// elapsedMs drives a continuous stretch/squish "bounce" along the arrow's
+// own pointing axis plus an alpha "shimmer" — per direct follow-up request
+// ("I dont see any bouncing/shimmering on the trickle/release drag arrow.
+// It stretches and changes color, that's all. Fix it.") — this is the exact
+// same bounce/shimmer math renderChestIcon's own on-chest trickle indicator
+// already uses, just applied to the drag cursor's arrow instead, since
+// that's the one actually on screen during the drag itself. `length` is
+// clamped to the canvas's own half-size so the bounce can never push the
+// arrow's tip past the SVG's edge even at max distance + peak bounce
+// simultaneously.
+function chestAimCursorCss(angleDeg, fraction, elapsedMs) {
   const size = 64;
   const c = size / 2;
   const minLen = 10;
   const maxLen = size / 2 - 4;
-  const length = minLen + (maxLen - minLen) * fraction;
+  const baseLength = minLen + (maxLen - minLen) * fraction;
   const color = chestAimArrowColor(fraction);
   const glowStdDev = 1.5 + fraction * 3.5;
+  const t = (elapsedMs || 0) / 1000;
+  const bounce = Math.sin(t * 4.5);
+  const length = Math.min(size / 2 - 2, baseLength * (1 + bounce * 0.18));
+  const halfWidth = 7 * (1 - bounce * 0.12);
+  const shimmer = 0.72 + 0.28 * (0.5 + 0.5 * Math.sin(t * 6));
   const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='${size}' height='${size}'>` +
     `<defs><filter id='g' x='-100%' y='-100%' width='300%' height='300%'>` +
     `<feGaussianBlur stdDeviation='${glowStdDev}' result='b'/>` +
     `<feMerge><feMergeNode in='b'/><feMergeNode in='b'/><feMergeNode in='SourceGraphic'/></feMerge>` +
     `</filter></defs>` +
-    `<g transform='rotate(${angleDeg} ${c} ${c})'>` +
-    `<polygon points='${c + length},${c} ${c - length * 0.35},${c - 7} ${c - length * 0.35},${c + 7}' fill='${color}' stroke='#1a1a1a' stroke-width='1.5' stroke-linejoin='round' filter='url(#g)'/>` +
+    `<g transform='rotate(${angleDeg} ${c} ${c})' opacity='${shimmer.toFixed(2)}'>` +
+    `<polygon points='${(c + length).toFixed(1)},${c} ${(c - length * 0.35).toFixed(1)},${(c - halfWidth).toFixed(1)} ${(c - length * 0.35).toFixed(1)},${(c + halfWidth).toFixed(1)}' fill='${color}' stroke='#1a1a1a' stroke-width='1.5' stroke-linejoin='round' filter='url(#g)'/>` +
     `</g></svg>`;
   return `url("data:image/svg+xml,${encodeURIComponent(svg)}") ${c} ${c}, auto`;
 }

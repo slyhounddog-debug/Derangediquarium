@@ -52,6 +52,7 @@ import {
   CHEST_TUTORIAL_MESSAGE,
   CHEST_TUTORIAL_GOLD_GRANT,
   CHEST_TUTORIAL_GOLD_GRANT_MESSAGE,
+  CHEST_TUTORIAL_DRAG_CLICK_RADIUS_TILES,
   TILE_STORAGE_CHEST,
   STORAGE_CHEST_CAPACITY,
   SPECIES,
@@ -4574,9 +4575,19 @@ const TUTORIAL_FLOWS = {
       id: 'trickle',
       text: 'Drag away from the Chest to aim, then let go to start trickling it back out!',
       tool: 'food',
+      // A much wider click-through "hole" than every other spotlight circle
+      // here (which are all a fixed 70 fixed-CSS-px) — per direct request
+      // ("make the clickable area 8 full tiles around the placed chest"),
+      // matching main.js's own getChestKeyNear search radius exactly
+      // (CHEST_TUTORIAL_DRAG_CLICK_RADIUS_TILES) so a press anywhere this
+      // overlay actually lets through also actually finds the chest. Scaled
+      // by the live camera zoom, same as every other screen-space circle
+      // here derived from a world point — without it, zooming out would
+      // shrink the real clickable area below what the overlay still shows
+      // as open.
       getCircle: (state) => {
         const screen = worldToScreen(POST_MOUND_CHEST_SPOT.x, POST_MOUND_CHEST_SPOT.y, state.camera);
-        return { cx: screen.x, cy: screen.y, r: 70 };
+        return { cx: screen.x, cy: screen.y, r: CHEST_TUTORIAL_DRAG_CLICK_RADIUS_TILES * TILE_SIZE * state.camera.zoom };
       },
     },
   ],

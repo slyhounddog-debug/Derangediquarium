@@ -2780,6 +2780,14 @@ export const CHEST_TUTORIAL_GOLD_GRANT_MESSAGE = "Here's 20 gold — go place th
 export const CHEST_TUTORIAL_WASTE_X = WORLD_W / 2 + TILE_SIZE;
 export const CHEST_TUTORIAL_WASTE_Y = SEABED_FLOOR_Y + TILE_SIZE * 2;
 export const CHEST_TUTORIAL_MESSAGE = "Now you've got somewhere to stash the overflow — drag away from any chest and let go whenever you want it trickling back out.";
+// Per direct request ("make the clickable area 8 full tiles around the
+// placed chest") — only during the 'trickle' step's own aim-drag mousedown
+// (main.js's getChestKeyNear call), so a slightly-off-target press during
+// the FIRST time a player ever sees this gesture still grabs the tutorial's
+// chest instead of silently doing nothing. Ordinary (non-tutorial) chest
+// drags are unaffected — those still require landing on the chest's own
+// tile exactly, same as ever.
+export const CHEST_TUTORIAL_DRAG_CLICK_RADIUS_TILES = 8;
 // Per direct request ("add in a chat a one time message when a fish or
 // building hasn't been purchased for 60 seconds that they should check out
 // the achievements to get ideas on how to progress") — see Systems.js's

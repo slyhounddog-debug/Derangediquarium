@@ -609,6 +609,37 @@ export function getChestKeyAt(state, worldX, worldY) {
   return buildingKey(col, row);
 }
 
+// Same as getChestKeyAt, but falls back to the NEAREST placed chest within
+// radiusTiles (world-space, from chest tile-center to (worldX, worldY)) when
+// the point doesn't land on a chest's own tile exactly — used only by
+// main.js's chest-aim mousedown handler during the 'chest' tutorial's own
+// 'trickle' step (see CHEST_TUTORIAL_DRAG_CLICK_RADIUS_TILES, Config.js),
+// per direct request ("make the clickable area 8 full tiles around the
+// placed chest") so a slightly-off press the first time a player ever sees
+// this gesture still grabs it. Every other chest-aim gesture (ordinary
+// left-drags once a player's used to it, and the right-drag clear, which is
+// blocked outright during any tutorial anyway) keeps requiring an exact hit.
+export function getChestKeyNear(state, worldX, worldY, radiusTiles) {
+  const direct = getChestKeyAt(state, worldX, worldY);
+  if (direct) return direct;
+  const radiusSq = (radiusTiles * TILE_SIZE) ** 2;
+  let bestKey = null;
+  let bestDistSq = radiusSq;
+  for (const key in state.level.buildingData) {
+    const data = state.level.buildingData[key];
+    if (!STORAGE_CHEST_TILES.has(data.type)) continue;
+    const [row, col] = key.split(',').map(Number);
+    const dx = worldX - (col * TILE_SIZE + TILE_SIZE / 2);
+    const dy = worldY - (row * TILE_SIZE + TILE_SIZE / 2);
+    const distSq = dx * dx + dy * dy;
+    if (distSq <= bestDistSq) {
+      bestDistSq = distSq;
+      bestKey = key;
+    }
+  }
+  return bestKey;
+}
+
 // Arms (or re-aims) a chest's auto-trickle — called once, at mouseup, by
 // main.js's chest-aim (left-drag) gesture, with the live drag's own final
 // angle and distance (already clamped into
