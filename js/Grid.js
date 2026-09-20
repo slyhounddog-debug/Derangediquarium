@@ -62,6 +62,8 @@ import {
   SCIENCE_ITEM_COLOR_B,
   SCIENCE_GREEN_COLOR_A,
   SCIENCE_GREEN_COLOR_B,
+  WASTE_COLOR,
+  COIN_TIERS,
   POWER_PLANT_RECIPES,
   POWER_PLANT_STATS,
   PROCESS_DOTS_COUNT,
@@ -624,14 +626,25 @@ export function armChestTrickle(state, key, angle, distanceTiles) {
   data.trickleTimerMs = 0;
 }
 
-// The chest popup's "Stop Trickle" button — per direct design, only ever
-// pauses trickleActive; trickleAngle/trickleDistanceTiles are deliberately
-// left alone so a later re-drag still has real remembered values to fall
-// back to display-wise, though nothing currently reads them while inactive.
-export function stopChestTrickle(state, key) {
+// The chest popup's "Pause Trickle"/"Resume Trickle" button — per direct
+// request, a genuine toggle: pausing only ever flips trickleActive off,
+// leaving trickleAngle/trickleDistanceTiles completely untouched, so a
+// later press flips it straight back on along that exact same remembered
+// trajectory and strength with no re-drag needed. Resuming resets
+// trickleTimerMs to 0 (same as a fresh armChestTrickle) so the next
+// ejection fires almost immediately rather than waiting out however much
+// of the interval had already elapsed before the pause. A no-op if this
+// chest has never been aimed at all yet (trickleAngle still null) — see
+// UI.js's refreshStorageChestModal, which disables the button in that case.
+export function toggleChestTrickle(state, key) {
   const data = state.level.buildingData[key];
   if (!data) return;
-  data.trickleActive = false;
+  if (data.trickleActive) {
+    data.trickleActive = false;
+  } else if (data.trickleAngle !== null) {
+    data.trickleActive = true;
+    data.trickleTimerMs = 0;
+  }
 }
 
 // The right-click-drag "clear" gesture's own trigger — per direct request,
@@ -1074,7 +1087,7 @@ export function renderBlueprintGhost(ctx, state, baseCol, baseRow, cells) {
     const color = BUILDING_TYPES[cell.buildingId].color;
     ctx.save();
     ctx.globalAlpha = 0.6;
-    renderTileShape(ctx, cell.buildingId, color, screen.x, screen.y, size, { angle: cell.angle });
+    renderTileShape(ctx, cell.buildingId, color, screen.x, screen.y, size, { angle: cell.angle }, state.level.elapsed);
     ctx.restore();
     ctx.save();
     ctx.globalAlpha = 0.4;
@@ -2784,7 +2797,7 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
         const screen = worldToScreen(col * TILE_SIZE, row * TILE_SIZE, camera);
         const size = TILE_SIZE * camera.zoom;
         const data = state.level.buildingData[buildingKey(col, row)];
-        renderTileShape(ctx, type, building.color, screen.x, screen.y, size, data);
+        renderTileShape(ctx, type, building.color, screen.x, screen.y, size, data, state.level.elapsed);
         // A pulsing glow whenever a linked, non-hungry Catalyst Fish is
         // actively buffing this exact tile — per direct spec ("give the
         // buffed building a visual glow so it's obvious it's buffed").
@@ -3053,14 +3066,31 @@ function renderSquareBevel(ctx, x, y, size) {
 // shape (square+bevel, plus the Processor's own center circle) rather than a
 // bespoke silhouette per tier, which is what keeps each tier reading as
 // "still a Processor/Refinery" at a glance.
+// The fill-bar's color once a chest is completely full — a different, more
+// alarming color than the mid-fill gold so "this chest can't take any more"
+// reads at a glance, per direct request. Same red every other "blocked/
+// can't" state in this file already uses (see renderBlueprintGhost's own
+// afford-check tint) rather than inventing a new one.
+const CHEST_FULL_BAR_COLOR = '#ff5a5a';
+
 // A plain bevelled square (same base every un-special-cased building tile
-// already gets) plus 3 pieces of live state: a dark "lid seam" so it reads
+// already gets) plus 4 pieces of live state: a dark "lid seam" so it reads
 // as a chest at a glance, a fill-level bar along the bottom (count/capacity
-// — empty until something's actually stored), and a small triangle arrow
-// rotated to trickleAngle while the auto-trickle is armed, the same
-// at-a-glance "this is actively doing something" language the pulsing
-// time-control buttons already use elsewhere in this game.
-function renderChestIcon(ctx, x, y, size, color, data) {
+// — empty until something's actually stored, switching to
+// CHEST_FULL_BAR_COLOR once full), a small icon in the top-LEFT corner of
+// whatever item type is currently locked in (renderChestContentsIcon, real
+// art per direct request — "no emojis"), and a small triangle arrow in the
+// top-RIGHT corner (moved off top-center to make room for that item icon)
+// rotated to trickleAngle while the auto-trickle is armed — plus a
+// continuous stretch/squish "bounce" and alpha "shimmer" along its own
+// pointing axis while active, per direct request ("have the arrow animation
+// shimmer and bounce in the direction the arrow is pointing... like the
+// arrow is trying to point you in that direction over and over again"), on
+// top of chestAimCursorCss's separate distance-driven stretch/color (that
+// one lives on the OS cursor during an active drag in main.js; this one is
+// the chest's own idle "trickle is armed" tell, driven by elapsedMs so it
+// keeps animating whether or not a drag is in progress).
+function renderChestIcon(ctx, x, y, size, color, data, elapsedMs) {
   ctx.fillStyle = color;
   ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
   ctx.beginPath();
@@ -3079,6 +3109,7 @@ function renderChestIcon(ctx, x, y, size, color, data) {
   if (data) {
     const capacity = STORAGE_CHEST_CAPACITY[data.type];
     const fillFraction = capacity > 0 ? Math.min(1, data.count / capacity) : 0;
+    const isFull = capacity > 0 && data.count >= capacity;
     const barX = x + size * 0.12;
     const barY = y + size * 0.62;
     const barW = size * 0.76;
@@ -3086,20 +3117,31 @@ function renderChestIcon(ctx, x, y, size, color, data) {
     ctx.fillStyle = 'rgba(0, 0, 0, 0.25)';
     ctx.fillRect(barX, barY, barW, barH);
     if (fillFraction > 0) {
-      ctx.fillStyle = '#ffe066';
+      ctx.fillStyle = isFull ? CHEST_FULL_BAR_COLOR : '#ffe066';
       ctx.fillRect(barX, barY, barW * fillFraction, barH);
     }
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
     ctx.lineWidth = 1;
     ctx.strokeRect(barX, barY, barW, barH);
 
+    if (data.lockedItemType !== null) {
+      renderChestContentsIcon(ctx, data.lockedItemType, x + size * 0.22, y + size * 0.2, size * 0.15);
+    }
+
     if (data.trickleActive && data.trickleAngle !== null) {
-      const cx = x + size / 2;
+      const cx = x + size * 0.78;
       const cy = y + size * 0.2;
       const r = size * 0.15;
+      const t = (elapsedMs || 0) / 1000;
+      const bounce = Math.sin(t * 4.5);
+      const stretch = 1 + bounce * 0.22;
+      const squish = 1 - bounce * 0.14;
+      const shimmer = 0.72 + 0.28 * (0.5 + 0.5 * Math.sin(t * 6));
       ctx.save();
       ctx.translate(cx, cy);
       ctx.rotate(data.trickleAngle);
+      ctx.scale(stretch, squish);
+      ctx.globalAlpha *= shimmer;
       ctx.fillStyle = '#4dff88';
       ctx.beginPath();
       ctx.moveTo(r, 0);
@@ -3494,6 +3536,34 @@ function renderRecipeItemIcon(ctx, itemType, cx, cy, r) {
   ctx.fill();
 }
 
+// A Storage Chest's small top-left "what's it holding" indicator — every
+// item type a chest can actually lock onto (see Entities.js's
+// chestSpawnPoints dispatch), unlike renderRecipeItemIcon above which only
+// ever sees the 7 Manufacturer/Power Plant recipe outputs. Reuses that same
+// function for the types it already covers, and adds the 2 it doesn't
+// (Waste, Coin) with the identical flat-fill-plus-rim-and-highlight look —
+// per direct request ("real object icons... no emojis"), same reasoning as
+// UI.js's own drawItemIconCanvas/FLAT_ICON_COLOR_BY_TYPE. Coin gets a fixed
+// gold tone (COIN_TIERS' own gold tier), not any particular pooled coin
+// value's real tier, since a chest's coinValueSum has no single "the" coin.
+function renderChestContentsIcon(ctx, itemType, cx, cy, r) {
+  if (itemType === 'waste' || itemType === 'coin') {
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = itemType === 'coin' ? COIN_TIERS[2].color : WASTE_COLOR;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
+    ctx.lineWidth = Math.max(1, r * 0.14);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx - r * 0.28, cy - r * 0.28, r * 0.28, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.fill();
+    return;
+  }
+  renderRecipeItemIcon(ctx, itemType, cx, cy, r);
+}
+
 // A recipe identifier marking a Manufacturer/Power Plant's chosen recipe —
 // shown ONLY once one is actually chosen. Originally a small painted
 // signage plaque (a wooden plank behind the icon); per direct follow-up
@@ -3656,7 +3726,7 @@ function renderPlatformFilterBadge(ctx, x, y, size, data) {
 // building's actual look wherever the shop/Lab used to show a flat emoji
 // instead (per direct request), with `data` simply omitted there (only
 // Turret's own aim-arm angle reads it, defaulting to straight up).
-export function renderTileShape(ctx, type, color, x, y, size, data) {
+export function renderTileShape(ctx, type, color, x, y, size, data, elapsedMs) {
   if (type === TILE_PLATFORM) {
     renderBrickPattern(ctx, x, y, size, color);
     renderPlatformFilterBadge(ctx, x, y, size, data);
@@ -3703,7 +3773,7 @@ export function renderTileShape(ctx, type, color, x, y, size, data) {
     // families' own tile constants, and each chest tier already reads as
     // distinct from its own BUILDING_TYPES color (bronze/steel/purple)
     // without needing one.
-    renderChestIcon(ctx, x, y, size, color, data);
+    renderChestIcon(ctx, x, y, size, color, data, elapsedMs);
   } else {
     ctx.fillStyle = color;
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
@@ -4163,7 +4233,7 @@ export function renderMoveGhost(ctx, state, worldX, worldY, buildingId, building
   const color = BUILDING_TYPES[buildingId].color;
   ctx.save();
   ctx.globalAlpha = 0.6;
-  renderTileShape(ctx, buildingId, color, screen.x, screen.y, size, buildingData);
+  renderTileShape(ctx, buildingId, color, screen.x, screen.y, size, buildingData, state.level.elapsed);
   ctx.restore();
   ctx.save();
   ctx.globalAlpha = 0.4;

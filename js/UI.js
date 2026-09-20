@@ -92,7 +92,7 @@ import {
   getTile, worldToTile, getBuildingCost, FAN_STATS,
   findNearestWasteTurretAndWaste, getRecipeBuildingKeyAt, renderTileShape,
   getBuildingCurrentPowerDraw, getBuildingUptimeFraction, applyRecipeToBuilding,
-  getChestKeyAt, armChestTrickle, stopChestTrickle,
+  getChestKeyAt, armChestTrickle, toggleChestTrickle,
 } from './Grid.js';
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
@@ -465,7 +465,7 @@ export function initUI(state) {
   });
   els.storageChestStopBtn.addEventListener('click', () => {
     if (!storageChestTileKey) return;
-    stopChestTrickle(state, storageChestTileKey);
+    toggleChestTrickle(state, storageChestTileKey);
     refreshStorageChestModal(state);
   });
   // No Clear Chest button any more — per direct request, replaced entirely
@@ -1149,13 +1149,22 @@ function refreshStorageChestModal(state) {
     els.storageChestIcon.innerHTML = itemIconImgHtml(data.lockedItemType, 26);
     els.storageChestCount.textContent = `${data.count} / ${capacity} ${label}`;
   }
-  els.storageChestStopBtn.disabled = !data.trickleActive;
+  // A genuine toggle now, per direct request — only disabled while there's
+  // no remembered direction to pause/resume at all yet (never dragged).
+  // Once a direction's been aimed, clicking this always flips
+  // trickleActive without ever forgetting trickleAngle/trickleDistanceTiles
+  // (see Grid.js's toggleChestTrickle), so the label just tracks which
+  // action the NEXT click will take.
+  els.storageChestStopBtn.disabled = data.trickleAngle === null;
+  els.storageChestStopBtn.textContent = data.trickleActive ? 'Pause Trickle' : 'Resume Trickle';
   // Per direct request — mentions the right-click-drag clear gesture that
   // replaced the old Clear Chest button, alongside the existing left-drag
   // trickle instructions.
   els.storageChestHint.textContent = (data.trickleActive
     ? 'Trickling out on its own. Drag away from the chest again to re-aim it.'
-    : 'Drag away from the chest to aim, then let go to start trickling it back out.')
+    : data.trickleAngle !== null
+      ? 'Paused. Press Resume Trickle to pick back up where it left off, or drag away from the chest to re-aim it.'
+      : 'Drag away from the chest to aim, then let go to start trickling it back out.')
     + ' Right click and drag to clear the chest.';
 }
 

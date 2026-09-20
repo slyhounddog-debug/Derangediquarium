@@ -1079,6 +1079,18 @@ function computeChestAimState(state, key, worldX, worldY) {
   return { angle, distanceTiles, fraction };
 }
 
+// True while (worldX, worldY) still sits within the dragged-from chest's own
+// tile — per direct request, releasing either drag gesture back over the
+// chest itself now cancels it outright (no direction armed/cleared) rather
+// than falling back to the 1-tile minimum distance, since a barely-moved
+// drag landing back on the chest reads as "I changed my mind," not "I want
+// the shortest possible trickle." Also drives the cancel cursor below.
+function isPointOverChestTile(key, worldX, worldY) {
+  const [row, col] = key.split(',').map(Number);
+  return worldX >= col * TILE_SIZE && worldX < col * TILE_SIZE + TILE_SIZE
+    && worldY >= row * TILE_SIZE && worldY < row * TILE_SIZE + TILE_SIZE;
+}
+
 // ---- Left-drag: arm the auto-trickle ----
 let chestAimDragKey = null; // "row,col" buildingKey of whichever chest is currently being aimed, or null
 let chestAimDragMoved = false;
@@ -1108,9 +1120,15 @@ input.mouseUpHandlers.push(() => {
   chestAimDragMoved = movedPx >= ITEM_DRAG_MOVE_THRESHOLD_PX;
   if (chestAimDragMoved) {
     const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
-    const { angle, distanceTiles } = computeChestAimState(state, chestAimDragKey, world.x, world.y);
-    armChestTrickle(state, chestAimDragKey, angle, distanceTiles);
-    advanceTutorialFlow(state, 'chest', 'trickle');
+    // Released back over the chest itself — cancel, per direct request, no
+    // direction armed. chestAimDragMoved stays true either way so the click
+    // handler still treats this as a drag (not a plain click that should
+    // pop the chest's info modal open).
+    if (!isPointOverChestTile(chestAimDragKey, world.x, world.y)) {
+      const { angle, distanceTiles } = computeChestAimState(state, chestAimDragKey, world.x, world.y);
+      armChestTrickle(state, chestAimDragKey, angle, distanceTiles);
+      advanceTutorialFlow(state, 'chest', 'trickle');
+    }
   }
   chestAimDragKey = null;
   lastCursorTool = null; // force updateCanvasCursor to re-apply the ordinary tool cursor next frame, since this gesture was overriding it directly
@@ -1146,8 +1164,11 @@ input.rightMouseUpHandlers.push(() => {
   const movedPx = Math.hypot(input.mouse.x - chestClearDragStartSx, input.mouse.y - chestClearDragStartSy);
   if (movedPx >= ITEM_DRAG_MOVE_THRESHOLD_PX) {
     const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
-    const { angle, distanceTiles } = computeChestAimState(state, chestClearDragKey, world.x, world.y);
-    clearChestContents(state, chestClearDragKey, angle, distanceTiles);
+    // Same cancel-on-release-over-the-chest rule as the left-drag above.
+    if (!isPointOverChestTile(chestClearDragKey, world.x, world.y)) {
+      const { angle, distanceTiles } = computeChestAimState(state, chestClearDragKey, world.x, world.y);
+      clearChestContents(state, chestClearDragKey, angle, distanceTiles);
+    }
   }
   chestClearDragKey = null;
   lastCursorTool = null;
@@ -1165,6 +1186,20 @@ function updateChestAimDrag() {
   const activeKey = chestAimDragKey ?? chestClearDragKey;
   if (activeKey == null) return;
   const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
+  // The cursor is still sitting back over the chest it was dragged from —
+  // releasing right now would cancel the gesture (see the mouseUp handlers
+  // above), so the OS cursor itself switches to a plain "not-allowed" glyph
+  // instead of the aim arrow, per direct request ("change the cursor to
+  // look like a cancel cursor... so the player knows they can release there
+  // and cancel it").
+  if (isPointOverChestTile(activeKey, world.x, world.y)) {
+    if (lastChestAimCursorFraction !== -1) {
+      lastChestAimCursorDeg = null;
+      lastChestAimCursorFraction = -1;
+      canvas.style.cursor = 'not-allowed';
+    }
+    return;
+  }
   const { angle, fraction } = computeChestAimState(state, activeKey, world.x, world.y);
   // Rounded to the nearest 5deg / 5% — a real per-pixel-of-mouse-movement
   // cursor rewrite would mean re-encoding a fresh SVG data URI on nearly
@@ -1968,6 +2003,15 @@ input.rightClickHandlers.push(() => {
   if (state.ui.paused || state.level.tutorialFlow) return;
   closeSidePanels(state);
   cancelActiveTool(state);
+  // A not-yet-placed Fan's pending angle-choosing step (fanAimingCell) isn't
+  // itself part of selectedTool, so cancelActiveTool above clearing the tool
+  // back to 'cursor' only makes isFanAimingActive() self-heal to false — the
+  // stale {col, row, buildingId} it left behind was still sitting here, so
+  // pressing Q right afterward (which just reselects state.ui.lastArmedTool)
+  // reactivated THIS same old cell/angle-choosing step instead of starting a
+  // fresh one under the cursor. Per direct bug report: right-click must fully
+  // cancel the placement, no lingering spot for a later Q to pull back up.
+  fanAimingCell = null;
 });
 
 // Middle-click-to-move — see movingBuilding's own comment above. Only arms
