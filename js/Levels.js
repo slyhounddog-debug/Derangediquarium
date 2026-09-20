@@ -81,11 +81,10 @@ export function loadLevel(state, levelId) {
     notifications: [{ id: 1, text: WELCOME_MESSAGE, elapsed: 0 }], // rolling log for UI.js's ticker — { id, text, elapsed }, capped at NOTIFICATION_LOG_MAX. Seeded with the welcome message as a real entry (not a UI fallback) so it survives in the scrollback log
     tankPoints: { total: 0, available: 0 }, // earned by Entities.js on fish adult-growth transitions, spent in UI.js's Tank Upgrades panel — see CLAUDE.md's "Tank Points & Tank Upgrades"
     upgrades: {
-      foodQuality: 0, fishMovement: 0, coinCapLevel: 0, scienceCapLevel: 0,
+      foodQuality: 0, fishMovement: 0, scienceCapLevel: 0,
       electricityGraphUnlocked: false, // Tank Upgrade (ELECTRICITY_GRAPH_UNLOCK_COST) — gates #hud-power's click-to-open rolling graph popup AND its dropdown arrow; the mw text readout itself is unaffected, still shown unconditionally once Electric Eel is unlocked
-      goldPerMinUnlocked: false, // Tank Upgrade (GOLD_PER_MIN_UNLOCK_COST) — reveals the #hud-gold-per-min readout, see Entities.js's computeTheoreticalGoldPerMinute
-      waveCountdownUnlocked: false, // Tank Upgrade (WAVE_COUNTDOWN_UNLOCK_COST) — reveals the #hud-wave-countdown readout, see UI.js's updateHUD
-    }, // purchased Tank Upgrade levels, 0 = not yet bought; read live by Entities.js, not baked into fish/food at creation time. Fish Merging is no longer gated by a Tank Upgrade at all — see Entities.js's isCombinableFish. coinCapLevel is a Tank Upgrade (COIN_CAP_UPGRADE_COSTS); scienceCapLevel is bought in the Science Lab instead (SCIENCE_CAP_UPGRADE_SCIENCE_COSTS/_GOLD_COSTS) but lives here alongside it since both index the same way into their own *_CAP_BY_LEVEL table. foodCapacity retired entirely — see Config.js's FOOD_STATIONARY_TO_WASTE_MS
+      waveCountdownUnlocked: false, // Tank Upgrade (WAVE_COUNTDOWN_UNLOCK_COST) — reveals the Base Stats panel's Alien Wave/timer lines, see UI.js's statsPanel
+    }, // purchased Tank Upgrade levels, 0 = not yet bought; read live by Entities.js, not baked into fish/food at creation time. Fish Merging is no longer gated by a Tank Upgrade at all — see Entities.js's isCombinableFish. Coin Cap (and its own Tank Upgrade) is gone entirely, per direct request. scienceCapLevel is bought in the Science Lab instead (SCIENCE_CAP_UPGRADE_SCIENCE_COSTS/_GOLD_COSTS) — indexes into SCIENCE_CAP_BY_LEVEL. foodCapacity retired entirely — see Config.js's FOOD_STATIONARY_TO_WASTE_MS
     // One-time story/tutorial notification gates — see CLAUDE.md's "Story &
     // Tutorial Notifications". Level-scoped like everything else here, so a
     // restart replays them (matching moundTeased/the Tank Point tutorial's
@@ -104,11 +103,10 @@ export function loadLevel(state, levelId) {
       firstShopOpened: false, // set the first time the Shop panel is ever expanded — until then, UI.js's scheduleShopButtonReminder keeps bouncing the shop toggle button as a reminder it exists
       firstAlienWaveTipShown: false, // fires the alien-combat tip the moment the very first wave's aliens actually spawn — see Systems.js's spawnAlienWave
       firstAlienWarning1Shown: false, // gates ALIEN_WARNING_MESSAGE_1 ("Something's stirring...") to only ever post once, ever — see Systems.js's updateAlienWaves
-      firstCoinCapWarningShown: false, // fires COIN_CAP_WARNING_MESSAGE the first time the live coin count reaches CAP_WARNING_THRESHOLD_FRACTION of the active cap — see UI.js's updateHUD
       hasScrolledDown: false, // set true the first time state.camera.y is ever seen > 0 — gates the #scroll-hint bouncing-arrows nudge, see UI.js's updateScrollHint
       firstAlienIntroShown: false, // gates the cinematic first-alien intro (spotlight + forced pause) to only ever trigger once, ever — see Entities.js's updateAlienPortals
       startTutorialShown: false, // gates the game-start guided tutorial (shop -> Guppy -> buy your first fish) to once, ever — see UI.js's tutorialFlow system, started by main.js the moment the player clicks Start
-      tankPointTutorialShown: false, // gates the "spend your first Tank Point" guided tutorial (Tank Upgrades -> Coin Capacity) to once, ever — see Entities.js's awardTankPoint
+      tankPointTutorialShown: false, // gates the "spend your first Tank Point" guided tutorial (Tank Upgrades -> Food Quality) to once, ever — see Entities.js's awardTankPoint
       postAlienTutorialShown: false, // gates the ONE-TIME decision of whether to offer the "arm up" guided walkthrough (Shop -> Waste Turret -> scroll down -> place it) — see Systems.js's updatePostAlienTutorial, fired ~10s after the first alien kill. Does NOT by itself mean the drag-Waste lesson was ever shown — see wasteDragTutorialShown below
       wasteDragTutorialShown: false, // set only once the "drag Waste into the Turret" lesson genuinely completes — via the tail of the full postalien walkthrough OR the standalone 'wastedrag' flow, see UI.js's onTutorialFlowComplete. Kept separate from postAlienTutorialShown so Escape-skipping the walkthrough before reaching that step doesn't permanently block the standalone fallback from firing later — see Systems.js's updatePostAlienTutorial
       mergeTutorialShown: false, // gates the "switch to Merge and drag two matching Adult fish together" guided tutorial to once, ever — triggered the first time two combinable fish exist on screen simultaneously, see Systems.js's updateMergeTutorialTrigger

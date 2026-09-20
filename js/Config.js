@@ -1076,11 +1076,17 @@ export const EYE_PUPIL_OFFSET_RATIO = 0.5; // how far the pupil can travel from 
 export const TANK_POINT_PER_ADULT_FISH = 1;
 export const TANK_POINT_COLOR = '#ffcc4d'; // floating "+1 Tank Point!" text color, and the panel's accent
 
-// Food Quality's own 5-level cost ladder — unchanged (was a flat [1,2,3,4]
-// 4-level ladder — bumped up and extended a level per direct request that
-// upgrades felt too cheap/fast to max out). Placeholder balance, same as
-// every other economy constant here — tune once real playtesting exists.
-export const FOOD_QUALITY_UPGRADE_COSTS = [2, 5, 15, 30, 50]; // Tank Points
+// Food Quality's own 5-level cost ladder — was a flat [1,2,3,4] 4-level
+// ladder, bumped up and extended a level per direct request that upgrades
+// felt too cheap/fast to max out. Placeholder balance, same as every other
+// economy constant here — tune once real playtesting exists. Per a later
+// direct request ("make it cost 1 tank point for the first upgrade" — Food
+// Quality is now the Tank Upgrades panel's first card and the Tank Point
+// tutorial's own target, replacing the removed Coin Capacity in both roles),
+// level 1's cost dropped from 2 to 1, same "always affordable off a
+// player's very first-ever Tank Point" reasoning the old Coin Capacity
+// node's own level-1 discount used.
+export const FOOD_QUALITY_UPGRADE_COSTS = [1, 5, 15, 30, 50]; // Tank Points
 export const FOOD_QUALITY_UPGRADE_MAX_LEVEL = FOOD_QUALITY_UPGRADE_COSTS.length;
 export const FOOD_QUALITY_SINK_SPEED_REDUCTION_PER_LEVEL = 0.10; // 10% slower fall per level (both FOOD_GRAVITY and FOOD_MAX_FALL_SPEED scale down) — doubled from 5%, part of the same slower-pacing pass as FOOD_GRAVITY/FOOD_MAX_FALL_SPEED above; applied live in Entities.js's updateFood
 // FOOD_HUNGER_RELIEF_BY_LEVEL above is the other half of Food Quality.
@@ -1118,62 +1124,53 @@ export const FISH_SPEED_MULTIPLIER = 1.1;
 // limit how much food can exist at all, just how long an ignored pellet
 // sticks around before it stops being food.
 
-// Coin Cap: how many Coin items can exist in state.level.items at once — per
-// direct request, now that the Rocky Shelf keeps every coin in the tank
-// forever instead of letting an uncaught one eventually fall off the bottom
-// and vanish, there needs to be an explicit ceiling instead or a fish's
-// passive production could pile up unboundedly. Checked in Entities.js's
-// updateFish right before a coin would spawn (effectiveCoinCapacity(state) —
-// state.level.upgrades.coinCapLevel indexes straight into COIN_CAP_BY_LEVEL,
-// same "array of absolute values, not a base+increment formula" shape as
-// FOOD_HUNGER_RELIEF_BY_LEVEL uses, since these steps aren't an even
-// arithmetic progression). Upgraded exclusively through a Tank Upgrade (Tank
-// Points) — see COIN_CAP_UPGRADE_COSTS, mirroring Food Capacity's own
-// leveled-cap pattern exactly, just gating Coins instead of Food and with no
-// "only while in open water" carve-out (a coin resting in the seabed city
-// still very much counts as an "active drop" the player hasn't banked yet).
-export const COIN_CAP_BY_LEVEL = [10, 25, 50, 100, 250, 500]; // index 0 = unupgraded default
-export const COIN_CAP_UPGRADE_COSTS = [1, 8, 20, 45, 80]; // Tank Points — level 1 cut from 3 to 1 per direct request, so a player can afford it off their very first-ever Tank Point (see the new Tank Point tutorial flow in UI.js); levels 2+ untouched, placeholder balance like every other economy constant here
-// Three one-time Tank Upgrade unlocks, per direct request — same shape as
-// the old (now-removed) Fish Merging card: a flat cost, a boolean flag in
+// Coin Cap is gone entirely, per direct request ("Remove the coin cap limit
+// from the game completely, and the upgrades for it") — a fish's coin drop
+// is never blocked any more (see Entities.js's updateFish), so there's no
+// cap table/upgrade-cost table/max-level constant left to read here at all.
+// Two one-time Tank Upgrade unlocks, per direct request — same shape as the
+// old (now-removed) Fish Merging card: a flat cost, a boolean flag in
 // state.level.upgrades, no leveled ladder. "Electricity Graph" gates the
 // #hud-power click-to-open rolling graph popup AND its dropdown arrow (the mw
 // text readout itself still shows unconditionally once Electric Eel is
 // unlocked, unaffected — only the graph/arrow are hidden behind this);
-// "Gold/min Stat" reveals a new HUD readout showing the tank's live
-// theoretical max gold/min — see Entities.js's computeTheoreticalGoldPerMinute
-// — and stays fully hidden (not just showing $0/min) until bought; "Wave
-// Countdown" reveals a HUD readout counting down to the next alien wave.
-// Costs deliberately uneven per direct request (2/5/3) rather than a flat
-// shared price — Electricity Graph is the cheapest since it's just a graph
-// popup, Gold/min the priciest since it's a genuinely useful always-on stat.
+// "Wave Countdown" gates the Alien Wave/timer lines in the new Tab-toggled
+// Base Stats panel (UI.js's statsPanel) instead of a HUD readout — per
+// direct request, alien wave/timer moved off the HUD entirely. The old
+// "Gold/min Stat" Tank Upgrade is gone entirely, per a later direct request
+// ("give the player access to that info from the very beginning, so remove
+// it from the tank upgrade as well") — Gold/min is now an unconditional line
+// in the Base Stats panel, no purchase needed.
 export const ELECTRICITY_GRAPH_UNLOCK_COST = 2; // Tank Points
-export const GOLD_PER_MIN_UNLOCK_COST = 5; // Tank Points
 export const WAVE_COUNTDOWN_UNLOCK_COST = 3; // Tank Points
-export const COIN_CAP_UPGRADE_MAX_LEVEL = COIN_CAP_UPGRADE_COSTS.length;
 
-// Shared by both the Coin Cap and Science Cap HUD readouts (UI.js's
-// updateHUD) — the live count/max ratio at or above which the readout
-// pulses red continuously, per direct request.
+// Used by the Science Cap HUD readout (UI.js's updateHUD) — the live
+// count/max ratio at or above which the readout pulses red continuously, per
+// direct request. Used to also gate the now-removed Coin Cap readout the
+// same way; Science Cap is the only cap left in the game.
 export const CAP_WARNING_THRESHOLD_FRACTION = 0.8;
 
-// Science Cap: the same idea as Coin Cap above, but for Science Bubble items
-// and upgraded exclusively through the Science Lab instead of Tank Points —
-// per direct request. Priced like every other Lab node (both Science AND
-// gold at once). Originally a single leveled card above the branching tree;
-// per a later direct request ("change the max science upgrades so each one
-// is a separate icon... instead of 5 times on the same icon") it became 5
-// chained one-time nodes INSIDE the tree instead (`science_cap_1..5` in
-// SCIENCE_LAB_UPGRADES) — these two cost arrays are what those nodes'
-// scienceCost/goldCost read from, one index each. The `science_cap_1`
-// node ("Bubble Cap 10") was later removed entirely, per direct request —
-// the player now starts with 10 already allowed (index 0 below) — so
-// `SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[0]`/`_GOLD_COSTS[0]` (its own cost
-// pair) are unused now; left in place rather than reshuffling the array
-// and every remaining node's (`science_cap_2`..`_5`) own fixed index into it.
-export const SCIENCE_CAP_BY_LEVEL = [10, 20, 30, 40, 50]; // index 0 = unupgraded default — raised 5 -> 10 per direct request
-export const SCIENCE_CAP_UPGRADE_SCIENCE_COSTS = [10, 20, 35, 60, 100]; // placeholder balance, tune once real playtesting exists; index 0 unused, see comment above
-export const SCIENCE_CAP_UPGRADE_GOLD_COSTS = [500, 1500, 3500, 7500, 15000]; // index 0 unused, see comment above
+// Science ("Bubble") Cap — upgraded exclusively through the Science Lab
+// instead of Tank Points — per direct request. Priced like every other Lab
+// node (both Science AND gold at once). Originally a single leveled card
+// above the branching tree; per a later direct request ("change the max
+// science upgrades so each one is a separate icon... instead of 5 times on
+// the same icon") it became 5 chained one-time nodes INSIDE the tree instead
+// (`science_cap_1..5` in SCIENCE_LAB_UPGRADES) — these two cost arrays are
+// what those nodes' scienceCost/goldCost read from, one index each. The
+// `science_cap_1` node ("Bubble Cap 10") was later removed entirely, per
+// direct request — the player now starts with 10 already allowed (index 0
+// below) — so `SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[0]`/`_GOLD_COSTS[0]` (its
+// own cost pair) are unused now; left in place rather than reshuffling the
+// array and every remaining node's (`science_cap_2`..`_5`) own fixed index
+// into it. Per direct request ("double the bubble cap limit across the
+// board — start with 20, first upgrade is 40, then 60, then 80, then 100")
+// the whole table is doubled from its old 10/20/30/40/50 progression; the
+// science half of every node's own cost is also doubled (gold left
+// untouched) — see this array's own values vs. the old 10/20/35/60/100.
+export const SCIENCE_CAP_BY_LEVEL = [20, 40, 60, 80, 100]; // index 0 = unupgraded default
+export const SCIENCE_CAP_UPGRADE_SCIENCE_COSTS = [20, 40, 70, 120, 200]; // placeholder balance, tune once real playtesting exists; index 0 unused, see comment above
+export const SCIENCE_CAP_UPGRADE_GOLD_COSTS = [500, 1500, 3500, 7500, 15000]; // untouched — per direct request, only science costs doubled, gold stays the same
 
 // The old "Defensive Capabilities" locked placeholder card is gone from the
 // Tank Upgrades panel entirely, per direct request — click damage/turret
@@ -2137,7 +2134,7 @@ export const SCIENCE_LAB_UPGRADES = {
     requires: [], grants: { species: ['octopus'] },
   },
   electric_fan: {
-    id: 'electric_fan', name: 'Electric Fan', icon: '💨', scienceCost: 20, goldCost: 2500,
+    id: 'electric_fan', name: 'Electric Fan', icon: '💨', scienceCost: 40, goldCost: 2500,
     requires: ['science_cap_2'], grants: { buildings: [TILE_FAN_T3] },
   },
   // Grants TILE_COLLECTOR_ELECTRIC, now displayed "Advanced Collector" (see
@@ -2146,23 +2143,23 @@ export const SCIENCE_LAB_UPGRADES = {
   // `electric_collector`, an opaque identifier other nodes' `requires`
   // arrays reference, not a player-facing "mention."
   electric_collector: {
-    id: 'electric_collector', name: 'Advanced Collector', icon: '🧲', scienceCost: 50, goldCost: 5000,
+    id: 'electric_collector', name: 'Advanced Collector', icon: '🧲', scienceCost: 100, goldCost: 5000,
     requires: ['science_cap_2'], grants: { buildings: [TILE_COLLECTOR_ELECTRIC] },
   },
   // Grants TILE_REFINERY_ELECTRIC, now displayed "Advanced Refinery" (see
   // BUILDING_TYPES' Refinery-family rename) — same "keep the id, sync the
   // display name" treatment as electric_collector above.
   electric_refinery: {
-    id: 'electric_refinery', name: 'Advanced Refinery', icon: '⚗️', scienceCost: 30, goldCost: 5000,
+    id: 'electric_refinery', name: 'Advanced Refinery', icon: '⚗️', scienceCost: 60, goldCost: 5000,
     requires: ['science_cap_2'], grants: { buildings: [TILE_REFINERY_ELECTRIC] },
   },
   advanced_fan: {
-    id: 'advanced_fan', name: 'Advanced Fan', icon: '🌪️', scienceCost: 100, goldCost: 15000,
+    id: 'advanced_fan', name: 'Advanced Fan', icon: '🌪️', scienceCost: 200, goldCost: 15000,
     requires: ['electric_fan'], grants: { buildings: [TILE_FAN_T4] },
   },
   // Grants TILE_COLLECTOR_ADVANCED, now displayed "Bio Collector."
   advanced_collector: {
-    id: 'advanced_collector', name: 'Bio Collector', icon: '🧲', scienceCost: 250, goldCost: 25000,
+    id: 'advanced_collector', name: 'Bio Collector', icon: '🧲', scienceCost: 500, goldCost: 25000,
     requires: ['electric_collector'], grants: { buildings: [TILE_COLLECTOR_ADVANCED] },
   },
   // Per direct request — Tier 1 Storage Chest is granted by the Mound's own
@@ -2172,21 +2169,21 @@ export const SCIENCE_LAB_UPGRADES = {
   // hybrid_catalyst_fish above (both already precedent for "gated on just
   // one science_cap_N node").
   storage_chest_t2: {
-    id: 'storage_chest_t2', name: 'Storage Chest II', icon: '📦', scienceCost: 40, goldCost: 4500,
+    id: 'storage_chest_t2', name: 'Storage Chest II', icon: '📦', scienceCost: 80, goldCost: 4500,
     requires: ['science_cap_2'], grants: { buildings: [TILE_STORAGE_CHEST_T2] },
   },
   storage_chest_t3: {
-    id: 'storage_chest_t3', name: 'Storage Chest III', icon: '📦', scienceCost: 70, goldCost: 16000,
+    id: 'storage_chest_t3', name: 'Storage Chest III', icon: '📦', scienceCost: 140, goldCost: 16000,
     requires: ['science_cap_4'], grants: { buildings: [TILE_STORAGE_CHEST_T3] },
   },
   // The Waste Turret needs no node at all — it's unlockedByDefault: true,
   // same as Platform (see BUILDING_TYPES), free from the very start.
   electric_turret: {
-    id: 'electric_turret', name: 'Electric Turret', icon: '🔫', scienceCost: 25, goldCost: 3000,
+    id: 'electric_turret', name: 'Electric Turret', icon: '🔫', scienceCost: 50, goldCost: 3000,
     requires: ['science_cap_2'], grants: { buildings: [TILE_TURRET_ELECTRIC] },
   },
   advanced_turret: {
-    id: 'advanced_turret', name: 'Advanced Turret', icon: '🔫', scienceCost: 120, goldCost: 18000,
+    id: 'advanced_turret', name: 'Advanced Turret', icon: '🔫', scienceCost: 240, goldCost: 18000,
     requires: ['electric_turret'], grants: { buildings: [TILE_TURRET_ADVANCED] },
   },
   // Two new turret fire-rate Lab nodes, per direct request — each a flat
@@ -2199,14 +2196,14 @@ export const SCIENCE_LAB_UPGRADES = {
   // AND Node I, and costs Green Science too (additive, same half-of-blue
   // convention every other Green-Science-gated node already follows).
   turret_fire_rate_1: {
-    id: 'turret_fire_rate_1', name: 'Turret Fire Rate I', icon: '🔥', scienceCost: 50, goldCost: 9000,
+    id: 'turret_fire_rate_1', name: 'Turret Fire Rate I', icon: '🔥', scienceCost: 100, goldCost: 9000,
     description: "Increases every turret's fire rate by 20%.",
     requires: ['science_cap_3'], grants: {},
   },
   // Per direct request, gated behind Bubble Cap 50 now instead of Green
   // Science Tech (still additionally requires Turret Fire Rate I, unchanged).
   turret_fire_rate_2: {
-    id: 'turret_fire_rate_2', name: 'Turret Fire Rate II', icon: '🔥', scienceCost: 70, scienceGreenCost: 35, goldCost: 15000,
+    id: 'turret_fire_rate_2', name: 'Turret Fire Rate II', icon: '🔥', scienceCost: 140, scienceGreenCost: 70, goldCost: 15000,
     description: "Increases every turret's fire rate by another 20%, on top of Turret Fire Rate I.",
     requires: ['science_cap_5', 'turret_fire_rate_1'], grants: {},
   },
@@ -2220,11 +2217,11 @@ export const SCIENCE_LAB_UPGRADES = {
   // separately requires Suckerfish, since reaching Bubble Cap 20 already
   // requires it transitively.
   manufacturer: {
-    id: 'manufacturer', name: 'Manufacturer', icon: '🏭', scienceCost: 35, goldCost: 5000,
+    id: 'manufacturer', name: 'Manufacturer', icon: '🏭', scienceCost: 70, goldCost: 5000,
     requires: ['science_cap_2'], grants: { buildings: [TILE_MANUFACTURER] },
   },
   power_plant: {
-    id: 'power_plant', name: 'Power Plant', icon: '☢️', scienceCost: 35, goldCost: 5000,
+    id: 'power_plant', name: 'Power Plant', icon: '☢️', scienceCost: 70, goldCost: 5000,
     // Grants the building AND (implicitly — POWER_PLANT_RECIPES.food.labNodeId
     // is null) its Food recipe at once.
     requires: ['science_cap_2'], grants: { buildings: [TILE_POWER_PLANT] },
@@ -2244,13 +2241,13 @@ export const SCIENCE_LAB_UPGRADES = {
   // this recipe needs exists, so gating it a further step up the Bubble Cap
   // chain was pure friction.
   recipe_bio_feeder: {
-    id: 'recipe_bio_feeder', name: 'Mutagen Paste Recipe', icon: '🩷', scienceCost: 45, goldCost: 7000,
+    id: 'recipe_bio_feeder', name: 'Mutagen Paste Recipe', icon: '🩷', scienceCost: 90, goldCost: 7000,
     requires: ['manufacturer'], grants: {},
   },
   // Per direct request, now requires Bubble Cap 30 AND the Alien Egg recipe
   // (instead of the Manufacturer/Power Plant buildings directly).
   recipe_bio_combustor: {
-    id: 'recipe_bio_combustor', name: 'Blue Science Recipe', icon: '🔥', scienceCost: 40, goldCost: 6000,
+    id: 'recipe_bio_combustor', name: 'Blue Science Recipe', icon: '🔥', scienceCost: 80, goldCost: 6000,
     requires: ['science_cap_3', 'recipe_alien_egg'], grants: {},
   },
   // Per direct request, merged with the old standalone recipe_green_science
@@ -2267,7 +2264,7 @@ export const SCIENCE_LAB_UPGRADES = {
   // unlock" pattern every other pure-recipe node in this tree already uses.
   // Moved from Bubble Cap 30 to Bubble Cap 40, per direct request.
   green_science_tech: {
-    id: 'green_science_tech', name: 'Green Science Recipe', icon: '🟢', scienceCost: 60, goldCost: 8000,
+    id: 'green_science_tech', name: 'Green Science Recipe', icon: '🟢', scienceCost: 120, goldCost: 8000,
     requires: ['recipe_bio_combustor', 'science_cap_4'], grants: {},
   },
   // The old recipe_bio_sludge node (Bubble Cap 30 gated, previously named
@@ -2289,14 +2286,14 @@ export const SCIENCE_LAB_UPGRADES = {
   // Per direct request, requires just the Manufacturer to be unlocked now
   // (not Bubble Cap 30) — same reasoning as recipe_bio_feeder above.
   recipe_alien_egg: {
-    id: 'recipe_alien_egg', name: 'Alien Egg Recipe', icon: '🥚', scienceCost: 55, goldCost: 10000,
+    id: 'recipe_alien_egg', name: 'Alien Egg Recipe', icon: '🥚', scienceCost: 110, goldCost: 10000,
     requires: ['manufacturer'], grants: {},
   },
   // The Power Plant's Biomass recipe is locked behind the Manufacturer's
   // Bio-Sludge recipe, per direct spec; its Blue Science recipe is locked
   // behind Green Science Tech.
   power_plant_biomass: {
-    id: 'power_plant_biomass', name: 'Power Plant: Biomass', icon: '🟩', scienceCost: 50, goldCost: 10000,
+    id: 'power_plant_biomass', name: 'Power Plant: Biomass', icon: '🟩', scienceCost: 100, goldCost: 10000,
     requires: ['power_plant', 'manufacturer'], grants: {},
   },
   // Requires Green Science Tech to be unlocked, so per direct request it
@@ -2304,7 +2301,7 @@ export const SCIENCE_LAB_UPGRADES = {
   // Blue amount — scienceGreenCost is additive, not exclusive, see
   // labNodeHasEnoughScience's comment in UI.js.
   power_plant_science: {
-    id: 'power_plant_science', name: 'Power Plant: Blue Science', icon: '🔬', scienceCost: 70, scienceGreenCost: 35, goldCost: 15000,
+    id: 'power_plant_science', name: 'Power Plant: Blue Science', icon: '🔬', scienceCost: 140, scienceGreenCost: 70, goldCost: 15000,
     requires: ['power_plant', 'green_science_tech'], grants: {},
   },
   // Bio Refinery — the top Refinery tier now that Ultra Refinery is gone
@@ -2319,7 +2316,7 @@ export const SCIENCE_LAB_UPGRADES = {
   // requiring only `electric_refinery`) is deleted outright — Bio Refinery
   // now has exactly one home in the tree, this one.
   bio_refinery: {
-    id: 'bio_refinery', name: 'Bio Refinery', icon: '⚗️', scienceCost: 100, scienceGreenCost: 50, goldCost: 20000,
+    id: 'bio_refinery', name: 'Bio Refinery', icon: '⚗️', scienceCost: 200, scienceGreenCost: 100, goldCost: 20000,
     requires: ['green_science_tech'], grants: { buildings: [TILE_REFINERY_ADVANCED] },
   },
 
@@ -2341,11 +2338,11 @@ export const SCIENCE_LAB_UPGRADES = {
   // Suckerfish itself), so dropping the separate direct requirement here
   // doesn't loosen anything.
   hybrid_buffer_fish: {
-    id: 'hybrid_buffer_fish', name: 'Buffer Fish', icon: '🧲', scienceCost: 20, goldCost: 4000,
+    id: 'hybrid_buffer_fish', name: 'Buffer Fish', icon: '🧲', scienceCost: 40, goldCost: 4000,
     requires: ['science_cap_3'], grants: { species: ['buffer_fish'] },
   },
   hybrid_eel_blimp: {
-    id: 'hybrid_eel_blimp', name: 'Blimp-Battery', icon: '🔋', scienceCost: 30, goldCost: 8000,
+    id: 'hybrid_eel_blimp', name: 'Blimp-Battery', icon: '🔋', scienceCost: 60, goldCost: 8000,
     requires: ['science_cap_3'], grants: { species: ['eel_blimp'] },
   },
   // The one hybrid node requiring Green Science as well as Blue, per direct
@@ -2360,7 +2357,7 @@ export const SCIENCE_LAB_UPGRADES = {
   // behind actually having researched that recipe anyway, without a second
   // explicit prerequisite on top.
   hybrid_catalyst_fish: {
-    id: 'hybrid_catalyst_fish', name: 'Catalyst Fish', icon: '🎯', scienceCost: 40, scienceGreenCost: 20, goldCost: 15000,
+    id: 'hybrid_catalyst_fish', name: 'Catalyst Fish', icon: '🎯', scienceCost: 80, scienceGreenCost: 40, goldCost: 15000,
     requires: ['science_cap_4'], grants: { species: ['catalyst_fish'] },
   },
   // Two more hybrids, per direct request — each gated behind a Manufacturer
@@ -2377,11 +2374,11 @@ export const SCIENCE_LAB_UPGRADES = {
   // 'manufacturer' — Bubble Cap 30 already requires the Manufacturer
   // transitively, so this is a strictly later gate, not a looser one).
   hybrid_zap_sucker: {
-    id: 'hybrid_zap_sucker', name: 'Feeder Fish', icon: '🔌', scienceCost: 35, goldCost: 9000,
+    id: 'hybrid_zap_sucker', name: 'Feeder Fish', icon: '🔌', scienceCost: 70, goldCost: 9000,
     requires: ['science_cap_3'], grants: { species: ['zap_sucker'] },
   },
   hybrid_xeno_octopus: {
-    id: 'hybrid_xeno_octopus', name: 'Xeno Octopus', icon: '👽', scienceCost: 45, goldCost: 12000,
+    id: 'hybrid_xeno_octopus', name: 'Xeno Octopus', icon: '👽', scienceCost: 90, goldCost: 12000,
     requires: ['recipe_alien_egg'], grants: { species: ['xeno_octopus'] },
   },
 
@@ -2417,28 +2414,28 @@ export const SCIENCE_LAB_UPGRADES = {
   // Per direct request, Bubble Cap 20 is the thing gated behind the tree's
   // remaining 2 roots together (Suckerfish, Science Octopus).
   science_cap_2: {
-    id: 'science_cap_2', name: 'Bubble Cap 20', icon: '🫧',
-    description: 'Raises the Science Bubble cap from 10 to 20 — how many can exist unbanked in the tank at once before an Octopus\'s brew is blocked.',
+    id: 'science_cap_2', name: 'Bubble Cap 40', icon: '🫧',
+    description: 'Raises the Science Bubble cap from 20 to 40 — how many can exist unbanked in the tank at once before an Octopus\'s brew is blocked.',
     scienceCost: SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[1], goldCost: SCIENCE_CAP_UPGRADE_GOLD_COSTS[1],
     requires: ['suckerfish', 'octopus'], grants: { scienceCapLevel: 1 },
   },
   // Per direct request, "the 2 requirements for bubble cap 30 is the
   // manufacturer and the bubble cap 20."
   science_cap_3: {
-    id: 'science_cap_3', name: 'Bubble Cap 30', icon: '🫧',
-    description: 'Raises the Science Bubble cap from 20 to 30 — how many can exist unbanked in the tank at once before an Octopus\'s brew is blocked.',
+    id: 'science_cap_3', name: 'Bubble Cap 60', icon: '🫧',
+    description: 'Raises the Science Bubble cap from 40 to 60 — how many can exist unbanked in the tank at once before an Octopus\'s brew is blocked.',
     scienceCost: SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[2], goldCost: SCIENCE_CAP_UPGRADE_GOLD_COSTS[2],
     requires: ['manufacturer', 'science_cap_2'], grants: { scienceCapLevel: 1 },
   },
   science_cap_4: {
-    id: 'science_cap_4', name: 'Bubble Cap 40', icon: '🫧',
-    description: 'Raises the Science Bubble cap from 30 to 40 — how many can exist unbanked in the tank at once before an Octopus\'s brew is blocked.',
+    id: 'science_cap_4', name: 'Bubble Cap 80', icon: '🫧',
+    description: 'Raises the Science Bubble cap from 60 to 80 — how many can exist unbanked in the tank at once before an Octopus\'s brew is blocked.',
     scienceCost: SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[3], goldCost: SCIENCE_CAP_UPGRADE_GOLD_COSTS[3],
     requires: ['science_cap_3'], grants: { scienceCapLevel: 1 },
   },
   science_cap_5: {
-    id: 'science_cap_5', name: 'Bubble Cap 50', icon: '🫧',
-    description: 'Raises the Science Bubble cap from 40 to 50 — how many can exist unbanked in the tank at once before an Octopus\'s brew is blocked.',
+    id: 'science_cap_5', name: 'Bubble Cap 100', icon: '🫧',
+    description: 'Raises the Science Bubble cap from 80 to 100 — how many can exist unbanked in the tank at once before an Octopus\'s brew is blocked.',
     scienceCost: SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[4], goldCost: SCIENCE_CAP_UPGRADE_GOLD_COSTS[4],
     requires: ['science_cap_4'], grants: { scienceCapLevel: 1 },
   },
@@ -2450,7 +2447,7 @@ export const SCIENCE_LAB_UPGRADES = {
   // already is.
   fish_scaling: {
     id: 'fish_scaling', name: 'Fish Scaling', icon: '📉',
-    scienceCost: 150, scienceGreenCost: 75, goldCost: 25000,
+    scienceCost: 300, scienceGreenCost: 150, goldCost: 25000,
     requires: ['science_cap_5'],
     grants: {},
   },
@@ -2480,7 +2477,7 @@ export const SCIENCE_LAB_UPGRADES = {
   mother_alien_fish: {
     id: 'mother_alien_fish', name: 'Escape the Fish Tank', icon: '👹', mystery: true,
     description: 'Win the game! Definitely no need to be loaded on turret power. *Glub**Glub* Thats how you wink as a fish.',
-    scienceCost: 250, scienceGreenCost: 100, goldCost: 50000,
+    scienceCost: 500, scienceGreenCost: 200, goldCost: 50000,
     requires: ['green_science_tech', 'power_plant_science', 'bio_refinery', 'science_cap_5'],
     grants: { triggersBossFight: true },
   },

@@ -38,12 +38,8 @@ import {
   POWER_HISTORY_MAX,
   SCIENCE_LAB_UPGRADES,
   SCIENCE_LAB_UPGRADE_LIST,
-  COIN_CAP_BY_LEVEL,
-  COIN_CAP_UPGRADE_COSTS,
   ELECTRICITY_GRAPH_UNLOCK_COST,
-  GOLD_PER_MIN_UNLOCK_COST,
   WAVE_COUNTDOWN_UNLOCK_COST,
-  COIN_CAP_UPGRADE_MAX_LEVEL,
   WORLD_W,
   WORLD_H,
   TILE_SIZE,
@@ -88,7 +84,11 @@ import {
   PLATFORM_FILTER_ITEM_TYPES,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings, loadLevel } from './Levels.js';
-import { getFishPurchaseCost, effectiveCoinCapacity, effectiveScienceCapacity, countTankItemsByType, hasAnyMergeOpportunity, resolveMergeTutorialPair, computeTheoreticalGoldPerMinute } from './Entities.js';
+import {
+  getFishPurchaseCost, effectiveScienceCapacity, countTankItemsByType, hasAnyMergeOpportunity, resolveMergeTutorialPair,
+  computeTheoreticalGoldPerMinute, computeTheoreticalCoinCountPerMinute, computeTheoreticalSciencePerMinute, computeTheoreticalFoodNeededPerMinute,
+  computeTheoreticalWastePerMinute, computeTheoreticalManufacturerOutputPerMinute, computeTheoreticalBiomassPerMinute,
+} from './Entities.js';
 import {
   getTile, worldToTile, getBuildingCost, FAN_STATS,
   findNearestWasteTurretAndWaste, getRecipeBuildingKeyAt, renderTileShape,
@@ -117,8 +117,7 @@ let currentPreviewSpecies = null; // species currently shown in the in-panel pre
 let currentPreviewBuilding = null; // building currently shown in the in-panel preview, if any — mutually exclusive with currentPreviewSpecies
 let lastMoney = null; // previous frame's money, to detect gain vs spend for the flash animation
 let lastCleanliness = null; // previous frame's cleanliness, same purpose
-let lastCoinCapCount = null; // previous frame's live coin count, to detect a rise for the shake-red cue below
-let lastScienceCapCount = null; // same, for Science Bubbles
+let lastScienceCapCount = null; // previous frame's live Science Bubble count, to detect a rise for the shake-red cue below
 let notificationLogExpanded = false;
 let lastRenderedNotificationCount = -1; // rebuild the log list only when it actually changes, not every frame
 let lastPillNotificationCount = null; // separate from the above — tracks the pill's own bounce/shimmer trigger regardless of whether the log is expanded; null means "not yet initialized," so the very first real notification on page load doesn't bounce
@@ -283,12 +282,8 @@ export function initUI(state) {
   els = {
     hud: document.getElementById('hud'),
     money: document.getElementById('hud-money'),
-    coinCap: document.getElementById('hud-coin-cap'),
     scienceCap: document.getElementById('hud-science-cap'),
     cleanliness: document.getElementById('hud-cleanliness'),
-    waves: document.getElementById('hud-waves'),
-    goldPerMin: document.getElementById('hud-gold-per-min'),
-    waveCountdown: document.getElementById('hud-wave-countdown'),
     power: document.getElementById('hud-power'),
     powerText: document.getElementById('hud-power-text'),
     powerArrow: document.getElementById('hud-power-arrow'),
@@ -296,6 +291,8 @@ export function initUI(state) {
     alienCountdown: document.getElementById('alien-countdown'),
     alienCountdownWave: document.getElementById('alien-countdown-wave'),
     alienCountdownSeconds: document.getElementById('alien-countdown-seconds'),
+    statsPanel: document.getElementById('stats-panel'),
+    statsPanelList: document.getElementById('stats-panel-list'),
     bossHealthBarWrap: document.getElementById('boss-health-bar-wrap'),
     bossHealthBarFill: document.getElementById('boss-health-bar-fill'),
     bossVictoryOverlay: document.getElementById('boss-victory-overlay'),
@@ -637,7 +634,6 @@ export function initUI(state) {
   const clearFlashClass = (e) => e.target.classList.remove('flash-pickup', 'flash-spend');
   els.money.addEventListener('animationend', clearFlashClass);
   els.cleanliness.addEventListener('animationend', clearFlashClass);
-  els.coinCap.addEventListener('animationend', clearFlashClass);
 
   // No Buy button any more — picking a species arms it as the active
   // click-tool (state.ui.selectedTool = 'fish:<id>'), exactly like picking a
@@ -1697,7 +1693,7 @@ function buyLabUpgrade(state, id) {
   // Mother Alien Fish, per direct spec — triggers the whole 10-second
   // end-game reveal sequence. Closes the Lab itself right here (UI.js
   // already owns closeLabMenu), then hands off to main.js via a cross-module
-  // flag (same pattern state.ui.coinCapFlashPending already established)
+  // flag (same pattern state.ui.wasteTurretAmmoGainedPending already established)
   // rather than importing main.js's simulation-level updateBossSequence
   // directly from this file — main.js's own bossFightTriggerPending handler
   // is what actually starts the music crossfade/timeline now, per a later
@@ -1733,7 +1729,7 @@ function openLabPurchaseModal(state, id) {
     els.labPurchaseIcon.textContent = '❓';
     els.labPurchaseName.textContent = '???';
     els.labPurchaseCost.textContent = '???';
-    els.labPurchaseDesc.innerHTML = '<div>Something is stirring in the deep... you\'ll need to have unlocked everything Green Science research offers, plus Bubble Cap 50, before you can learn any more.</div>';
+    els.labPurchaseDesc.innerHTML = '<div>Something is stirring in the deep... you\'ll need to have unlocked everything Green Science research offers, plus Bubble Cap 100, before you can learn any more.</div>';
     els.labPurchaseStats.innerHTML = '';
     refreshLabPurchaseButton(state);
     els.labPurchaseOverlay.classList.remove('hidden');
@@ -2270,8 +2266,8 @@ function restartLevel(state) {
   // just the very first Start click — main.js's triggerSplash() is a local
   // function closing over DOM refs this file can't import directly without
   // a circular dependency, so this just arms the same cross-module pending-
-  // flag pattern coinCapFlashPending/wasteTurretAmmoGainedPending already
-  // use; render() reads and clears it the very next frame.
+  // flag pattern wasteTurretAmmoGainedPending/chestItemAbsorbedPending
+  // already use; render() reads and clears it the very next frame.
   state.ui.replaySplashPending = true;
 }
 
@@ -3001,22 +2997,6 @@ function describeFishMovementLevel(level) {
   return `Swim speed <span class="stat-current">+${speed} px/sec</span> → <span class="stat-next">+${nextSpeed} px/sec</span>.`;
 }
 
-// COIN_CAP_BY_LEVEL is an absolute-value table, not a base+increment formula
-// (the requested progression isn't an even step), so this indexes straight
-// in rather than computing a cap like describeFoodCapacityLevel above does.
-// (Science's own cap has no equivalent leveled-card description any more —
-// it moved into the branching Lab tree as individual nodes instead, each
-// with its own fixed `description` string, see SCIENCE_LAB_UPGRADES'
-// science_cap_2..5.)
-function describeCoinCapacityLevel(level) {
-  const cap = COIN_CAP_BY_LEVEL[level];
-  if (level >= COIN_CAP_UPGRADE_MAX_LEVEL) {
-    return `Up to ${cap} coins can sit in the tank uncollected at once.`;
-  }
-  const nextCap = COIN_CAP_BY_LEVEL[level + 1];
-  return `Up to <span class="stat-current">${cap} coins</span> → <span class="stat-next">${nextCap} coins</span> can sit in the tank uncollected at once.`;
-}
-
 // Builds a single card's DOM once and returns references to the parts that
 // change over time (level readout, description, buy button) — refreshTankPanel
 // mutates these in place every frame the panel's open, rather than rebuilding
@@ -3039,17 +3019,15 @@ function createUpgradeCard(name, icon) {
   return { card, levelEl, descEl, buyBtn };
 }
 
-let tankCards = null; // { foodQuality, fishMovement, coinCapacity, electricityGraph, goldPerMin, waveCountdown } — each { card, levelEl, descEl, buyBtn }. Splicing itself was never a purchase here — see Config.js's SCIENCE_LAB_UPGRADES' 3 flat hybrid nodes. Food Capacity retired entirely — see Config.js's FOOD_STATIONARY_TO_WASTE_MS.
+let tankCards = null; // { foodQuality, fishMovement, electricityGraph, waveCountdown } — each { card, levelEl, descEl, buyBtn }. Splicing itself was never a purchase here — see Config.js's SCIENCE_LAB_UPGRADES' 3 flat hybrid nodes. Food Capacity retired entirely — see Config.js's FOOD_STATIONARY_TO_WASTE_MS. Coin Capacity is gone entirely, per direct request ("remove the coin cap limit from the game completely, and the upgrades for it"). "Gold/min Stat" is gone too, per a later direct request ("give the player access to that info from the very beginning, so remove it from the tank upgrade as well") — Gold/min is now an unconditional line in the Base Stats panel (statsPanel below).
 
 function buildTankPanel(state) {
   els.tankUpgradeList.innerHTML = '';
   const foodQuality = createUpgradeCard('Food Quality', '🍽️');
   const fishMovement = createUpgradeCard('Fish Movement', '🏊');
-  const coinCapacity = createUpgradeCard('Coin Capacity', '🪙');
   const electricityGraph = createUpgradeCard('Electricity Graph', '📊');
-  const goldPerMin = createUpgradeCard('Gold/min Stat', '📈');
   const waveCountdown = createUpgradeCard('Wave Countdown', '⏱️');
-  tankCards = { foodQuality, fishMovement, coinCapacity, electricityGraph, goldPerMin, waveCountdown };
+  tankCards = { foodQuality, fishMovement, electricityGraph, waveCountdown };
 
   foodQuality.buyBtn.addEventListener('click', () => {
     const level = state.level.upgrades.foodQuality;
@@ -3060,6 +3038,13 @@ function buildTankPanel(state) {
     state.level.upgrades.foodQuality += 1;
     playUpgrade();
     refreshTankPanel(state);
+    // Tank-Point guided tutorial's second (final) step stops on this exact
+    // button — see TUTORIAL_FLOWS. Level 1 costs only 1 Tank Point (see
+    // Config.js's FOOD_QUALITY_UPGRADE_COSTS) specifically so a player who
+    // just earned their very first Tank Point can always afford this — per
+    // direct request, this replaces the old Coin Capacity node as both the
+    // panel's first card AND this tutorial's own target.
+    advanceTutorialFlow(state, 'tankpoint', 'foodqualitybuy');
   });
   fishMovement.buyBtn.addEventListener('click', () => {
     const level = state.level.upgrades.fishMovement;
@@ -3071,21 +3056,6 @@ function buildTankPanel(state) {
     playUpgrade();
     refreshTankPanel(state);
   });
-  coinCapacity.buyBtn.addEventListener('click', () => {
-    const level = state.level.upgrades.coinCapLevel;
-    if (level >= COIN_CAP_UPGRADE_MAX_LEVEL) return;
-    const cost = COIN_CAP_UPGRADE_COSTS[level];
-    if (state.level.tankPoints.available < cost) return;
-    state.level.tankPoints.available -= cost;
-    state.level.upgrades.coinCapLevel += 1;
-    playUpgrade();
-    refreshTankPanel(state);
-    // Tank-Point guided tutorial's second (final) step stops on this exact
-    // button — see TUTORIAL_FLOWS. Level 1 costs only 1 Tank Point (see
-    // Config.js's COIN_CAP_UPGRADE_COSTS) specifically so a player who just
-    // earned their very first Tank Point can always afford this.
-    advanceTutorialFlow(state, 'tankpoint', 'coincapbuy');
-  });
   // Two new one-time boolean unlocks, per direct request — same
   // buy-once/no-leveled-ladder shape the old Fish Merging card used before
   // it was removed (see refreshTankPanel below for the shared "Unlocked"/
@@ -3095,14 +3065,6 @@ function buildTankPanel(state) {
     if (state.level.tankPoints.available < ELECTRICITY_GRAPH_UNLOCK_COST) return;
     state.level.tankPoints.available -= ELECTRICITY_GRAPH_UNLOCK_COST;
     state.level.upgrades.electricityGraphUnlocked = true;
-    playUpgrade();
-    refreshTankPanel(state);
-  });
-  goldPerMin.buyBtn.addEventListener('click', () => {
-    if (state.level.upgrades.goldPerMinUnlocked) return;
-    if (state.level.tankPoints.available < GOLD_PER_MIN_UNLOCK_COST) return;
-    state.level.tankPoints.available -= GOLD_PER_MIN_UNLOCK_COST;
-    state.level.upgrades.goldPerMinUnlocked = true;
     playUpgrade();
     refreshTankPanel(state);
   });
@@ -3117,11 +3079,11 @@ function buildTankPanel(state) {
 
   // Fish Merging's own card is gone entirely — per direct request, merging
   // is always available now, no Tank Upgrade purchase needed (see
-  // Entities.js's isCombinableFish). Reordered per direct request: Fish
-  // Movement moved up to 2nd, Food Quality to 3rd (Defensive Capabilities'
-  // old placeholder card is gone too — that scope moved into the Science
-  // Lab's own turret nodes).
-  els.tankUpgradeList.append(coinCapacity.card, fishMovement.card, foodQuality.card, electricityGraph.card, goldPerMin.card, waveCountdown.card);
+  // Entities.js's isCombinableFish). Coin Capacity is gone entirely too —
+  // per direct request, Food Quality takes its place as the panel's FIRST
+  // card (also its own removed slot's old spot in the tutorial — see
+  // foodQuality's buyBtn listener above).
+  els.tankUpgradeList.append(foodQuality.card, fishMovement.card, electricityGraph.card, waveCountdown.card);
 
   refreshTankPanel(state);
 }
@@ -3131,7 +3093,7 @@ function buildTankPanel(state) {
 // state can all change while the player has it open.
 function refreshTankPanel(state) {
   if (!tankCards) return;
-  const { foodQuality, fishMovement, coinCapacity, electricityGraph, goldPerMin, waveCountdown } = tankCards;
+  const { foodQuality, fishMovement, electricityGraph, waveCountdown } = tankCards;
   const available = state.level.tankPoints.available;
 
   const fqLevel = state.level.upgrades.foodQuality;
@@ -3158,18 +3120,6 @@ function refreshTankPanel(state) {
     fishMovement.buyBtn.disabled = available < cost;
   }
 
-  const ccLevel = state.level.upgrades.coinCapLevel;
-  coinCapacity.levelEl.textContent = `Level ${ccLevel} / ${COIN_CAP_UPGRADE_MAX_LEVEL}`;
-  coinCapacity.descEl.innerHTML = describeCoinCapacityLevel(ccLevel);
-  if (ccLevel >= COIN_CAP_UPGRADE_MAX_LEVEL) {
-    coinCapacity.buyBtn.textContent = 'Maxed out';
-    coinCapacity.buyBtn.disabled = true;
-  } else {
-    const cost = COIN_CAP_UPGRADE_COSTS[ccLevel];
-    coinCapacity.buyBtn.textContent = `${cost} 🏆`;
-    coinCapacity.buyBtn.disabled = available < cost;
-  }
-
   // Two one-time boolean unlocks — same "Unlocked" / "Unlock — cost"
   // button-text pattern the old Fish Merging card used before it was
   // removed, per direct request.
@@ -3182,17 +3132,6 @@ function refreshTankPanel(state) {
   } else {
     electricityGraph.buyBtn.textContent = `Unlock — ${ELECTRICITY_GRAPH_UNLOCK_COST} 🏆`;
     electricityGraph.buyBtn.disabled = available < ELECTRICITY_GRAPH_UNLOCK_COST;
-  }
-
-  const gpmUnlocked = state.level.upgrades.goldPerMinUnlocked;
-  goldPerMin.levelEl.textContent = gpmUnlocked ? 'Unlocked' : 'Locked';
-  goldPerMin.descEl.textContent = "Adds a live gold/min stat to the HUD — your tank's current theoretical max earning rate.";
-  if (gpmUnlocked) {
-    goldPerMin.buyBtn.textContent = 'Unlocked ✓';
-    goldPerMin.buyBtn.disabled = true;
-  } else {
-    goldPerMin.buyBtn.textContent = `Unlock — ${GOLD_PER_MIN_UNLOCK_COST} 🏆`;
-    goldPerMin.buyBtn.disabled = available < GOLD_PER_MIN_UNLOCK_COST;
   }
 
   const wcUnlocked = state.level.upgrades.waveCountdownUnlocked;
@@ -3240,6 +3179,93 @@ function refreshTankPanelView(state) {
   if (state.ui.tankPanelView === 'upgrades') refreshTankPanel(state);
   else if (state.ui.tankPanelView === 'achievements') refreshAchievementPanel(state);
   else refreshCustomizationPanel(state);
+}
+
+// ---- Base Stats panel (Tab) ----
+// Per direct request ("a toggleable modal that you press tab to fly onto the
+// left side of the screen... shows all the stats about your base"). Rebuilt
+// fresh every time it's opened AND every frame it stays open (mirrors the
+// Tank panel's own refresh-while-open pattern, see updateHUD below) — it's
+// cheap for this game's typical entity/building counts, same reasoning
+// computeTheoreticalGoldPerMinute's own doc comment already gives.
+let statsPanelOpen = false;
+export function isStatsPanelOpen() { return statsPanelOpen; }
+export function openStatsPanel(state) {
+  statsPanelOpen = true;
+  els.statsPanel.classList.add('open');
+  refreshStatsPanel(state);
+}
+export function closeStatsPanel() {
+  statsPanelOpen = false;
+  els.statsPanel.classList.remove('open');
+}
+export function toggleStatsPanel(state) {
+  if (statsPanelOpen) closeStatsPanel();
+  else openStatsPanel(state);
+}
+
+// A plain "label -> value" row. `locked`, when true, renders as a single
+// dim italic line instead (no value column) — used for a stat that's real
+// but gated behind an upgrade/recipe the player hasn't bought yet, so the
+// panel still tells them it EXISTS without showing a live number for
+// something they can't act on yet.
+function statsPanelRowHtml(label, value) {
+  return `<div class="stats-panel-row"><span class="stats-panel-row-label">${label}</span><span class="stats-panel-row-value">${value}</span></div>`;
+}
+function statsPanelLockedHtml(text) {
+  return `<div class="stats-panel-locked">${text}</div>`;
+}
+
+function refreshStatsPanel(state) {
+  const rows = [];
+
+  // Gold/min (dollar value) and Coin/min (physical item count) are two
+  // separate stats, per direct clarification — a tank of many cheap fish and
+  // a tank of few expensive ones can earn the same Gold/min while needing
+  // very different Coin/min worth of Collector/Processor throughput to
+  // actually handle it all. Both unconditional now — no Tank Upgrade left to
+  // gate either (the old "Gold/min Stat" node is gone entirely, per direct
+  // request: "give the player access to that info from the very beginning").
+  rows.push(statsPanelRowHtml('Gold/min', `$${Math.round(computeTheoreticalGoldPerMinute(state))}`));
+  rows.push(statsPanelRowHtml('Coin/min', Math.round(computeTheoreticalCoinCountPerMinute(state))));
+  rows.push(statsPanelRowHtml('Food/min needed', Math.round(computeTheoreticalFoodNeededPerMinute(state))));
+  rows.push(statsPanelRowHtml('Waste/min', computeTheoreticalWastePerMinute(state).toFixed(1)));
+
+  const researcherUnlocked = state.meta.speciesUnlocked.some((id) => SPECIES[id].behavior.includes('RESEARCHER'));
+  if (researcherUnlocked) {
+    rows.push(statsPanelRowHtml('Science/min', computeTheoreticalSciencePerMinute(state).toFixed(1)));
+  }
+
+  if (state.meta.buildingsUnlocked.includes(TILE_MANUFACTURER)) {
+    rows.push(statsPanelRowHtml('Biomass/min', computeTheoreticalBiomassPerMinute(state).toFixed(1)));
+  }
+  if (state.meta.labUpgradesPurchased.includes('recipe_bio_feeder')) {
+    rows.push(statsPanelRowHtml('Mutagen Paste/min', computeTheoreticalManufacturerOutputPerMinute(state, 'mutagen_paste').toFixed(1)));
+  }
+  if (state.meta.labUpgradesPurchased.includes('recipe_alien_egg')) {
+    rows.push(statsPanelRowHtml('Alien Egg/min', computeTheoreticalManufacturerOutputPerMinute(state, 'alien_egg').toFixed(1)));
+  }
+  if (state.meta.labUpgradesPurchased.includes('green_science_tech')) {
+    rows.push(statsPanelRowHtml('Green Science/min', computeTheoreticalManufacturerOutputPerMinute(state, 'science_green').toFixed(1)));
+  }
+
+  // Alien Wave/timer — moved off the HUD entirely, per direct request, into
+  // here instead. Same "hidden until its own Tank Upgrade is bought" gate
+  // the old #hud-wave-countdown readout used, and the same "wave in
+  // progress"/boss-fight fallback text (see the old updateHUD block this
+  // replaced) rather than a stale/misleading numeric countdown.
+  if (state.level.upgrades.waveCountdownUnlocked) {
+    rows.push(statsPanelRowHtml('Alien Wave', state.level.alienWavesSpawned));
+    let timerText;
+    if (state.level.bossPhase) timerText = '—';
+    else if (state.level.alienWaveActive) timerText = 'in progress';
+    else timerText = `${Math.max(0, Math.ceil((state.level.alienNextWaveAtMs - state.level.elapsed) / 1000))}s`;
+    rows.push(statsPanelRowHtml('Next Wave', timerText));
+  } else {
+    rows.push(statsPanelLockedHtml('Alien Wave/Timer — buy Wave Countdown in Tank Upgrades'));
+  }
+
+  els.statsPanelList.innerHTML = rows.join('');
 }
 
 // ---- Achievements ----
@@ -3953,49 +3979,6 @@ export function updateHUD(state) {
   const cleanlinessText = `✨ ${Math.round(cleanliness)}%`;
   els.cleanliness.textContent = cleanlinessText;
   els.cleanliness.style.color = cleanlinessColor(cleanliness);
-  // Coin Cap — always shown (coins exist from the very start), unlike
-  // Science below. Counts EVERY coin currently in state.level.items, seabed
-  // city included — see Entities.js's countTankItemsByType.
-  const coinCapCount = countTankItemsByType(state, 'coin');
-  const coinCapMax = effectiveCoinCapacity(state);
-  els.coinCap.textContent = `🪙 ${coinCapCount}/${coinCapMax}`;
-  // Per direct request: pulse red continuously once the live count reaches
-  // CAP_WARNING_THRESHOLD_FRACTION (80%) of the active cap, and shake red
-  // (the same one-shot flash-spend every other HUD readout already uses)
-  // every time the count itself goes UP — both are "this is filling up,
-  // pay attention" cues, just one continuous and one per-event.
-  const coinCapWarningActive = coinCapCount / coinCapMax >= CAP_WARNING_THRESHOLD_FRACTION;
-  els.coinCap.classList.toggle('cap-warning', coinCapWarningActive);
-  // Per direct request, a genuinely FULL cap (not just the 80% warning)
-  // also bounces like a notification badge, on top of the pulse — see
-  // style.css's .cap-full for the visual, kept deliberately distinct from
-  // the flash-spend shake below (a different signal: a blocked production
-  // attempt, not "the cap is full" itself).
-  els.coinCap.classList.toggle('cap-full', coinCapCount >= coinCapMax);
-  // One-time notification the first time the coin count ever reaches this
-  // threshold, per direct request — "make it more obvious when the coin
-  // limit is reached." Same inline push-then-cap pattern every other
-  // notification writer in this codebase uses (see CLAUDE.md's Rolling
-  // Notification Log section) rather than a shared helper.
-  if (coinCapWarningActive && !state.level.tutorialFlags.firstCoinCapWarningShown) {
-    state.level.tutorialFlags.firstCoinCapWarningShown = true;
-    pushUiNotification(state, `Pick up those coins, you can only have ${coinCapMax} on screen at once`);
-  }
-  if (lastCoinCapCount !== null && coinCapCount > lastCoinCapCount) {
-    playFlash(els.coinCap, 'flash-spend');
-  }
-  lastCoinCapCount = coinCapCount;
-  // Set by Entities.js's updateFish the instant a coin-drop cycle is
-  // blocked by the cap — a plain flag read-and-cleared here rather than a
-  // direct function call, since Entities.js has no reason to import UI.js.
-  // A blocked drop never actually raises the count, so this can't double up
-  // with the increase-triggered shake above — it's the one case that still
-  // needs its own explicit trigger.
-  if (state.ui.coinCapFlashPending) {
-    state.ui.coinCapFlashPending = false;
-    playFlash(els.coinCap, 'flash-spend');
-  }
-
   // Same cross-module-flag pattern — see main.js's state.ui declaration for
   // why Grid.js can't call advanceTutorialFlow directly. Calling both is
   // safe: each is a no-op unless that exact flow/step is the one currently
@@ -4026,44 +4009,15 @@ export function updateHUD(state) {
     lastScienceCapCount = scienceCapCount;
   }
 
-  // Waves — hidden until the first alien wave has actually spawned, same
-  // "hidden until relevant" precedent as the Science/electricity readouts.
-  // Per direct request ("add a Waves counter for the alien waves").
-  const wavesSpawned = state.level.alienWavesSpawned;
-  els.waves.classList.toggle('hidden', wavesSpawned === 0);
-  if (wavesSpawned > 0) els.waves.textContent = `👽 Wave ${wavesSpawned}`;
-
-  // Theoretical gold/min — hidden until its own Tank Upgrade is bought, per
-  // direct request. Recomputed fresh every frame (cheap for this game's
-  // typical entity counts) so it updates instantly with fish growth/death,
-  // tank cleanliness, alien proximity, or a Mutagen Paste buff — exactly the
-  // 4 triggers named in the request — with no caching to keep in sync.
-  const goldPerMinUnlocked = state.level.upgrades.goldPerMinUnlocked;
-  els.goldPerMin.classList.toggle('hidden', !goldPerMinUnlocked);
-  if (goldPerMinUnlocked) {
-    els.goldPerMin.textContent = `📈 $${Math.round(computeTheoreticalGoldPerMinute(state))}/min`;
-  }
-
-  // Wave Countdown — hidden until its own Tank Upgrade is bought, per direct
-  // request, same "hidden until relevant" precedent as the gold/min readout
-  // above. While a wave is still in progress (its portals haven't all opened
-  // yet, or one of its aliens is still alive) the real countdown to the NEXT
-  // wave hasn't even started (see Systems.js's updateAlienWaves), so a plain
-  // numeric countdown would be stale/misleading — shown as "in progress"
-  // instead. Same during a boss fight, when normal wave spawning is
-  // suspended entirely and alienNextWaveAtMs is meaningless.
-  const waveCountdownUnlocked = state.level.upgrades.waveCountdownUnlocked;
-  els.waveCountdown.classList.toggle('hidden', !waveCountdownUnlocked);
-  if (waveCountdownUnlocked) {
-    if (state.level.bossPhase) {
-      els.waveCountdown.textContent = '👽 Next wave: —';
-    } else if (state.level.alienWaveActive) {
-      els.waveCountdown.textContent = '👽 Wave in progress';
-    } else {
-      const secsLeft = Math.max(0, Math.ceil((state.level.alienNextWaveAtMs - state.level.elapsed) / 1000));
-      els.waveCountdown.textContent = `👽 Next wave: ${secsLeft}s`;
-    }
-  }
+  // Alien Wave count/countdown, and the theoretical gold/min figure, are
+  // gone from the HUD entirely, per direct request ("remove the alien wave
+  // and wave timer from the HUD and add them in the informational tab";
+  // later, "add Gold/min into the informational tab and remove it from the
+  // HUD... give the player access to that info from the very beginning") —
+  // see statsPanel's own refresh below, which shows Alien Wave/timer (still
+  // gated on waveCountdownUnlocked, same Tank Upgrade that used to gate the
+  // old #hud-wave-countdown readout) and Gold/min (now unconditional, no
+  // Tank Upgrade left to gate it).
 
   // Electricity — only shown at all once Electric Eel is unlocked, per
   // direct request. Text only updates once a real second, matching the
@@ -4122,6 +4076,7 @@ export function updateHUD(state) {
   if (storageChestMenuOpen || storageChestMenuClosing) updateStorageChestModalPosition(state);
   if (labMenuOpen) refreshLabTree(state); // no position-tracking needed any more — it's a centered modal now, not anchored to the Mound's screen position
   if (!state.ui.tankPanelCollapsed) refreshTankPanelView(state);
+  if (statsPanelOpen) refreshStatsPanel(state);
 
   if (lastMoney !== null && money !== lastMoney) {
     playFlash(els.money, money > lastMoney ? 'flash-pickup' : 'flash-spend');
@@ -4528,7 +4483,7 @@ const TUTORIAL_FLOWS = {
   ],
   tankpoint: [
     { id: 'tankbtn', text: 'Open Tank Upgrades to spend your Tank Point!', tool: 'food', getCircle: () => tutorialCircleForDom(els.tankCollapseBtn) },
-    { id: 'coincapbuy', text: 'Buy your first Coin Capacity upgrade!', tool: 'food', getCircle: () => tutorialCircleForDom(tankCards?.coinCapacity.buyBtn) },
+    { id: 'foodqualitybuy', text: 'Buy your first Food Quality upgrade!', tool: 'food', getCircle: () => tutorialCircleForDom(tankCards?.foodQuality.buyBtn) },
   ],
   postalien: [
     { id: 'shop', text: 'Time to arm up — open the Shop!', tool: 'food', getCircle: () => tutorialCircleForDom(els.shopCollapseBtn) },

@@ -36,7 +36,6 @@ import {
   TILE_FAN_T3,
   TILE_FAN_T4,
   TILE_REFUND_FRACTION,
-  CLEANLINESS_MAX,
   SCIENCE_LAB_UPGRADES,
   SCIENCE_ITEM_RADIUS,
   SCIENCE_ITEM_COLOR_A,
@@ -208,6 +207,7 @@ import {
   toggleTimePause,
   toggleSpeedX2,
   toggleAltMode,
+  toggleStatsPanel,
   advanceTutorialFlow,
   closeSidePanels,
   tutorialScrollDirectionNeeded,
@@ -588,19 +588,12 @@ const state = {
     // (bubbles/seaweed) is deliberately NOT gated on this — see update()'s
     // own comment — so the blurred tank still reads as alive behind the menu.
     gameStarted: false,
-    // Set by Entities.js's updateFish the instant a fish's coin-drop cycle is
-    // blocked by the Coin Cap — a plain cross-module state flag rather than
-    // Entities.js importing UI.js directly (which would be circular, since
-    // UI.js already imports plenty from Entities.js), read and cleared by
-    // UI.js's updateHUD on its very next frame to trigger the "shake red"
-    // flash on the Coin HUD readout. See Config.js's COIN_CAP_BY_LEVEL.
-    coinCapFlashPending: false,
-    // Same cross-module-flag pattern as coinCapFlashPending above, set by
-    // Grid.js's updateBuildings the instant a Waste Turret's ammo actually
-    // goes up (Grid.js importing UI.js directly would be circular, since
-    // UI.js already imports from Grid.js) — read and cleared by UI.js's
-    // updateHUD to advance the 'postalien'/'wastedrag' guided-tutorial
-    // flows' "drag Waste into the Turret" step.
+    // Set by Grid.js's updateBuildings the instant a Waste Turret's ammo
+    // actually goes up (Grid.js importing UI.js directly would be circular,
+    // since UI.js already imports from Grid.js) — a plain cross-module state
+    // flag, read and cleared by UI.js's updateHUD to advance the
+    // 'postalien'/'wastedrag' guided-tutorial flows' "drag Waste into the
+    // Turret" step.
     wasteTurretAmmoGainedPending: false,
     // Same cross-module-flag pattern as wasteTurretAmmoGainedPending above,
     // set by Grid.js's Storage Chest intake scan — read and cleared by
@@ -636,11 +629,11 @@ const state = {
     // actually count down while the menu that triggered it stays open.
     // Systems.js's updateAutosave writes this field directly (a plain
     // state.ui write, not rendering — same cross-module-flag convention
-    // coinCapFlashPending/wasteTurretAmmoGainedPending already use) since
+    // wasteTurretAmmoGainedPending/chestItemAbsorbedPending already use) since
     // Systems.js itself is forbidden from touching the DOM; UI.js's
     // saveGameFromPause (already UI.js's own domain) writes it directly too.
     toastText: null,
-    // Same cross-module-flag pattern as coinCapFlashPending/
+    // Same cross-module-flag pattern as
     // wasteTurretAmmoGainedPending above — set by UI.js's restartLevel
     // (the pause menu's Restart button) the instant it calls loadLevel, per
     // direct request ("make the splash screen animation happen again").
@@ -2160,6 +2153,13 @@ input.keydownHandlers.push((e) => {
   // preventDefault stops the browser's own Alt behavior (focusing/opening
   // its menu bar) from firing alongside this.
   if (e.code === 'AltLeft' || e.code === 'AltRight') { e.preventDefault(); toggleAltMode(state); return; }
+  // Base Stats panel, per direct request — same "always reachable" reasoning
+  // as the debug overlay/Alt-mode above (a pure read-only info view, useful
+  // in any state including paused, and there'd be no way to close it again
+  // if a tutorial/pause menu could swallow the toggle while it's open).
+  // preventDefault stops the browser's own Tab focus-cycling from also
+  // firing alongside this.
+  if (e.code === 'Tab') { e.preventDefault(); toggleStatsPanel(state); return; }
   // Escape can always skip an active guided tutorial — per direct request
   // ("make sure escape can actually skip any tutorial"), checked here,
   // ahead of the general tutorial-flow hotkey block below, so it's the one
@@ -2766,7 +2766,7 @@ function update(dtMs) {
   if (!state.ui.gameStarted) return; // frozen until the player clicks Start on the first-launch start screen — render() still runs (a static frame), same "frozen but visible" pattern the pause menu already uses
   updateBattleMusic(state);
   // Cross-module flag (UI.js's buyLabUpgrade sets it, same pattern
-  // state.ui.coinCapFlashPending already established) — the Mother Alien
+  // state.ui.wasteTurretAmmoGainedPending already established) — the Mother Alien
   // Fish purchase's own gameplay-state transition (starting the boss
   // sequence) belongs here in main.js, not in UI.js, per this file's own
   // module-boundary rule ("no gameplay logic" in UI.js).
@@ -2974,19 +2974,17 @@ function update(dtMs) {
 
 // The open-water background — a vertical gradient (lighter at the top,
 // deeper/darker toward the bottom) instead of a single flat fill, and
-// overall lightened from the original flat #1c5f8a, per direct request.
-// Also responds live to state.level.cleanliness: at 100% it's the full
-// lightened gradient; toward 0% both stops darken by DIRTY_DARKEN_FACTOR —
-// "not a ton, but enough to notice." Recomputed every frame (cleanliness
-// and canvas size can both change) rather than cached, same as every other
-// per-frame canvas style in this render pass.
+// overall lightened from the original flat #1c5f8a, per direct request. Used
+// to also darken live with state.level.cleanliness; removed per a later
+// direct request ("remove the effect where the tank background gets darker
+// as the tank gets dirtier — there's enough physical objects to act as the
+// dirtiness now") — the gradient is a fixed pair of colors now, no longer a
+// function of cleanliness at all.
 const WATER_TOP_CLEAN = { r: 58, g: 138, b: 184 };
 const WATER_BOTTOM_CLEAN = { r: 32, g: 100, b: 145 };
-const DIRTY_DARKEN_FACTOR = 0.82; // at 0% cleanliness, colors scale down to 82% of their clean brightness
-function waterBackgroundGradient(ctx, canvasHeight, cleanliness) {
-  const darken = DIRTY_DARKEN_FACTOR + (1 - DIRTY_DARKEN_FACTOR) * (cleanliness / CLEANLINESS_MAX);
-  const top = `rgb(${Math.round(WATER_TOP_CLEAN.r * darken)}, ${Math.round(WATER_TOP_CLEAN.g * darken)}, ${Math.round(WATER_TOP_CLEAN.b * darken)})`;
-  const bottom = `rgb(${Math.round(WATER_BOTTOM_CLEAN.r * darken)}, ${Math.round(WATER_BOTTOM_CLEAN.g * darken)}, ${Math.round(WATER_BOTTOM_CLEAN.b * darken)})`;
+function waterBackgroundGradient(ctx, canvasHeight) {
+  const top = `rgb(${WATER_TOP_CLEAN.r}, ${WATER_TOP_CLEAN.g}, ${WATER_TOP_CLEAN.b})`;
+  const bottom = `rgb(${WATER_BOTTOM_CLEAN.r}, ${WATER_BOTTOM_CLEAN.g}, ${WATER_BOTTOM_CLEAN.b})`;
   const gradient = ctx.createLinearGradient(0, 0, 0, canvasHeight);
   gradient.addColorStop(0, top);
   gradient.addColorStop(1, bottom);
@@ -3384,7 +3382,7 @@ function render() {
     lastFpsTime = now;
   }
 
-  ctx.fillStyle = waterBackgroundGradient(ctx, canvas.height, state.level.cleanliness);
+  ctx.fillStyle = waterBackgroundGradient(ctx, canvas.height);
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   // Ambience (bubbles/seaweed) renders immediately after the plain
@@ -4309,7 +4307,7 @@ function render() {
   // is what actually swaps the legend text). Computed here into state.ui
   // rather than drawn on canvas — UI.js's updateHUD reads it to drive the
   // bottom-left legend, the same cross-module-flag pattern this file
-  // already uses for coinCapFlashPending/wasteTurretAmmoGainedPending,
+  // already uses for wasteTurretAmmoGainedPending/chestItemAbsorbedPending,
   // since UI.js can't be imported back into here without a circular
   // dependency.
   if (movingBuilding != null || (isFanAimingActive() && fanAimingMoveData != null)) {

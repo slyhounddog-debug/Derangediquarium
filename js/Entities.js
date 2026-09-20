@@ -100,7 +100,6 @@ import {
   UTILITY_SPECIES_IDS,
   SCIENCE_ITEM_RADIUS,
   SCIENCE_PROGRESS_TICKS,
-  COIN_CAP_BY_LEVEL,
   SCIENCE_CAP_BY_LEVEL,
   ALIEN_AWARENESS_RADIUS,
   ALIEN_FOOD_AWARENESS_RADIUS,
@@ -154,6 +153,10 @@ import {
   CLEANLINESS_STRESS_THRESHOLD,
   CLEANLINESS_STRESS_MAX_HUNGER_MULTIPLIER,
   CLEANLINESS_STRESS_MAX_INTERVAL_MULTIPLIER,
+  REFINERY_STATS,
+  MANUFACTURER_ITEM_PROCESS_MS,
+  MANUFACTURER_RECIPES,
+  ALIEN_DNA_REFINERY_TIME_MULTIPLIER,
   ELECTRIC_SUCKER_FOOD_INTERVAL_MS,
   SCIENCE_ALIEN_DNA_INTERVAL_MS,
   ALIEN_EGG_RADIUS,
@@ -271,6 +274,146 @@ export function computeTheoreticalGoldPerMinute(state) {
       : stageDef.dropValue * Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, (fish.starTier || 1) - 1)) * mutagenMultiplier;
     const effectiveDropInterval = stageDef.dropInterval * dirtyIntervalMultiplier;
     total += (dropValue / effectiveDropInterval) * 60000;
+  }
+  return total;
+}
+
+// A SEPARATE stat from computeTheoreticalGoldPerMinute above, per direct
+// clarification ("Gold/min and Coin/min are a separate stat... the Coin/min
+// is for the physical coin objects that will be spawned by fish every
+// minute, so the player knows how many coins need to be processed") — this
+// counts DROP EVENTS (one physical Coin item each), not their dollar value,
+// so a tank of many low-value fish and a tank of few high-value fish can
+// show very different Coin/min even at the same Gold/min. Same fish filter/
+// blocking rules as the gold version (alien-proximity/dying excluded,
+// cleanliness stretches the interval), just without the dropValue term.
+export function computeTheoreticalCoinCountPerMinute(state) {
+  const stress = cleanlinessStressFactor(state);
+  const dirtyIntervalMultiplier = 1 + stress * (CLEANLINESS_STRESS_MAX_INTERVAL_MULTIPLIER - 1);
+  let total = 0;
+  for (const fish of state.level.entities) {
+    if (fish.type !== 'fish' || fish.alienNearby || fish.dying) continue;
+    const def = SPECIES[fish.speciesId];
+    if (!def.behavior.includes('FEEDER')) continue;
+    const stageDef = def.growthStages[fish.stage];
+    const effectiveDropInterval = stageDef.dropInterval * dirtyIntervalMultiplier;
+    total += 60000 / effectiveDropInterval;
+  }
+  return total;
+}
+
+// ---- Base Stats panel (UI.js's statsPanel, toggled with Tab) — per direct
+// request, "shows all the stats about your base." Every function below is
+// the same "theoretical, assumes nothing's ever blocked/idle" framing
+// computeTheoreticalGoldPerMinute above already established — a live
+// snapshot of current capacity, not a tracked historical average.
+
+// Same shape as computeTheoreticalGoldPerMinute, just for a RESEARCHER
+// species' 'science' drop instead of a FEEDER's coin — Science Octopus/Xeno
+// Octopus are the only current RESEARCHER-behavior species, but this reads
+// the behavior tag generically rather than hardcoding either id.
+export function computeTheoreticalSciencePerMinute(state) {
+  const stress = cleanlinessStressFactor(state);
+  const dirtyIntervalMultiplier = 1 + stress * (CLEANLINESS_STRESS_MAX_INTERVAL_MULTIPLIER - 1);
+  let total = 0;
+  for (const fish of state.level.entities) {
+    if (fish.type !== 'fish' || fish.alienNearby || fish.dying) continue;
+    const def = SPECIES[fish.speciesId];
+    if (!def.behavior.includes('RESEARCHER')) continue;
+    const stageDef = def.growthStages[fish.stage];
+    const effectiveDropInterval = stageDef.dropInterval * dirtyIntervalMultiplier;
+    total += (stageDef.dropValue / effectiveDropInterval) * 60000;
+  }
+  return total;
+}
+
+// How much Food the tank's fish collectively need per minute just to hold
+// hunger steady — each fish's own hungerRate (per real second, already
+// scaled by star tier/cleanliness stress/Suckerfish-near-alien halving, the
+// same formula updateFish's own hunger-accumulation line uses) converted to
+// hunger-per-minute, then divided by however much one Food pellet currently
+// relieves at the player's purchased Food Quality level. Scavengers eat
+// Waste, not Food, so they're excluded — same FEEDER/RESEARCHER-style
+// species filter as the other functions here, just inverted (everyone
+// EXCEPT a pure Scavenger has a real hunger clock ticking).
+export function computeTheoreticalFoodNeededPerMinute(state) {
+  const stress = cleanlinessStressFactor(state);
+  const relief = FOOD_HUNGER_RELIEF_BY_LEVEL[state.level.upgrades.foodQuality];
+  let totalHungerPerMin = 0;
+  for (const fish of state.level.entities) {
+    if (fish.type !== 'fish' || fish.dying) continue;
+    const def = SPECIES[fish.speciesId];
+    if (def.behavior.includes('SCAVENGER')) continue; // targets Waste, never Food, regardless of any other tag it also carries
+    const alienHungerMultiplier = (fish.speciesId === 'suckerfish' && fish.alienNearby) ? 0.5 : 1;
+    const hungerRate = def.hungerRate * Math.pow(FISH_STAR_TIER_HUNGER_MULTIPLIER, (fish.starTier || 1) - 1)
+      * (1 + stress * (CLEANLINESS_STRESS_MAX_HUNGER_MULTIPLIER - 1)) * alienHungerMultiplier;
+    totalHungerPerMin += hungerRate * 60;
+  }
+  return totalHungerPerMin / relief;
+}
+
+// How much Waste the tank's fish collectively produce per minute via the
+// passive "fish poop" timer (Config.js's WASTE_POOP_INTERVAL_MS, scaled per-
+// species) — independent of the Collector-byproduct path, same as
+// updateFish's own poop branch. Scavengers don't poop.
+export function computeTheoreticalWastePerMinute(state) {
+  let total = 0;
+  for (const fish of state.level.entities) {
+    if (fish.type !== 'fish' || fish.dying) continue;
+    const def = SPECIES[fish.speciesId];
+    if (def.behavior.includes('SCAVENGER')) continue;
+    const interval = WASTE_POOP_INTERVAL_MS * (def.wastePoopIntervalMultiplier || 1);
+    total += 60000 / interval;
+  }
+  return total;
+}
+
+// A Manufacturer recipe's theoretical items/min, assuming it's fed
+// continuously — its total cycle time is the sum of its 2 ingredients' own
+// MANUFACTURER_ITEM_PROCESS_MS durations (see that constant's own comment),
+// processed one at a time in sequence.
+function manufacturerRecipeRatePerMin(recipe) {
+  const cycleMs = recipe.inputs.reduce((sum, ingredient) => sum + MANUFACTURER_ITEM_PROCESS_MS[ingredient], 0);
+  return 60000 / cycleMs;
+}
+
+// Sums the theoretical items/min of every currently-placed Manufacturer
+// locked into a recipe with this exact output type — e.g. 3 Manufacturers
+// all running Green Science each contribute their own rate, added together.
+// Returns 0 (not hidden) if the recipe's known but nothing's currently
+// producing it — the caller decides whether to show the line at all, gated
+// on the recipe's own labNodeId having been researched (see UI.js's
+// statsPanel), separately from whether the rate is currently nonzero.
+export function computeTheoreticalManufacturerOutputPerMinute(state, outputType) {
+  const recipe = MANUFACTURER_RECIPE_LIST_BY_OUTPUT[outputType];
+  if (!recipe) return 0;
+  let total = 0;
+  for (const key in state.level.buildingData) {
+    const data = state.level.buildingData[key];
+    if (data.type === TILE_MANUFACTURER && data.recipeId === recipe.id) {
+      total += manufacturerRecipeRatePerMin(recipe);
+    }
+  }
+  return total;
+}
+const MANUFACTURER_RECIPE_LIST_BY_OUTPUT = Object.fromEntries(
+  Object.values(MANUFACTURER_RECIPES).map((recipe) => [recipe.output, recipe]),
+);
+
+// Biomass only ever comes from a Refinery locked into its Bio-Sludge (Alien
+// DNA) -> Biomass recipe (data.lockedRecipe === 'dna_to_biomass') — see
+// Grid.js's updateBuildings for that same recipe id. Its own per-instance
+// rate depends on which Refinery tier it is (REFINERY_STATS[type].foodProcessMs,
+// stretched by ALIEN_DNA_REFINERY_TIME_MULTIPLIER for this specific recipe —
+// same formula Grid.js's own processing-progress readout uses).
+export function computeTheoreticalBiomassPerMinute(state) {
+  let total = 0;
+  for (const key in state.level.buildingData) {
+    const data = state.level.buildingData[key];
+    const stats = REFINERY_STATS[data.type];
+    if (stats && data.lockedRecipe === 'dna_to_biomass') {
+      total += 60000 / (stats.foodProcessMs * ALIEN_DNA_REFINERY_TIME_MULTIPLIER);
+    }
   }
   return total;
 }
@@ -903,7 +1046,7 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
     bubbleTimerMs: FISH_BUBBLE_INTERVAL_MIN_MS + Math.random() * (FISH_BUBBLE_INTERVAL_MAX_MS - FISH_BUBBLE_INTERVAL_MIN_MS),
     pendingSecondBubbleMs: 0,
     alienNearby: false, // recomputed every tick in updateFish — true while a living alien is within ALIEN_INCOME_BLOCK_RADIUS, driving both the coin-production block and the continuous gray tint (main.js's render)
-    capBlockedTintRemainingMs: 0, // counts down from FISH_BLOCKED_TINT_MS whenever a coin drop is blocked by the Coin Cap — the OTHER (timed) source of the gray tint, see triggerProductionBlocked
+    capBlockedTintRemainingMs: 0, // counts down from FISH_BLOCKED_TINT_MS whenever a science drop is blocked by the Bubble Cap — the OTHER (timed) source of the gray tint, see triggerProductionBlocked
     mutagenBuffActive: false, // Adult-only Mutagen Paste buff — see updateFish's eat branch; cleared once hunger crosses back into HUNGER_CRITICAL_THRESHOLD
     magnetOn: false, // Buffer Fish only — toggled by clicking the fish (main.js's click handler); pulls nearby Waste toward it while true, see computeBufferFishMagnetForce
     linkedBuildingKey: null, // Catalyst Fish only — the "row,col" buildingData key it's currently linked to, or null; set by main.js's catalyst link-click flow, read by Grid.js's getCatalystSpeedMultiplier
@@ -1005,14 +1148,6 @@ function canSpawnMoreBiomass(state) {
   return countTankItemsByType(state, 'biomass') < BIOMASS_MAX_ON_SCREEN;
 }
 
-// Coin Cap Tank Upgrade — state.level.upgrades.coinCapLevel indexes straight
-// into COIN_CAP_BY_LEVEL (an array of absolute values, not a base+increment
-// formula, since the requested progression — 10/25/50/100/250/500 — isn't an
-// even arithmetic step).
-export function effectiveCoinCapacity(state) {
-  return COIN_CAP_BY_LEVEL[state.level.upgrades.coinCapLevel];
-}
-
 // Science Cap — bought in the Science Lab instead of as a Tank Upgrade (see
 // UI.js's Lab modal), but reads the exact same way.
 export function effectiveScienceCapacity(state) {
@@ -1028,31 +1163,24 @@ export function countScienceCapacityUsed(state) {
 }
 
 // Called the instant a fish's drop cycle completes but its resource is
-// already at its active cap. `resource` is only ever 'coin' or 'science';
-// only the coin case also arms the HUD's "shake red" cue
-// (state.ui.coinCapFlashPending, read and cleared by UI.js's updateHUD next
-// frame — Entities.js has no reason to import UI.js just for this one flag,
-// so it's a plain state write, same as every other system-to-system signal
-// in this codebase that isn't a direct function call) — per direct request,
-// only the Coin HUD element shakes on a blocked coin, Science has no
-// equivalent HUD-shake ask. Both resources now share the same "on fire,
-// disintegrating" particle effect — per direct request ("instead of the
-// bubble icon that shows up when the fish can't spawn coins, make it look
-// like a coin on fire that disintegrates"), later extended to Science too
-// ("use a science icon and do that animation when the science bubble cap is
-// reached") — pushed into state.level.productionBlockedEffects (tagged with
-// `resource` so main.js's render knows which icon to burn) and rendered/aged
-// the same "detached particle, independent of the fish" way
-// alienDeathEffects already is (see Config.js's
-// PRODUCTION_BLOCKED_EFFECT_DURATION_MS, updateProductionBlockedEffects
-// below, and main.js's render). The old muted "🫧" floatingText bubble
-// Science used before this is gone entirely.
+// already at its active cap. `resource` is only ever 'science' now — the
+// Coin Cap this used to also guard is gone entirely (see the FEEDER drop
+// branch above), removed along with `state.ui.coinCapFlashPending`'s only
+// setter, per direct request. Still the same "on fire, disintegrating"
+// particle effect — per direct request ("instead of the bubble icon that
+// shows up when the fish can't spawn coins, make it look like a coin on fire
+// that disintegrates"), later extended to Science too ("use a science icon
+// and do that animation when the science bubble cap is reached") — pushed
+// into state.level.productionBlockedEffects (tagged with `resource` so
+// main.js's render knows which icon to burn) and rendered/aged the same
+// "detached particle, independent of the fish" way alienDeathEffects already
+// is (see Config.js's PRODUCTION_BLOCKED_EFFECT_DURATION_MS,
+// updateProductionBlockedEffects below, and main.js's render).
 function triggerProductionBlocked(state, fish, stageDef, resource) {
   state.level.productionBlockedEffects.push({
     x: fish.x, y: fish.y - FISH_BASE_SIZE * stageDef.scale * 0.6, age: 0, resource,
   });
   playProductionBlocked();
-  if (resource === 'coin') state.ui.coinCapFlashPending = true;
   // Per direct request, a fish also flashes gray for exactly
   // FISH_BLOCKED_TINT_MS the moment a drop is blocked by its cap — the same
   // visual cue an alien blocking production continuously uses (see
@@ -2764,15 +2892,13 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
         : Math.ceil(stageDef.dropValue * Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, (fish.starTier || 1) - 1))) * mutagenMultiplier;
       // Skip entirely for a $0 drop (any not-yet-behavior-wired species) — a
       // worthless coin still lands on a Processor like any other, which is
-      // actively counterproductive busywork for no payout. A genuine drop is
-      // then gated by the Coin Cap — at the cap, nothing spawns and the fish
-      // shows the blocked feedback instead.
+      // actively counterproductive busywork for no payout. No Coin Cap gate
+      // any more — per direct request ("remove the coin cap limit from the
+      // game completely"), a coin drop can never be blocked; only the
+      // Science ("Bubble") Cap still gates a resource this way, further
+      // down in this same function.
       if (dropValue > 0) {
-        if (countTankItemsByType(state, 'coin') >= effectiveCoinCapacity(state)) {
-          triggerProductionBlocked(state, fish, stageDef, 'coin');
-        } else {
-          state.level.items.push(createCoin(fish.x, fish.y, dropValue));
-        }
+        state.level.items.push(createCoin(fish.x, fish.y, dropValue));
       }
     }
   }

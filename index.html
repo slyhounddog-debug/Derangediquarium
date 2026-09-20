@@ -75,12 +75,8 @@
 
 <div id="hud">
   <div id="hud-money" class="sheen-target" title="Money — spend it on fish and food in the shop">💰 $0</div>
-  <div id="hud-coin-cap" class="sheen-target" title="Coins currently sitting in the tank, uncollected — capped by your Coin Capacity Tank Upgrade">🪙 0/10</div>
   <div id="hud-science-cap" class="sheen-target hidden" title="Science Bubbles currently sitting in the tank, uncollected — capped by the Science Lab's Bubble Capacity upgrade">🔬 0/5</div>
   <div id="hud-cleanliness" class="sheen-target" title="Tank cleanliness — a dirty tank stresses your fish: they get hungrier faster and produce money less often">✨ 100%</div>
-  <div id="hud-gold-per-min" class="sheen-target hidden" title="Theoretical max gold/min every fish in the tank could currently earn — theoretical because it ignores the Coin Cap. Unlocked in Tank Upgrades.">📈 $0/min</div>
-  <div id="hud-waves" class="sheen-target hidden" title="Alien waves survived so far">👽 Wave 0</div>
-  <div id="hud-wave-countdown" class="sheen-target hidden" title="Countdown to the next alien wave. Unlocked in Tank Upgrades.">👽 Next wave: --</div>
   <div id="hud-power-wrap">
     <button id="hud-power" class="sheen-target hidden" title="Electricity — current draw / accumulated capacity. Click for a rolling graph.">
       <span id="hud-power-text">⚡ 0/0 mw</span>
@@ -105,6 +101,20 @@
     <button id="time-speed-btn" class="minimap-ctrl-btn sheen-target" title="2x Speed (X)">⏩</button>
     <button id="pause-menu-btn" class="minimap-ctrl-btn sheen-target" title="Menu (Esc)">☰</button>
   </div>
+</div>
+
+<!-- Base Stats panel — per direct request ("a toggleable modal that you
+     press tab to fly onto the left side of the screen... shows all the
+     stats about your base"). Fixed to the left edge, slid off-screen via a
+     transform when closed (UI.js's toggleStatsPanel/main.js's Tab handler)
+     rather than the shop/tank panels' own scale-from-an-anchor-button
+     treatment, since this one has no anchor button to grow from — it's a
+     pure hotkey toggle. Content is rebuilt fresh every time it opens
+     (refreshStatsPanel) rather than kept live every frame like the HUD,
+     since it's only ever on screen while explicitly open. -->
+<div id="stats-panel">
+  <div id="stats-panel-title">Base Stats</div>
+  <div id="stats-panel-list"></div>
 </div>
 
 <div id="tutorial-overlay" class="hidden"></div>
@@ -175,6 +185,7 @@
   <div id="hotkey-legend-f" class="hidden">F: Add Favorite</div>
   <div id="hotkey-legend-undo" class="hidden">Ctrl+Z: Undo</div>
   <div id="hotkey-legend-alt">Alt: Turn on Alt-mode</div>
+  <div id="hotkey-legend-tab">Tab: Base Stats</div>
 </div>
 
 <div id="alien-countdown" class="hidden">👽 Wave <span id="alien-countdown-wave">1</span> incoming: <span id="alien-countdown-seconds">10</span>s</div>

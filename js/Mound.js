@@ -58,7 +58,7 @@ export function centerCameraOnMound(camera) {
 // "Tier 1.75" step for it — this step exists purely for the Chest now, at
 // the same MOUND_TEASE_COST ($75, cut from $150 per direct request, back
 // when it really was a joke).
-const MOUND_TEASE_MESSAGE = `You throw $${MOUND_TEASE_COST} at a suspicious lump of dirt. It splits open — a sturdy Storage Chest tumbles out, somehow undamaged.`;
+const MOUND_TEASE_MESSAGE = "Now there's a way to clean up your tank! Check your Chest! (In the Shop)";
 
 // Per direct request, the Mound is a short on-ramp now, not the game's
 // whole arc — it only ever grants Electric Eel/Collector/Electric Refinery
