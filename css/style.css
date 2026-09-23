@@ -352,7 +352,10 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
    partner, or a single "No available fish to merge." line) — same stacked,
    variable-height treatment as #building-move-legend above rather than the
    fixed pill shape #build-legend uses. */
-#fish-merge-legend { display: flex; flex-direction: column; gap: 3px; text-align: center; border-radius: 20px; }
+#fish-merge-legend { display: flex; flex-direction: column; gap: 5px; text-align: center; border-radius: 20px; }
+.fish-merge-icon-row { display: flex; align-items: center; justify-content: center; gap: 6px; }
+.fish-merge-icon { width: 22px; height: 22px; flex: none; }
+.fish-merge-arrow { font-size: 12px; opacity: 0.7; }
 
 /* Persistent, always-on hotkey reminder — per direct request, small white
    text in the literal bottom-left corner of the viewport (distinct from

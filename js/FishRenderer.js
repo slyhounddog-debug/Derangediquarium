@@ -590,10 +590,15 @@ function drawSuckerfishBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGr
 // perpendicular to the swim direction by a sine wave whose phase shifts
 // along the body — the same underlying idea Ambience.js's seaweed sway
 // uses, just applied along a horizontal body instead of a vertical stem.
-// widthScale/bumps are both purely for the Feeder Fish/Battery fish hybrid
-// bodies below (drawHybridBody) — a plain Electric Eel always calls this with
-// the defaults (1, false), identical to its old behavior.
-function drawEelBody(ctx, x, y, size, facing, tailPhase, isFullyGrown, color, eyeDirection, widthScale = 1, bumps = false) {
+// widthScale/bumps/bulge are all purely for the Feeder Fish/Battery fish
+// hybrid bodies below (drawHybridBody) — a plain Electric Eel always calls
+// this with the defaults (1, false, 0), identical to its old behavior.
+// bulge adds a Blimpfish-like round "belly" — a sine bump (0 at both ends,
+// peaking mid-body) layered on top of the ordinary linear tail-to-head
+// taper, so the body reads as genuinely round in the middle while still
+// tapering thin at the tail and narrower at the head, unlike widthScale
+// alone (a flat multiplier, which just made a uniformly fatter eel).
+function drawEelBody(ctx, x, y, size, facing, tailPhase, isFullyGrown, color, eyeDirection, widthScale = 1, bumps = false, bulge = 0) {
   const length = size * 1.5;
   const segments = 7;
   const points = [];
@@ -601,7 +606,8 @@ function drawEelBody(ctx, x, y, size, facing, tailPhase, isFullyGrown, color, ey
     const t = i / segments; // 0 = tail end, 1 = head end
     const px = x - facing * length * (0.5 - t);
     const wave = Math.sin(tailPhase - t * 3.2) * size * 0.22 * (1 - t * 0.3); // undulation eases off toward the head
-    points.push({ x: px, y: y + wave, width: size * (0.1 + t * 0.16) * widthScale }); // tapers thin at the tail, wider at the head
+    const bulgeWidth = bulge * Math.sin(t * Math.PI) * size;
+    points.push({ x: px, y: y + wave, width: size * (0.1 + t * 0.16) * widthScale + bulgeWidth }); // tapers thin at the tail, wider at the head, rounder mid-body
   }
   ctx.fillStyle = color;
   ctx.beginPath();
@@ -720,16 +726,20 @@ function drawHybridBody(ctx, x, y, size, facing, tailPhase, stage, color, eyeDir
   const bodyShape = shapeParent === 'dartfin' ? 'slim' : shapeParent === 'blimpfish' ? 'round' : 'normal';
 
   if (hasEel) {
-    // Battery fish (Electric Eel x Blimpfish) reads as a plumper eel — its
-    // "blimp" half shows as extra girth on the same undulating silhouette
-    // rather than a second, competing body shape.
-    const widthScale = bodyShape === 'round' ? 1.4 : 1;
-    drawEelBody(ctx, x, y, size, facing, tailPhase, true, color, eyeDirection, widthScale, hasSuckerfish);
+    // Battery fish (Electric Eel x Blimpfish) reads as a genuinely round,
+    // Blimpfish-plump eel — per direct follow-up request ("more round like
+    // the blimp fish but still move like the electric eel"), a real mid-body
+    // bulge (see drawEelBody's own `bulge` param) layered on top of a milder
+    // flat widthScale, rather than the earlier version's uniformly-fatter
+    // (but still eel-tapered, not actually round) silhouette.
+    const widthScale = bodyShape === 'round' ? 1.15 : 1;
+    const bulge = bodyShape === 'round' ? 0.32 : 0;
+    drawEelBody(ctx, x, y, size, facing, tailPhase, true, color, eyeDirection, widthScale, hasSuckerfish, bulge);
     const length = size * 1.5;
     const t = 1; // head end, mirrors drawEelBody's own point math
     const headPx = x - facing * length * (0.5 - t);
     const headWave = Math.sin(tailPhase - t * 3.2) * size * 0.22 * (1 - t * 0.3);
-    const headWidth = size * (0.1 + t * 0.16) * widthScale;
+    const headWidth = size * (0.1 + t * 0.16) * widthScale; // bulge is 0 at t=1 (the head), so it deliberately doesn't factor in here
     return {
       headX: headPx + facing * headWidth * 0.1,
       headY: y + headWave - headWidth * 1.4,

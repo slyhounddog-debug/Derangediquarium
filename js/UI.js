@@ -1096,7 +1096,11 @@ export function refreshFishInfoMenu(state) {
   const mergeLines = describeFishMergeOptions(state, fish);
   els.fishInfoMergeTitle.classList.toggle('hidden', mergeLines == null);
   els.fishInfoMergeLines.classList.toggle('hidden', mergeLines == null);
-  if (mergeLines != null) els.fishInfoMergeLines.innerHTML = mergeLines.map((line) => `<div>${line}</div>`).join('');
+  // The modal keeps the full text sentence, per direct request ("Keep the
+  // fish info modal text for the available merges as it is now") — only the
+  // bottom-left hover legend (refreshFishMergeLegendIcons below) switched to
+  // icons.
+  if (mergeLines != null) els.fishInfoMergeLines.innerHTML = mergeLines.map((entry) => `<div>${entry.text}</div>`).join('');
 
   updateFishInfoMenuPosition(state);
 }
@@ -4447,9 +4451,7 @@ export function updateHUD(state) {
   // active (see its own comment), so no extra mutual-exclusivity check is
   // needed here beyond just reading it.
   const fishMergeLegendVisible = !tutorialActive && state.ui.fishMergeHoverLines != null;
-  if (fishMergeLegendVisible) {
-    els.fishMergeLegend.innerHTML = state.ui.fishMergeHoverLines.map((line) => `<div>${line}</div>`).join('');
-  }
+  if (fishMergeLegendVisible) refreshFishMergeLegendIcons(state.ui.fishMergeHoverLines);
   els.fishMergeLegend.classList.toggle('hidden', !fishMergeLegendVisible);
 
   if (buildLegendVisible || tutorialActive || buildingMoveLegendVisible || fishMergeLegendVisible) positionBottomLeftLegends();
@@ -4502,6 +4504,47 @@ export function updateHUD(state) {
   // so there's nothing left to dynamically re-word here. The SEPARATE
   // "(Esc) to skip tutorial" hint (#tutorial-skip-legend) is untouched —
   // that's still real, distinct Escape behavior during a guided tutorial.
+}
+
+// The bottom-left hover legend (#fish-merge-legend) draws each merge/splice
+// option as two small real drawFish icons with an arrow between them
+// instead of names — per direct request ("use just the icons of the fish
+// instead of the names... So instead of 'Splice with Guppy -> Magnet fish'
+// just show '(Guppy icon) -> (Magnet Fish icon)'"). The fish info modal
+// keeps the plain text sentence (see refreshFishInfoMenu's own `.text`
+// usage) — only this hover legend changed. Rebuilt fresh every frame it's
+// visible (same as the plain-text version it replaced), a handful of tiny
+// (22px) canvases at most, so the per-frame DOM churn is negligible.
+const FISH_MERGE_ICON_SIZE = 22;
+function buildFishMergeIconCanvas(speciesId) {
+  const canvas = document.createElement('canvas');
+  canvas.width = FISH_MERGE_ICON_SIZE;
+  canvas.height = FISH_MERGE_ICON_SIZE;
+  canvas.className = 'fish-merge-icon';
+  const def = SPECIES[speciesId];
+  drawFish(canvas.getContext('2d'), FISH_MERGE_ICON_SIZE / 2, FISH_MERGE_ICON_SIZE / 2, speciesId, def.growthStages.length - 1, 1, 0, { x: 1, y: 0 });
+  return canvas;
+}
+function refreshFishMergeLegendIcons(entries) {
+  els.fishMergeLegend.innerHTML = '';
+  for (const entry of entries) {
+    if (entry.otherSpeciesId == null) {
+      // The "No available fish to merge." entry — no icons to show.
+      const div = document.createElement('div');
+      div.textContent = entry.text;
+      els.fishMergeLegend.appendChild(div);
+      continue;
+    }
+    const row = document.createElement('div');
+    row.className = 'fish-merge-icon-row';
+    row.appendChild(buildFishMergeIconCanvas(entry.otherSpeciesId));
+    const arrow = document.createElement('span');
+    arrow.className = 'fish-merge-arrow';
+    arrow.textContent = '→';
+    row.appendChild(arrow);
+    row.appendChild(buildFishMergeIconCanvas(entry.resultSpeciesId));
+    els.fishMergeLegend.appendChild(row);
+  }
 }
 
 // Shift-click Replace's own cost-legend text — a negative net cost (the

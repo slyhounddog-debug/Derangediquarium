@@ -1707,36 +1707,44 @@ export function isSpliceTargetCandidate(state, fish) {
 // Lives here (not main.js, where it originated) so BOTH the hover legend
 // (main.js) and the fish info modal (UI.js) can share it without either
 // module reaching into the other. Returns null if `fish` doesn't qualify
-// for either mechanic at all, otherwise one description line per currently-
-// living, currently-eligible partner already in the tank (deduped by
-// resulting text — several same-species Guppies all read as one "Merge with
-// Guppy -> ..." line), or a single "No available fish to merge." line if
-// `fish` qualifies in shape but nothing pairs with it right now. Checked
-// both drag orderings for splicing, same as the real mouseup resolution in
-// main.js, so it doesn't matter whether `fish` is the utility half or the
-// target half of a pair.
+// for either mechanic at all, otherwise one entry per currently-living,
+// currently-eligible partner already in the tank (deduped by resulting text
+// — several same-species Guppies all read as one "Merge with Guppy -> ..."
+// entry), or a single "No available fish to merge." entry (otherSpeciesId/
+// resultSpeciesId both null) if `fish` qualifies in shape but nothing pairs
+// with it right now. Checked both drag orderings for splicing, same as the
+// real mouseup resolution in main.js, so it doesn't matter whether `fish` is
+// the utility half or the target half of a pair.
+//
+// Each entry is `{ text, otherSpeciesId, resultSpeciesId }` — `text` is the
+// full "Merge/Splice with X -> Y" sentence the fish info modal shows as-is;
+// `otherSpeciesId`/`resultSpeciesId` are the two fish the hover legend draws
+// as small icons instead of names, per a later direct request ("use just
+// the icons of the fish instead of the names... Keep the fish info modal
+// text for the available merges as it is now").
 export function describeFishMergeOptions(state, fish) {
   const combineSource = isCombinableFish(state, fish);
   const spliceSource = isSpliceSource(state, fish);
   const spliceTarget = isSpliceTargetCandidate(state, fish);
   if (!combineSource && !spliceSource && !spliceTarget) return null;
-  const lines = [];
+  const entries = [];
   const seen = new Set();
   for (const other of state.level.entities) {
     if (other.type !== 'fish' || other.id === fish.id || other.dying) continue;
-    let desc = null;
+    let text = null, resultSpeciesId = null;
     if (combineSource && canCombineFish(state, fish, other)) {
-      desc = `Merge with ${SPECIES[other.speciesId].name} → Tier ${(fish.starTier || 1) + 1} ${SPECIES[fish.speciesId].name}`;
+      resultSpeciesId = fish.speciesId;
+      text = `Merge with ${SPECIES[other.speciesId].name} → Tier ${(fish.starTier || 1) + 1} ${SPECIES[fish.speciesId].name}`;
     } else if (spliceSource && canSpliceFish(state, fish, other)) {
-      const hybridId = getHybridSpeciesId(other.speciesId, fish.speciesId);
-      desc = `Splice with ${SPECIES[other.speciesId].name} → ${SPECIES[hybridId].name}`;
+      resultSpeciesId = getHybridSpeciesId(other.speciesId, fish.speciesId);
+      text = `Splice with ${SPECIES[other.speciesId].name} → ${SPECIES[resultSpeciesId].name}`;
     } else if (spliceTarget && canSpliceFish(state, other, fish)) {
-      const hybridId = getHybridSpeciesId(fish.speciesId, other.speciesId);
-      desc = `Splice with ${SPECIES[other.speciesId].name} → ${SPECIES[hybridId].name}`;
+      resultSpeciesId = getHybridSpeciesId(fish.speciesId, other.speciesId);
+      text = `Splice with ${SPECIES[other.speciesId].name} → ${SPECIES[resultSpeciesId].name}`;
     }
-    if (desc && !seen.has(desc)) { seen.add(desc); lines.push(desc); }
+    if (text && !seen.has(text)) { seen.add(text); entries.push({ text, otherSpeciesId: other.speciesId, resultSpeciesId }); }
   }
-  return lines.length > 0 ? lines : ['No available fish to merge.'];
+  return entries.length > 0 ? entries : [{ text: 'No available fish to merge.', otherSpeciesId: null, resultSpeciesId: null }];
 }
 
 const FIRST_SPLICE_MESSAGE =

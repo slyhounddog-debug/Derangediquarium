@@ -583,10 +583,14 @@ const state = {
     // merged with the fish being hovered on, and what the fish would be
     // created when merged"). Written fresh every render() frame; null while
     // the hovered fish isn't merge/splice-eligible at all (hides the legend
-    // entirely), otherwise an array of description lines, one per currently-
-    // present compatible partner, or a single "No available fish to merge."
-    // line when the hovered fish IS eligible but nothing in the tank right
-    // now actually pairs with it. See main.js's describeFishMergeOptions.
+    // entirely), otherwise an array of `{ text, otherSpeciesId,
+    // resultSpeciesId }` entries (Entities.js's describeFishMergeOptions),
+    // one per currently-present compatible partner, or a single "No
+    // available fish to merge." entry (both ids null) when the hovered fish
+    // IS eligible but nothing in the tank right now actually pairs with it.
+    // UI.js's updateHUD draws `otherSpeciesId -> resultSpeciesId` as two
+    // small fish icons here (per a later direct request); the fish info
+    // modal uses `.text` instead, unchanged.
     fishMergeHoverLines: null,
     // The fish info modal's own locked-fish tracking — per direct request,
     // written by UI.js's openFishInfoMenu/closeFishInfoMenu (main.js can't
