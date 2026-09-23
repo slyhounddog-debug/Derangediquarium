@@ -47,10 +47,10 @@ import {
   BIOMASS_COLOR_CORE,
   MUTAGEN_PASTE_COLOR,
   BUFFER_FISH_MAGNET_RADIUS,
-  FISH_BUBBLE_RADIUS_MIN,
-  FISH_BUBBLE_RADIUS_MAX,
-  FISH_BUBBLE_RISE_SPEED_MIN,
-  FISH_BUBBLE_RISE_SPEED_MAX,
+  BUILDING_BUBBLE_RADIUS_MIN,
+  BUILDING_BUBBLE_RADIUS_MAX,
+  BUILDING_BUBBLE_RISE_SPEED_MIN,
+  BUILDING_BUBBLE_RISE_SPEED_MAX,
   FOOD_STALE_FRACTION,
   FOOD_STALE_COLOR,
   FOOD_STATIONARY_TO_WASTE_MS,
@@ -749,16 +749,29 @@ let draggedFishId = null;
 let fishDragArmed = false;
 
 // Which hybrids have a real on/off ability toggle — Magnet Fish (magnet),
-// Feeder Fish (auto-Food dispenser), Bio Fish (Bio-Sludge mode) — per
-// direct request, all 3 now require a genuine DOUBLE-click to flip (see the
-// click handler's own comment for why: a single click on any fish opens its
-// info modal instead now).
+// Feeder Fish (auto-Food dispenser), Bio Fish (Bio-Sludge mode) — per direct
+// request, all 3 now flip on a genuine RIGHT-click (see the rightClickHandlers
+// entry below), which needs no disambiguation against a plain left-click
+// opening the info modal at all, unlike the double-click scheme this
+// replaced.
 const TOGGLEABLE_FISH_SPECIES = ['buffer_fish', 'zap_sucker', 'xeno_octopus'];
-const FISH_DOUBLE_CLICK_MS = 350;
 const FISH_TOGGLE_BOUNCE_DURATION_MS = 400;
 const FISH_TOGGLE_BOUNCE_AMOUNT = 0.22;
-let pendingFishToggleClickId = null;
-let pendingFishToggleClickTimeout = null;
+// Magnet Fish's own filter modal (which items its magnet attracts) now
+// opens on a LONG left-click instead of a right-click — per direct request
+// ("make it take a long left-click to bring up the filter modal... this
+// will prevent the delay that happens on hybrid fish when you single click
+// them"). Held on mousedown, fired via setTimeout if still held/hasn't
+// dragged away by MAGNET_FISH_LONG_PRESS_MS; magnetFishLongPressFired is
+// checked at the top of the click handler below to swallow the click that
+// follows the same press/release gesture, so it doesn't ALSO open the info
+// modal on release.
+const MAGNET_FISH_LONG_PRESS_MS = 500;
+const MAGNET_FISH_LONG_PRESS_MOVE_TOLERANCE_PX = 8;
+let magnetFishLongPressTimeout = null;
+let magnetFishLongPressStartX = 0;
+let magnetFishLongPressStartY = 0;
+let magnetFishLongPressFired = false;
 
 // Per direct request ("Add in a shimmer and bounce animation anytime a
 // hybrid fish with an ability is toggled on. During the time the fish
@@ -781,6 +794,31 @@ function toggleFishAbility(state, fish) {
     fish.toggleBounceStartedAt = state.level.elapsed;
   }
 }
+
+input.mouseDownHandlers.push((sx, sy) => {
+  if (state.ui.paused || state.level.tutorialFlow) return;
+  const world = screenToWorld(sx, sy, state.camera);
+  const fish = findFishAt(state, world.x, world.y);
+  if (!fish || fish.speciesId !== 'buffer_fish') return;
+  magnetFishLongPressStartX = sx;
+  magnetFishLongPressStartY = sy;
+  const fishId = fish.id;
+  if (magnetFishLongPressTimeout != null) clearTimeout(magnetFishLongPressTimeout);
+  magnetFishLongPressTimeout = setTimeout(() => {
+    magnetFishLongPressTimeout = null;
+    if (!input.mouseDown) return; // already released — a plain short click, let the ordinary click handler open the info modal
+    const moved = Math.hypot(input.mouse.x - magnetFishLongPressStartX, input.mouse.y - magnetFishLongPressStartY);
+    if (moved > MAGNET_FISH_LONG_PRESS_MOVE_TOLERANCE_PX) return; // dragged, not a genuine long-press-in-place
+    const stillThere = state.level.entities.find((e) => e.id === fishId && e.type === 'fish');
+    if (!stillThere) return;
+    magnetFishLongPressFired = true;
+    openMagnetFishFilterMenu(state, fishId);
+  }, MAGNET_FISH_LONG_PRESS_MS);
+});
+
+input.mouseUpHandlers.push(() => {
+  if (magnetFishLongPressTimeout != null) { clearTimeout(magnetFishLongPressTimeout); magnetFishLongPressTimeout = null; }
+});
 
 input.mouseDownHandlers.push((sx, sy) => {
   fishDragArmed = false;
@@ -1824,6 +1862,7 @@ function effectiveToolAt(worldY) {
 }
 
 input.clickHandlers.push((sx, sy) => {
+  if (magnetFishLongPressFired) { magnetFishLongPressFired = false; return; } // this click is the tail end of the same press/release that just opened the Magnet Fish filter modal via a long-press — don't also open its info modal
   if (fishDragArmed) { fishDragArmed = false; return; } // this click followed a fish-combine drag gesture — don't also bank/feed/mound-click at the release point
   if (itemDragMoved) { itemDragMoved = false; return; } // this click followed a genuine item-drag gesture — don't also bank/feed/place at the release point. An unmoved press-release leaves itemDragMoved false, so a plain click on a Coin/Science item still banks it normally
   if (recipeDragMoved) { recipeDragMoved = false; return; } // this click followed a genuine Manufacturer/Power Plant recipe-copy drag — don't also open the recipe pop-up at the release point
@@ -1967,38 +2006,15 @@ input.clickHandlers.push((sx, sy) => {
     }
   }
 
-  // Magnet Fish/Feeder Fish/Bio Fish each have an on/off ability toggle
-  // (magnet, auto-Food dispenser, Bio-Sludge mode) — per direct request, a
-  // single click on any fish now opens its info modal instead (see the
-  // generic fallback further below), so toggling one of these abilities
-  // now needs a genuine DOUBLE-click to disambiguate from that. A first
-  // click on one of these 3 species is deferred (setTimeout) rather than
-  // acted on immediately: if a second click on the SAME fish lands within
-  // FISH_DOUBLE_CLICK_MS, that's the real double-click — toggle the
-  // ability and cancel the pending open; otherwise the timer fires on its
-  // own and opens the info modal, exactly as an ordinary single click on
-  // any other fish already would.
+  // Per direct follow-up request ("let's make it so that you right-click to
+  // toggle on/off hybrid fish... Switching it to right click will prevent
+  // the delay that happens on hybrid fish when you single click them")
+  // — Magnet Fish/Feeder Fish/Bio Fish's on/off toggle moved to a dedicated
+  // right-click handler below (see its own comment), so a single left-click
+  // on ANY fish, toggleable or not, now opens its info modal immediately
+  // with no deferred double-click disambiguation needed any more — see the
+  // generic fallback further below.
   const clickedFish = findFishAt(state, world.x, world.y);
-  if (clickedFish && TOGGLEABLE_FISH_SPECIES.includes(clickedFish.speciesId)) {
-    if (pendingFishToggleClickId === clickedFish.id) {
-      clearTimeout(pendingFishToggleClickTimeout);
-      pendingFishToggleClickId = null;
-      pendingFishToggleClickTimeout = null;
-      toggleFishAbility(state, clickedFish);
-      return;
-    }
-    pendingFishToggleClickId = clickedFish.id;
-    const fishId = clickedFish.id;
-    pendingFishToggleClickTimeout = setTimeout(() => {
-      pendingFishToggleClickId = null;
-      pendingFishToggleClickTimeout = null;
-      const fish = state.level.entities.find((e) => e.id === fishId && e.type === 'fish');
-      if (fish && !state.ui.paused && !state.level.tutorialFlow) {
-        openFishInfoMenu(state, fishId);
-      }
-    }, FISH_DOUBLE_CLICK_MS);
-    return;
-  }
 
   // A Fan's click-2 must work regardless of where it lands — including open
   // water, e.g. aiming a Fan's cone straight up into the water column, a
@@ -2170,20 +2186,20 @@ input.clickHandlers.push((sx, sy) => {
   // click for those building types.
 });
 
-// Magnet Fish: right-click opens its own item-filter pop-up (which object
-// types its magnet, when toggled on, actually attracts) — per direct
-// request ("right click on the buffer fish, bring up a filter modal like on
-// platforms"), the right-click counterpart to the plain left-click on/off
-// toggle above. Checked first, ahead of every other right-click handler
-// below, so it can't be shadowed by the universal-cancel handler's own
-// closeSidePanels/cancelActiveTool (neither of which touch this pop-up
-// anyway, but checked first for the same "most specific gesture wins"
-// precedent every other right-click branch here follows).
+// Magnet Fish/Feeder Fish/Bio Fish: right-click toggles their on/off
+// ability — per direct request ("let's make it so that you right-click to
+// toggle on/off hybrid fish"), replacing the earlier double-click scheme (a
+// plain left-click now always opens the info modal immediately, with no
+// disambiguation delay — see the click handler's own comment). Checked
+// first, ahead of every other right-click handler below, so it can't be
+// shadowed by the universal-cancel handler's own closeSidePanels/
+// cancelActiveTool (which still also runs on this same right-click — see
+// that handler's own comment on why that's fine/existing precedent).
 input.rightClickHandlers.push((sx, sy) => {
   if (state.ui.paused || state.level.tutorialFlow) return;
   const world = screenToWorld(sx, sy, state.camera);
   const fish = findFishAt(state, world.x, world.y);
-  if (fish && fish.speciesId === 'buffer_fish') openMagnetFishFilterMenu(state, fish.id);
+  if (fish && TOGGLEABLE_FISH_SPECIES.includes(fish.speciesId)) toggleFishAbility(state, fish);
 });
 
 // Blueprint tool: right-click cancels an in-progress selection (drag) or an
@@ -2920,15 +2936,22 @@ function updateBuildingBubbles(dtMs) {
     const centerY = row * TILE_SIZE + TILE_SIZE / 2;
     if (!isBuildingRunningForBubbles(state, data, centerX, centerY)) continue;
     if (Math.random() > BUILDING_BUBBLE_CHANCE_PER_ROLL) continue;
+    // fromBuilding: true is what Entities.js's updateFishBubbleEffects reads
+    // to cull this one differently — a much longer lifetime, surviving
+    // until it's actually risen near the water's surface, and its own
+    // bigger radius/rise-speed range (closer to Ambience.js's background
+    // bubbles) — per direct follow-up request, rather than the short-lived,
+    // smaller fish mouth-bubble defaults this list was built for.
     state.level.fishBubbleEffects.push({
       x: centerX + (Math.random() * 2 - 1) * TILE_SIZE * 0.25,
       y: centerY,
-      radius: FISH_BUBBLE_RADIUS_MIN + Math.random() * (FISH_BUBBLE_RADIUS_MAX - FISH_BUBBLE_RADIUS_MIN),
+      radius: BUILDING_BUBBLE_RADIUS_MIN + Math.random() * (BUILDING_BUBBLE_RADIUS_MAX - BUILDING_BUBBLE_RADIUS_MIN),
       age: 0,
-      riseSpeed: FISH_BUBBLE_RISE_SPEED_MIN + Math.random() * (FISH_BUBBLE_RISE_SPEED_MAX - FISH_BUBBLE_RISE_SPEED_MIN),
+      riseSpeed: BUILDING_BUBBLE_RISE_SPEED_MIN + Math.random() * (BUILDING_BUBBLE_RISE_SPEED_MAX - BUILDING_BUBBLE_RISE_SPEED_MIN),
       wobbleFreq: 1.2 + Math.random() * 1.6,
       wobblePhase: Math.random() * Math.PI * 2,
       wobbleAmp: 2 + Math.random() * 4,
+      fromBuilding: true,
     });
   }
 }
@@ -3031,7 +3054,14 @@ function updateBossSequence(state, dtMs) {
 // no-ops on a repeat call with the same value, so calling this every single
 // tick is cheap and never restarts an in-flight crossfade.
 function updateBattleMusic(state) {
-  const aliensAlive = state.level.entities.some((e) => e.type === 'alien');
+  // Per direct request ("make it so the battle music only plays during the
+  // alien waves, not when an alien egg hatches") — excludes a living alien
+  // with `hatchedFromEgg` true (Entities.js's updateAlienEgg is the only
+  // place that ever sets it) from counting toward battle music at all, so a
+  // single Alien-Egg-hatched alien wandering around (or waiting to be
+  // spliced into a Bio Fish) never triggers it on its own; only a genuine
+  // wave alien does.
+  const aliensAlive = state.level.entities.some((e) => e.type === 'alien' && !e.hatchedFromEgg);
   const msUntilNextWave = state.level.alienNextWaveAtMs - state.level.elapsed;
   const withinPreBattleWindow = !state.level.alienWaveActive && msUntilNextWave > 0 && msUntilNextWave <= ALIEN_MUSIC_BATTLE_LEAD_MS;
   setBattleMusicActive(aliensAlive || withinPreBattleWindow);

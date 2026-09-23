@@ -1444,7 +1444,7 @@ export const SPECIES = {
   // main.js's right-click filter modal (openMagnetFishFilterMenu).
   buffer_fish: {
     id: 'buffer_fish', name: 'Magnet Fish', tier: 4, unlockPhase: 4, cost: 70,
-    description: 'Suckerfish × Guppy — double-click it to toggle its magnet on/off (single-click opens its info instead), then right-click it to choose what it attracts (Waste by default). Still eats Waste like a Suckerfish, but converts what it eats into Food instead of just relieving its own hunger.',
+    description: 'Suckerfish × Guppy — right-click it to toggle its magnet on/off (single-click opens its info instead), then hold a long left-click on it to choose what it attracts (Waste by default). Still eats Waste like a Suckerfish, but converts what it eats into Food instead of just relieving its own hunger.',
     behavior: ['SCAVENGER'], dropType: 'waste_to_food', parents: ['suckerfish', 'guppy'],
     swimSpeed: 33, lifespan: 300000, hungerRate: 0.914,
     // dropInterval is this pure Scavenger's eat cooldown, same "up to 3
@@ -1462,7 +1462,7 @@ export const SPECIES = {
   // isPureGenerator branch for the "no power while making food" half.
   zap_sucker: {
     id: 'zap_sucker', name: 'Feeder Fish', tier: 4, unlockPhase: 4, cost: 90,
-    description: 'Electric Eel × Suckerfish — double-click it to toggle its automatic Food dispenser on/off (single-click opens its info instead). While OFF, it generates power like an Electric Eel; while ON, it spits out one Food item every 6 seconds (no feeding required to trigger it) and generates no power at all. Still eats Waste either way.',
+    description: 'Electric Eel × Suckerfish — right-click it to toggle its automatic Food dispenser on/off (single-click opens its info instead). While OFF, it generates power like an Electric Eel; while ON, it spits out one Food item every 6 seconds (no feeding required to trigger it) and generates no power at all. Still eats Waste either way.',
     behavior: ['SCAVENGER', 'GENERATOR'], dropType: 'auto_food', parents: ['electric_eel', 'suckerfish'],
     swimSpeed: 30, lifespan: 300000, hungerRate: 0.9,
     // pixelsPerMW (Generator half) and dropInterval (Scavenger eat-cooldown
@@ -1486,7 +1486,7 @@ export const SPECIES = {
   // hatchedFromEgg flag) — an ordinary wave-spawned Tier 1 does NOT qualify.
   xeno_octopus: {
     id: 'xeno_octopus', name: 'Bio Fish', tier: 4, unlockPhase: 4, cost: 100, parents: ['octopus', 'alien_t1'], // renamed from 'Xeno Octopus' per direct request; id left alone, same precedent as eel_blimp's own rename
-    description: 'A hybrid of an Alien and a Science Octopus — not purchasable directly. Drag a grown Octopus onto a Tier 1 alien that hatched from an Alien Egg (an ordinary wave-spawned alien won\'t do) to splice them together. Double-click it to toggle Bio-Sludge mode (single-click opens its info instead) — while on, it brews and spits out Bio-Sludge every 8 seconds instead of Science Bubbles. Still needs to be fed like any other fish.',
+    description: 'A hybrid of an Alien and a Science Octopus — not purchasable directly. Drag a grown Octopus onto a Tier 1 alien that hatched from an Alien Egg (an ordinary wave-spawned alien won\'t do) to splice them together. Right-click it to toggle Bio-Sludge mode (single-click opens its info instead) — while on, it brews and spits out Bio-Sludge every 8 seconds instead of Science Bubbles. Still needs to be fed like any other fish.',
     behavior: ['RESEARCHER'], dropType: 'science_blue',
     swimSpeed: 25, lifespan: 300000, hungerRate: 0.468,
     growthStages: [
@@ -2071,7 +2071,7 @@ export const MOUND_TEASE_COST = 75; // cut from 150 per direct request — still
 // Rudimentary Fan) is gone entirely, per direct request — the Rudimentary
 // Fan is unlocked from level start now instead (BUILDING_TYPES'
 // unlockedByDefault, alongside Platform/Waste Turret, below).
-export const MOUND_CRACK_COST = { 1: 500, 2: 5000 }; // 1: Tier 1->2 (Collector + Refinery + Octopus), cut from 1000 per direct request; 2: Tier 2->3 (shatters into the Science Lab, grants nothing directly)
+export const MOUND_CRACK_COST = { 1: 500, 2: 1500 }; // 1: Tier 1->2 (Collector + Refinery + Octopus), cut from 1000 per direct request; 2: Tier 2->3 (shatters into the Science Lab, grants nothing directly), cut from 5000 per a later direct request
 export const MOUND_WIDTH_TILES = 4.4; // how many seabed tiles wide its clickable footprint is — 10% bigger than the original 4
 export const MOUND_HEIGHT_PX = 62; // how far it mounds up above the seabed surface — 10% bigger than the original 56
 // Platform, the Waste Turret, and the Rudimentary Fan are all NOT tier-gated
@@ -2622,6 +2622,28 @@ export const FISH_BUBBLE_RISE_SPEED_MIN = 18;
 export const FISH_BUBBLE_RISE_SPEED_MAX = 34;
 export const FISH_BUBBLE_RADIUS_MIN = 1.5;
 export const FISH_BUBBLE_RADIUS_MAX = 4.5;
+
+// A running building's own bubble (main.js's updateBuildingBubbles) reuses
+// the same transient effect LIST as a fish's mouth bubble (state.level.
+// fishBubbleEffects), but per direct follow-up requests needs its own,
+// much longer-lived/bigger/further-rising look: a building usually sits
+// much lower in the tank than a fish, so the same short fish-bubble
+// lifetime (2.5s) meant it aged out and vanished long before getting
+// anywhere near the water's surface. BUILDING_BUBBLE_LIFETIME_MS is
+// deliberately generous — Entities.js's updateFishBubbleEffects culls a
+// building-sourced bubble once it's actually reached near the top of the
+// tank (BUILDING_BUBBLE_TOP_MARGIN_PX below y=0) OR this lifetime elapses,
+// whichever comes first, so this is really just a safety ceiling for a
+// bubble that somehow never reaches the top (rise speed rolled very low).
+// Radius matches Ambience.js's own background bubbles ("closer to the
+// background bubbles in size", per direct request) rather than the
+// smaller fish mouth-bubble range.
+export const BUILDING_BUBBLE_LIFETIME_MS = 20000;
+export const BUILDING_BUBBLE_TOP_MARGIN_PX = 40; // culled once within this many px of the water's top (y=0)
+export const BUILDING_BUBBLE_RISE_SPEED_MIN = 16;
+export const BUILDING_BUBBLE_RISE_SPEED_MAX = 42;
+export const BUILDING_BUBBLE_RADIUS_MIN = 3;
+export const BUILDING_BUBBLE_RADIUS_MAX = 7;
 // "Slightly dependent on the size of the fish," per direct spec — not a
 // direct multiplier (a baby fish still gets a real, visible bubble, just a
 // somewhat smaller one on average) — see emitFishBubble's own sizeFactor.

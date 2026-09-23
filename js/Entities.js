@@ -87,6 +87,8 @@ import {
   FISH_BUBBLE_SECOND_CHANCE,
   FISH_BUBBLE_SECOND_DELAY_MS,
   FISH_BUBBLE_LIFETIME_MS,
+  BUILDING_BUBBLE_LIFETIME_MS,
+  BUILDING_BUBBLE_TOP_MARGIN_PX,
   FISH_BUBBLE_RISE_SPEED_MIN,
   FISH_BUBBLE_RISE_SPEED_MAX,
   FISH_BUBBLE_RADIUS_MIN,
@@ -2097,10 +2099,26 @@ function computeBufferFishMagnetForce(state, item) {
 // one call (same as before the magnet force existed; it used to be
 // Waste-only and so only updateWaste called it directly — now every item
 // type needs it, since a Magnet Fish's filter can include any of them).
+//
+// Per direct request ("magnet fish are only affected by items mass half as
+// much as they are currently, so the scope of how the objects behave are
+// much more similar for the magnet") — the magnet's own pull is HALF as
+// mass-sensitive as Fan thrust, not half its raw magnitude. Grid.js's
+// integrateItemForces divides this function's whole returned force by
+// item.mass uniformly (a_fan = F/mass, the existing Mass Hierarchy — a heavy
+// coin barely moves under a given Fan force, a light Food pellet leaps
+// away); pre-multiplying just the magnet component by sqrt(item.mass) here
+// cancels out HALF of that later division for the magnet specifically
+// (mass / sqrt(mass) = sqrt(mass)), so a_magnet effectively works out to
+// F_magnet / sqrt(mass) instead of F_magnet / mass — a genuinely halved
+// mass EXPONENT, not a flat 50% force cut, which is what actually narrows
+// the gap between how a heavy item and a light item respond to the magnet.
+// Fan force itself is completely untouched.
 function computeEnvironmentalForce(state, item) {
   const fanForce = computeFanForce(state, item);
   const magnetForce = computeBufferFishMagnetForce(state, item);
-  return { fx: fanForce.fx + magnetForce.fx, fy: fanForce.fy + magnetForce.fy };
+  const magnetMassAdjust = Math.sqrt(item.mass);
+  return { fx: fanForce.fx + magnetForce.fx * magnetMassAdjust, fy: fanForce.fy + magnetForce.fy * magnetMassAdjust };
 }
 
 function updateWaste(item, state, dtMs) {
@@ -3230,11 +3248,20 @@ function updateProductionBlockedEffects(state, dtMs) {
 // Same age-and-cull pattern as the two above, plus real motion (a fish
 // mouth bubble actually rises, unlike a death burst or a disintegrating
 // coin/science icon, which stay put and just fade) — see emitFishBubble.
+// A building-sourced bubble (main.js's updateBuildingBubbles, `fromBuilding:
+// true`) is culled differently — per direct request ("make the bubbles from
+// the buildings last longer, and at least until they get close to the upper
+// part of the tank"): it survives until it's actually risen to near the
+// water's surface (within BUILDING_BUBBLE_TOP_MARGIN_PX of y=0), with its
+// own much longer BUILDING_BUBBLE_LIFETIME_MS as just a safety ceiling for
+// the (rare) case it never gets there. A plain fish mouth-bubble is
+// unaffected, still culled purely by its own short fixed lifetime.
 function updateFishBubbleEffects(state, dtMs) {
   const dt = dtMs / 1000;
   state.level.fishBubbleEffects = state.level.fishBubbleEffects.filter((b) => {
     b.age += dtMs;
     b.y -= b.riseSpeed * dt;
+    if (b.fromBuilding) return b.age < BUILDING_BUBBLE_LIFETIME_MS && b.y > BUILDING_BUBBLE_TOP_MARGIN_PX;
     return b.age < FISH_BUBBLE_LIFETIME_MS;
   });
 }
