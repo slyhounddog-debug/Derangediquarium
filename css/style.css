@@ -95,7 +95,6 @@ html, body {
 body.alt-mode #hud,
 body.alt-mode #minimap-wrap,
 body.alt-mode #notification-ticker,
-body.alt-mode #bottom-bar-row,
 body.alt-mode #build-legend,
 body.alt-mode #tutorial-skip-legend,
 body.alt-mode #building-move-legend,
@@ -105,6 +104,20 @@ body.alt-mode #save-toast,
 body.alt-mode #scroll-hint,
 body.alt-mode #tutorial-overlay,
 body.alt-mode #tutorial-text {
+  display: none !important;
+}
+/* Per direct request, the Shop and Tank Upgrades panels stay openable by
+   their own hotkeys (E/P) even in Alt-mode — "floating in their normal
+   spots with no buttons under them." #bottom-bar-row itself is no longer
+   blanket-hidden (it has no visible background of its own, just an
+   invisible flex container — see its own CSS comment — so leaving it
+   visible is harmless); only its two toggle buttons and the food/merge/
+   blueprint/favorites toolbar are hidden, exactly the "no buttons under
+   them" part. #shop-panel/#tank-panel's own .collapsed class (E/P's real
+   open/close toggle) is completely untouched by Alt-mode either way. */
+body.alt-mode #shop-collapse-btn,
+body.alt-mode #tank-collapse-btn,
+body.alt-mode #bottom-tool-bar {
   display: none !important;
 }
 body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
@@ -178,16 +191,26 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
 /* Hidden until the Electricity Graph Tank Upgrade is bought — per direct
    request, the arrow shouldn't hint at a dropdown that doesn't work yet. */
 #hud-power-arrow.hidden { display: none; }
+/* Per direct request ("the electricity graph is partly covered by the
+   minimap... move it left so the left of it lines up with the left of the
+   hud... shrink the width a tiny bit so it fits in that space... make sure
+   the electricity graph is in-line with the minimap, and the same
+   height") — left/top and the canvas's own width/height are all set live
+   in JS (UI.js's positionPowerGraph, called on open and every frame it
+   stays open) off #hud/#minimap-wrap's real current bounding boxes, since
+   both are independently right-anchored, variable-width fixed elements
+   with no fixed relationship in CSS alone. position:fixed (not the old
+   absolute-under-the-pill anchor) since those live values are viewport
+   coordinates. */
 #hud-power-graph {
-  /* Shifted down and left from directly-below-the-pill, per direct report
-     that it overlapped #hud itself. */
-  position: absolute; top: calc(100% + 24px); right: 70px;
+  position: fixed;
   background: linear-gradient(165deg, #fffaf3 0%, #fff3d9 100%);
   border: 2px solid #ffffff;
   border-radius: 16px;
   padding: 10px;
   box-shadow: 0 6px 16px rgba(107, 76, 107, 0.25), inset 0 2px 0 rgba(255, 255, 255, 0.85);
   z-index: 12;
+  box-sizing: content-box;
 }
 #hud-power-graph.hidden { display: none; }
 #hud-power-graph-canvas { display: block; }

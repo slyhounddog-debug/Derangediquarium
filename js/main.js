@@ -192,6 +192,7 @@ import {
   openRecipeMenu,
   openBuildingInfoMenu,
   openPlatformFilterMenu,
+  openMagnetFishFilterMenu,
   copyPlatformFilter,
   openStorageChestModal,
   toggleFavoriteForSelectedTool,
@@ -1954,14 +1955,13 @@ input.clickHandlers.push((sx, sy) => {
     }
   }
 
-  // A Fan's click-2 confirmation must work regardless of where the
-  // confirming click lands — including open water, e.g. aiming a Fan's
-  // cone straight up into the water column, a completely normal thing to
-  // do — so this is checked BEFORE the open-water "defaults to Food"
-  // override below, and can never be shadowed by it. isFanAimingActive()
-  // already self-heals against a tool switch (see its own comment), so
-  // this is only ever true while the exact fan that was armed is still the
-  // selected tool.
+  // A Fan's click-2 must work regardless of where it lands — including open
+  // water, e.g. aiming a Fan's cone straight up into the water column, a
+  // completely normal thing to do — so this is checked BEFORE the
+  // open-water "defaults to Food" override below, and can never be
+  // shadowed by it. isFanAimingActive() already self-heals against a tool
+  // switch (see its own comment), so this is only ever true while the
+  // exact fan that was armed is still the selected tool.
   if (isFanAimingActive()) {
     const buildingId = fanAimingCell.buildingId;
     const angle = angleFromTileToPoint(fanAimingCell.col, fanAimingCell.row, world.x, world.y);
@@ -1986,20 +1986,14 @@ input.clickHandlers.push((sx, sy) => {
       fanAimingMoveOrigin = null;
       return;
     }
-    // Shift-click Replace applies to a Fan's own confirm click too, per
-    // direct request ("preserve... fan angle") — re-reads Shift live rather
-    // than remembering whatever it was on click 1, so the player can decide
-    // right up to the confirming click.
-    const fanShiftHeld = isShiftHeld();
-    const fanBuildResult = placeTileWithReplace(state, fanAimingCell.col, fanAimingCell.row, buildingId, angle, fanShiftHeld);
-    if (!fanBuildResult.placed) {
-      handleBuildPlacementFailure(fanBuildResult.info.reason);
-    } else if (fanBuildResult.replaced) {
-      pushUndoEntry({ type: 'replace', col: fanAimingCell.col, row: fanAimingCell.row, oldBuildingId: fanBuildResult.oldBuildingId, oldData: fanBuildResult.oldData, netCost: fanBuildResult.info.netCost });
-      showReplaceNetCostText(fanAimingCell.col * TILE_SIZE + TILE_SIZE / 2, fanAimingCell.row * TILE_SIZE + TILE_SIZE / 2, fanBuildResult.info.netCost);
-    } else {
-      pushUndoEntry({ type: 'place', col: fanAimingCell.col, row: fanAimingCell.row, buildingId });
-    }
+    // Per direct request, the purchase/replace already happened on click 1
+    // below — this second click is now purely a free angle re-aim on the
+    // ALREADY-PLACED fan (no cost, no affordability check, nothing to
+    // undo beyond the original placement). A same-family Fan-on-Fan
+    // replace never even reaches this branch — see click 1's own comment.
+    const key = buildingKey(fanAimingCell.col, fanAimingCell.row);
+    const data = state.level.buildingData[key];
+    if (data) data.angle = angle;
     fanAimingCell = null;
     return;
   }
@@ -2012,15 +2006,46 @@ input.clickHandlers.push((sx, sy) => {
   if (effectiveTool.startsWith('build:')) {
     const buildingId = effectiveTool.slice('build:'.length);
     if (FAN_BUILDING_IDS.includes(buildingId)) {
-      // Click 1: arm aiming at this cell if it's actually a legal placement —
-      // no tile placed yet, no money spent yet. Shift-aware (describeReplacement)
-      // so an occupied-but-replaceable tile still arms the aiming phase —
-      // the real replace (refund + charge) only happens on the confirming
-      // click 2 above, same as every other Fan placement's cost.
+      // Click 1 IS the purchase/replace now, per direct request ("the
+      // purchase for any fan should happen on the first click or
+      // shift-click, it shouldn't be able to be placed at all if it's not
+      // afforded, and the purchase/replacement should happen on the first
+      // click, with the second click just to confirm the angle"). Nothing
+      // is armed/charged at all if describeReplacement rejects it outright.
       const { col, row } = worldToTile(world.x, world.y);
-      const check = describeReplacement(state, col, row, buildingId, isShiftHeld());
-      if (check.ok) fanAimingCell = { col, row, buildingId };
-      else handleBuildPlacementFailure(check.reason);
+      const shiftHeld = isShiftHeld();
+      const check = describeReplacement(state, col, row, buildingId, shiftHeld);
+      if (!check.ok) { handleBuildPlacementFailure(check.reason); return; }
+      if (check.replacing && check.sameFamily) {
+        // Fan-on-Fan replace, per direct request ("shift click once on a
+        // placed fan when placing another fan is all that's needed... it
+        // will inherit the fan angle from the replaced fan") — one single
+        // Shift-click does the whole thing, no click 2 at all. The angle
+        // argument here is irrelevant and ignored — applyReplacementMutation's
+        // own same-family branch keeps the OLD fan's data (including its
+        // angle) untouched apart from retyping it, which is exactly the
+        // inherited-angle behavior requested.
+        const result = placeTileWithReplace(state, col, row, buildingId, 0, shiftHeld);
+        if (result.placed) {
+          pushUndoEntry({ type: 'replace', col, row, oldBuildingId: result.oldBuildingId, oldData: result.oldData, netCost: result.info.netCost });
+          showReplaceNetCostText(col * TILE_SIZE + TILE_SIZE / 2, row * TILE_SIZE + TILE_SIZE / 2, result.info.netCost);
+        }
+        return;
+      }
+      // A fresh placement or a cross-family replace still needs its own
+      // angle chosen — charge now (using the cursor's current sub-tile
+      // angle as the initial aim), then arm fanAimingCell so click 2 above
+      // can freely re-aim it before it's final, at no extra cost.
+      const angle = angleFromTileToPoint(col, row, world.x, world.y);
+      const result = placeTileWithReplace(state, col, row, buildingId, angle, shiftHeld);
+      if (!result.placed) { handleBuildPlacementFailure(result.info.reason); return; }
+      if (result.replaced) {
+        pushUndoEntry({ type: 'replace', col, row, oldBuildingId: result.oldBuildingId, oldData: result.oldData, netCost: result.info.netCost });
+        showReplaceNetCostText(col * TILE_SIZE + TILE_SIZE / 2, row * TILE_SIZE + TILE_SIZE / 2, result.info.netCost);
+      } else {
+        pushUndoEntry({ type: 'place', col, row, buildingId });
+      }
+      fanAimingCell = { col, row, buildingId };
       return; // either way, a fan-tool click never falls through to mound/coin/food
     }
   }
@@ -2095,6 +2120,22 @@ input.clickHandlers.push((sx, sy) => {
   // click for those building types.
 });
 
+// Magnet Fish: right-click opens its own item-filter pop-up (which object
+// types its magnet, when toggled on, actually attracts) — per direct
+// request ("right click on the buffer fish, bring up a filter modal like on
+// platforms"), the right-click counterpart to the plain left-click on/off
+// toggle above. Checked first, ahead of every other right-click handler
+// below, so it can't be shadowed by the universal-cancel handler's own
+// closeSidePanels/cancelActiveTool (neither of which touch this pop-up
+// anyway, but checked first for the same "most specific gesture wins"
+// precedent every other right-click branch here follows).
+input.rightClickHandlers.push((sx, sy) => {
+  if (state.ui.paused || state.level.tutorialFlow) return;
+  const world = screenToWorld(sx, sy, state.camera);
+  const fish = findFishAt(state, world.x, world.y);
+  if (fish && fish.speciesId === 'buffer_fish') openMagnetFishFilterMenu(state, fish.id);
+});
+
 // Blueprint tool: right-click cancels an in-progress selection (drag) or an
 // already-captured clipboard armed for pasting — back to a clean slate,
 // ready for a new drag-select, without leaving the tool itself.
@@ -2142,14 +2183,17 @@ input.rightClickHandlers.push(() => {
   if (state.ui.paused || state.level.tutorialFlow) return;
   closeSidePanels(state);
   cancelActiveTool(state);
-  // A not-yet-placed Fan's pending angle-choosing step (fanAimingCell) isn't
-  // itself part of selectedTool, so cancelActiveTool above clearing the tool
-  // back to 'cursor' only makes isFanAimingActive() self-heal to false — the
-  // stale {col, row, buildingId} it left behind was still sitting here, so
+  // A Fan's pending angle-adjust step (fanAimingCell) isn't itself part of
+  // selectedTool, so cancelActiveTool above clearing the tool back to
+  // 'cursor' only makes isFanAimingActive() self-heal to false — the stale
+  // {col, row, buildingId} it left behind was still sitting here, so
   // pressing Q right afterward (which just reselects state.ui.lastArmedTool)
-  // reactivated THIS same old cell/angle-choosing step instead of starting a
-  // fresh one under the cursor. Per direct bug report: right-click must fully
-  // cancel the placement, no lingering spot for a later Q to pull back up.
+  // reactivated THIS same old angle-adjust step instead of starting a fresh
+  // placement under the cursor. Per direct bug report (from back when click
+  // 2 was still the real purchase): right-click must fully cancel it, no
+  // lingering spot for a later Q to pull back up. The Fan itself is already
+  // real/bought by this point now (purchase moved to click 1) — this just
+  // stops the free angle re-aim, it never un-places anything.
   fanAimingCell = null;
 });
 
@@ -3523,18 +3567,17 @@ function render() {
     // Deliberately NOT gated by hoverEffectiveTool — aiming an already-armed
     // Fan up into open water is normal and its ghost should still track the
     // cursor there, same reasoning as the click handler's own click-2 path.
+    // Per direct request, the real purchase/replace now happens on click 1
+    // (see the click handler above) — by the time this renders, the Fan is
+    // ALREADY placed (or, for a move, always free) either way, so this is
+    // always a free angle re-aim: ignoreCost:true unconditionally, never
+    // tinted red/blue for affordability/replace, and no more
+    // buildReplaceInfo/"Shift+Click: Replace" legend here — there's no
+    // purchase decision left to make at this step.
     const angle = angleFromTileToPoint(fanAimingCell.col, fanAimingCell.row, hoverWorld.x, hoverWorld.y);
     const cellCenterX = fanAimingCell.col * TILE_SIZE + TILE_SIZE / 2;
     const cellCenterY = fanAimingCell.row * TILE_SIZE + TILE_SIZE / 2;
-    // A moved Fan's own angle step is always free — ignoreCost here too, or
-    // the ghost would wrongly show red (unaffordable) if the player's
-    // current balance happens to be below the fan's ordinary shop cost,
-    // even though the real confirm (see the click handler) never charges it.
-    const fanShiftHeld = fanAimingMoveData == null && isShiftHeld();
-    renderBuildGhost(ctx, state, cellCenterX, cellCenterY, fanAimingCell.buildingId, angle, true, fanAimingMoveData != null, fanShiftHeld);
-    if (fanAimingMoveData == null) {
-      state.ui.buildReplaceInfo = describeReplacement(state, fanAimingCell.col, fanAimingCell.row, fanAimingCell.buildingId, fanShiftHeld);
-    }
+    renderBuildGhost(ctx, state, cellCenterX, cellCenterY, fanAimingCell.buildingId, angle, true, true, false);
   } else if (hoverEffectiveTool.startsWith('build:') && input.mouse.inside && !state.ui.paused) {
     const world = hoverWorld;
     const buildingId = hoverEffectiveTool.slice('build:'.length);
@@ -4211,6 +4254,15 @@ function render() {
       ctx.stroke();
     }
 
+    // Per direct request — a small dot next to the "!"/"!!" indicator below
+    // showing WHAT this fish is hungry for: FOOD_COLOR for an ordinary
+    // Food-eater, WASTE_COLOR for a Scavenger (eats Waste, never Food) —
+    // same two colors every other Food/Waste item in the game already uses,
+    // so it reads as "the same stuff," not a new, unrelated icon language.
+    // A Scavenger's own hunger is hard-clamped below
+    // HUNGER_CRITICAL_THRESHOLD now (see Entities.js's updateFish), so in
+    // practice this only ever shows next to its "!", never a "!!".
+    const hungerIconColor = def.behavior.includes('SCAVENGER') ? WASTE_COLOR : FOOD_COLOR;
     if (fish.hunger >= HUNGER_CRITICAL_THRESHOLD) {
       // Per direct request — bounces slowly at first, then much more
       // aggressively once the 2nd of the 4 hunger chimes has played (see
@@ -4224,10 +4276,18 @@ function render() {
       ctx.fillStyle = '#ff3b3b';
       ctx.font = 'bold 15px sans-serif';
       ctx.fillText('!!', pos.x - 6, pos.y - size * 0.5 - 4 + bounceOffset);
+      ctx.beginPath();
+      ctx.arc(pos.x - 14, pos.y - size * 0.5 - 8 + bounceOffset, 3.5, 0, Math.PI * 2);
+      ctx.fillStyle = hungerIconColor;
+      ctx.fill();
     } else if (fish.hunger >= HUNGER_SEEK_THRESHOLD) {
       ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
       ctx.font = '10px sans-serif';
       ctx.fillText('!', pos.x - 2, pos.y - size * 0.5 - 4);
+      ctx.beginPath();
+      ctx.arc(pos.x - 9, pos.y - size * 0.5 - 7, 3, 0, Math.PI * 2);
+      ctx.fillStyle = hungerIconColor;
+      ctx.fill();
     }
   }
 

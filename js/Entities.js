@@ -150,9 +150,7 @@ import {
   EEL_BLIMP_MUTAGEN_PRODUCTION_MULTIPLIER,
   BUFFER_FISH_MAGNET_RADIUS,
   BUFFER_FISH_MAGNET_FORCE,
-  CLEANLINESS_STRESS_THRESHOLD,
-  CLEANLINESS_STRESS_MAX_HUNGER_MULTIPLIER,
-  CLEANLINESS_STRESS_MAX_INTERVAL_MULTIPLIER,
+  CLEANLINESS_MIN_MONEY_FRACTION,
   REFINERY_STATS,
   MANUFACTURER_ITEM_PROCESS_MS,
   MANUFACTURER_RECIPES,
@@ -233,14 +231,15 @@ function adjustCleanliness(state, delta) {
 }
 
 // Real gameplay detriment of a dirty tank, per direct request — see
-// Config.js's CLEANLINESS_STRESS_* constants for the full rationale. Returns
-// 0 (no stress) at or above CLEANLINESS_STRESS_THRESHOLD, scaling linearly
-// up to 1 (maximum stress) at 0% cleanliness. Used by updateFish to slow
-// coin production and speed up hunger.
-function cleanlinessStressFactor(state) {
-  const cleanliness = state.level.cleanliness;
-  if (cleanliness >= CLEANLINESS_STRESS_THRESHOLD) return 0;
-  return (CLEANLINESS_STRESS_THRESHOLD - cleanliness) / CLEANLINESS_STRESS_THRESHOLD;
+// Config.js's CLEANLINESS_MIN_MONEY_FRACTION for the full rationale. Scales
+// smoothly across the whole 0-100% cleanliness range: 1.0 (full value) at
+// 100% clean, down to CLEANLINESS_MIN_MONEY_FRACTION (0.5, half value) at 0%
+// clean. Used by updateFish (and computeTheoreticalGoldPerMinute) to scale a
+// FEEDER fish's coin dropValue directly — the ONLY thing dirtiness affects
+// now, per direct request ("JUST fish producing less money").
+function cleanlinessMoneyMultiplier(state) {
+  const cleanFraction = state.level.cleanliness / 100;
+  return CLEANLINESS_MIN_MONEY_FRACTION + cleanFraction * (1 - CLEANLINESS_MIN_MONEY_FRACTION);
 }
 
 // The tank's current THEORETICAL max gold/min — "theoretical" because it
@@ -260,8 +259,7 @@ function cleanlinessStressFactor(state) {
 // total, same convention UI.js's own fishEconomyStatsHtml already uses for
 // its baby/adult $/min range.
 export function computeTheoreticalGoldPerMinute(state) {
-  const stress = cleanlinessStressFactor(state);
-  const dirtyIntervalMultiplier = 1 + stress * (CLEANLINESS_STRESS_MAX_INTERVAL_MULTIPLIER - 1);
+  const moneyMultiplier = cleanlinessMoneyMultiplier(state);
   let total = 0;
   for (const fish of state.level.entities) {
     if (fish.type !== 'fish' || fish.alienNearby || fish.dying) continue; // a fish fully blocked by alien proximity (or already dying — see updateDyingFish) contributes nothing, same as a real drop attempt would
@@ -271,9 +269,8 @@ export function computeTheoreticalGoldPerMinute(state) {
     const mutagenMultiplier = fish.mutagenBuffActive ? MUTAGEN_PASTE_COIN_MULTIPLIER : 1;
     const dropValue = (fish.dropValueOverride != null
       ? fish.dropValueOverride
-      : stageDef.dropValue * Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, (fish.starTier || 1) - 1)) * mutagenMultiplier;
-    const effectiveDropInterval = stageDef.dropInterval * dirtyIntervalMultiplier;
-    total += (dropValue / effectiveDropInterval) * 60000;
+      : stageDef.dropValue * Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, (fish.starTier || 1) - 1)) * mutagenMultiplier * moneyMultiplier;
+    total += (dropValue / stageDef.dropInterval) * 60000;
   }
   return total;
 }
@@ -284,20 +281,19 @@ export function computeTheoreticalGoldPerMinute(state) {
 // minute, so the player knows how many coins need to be processed") — this
 // counts DROP EVENTS (one physical Coin item each), not their dollar value,
 // so a tank of many low-value fish and a tank of few high-value fish can
-// show very different Coin/min even at the same Gold/min. Same fish filter/
-// blocking rules as the gold version (alien-proximity/dying excluded,
-// cleanliness stretches the interval), just without the dropValue term.
+// show very different Coin/min even at the same Gold/min. Cleanliness no
+// longer affects this at all — per direct request, dirtiness now only
+// scales a coin's VALUE (see cleanlinessMoneyMultiplier), not how often
+// fish drop them — a dirty tank still produces just as many physical coins,
+// just worth less.
 export function computeTheoreticalCoinCountPerMinute(state) {
-  const stress = cleanlinessStressFactor(state);
-  const dirtyIntervalMultiplier = 1 + stress * (CLEANLINESS_STRESS_MAX_INTERVAL_MULTIPLIER - 1);
   let total = 0;
   for (const fish of state.level.entities) {
     if (fish.type !== 'fish' || fish.alienNearby || fish.dying) continue;
     const def = SPECIES[fish.speciesId];
     if (!def.behavior.includes('FEEDER')) continue;
     const stageDef = def.growthStages[fish.stage];
-    const effectiveDropInterval = stageDef.dropInterval * dirtyIntervalMultiplier;
-    total += 60000 / effectiveDropInterval;
+    total += 60000 / stageDef.dropInterval;
   }
   return total;
 }
@@ -311,33 +307,33 @@ export function computeTheoreticalCoinCountPerMinute(state) {
 // Same shape as computeTheoreticalGoldPerMinute, just for a RESEARCHER
 // species' 'science' drop instead of a FEEDER's coin — Science Octopus/Xeno
 // Octopus are the only current RESEARCHER-behavior species, but this reads
-// the behavior tag generically rather than hardcoding either id.
+// the behavior tag generically rather than hardcoding either id. Cleanliness
+// doesn't affect Science production at all — per direct request, dirtiness
+// now only affects a FEEDER fish's money.
 export function computeTheoreticalSciencePerMinute(state) {
-  const stress = cleanlinessStressFactor(state);
-  const dirtyIntervalMultiplier = 1 + stress * (CLEANLINESS_STRESS_MAX_INTERVAL_MULTIPLIER - 1);
   let total = 0;
   for (const fish of state.level.entities) {
     if (fish.type !== 'fish' || fish.alienNearby || fish.dying) continue;
     const def = SPECIES[fish.speciesId];
     if (!def.behavior.includes('RESEARCHER')) continue;
     const stageDef = def.growthStages[fish.stage];
-    const effectiveDropInterval = stageDef.dropInterval * dirtyIntervalMultiplier;
-    total += (stageDef.dropValue / effectiveDropInterval) * 60000;
+    total += (stageDef.dropValue / stageDef.dropInterval) * 60000;
   }
   return total;
 }
 
 // How much Food the tank's fish collectively need per minute just to hold
 // hunger steady — each fish's own hungerRate (per real second, already
-// scaled by star tier/cleanliness stress/Suckerfish-near-alien halving, the
-// same formula updateFish's own hunger-accumulation line uses) converted to
+// scaled by star tier/Suckerfish-near-alien halving, the same formula
+// updateFish's own hunger-accumulation line uses) converted to
 // hunger-per-minute, then divided by however much one Food pellet currently
 // relieves at the player's purchased Food Quality level. Scavengers eat
 // Waste, not Food, so they're excluded — same FEEDER/RESEARCHER-style
 // species filter as the other functions here, just inverted (everyone
-// EXCEPT a pure Scavenger has a real hunger clock ticking).
+// EXCEPT a pure Scavenger has a real hunger clock ticking). Cleanliness no
+// longer affects hunger at all — per direct request, dirtiness now only
+// affects a FEEDER fish's money.
 export function computeTheoreticalFoodNeededPerMinute(state) {
-  const stress = cleanlinessStressFactor(state);
   const relief = FOOD_HUNGER_RELIEF_BY_LEVEL[state.level.upgrades.foodQuality];
   let totalHungerPerMin = 0;
   for (const fish of state.level.entities) {
@@ -345,8 +341,7 @@ export function computeTheoreticalFoodNeededPerMinute(state) {
     const def = SPECIES[fish.speciesId];
     if (def.behavior.includes('SCAVENGER')) continue; // targets Waste, never Food, regardless of any other tag it also carries
     const alienHungerMultiplier = (fish.speciesId === 'suckerfish' && fish.alienNearby) ? 0.5 : 1;
-    const hungerRate = def.hungerRate * Math.pow(FISH_STAR_TIER_HUNGER_MULTIPLIER, (fish.starTier || 1) - 1)
-      * (1 + stress * (CLEANLINESS_STRESS_MAX_HUNGER_MULTIPLIER - 1)) * alienHungerMultiplier;
+    const hungerRate = def.hungerRate * Math.pow(FISH_STAR_TIER_HUNGER_MULTIPLIER, (fish.starTier || 1) - 1) * alienHungerMultiplier;
     totalHungerPerMin += hungerRate * 60;
   }
   return totalHungerPerMin / relief;
@@ -1049,7 +1044,8 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
     alienNearby: false, // recomputed every tick in updateFish — true while a living alien is within ALIEN_INCOME_BLOCK_RADIUS, driving both the coin-production block and the continuous gray tint (main.js's render)
     capBlockedTintRemainingMs: 0, // counts down from FISH_BLOCKED_TINT_MS whenever a science drop is blocked by the Bubble Cap — the OTHER (timed) source of the gray tint, see triggerProductionBlocked
     mutagenBuffActive: false, // Adult-only Mutagen Paste buff — see updateFish's eat branch; cleared once hunger crosses back into HUNGER_CRITICAL_THRESHOLD
-    magnetOn: false, // Buffer Fish only — toggled by clicking the fish (main.js's click handler); pulls nearby Waste toward it while true, see computeBufferFishMagnetForce
+    magnetOn: false, // Magnet Fish (buffer_fish) only — toggled by clicking the fish (main.js's click handler); pulls nearby items whose type is in magnetFilterItems toward it while true, see computeBufferFishMagnetForce
+    magnetFilterItems: ['waste'], // Magnet Fish only — which item types its magnet attracts, toggled via main.js's right-click filter modal (openMagnetFishFilterMenu), same checkbox UI a Platform's own filterItems uses. Defaults to Waste only, matching the original fixed behavior.
     linkedBuildingKey: null, // Catalyst Fish only — the "row,col" buildingData key it's currently linked to, or null; set by main.js's catalyst link-click flow, read by Grid.js's getCatalystSpeedMultiplier
     autoFoodOn: false, // Feeder Fish only — toggled by clicking the fish; while true, dispenses a real Food item every ELECTRIC_SUCKER_FOOD_INTERVAL_MS with no feeding required (and generates no power meanwhile — see updateFish's isPureGenerator branch) — see updateFish's own dedicated timer block
     autoFoodTimerMs: 0, // Feeder Fish only — counts up toward ELECTRIC_SUCKER_FOOD_INTERVAL_MS, only while autoFoodOn is true
@@ -1830,8 +1826,8 @@ function updateFood(item, state, dtMs) {
     // computeFanForce/integrateItemForces. The continuous sway is a
     // separate flavor effect layered on top of (not replacing) the physics
     // vx, so a Fan-launched pellet still wavers a little as it rises/falls.
-    const fanForce = computeFanForce(state, item);
-    integrateItemForces(item, dt, physics, fanForce);
+    const envForce = computeEnvironmentalForce(state, item);
+    integrateItemForces(item, dt, physics, envForce);
     item.fallTime += dt;
     const swayVx = currentSwayVx(item, FOOD_SWAY_AMPLITUDE, FOOD_SWAY_FREQUENCY, FOOD_SWAY_ENVELOPE_FREQUENCY);
     item.x += (item.vx + swayVx) * dt;
@@ -1890,8 +1886,8 @@ function updateCoin(item, state, dtMs) {
     // Fan force applies everywhere, not just the seabed band — see Grid.js's
     // computeFanForce/integrateItemForces. A coin's high mass means it needs
     // strong or overlapping fan coverage to actually clear a ledge.
-    const fanForce = computeFanForce(state, item);
-    integrateItemForces(item, dt, physics, fanForce);
+    const envForce = computeEnvironmentalForce(state, item);
+    integrateItemForces(item, dt, physics, envForce);
     item.y += item.vy * dt;
     item.x += item.vx * dt;
     clampItemToWorldWalls(item);
@@ -1919,8 +1915,8 @@ function updateScience(item, state, dtMs) {
   const dt = dtMs / 1000;
   const physics = { gravity: GRAVITY, maxFallSpeed: MAX_FALL_SPEED };
   if (item.y < SEABED_FLOOR_Y) {
-    const fanForce = computeFanForce(state, item);
-    integrateItemForces(item, dt, physics, fanForce);
+    const envForce = computeEnvironmentalForce(state, item);
+    integrateItemForces(item, dt, physics, envForce);
     item.y += item.vy * dt;
     item.x += item.vx * dt;
     clampItemToWorldWalls(item);
@@ -1942,21 +1938,32 @@ function updateScience(item, state, dtMs) {
 // falls/routes like a coin and piles up wherever it lands. If it does reach
 // a Collector, it's silently removed with no money and no further waste
 // spawned (no waste-spawns-waste loop).
-// Buffer Fish's click-toggled magnet (fish.magnetOn) — sums an attraction
-// force from every living, magnet-ON Buffer Fish within
+// Magnet Fish's click-toggled magnet (fish.magnetOn) — sums an attraction
+// force from every living, magnet-ON Magnet Fish within
 // BUFFER_FISH_MAGNET_RADIUS, same linear-falloff-to-0-at-range shape a Fan's
 // own cone force already uses (see Grid.js's computeFanForce), just radial
 // (pulling straight toward the fish) rather than a fixed-direction cone.
-// Waste-only, and open-water-only — a Buffer Fish can never swim into the
-// seabed city any more than any other fish can, so Waste that's already
-// settled down there is just as unreachable to this as to a normal
-// Suckerfish eating it directly. Returns the same { fx, fy } shape
-// computeFanForce does so the two can be summed before integrateItemForces.
+// Per direct request ("make it so the buffer fish can attract any object the
+// same way they attract waste, when turned on in the modal"), no longer
+// hardcoded to Waste — each fish now carries its OWN magnetFilterItems
+// whitelist (default ['waste'], toggled via main.js's right-click filter
+// modal, same UI/semantics as a Platform's own filterItems — see
+// openMagnetFishFilterMenu), and only pulls an item whose type is checked
+// into that list. Open-water-only, unchanged — a Magnet Fish can never swim
+// into the seabed city any more than any other fish can, so anything
+// already settled down there is just as unreachable to this as before.
+// Returns the same { fx, fy } shape computeFanForce does, so the two can be
+// summed before integrateItemForces (see computeEnvironmentalForce below).
 function computeBufferFishMagnetForce(state, item) {
   let fx = 0;
   let fy = 0;
   for (const entity of state.level.entities) {
     if (entity.type !== 'fish' || entity.speciesId !== 'buffer_fish' || !entity.magnetOn) continue;
+    // A fish loaded from a save written before magnetFilterItems existed
+    // has it as undefined, not ['waste'] — falls back to the same default a
+    // freshly-spawned Magnet Fish gets, so an old save's already-toggled
+    // magnet keeps attracting Waste exactly like it always did.
+    if (!(entity.magnetFilterItems || ['waste']).includes(item.type)) continue;
     const dx = entity.x - item.x;
     const dy = entity.y - item.y;
     const dist = Math.hypot(dx, dy);
@@ -1968,14 +1975,23 @@ function computeBufferFishMagnetForce(state, item) {
   return { fx, fy };
 }
 
+// Shared by every item type's own update function below — Grid.js's Fan
+// force plus a Magnet Fish's own pull, summed once so each site only needs
+// one call (same as before the magnet force existed; it used to be
+// Waste-only and so only updateWaste called it directly — now every item
+// type needs it, since a Magnet Fish's filter can include any of them).
+function computeEnvironmentalForce(state, item) {
+  const fanForce = computeFanForce(state, item);
+  const magnetForce = computeBufferFishMagnetForce(state, item);
+  return { fx: fanForce.fx + magnetForce.fx, fy: fanForce.fy + magnetForce.fy };
+}
+
 function updateWaste(item, state, dtMs) {
   const dt = dtMs / 1000;
   const physics = { gravity: WASTE_GRAVITY, maxFallSpeed: WASTE_MAX_FALL_SPEED };
   if (item.y < SEABED_FLOOR_Y) {
-    const fanForce = computeFanForce(state, item);
-    const magnetForce = computeBufferFishMagnetForce(state, item);
-    const totalForce = { fx: fanForce.fx + magnetForce.fx, fy: fanForce.fy + magnetForce.fy };
-    integrateItemForces(item, dt, physics, totalForce);
+    const envForce = computeEnvironmentalForce(state, item);
+    integrateItemForces(item, dt, physics, envForce);
     item.fallTime += dt;
     const swayVx = currentSwayVx(item, WASTE_SWAY_AMPLITUDE, WASTE_SWAY_FREQUENCY, FOOD_SWAY_ENVELOPE_FREQUENCY);
     item.y += item.vy * dt;
@@ -2002,8 +2018,8 @@ function updateAlienDna(item, state, dtMs) {
   const dt = dtMs / 1000;
   const physics = { gravity: GRAVITY, maxFallSpeed: MAX_FALL_SPEED };
   if (item.y < SEABED_FLOOR_Y) {
-    const fanForce = computeFanForce(state, item);
-    integrateItemForces(item, dt, physics, fanForce);
+    const envForce = computeEnvironmentalForce(state, item);
+    integrateItemForces(item, dt, physics, envForce);
     item.y += item.vy * dt;
     item.x += item.vx * dt;
     clampItemToWorldWalls(item);
@@ -2019,8 +2035,8 @@ function updateBiomass(item, state, dtMs) {
   const dt = dtMs / 1000;
   const physics = { gravity: GRAVITY, maxFallSpeed: MAX_FALL_SPEED };
   if (item.y < SEABED_FLOOR_Y) {
-    const fanForce = computeFanForce(state, item);
-    integrateItemForces(item, dt, physics, fanForce);
+    const envForce = computeEnvironmentalForce(state, item);
+    integrateItemForces(item, dt, physics, envForce);
     item.y += item.vy * dt;
     item.x += item.vx * dt;
     clampItemToWorldWalls(item);
@@ -2044,8 +2060,8 @@ function updateAlienEgg(item, state, dtMs) {
   const dt = dtMs / 1000;
   const physics = { gravity: GRAVITY, maxFallSpeed: MAX_FALL_SPEED };
   if (item.y < SEABED_FLOOR_Y) {
-    const fanForce = computeFanForce(state, item);
-    integrateItemForces(item, dt, physics, fanForce);
+    const envForce = computeEnvironmentalForce(state, item);
+    integrateItemForces(item, dt, physics, envForce);
     item.y += item.vy * dt;
     item.x += item.vx * dt;
     clampItemToWorldWalls(item);
@@ -2082,8 +2098,8 @@ function updateMutagenPaste(item, state, dtMs) {
   const dt = dtMs / 1000;
   const physics = { gravity: FOOD_GRAVITY, maxFallSpeed: FOOD_MAX_FALL_SPEED };
   if (item.y < SEABED_FLOOR_Y) {
-    const fanForce = computeFanForce(state, item);
-    integrateItemForces(item, dt, physics, fanForce);
+    const envForce = computeEnvironmentalForce(state, item);
+    integrateItemForces(item, dt, physics, envForce);
     item.fallTime += dt;
     const swayVx = currentSwayVx(item, FOOD_SWAY_AMPLITUDE, FOOD_SWAY_FREQUENCY, FOOD_SWAY_ENVELOPE_FREQUENCY);
     item.x += (item.vx + swayVx) * dt;
@@ -2104,8 +2120,8 @@ function updateScienceGreen(item, state, dtMs) {
   const dt = dtMs / 1000;
   const physics = { gravity: GRAVITY, maxFallSpeed: MAX_FALL_SPEED };
   if (item.y < SEABED_FLOOR_Y) {
-    const fanForce = computeFanForce(state, item);
-    integrateItemForces(item, dt, physics, fanForce);
+    const envForce = computeEnvironmentalForce(state, item);
+    integrateItemForces(item, dt, physics, envForce);
     item.y += item.vy * dt;
     item.x += item.vx * dt;
     clampItemToWorldWalls(item);
@@ -2370,6 +2386,11 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
 
   const def = SPECIES[fish.speciesId];
   const dt = dtMs / 1000;
+  // Moved up from further down in this function (still computed only once)
+  // so the hunger-accumulation/death logic right below can read it — per
+  // direct request, a Scavenger (Suckerfish/Magnet Fish and any future
+  // SCAVENGER species/hybrid) never dies of hunger at all, full stop.
+  const isScavenger = def.behavior.includes('SCAVENGER'); // Suckerfish (and any future SCAVENGER species) eats ONLY Waste, never Food
 
   // Alien Invasion can now genuinely kill a fish, per direct request — a
   // living alien touching this fish applies damage once per second
@@ -2415,12 +2436,11 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
   // A higher star tier is also less hungry — compounding 10%-per-tier
   // reduction, same ^(starTier-1) pattern as the coin-value multiplier below.
   // starTier defaults to 1 (a no-op ^0 = 1x) for every fish that's never been
-  // combined, same as everywhere else star tier is read.
-  // A dirty tank stresses fish — see Config.js's CLEANLINESS_STRESS_*
-  // constants and cleanlinessStressFactor above. A no-op (factor 0) at or
-  // above the threshold, same as every other not-yet-relevant multiplier in
-  // this codebase's formulas.
-  const stress = cleanlinessStressFactor(state);
+  // combined, same as everywhere else star tier is read. Cleanliness no
+  // longer stresses hunger at all — per direct request ("make it so that
+  // tank dirtiness correlates to JUST fish producing less money"), that
+  // effect is gone entirely; see cleanlinessMoneyMultiplier's own comment
+  // for where dirtiness's one remaining effect (coin value) actually lives.
   // Per direct request ("suckerfish hunger should go up half as fast when
   // next to aliens") — a Suckerfish near a living alien gets hungry more
   // slowly, which indirectly means it seeks out Waste less often while an
@@ -2428,8 +2448,7 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
   // theme the coin-block/food-production halving below share, just applied
   // to Suckerfish's own non-production role).
   const alienHungerMultiplier = (fish.speciesId === 'suckerfish' && fish.alienNearby) ? 0.5 : 1;
-  const hungerRate = def.hungerRate * Math.pow(FISH_STAR_TIER_HUNGER_MULTIPLIER, (fish.starTier || 1) - 1)
-    * (1 + stress * (CLEANLINESS_STRESS_MAX_HUNGER_MULTIPLIER - 1)) * alienHungerMultiplier;
+  const hungerRate = def.hungerRate * Math.pow(FISH_STAR_TIER_HUNGER_MULTIPLIER, (fish.starTier || 1) - 1) * alienHungerMultiplier;
   // Per direct request ("make it so the game is paused during tutorials, so
   // my fish doesn't die while I'm placing a turret or chest") — hunger
   // itself stays frozen for as long as ANY guided tutorial is active, full
@@ -2445,6 +2464,14 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
   // hands are tied up in a multi-step guided flow they can't rush through.
   const hungerDt = state.level.tutorialFlow ? 0 : dt;
   fish.hunger = Math.min(HUNGER_MAX, fish.hunger + hungerRate * hungerDt);
+  // Per direct request, a Scavenger (eats Waste, never Food) never dies of
+  // hunger at all — hard-clamped just under HUNGER_CRITICAL_THRESHOLD, so it
+  // can still show the first ("!") seek indicator and actively hunt for
+  // Waste, but can never progress into the second ("!!") stage, never plays
+  // that stage's chime sounds (the block right below this naturally no-ops,
+  // since it's gated on the same threshold), and never reaches HUNGER_MAX
+  // (the death check right below this also naturally never fires).
+  if (isScavenger) fish.hunger = Math.min(fish.hunger, HUNGER_CRITICAL_THRESHOLD - 0.01);
   if (fish.hunger >= HUNGER_MAX) {
     playFishDeath();
     state.level.fishDiedCount += 1; // end-game stats modal only — see main.js's showGameOverModal
@@ -2476,7 +2503,7 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
       && fish.hunger >= HUNGER_CRITICAL_THRESHOLD + FISH_HUNGER_CHIME_FRACTIONS[fish.hungerChimesPlayed] * (HUNGER_MAX - HUNGER_CRITICAL_THRESHOLD)
     ) {
       fish.hungerChimesPlayed += 1;
-      playHunger();
+      playHunger(fish.hungerChimesPlayed - 1); // 0-based index of the chime that just fired — see Sound.js's own comment for the escalating-volume rationale
     }
     // Per direct request, ALWAYS let out a bubble the instant a fish hits
     // the second (more urgent) hunger stage — a guaranteed emission, on
@@ -2558,7 +2585,6 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
     }
   }
 
-  const isScavenger = def.behavior.includes('SCAVENGER'); // Suckerfish (and any future SCAVENGER species) eats ONLY Waste, never Food
   // A SCAVENGER+FEEDER hybrid (Scrub-Guppy/Dartfin/Blimpfish) still eats
   // Waste like any Scavenger, but its dropInterval is claimed for coin-drop
   // timing instead (see the passive-production branch below) — so unlike a
@@ -2895,22 +2921,23 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
     // (fish.alienNearby, set above) is the only feedback for this case. The
     // cycle still resets rather than holding at the threshold, so the fish
     // doesn't instantly drop a coin the moment the alien wanders off.
-    // A dirty tank makes a fish produce money less OFTEN, not less money per
-    // drop — per the cleanliness warning's own wording ("the less often your
-    // fish produce money"), stretching the interval rather than shrinking
-    // the payout. stress is 0 (no-op) above CLEANLINESS_STRESS_THRESHOLD.
-    const dirtyIntervalMultiplier = 1 + stress * (CLEANLINESS_STRESS_MAX_INTERVAL_MULTIPLIER - 1);
-    const effectiveDropInterval = stageDef.dropInterval * dirtyIntervalMultiplier;
-    if (fish.dropTimer >= effectiveDropInterval && fish.alienNearby) {
+    // A dirty tank makes a fish produce LESS money, not less OFTEN — per
+    // direct request ("make it so that tank dirtiness correlates to just
+    // fish producing less money... half as much money at 0% cleanliness"),
+    // replacing an earlier version of this mechanic that stretched the
+    // interval instead. The drop timer itself now runs at the fish's real,
+    // undirtied pace; cleanlinessMoneyMultiplier scales the payout amount
+    // further down, applied alongside the other value multipliers below.
+    if (fish.dropTimer >= stageDef.dropInterval && fish.alienNearby) {
       fish.dropTimer = 0;
-    } else if (fish.dropTimer >= effectiveDropInterval) {
+    } else if (fish.dropTimer >= stageDef.dropInterval) {
       // Subtracting (not resetting to 0) lets the coin-drop timer overfill
       // the same way hunger can go negative from an overfed pellet — a big
       // feed-bonus jump (COIN_TIMER_FEED_BONUS_FRACTION_BY_LEVEL) can push
-      // dropTimer well past effectiveDropInterval in one bite, and whatever
+      // dropTimer well past stageDef.dropInterval in one bite, and whatever
       // carries over past the threshold means the NEXT coin arrives sooner
       // too, per direct request.
-      fish.dropTimer -= effectiveDropInterval;
+      fish.dropTimer -= stageDef.dropInterval;
       // A hybrid's dropValueOverride (T5 value carry-over pipeline) already
       // reflects its economy parent's tier-scaled value in full — using it
       // directly, not layering the starTier multiplier on top again, since a
@@ -2923,14 +2950,20 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
       // to the next whole coin value rather than handing out a fractional
       // amount, per direct request.
       // Mutagen Paste's Adult buff (fish.mutagenBuffActive — see the eat
-      // branch above) multiplies the final coin value on top of everything
-      // else, star tier included — applied last, after Math.ceil, so it
-      // always lands on a whole number regardless of the base value's own
-      // rounding.
+      // branch above) and cleanlinessMoneyMultiplier (a dirty tank's own
+      // money penalty) both multiply the final coin value on top of
+      // everything else, star tier included — applied last, after
+      // Math.ceil, so it always lands on a whole number regardless of the
+      // base value's own rounding.
       const mutagenMultiplier = fish.mutagenBuffActive ? MUTAGEN_PASTE_COIN_MULTIPLIER : 1;
-      const dropValue = (fish.dropValueOverride != null
+      const moneyMultiplier = cleanlinessMoneyMultiplier(state);
+      const baseDropValue = fish.dropValueOverride != null
         ? fish.dropValueOverride
-        : Math.ceil(stageDef.dropValue * Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, (fish.starTier || 1) - 1))) * mutagenMultiplier;
+        : Math.ceil(stageDef.dropValue * Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, (fish.starTier || 1) - 1));
+      // Math.round (not ceil) on this final step — cleanlinessMoneyMultiplier
+      // can land anywhere in a continuous 0.5-1.0 range, so ceiling it back
+      // up every time would silently erase most of the intended penalty.
+      const dropValue = Math.round(baseDropValue * mutagenMultiplier * moneyMultiplier);
       // Skip entirely for a $0 drop (any not-yet-behavior-wired species) — a
       // worthless coin still lands on a Processor like any other, which is
       // actively counterproductive busywork for no payout. No Coin Cap gate

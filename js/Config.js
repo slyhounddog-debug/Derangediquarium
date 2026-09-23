@@ -938,7 +938,7 @@ export const WASTE_MAX_ON_SCREEN = 200;
 // written.
 export const CLEANLINESS_WARNING_THRESHOLD = 90;
 export const CLEANLINESS_WARNING_MESSAGE =
-  'Looking a little dirty in there champ. The dirtier your tank is, the less often your fish produce money. If only there was a way to clean it......';
+  'Looking a little dirty in there champ. The dirtier your tank is, the less money your fish produce. If only there was a way to clean it......';
 // The first-ever Bio-Sludge (alien_dna) item, per direct request — worded
 // differently depending on whether the Refinery is already unlocked (it's
 // granted by the Mound's real Tier 1->2 crack), since a player who hasn't
@@ -959,21 +959,20 @@ export const FIRST_BIO_SLUDGE_NO_REFINERY_MESSAGE =
 export const CLEANLINESS_COLOR_CLEAN = '#4fc3f7';
 export const CLEANLINESS_COLOR_DIRTY = '#8a6f45';
 
-// Real gameplay detriments of a dirty tank, per direct request ("if the
-// detriments of tank cleanliness haven't been implemented, make sure they
-// are") — this is what CLEANLINESS_WARNING_MESSAGE above was always
-// foreshadowing ("the dirtier your tank is, the less often your fish produce
-// money"). Below CLEANLINESS_STRESS_THRESHOLD, every fish gets hungrier
-// faster AND takes longer between coin drops — both scale linearly with how
-// far below the threshold cleanliness has fallen, maxing out at 0%
-// cleanliness. Entities.js's cleanlinessStressFactor(state) returns that 0-1
-// scale; updateFish applies it to both the hunger accumulation rate and the
-// coin-drop interval (not the payout amount — a dirty tank makes fish
-// produce money less OFTEN, per the warning's own wording, not less money
-// per drop).
-export const CLEANLINESS_STRESS_THRESHOLD = 50;
-export const CLEANLINESS_STRESS_MAX_HUNGER_MULTIPLIER = 1.5; // at 0% cleanliness, hunger accumulates 50% faster
-export const CLEANLINESS_STRESS_MAX_INTERVAL_MULTIPLIER = 2; // at 0% cleanliness, a coin-drop cycle takes 2x as long
+// Real gameplay detriment of a dirty tank, per direct request ("make it so
+// that tank dirtiness correlates to just fish producing less money. They
+// produce half as much money at 0% cleanliness") — replaces an earlier
+// version of this same mechanic that also slowed hunger AND stretched the
+// coin-drop interval; per this later direct request ("JUST fish producing
+// less money"), dirtiness now affects ONLY a FEEDER fish's coin VALUE — the
+// old hunger-rate/interval-stretch effects are gone entirely — and scales
+// smoothly across the WHOLE 0-100% range (no dead zone above a threshold —
+// the old version only kicked in below 50%). Entities.js's
+// cleanlinessMoneyMultiplier(state) returns the live 0.5-1.0 multiplier
+// (CLEANLINESS_MIN_MONEY_FRACTION at 0% clean, 1.0 at 100% clean), applied
+// directly to a coin's own dropValue in updateFish's real coin-drop branch
+// and to computeTheoreticalGoldPerMinute's own stat.
+export const CLEANLINESS_MIN_MONEY_FRACTION = 0.5; // at 0% cleanliness, fish produce half as much money
 
 // ---- Floating pickup text ----
 export const PICKUP_TEXT_LIFETIME_MS = 900; // how long a "+$N" pickup readout stays on screen after a coin is banked
@@ -1435,9 +1434,16 @@ export const SPECIES = {
     growthStages: [{ feedsRequired: 0, scale: 1.0, dropValue: 0, pixelsPerMW: 0.5 }],
     unlockedByDefault: false,
   },
+  // Renamed 'Buffer Fish' -> 'Magnet Fish' per direct request — the id
+  // (buffer_fish) is left alone, an internal identifier other code/nodes
+  // reference, not a player-facing "mention." Its magnet is no longer
+  // Waste-only either, per that same direct request ("make it so the buffer
+  // fish can attract any object the same way they attract waste, when
+  // turned on in the modal") — see Entities.js's fish.magnetFilterItems and
+  // main.js's right-click filter modal (openMagnetFishFilterMenu).
   buffer_fish: {
-    id: 'buffer_fish', name: 'Buffer Fish', tier: 4, unlockPhase: 4, cost: 70,
-    description: 'Suckerfish × Guppy — click it to toggle a Waste-attracting magnet on/off. Still eats Waste like a Suckerfish, but converts what it eats into Food instead of just relieving its own hunger.',
+    id: 'buffer_fish', name: 'Magnet Fish', tier: 4, unlockPhase: 4, cost: 70,
+    description: 'Suckerfish × Guppy — click it to toggle its magnet on/off, then right-click it to choose what it attracts (Waste by default). Still eats Waste like a Suckerfish, but converts what it eats into Food instead of just relieving its own hunger.',
     behavior: ['SCAVENGER'], dropType: 'waste_to_food', parents: ['suckerfish', 'guppy'],
     swimSpeed: 33, lifespan: 300000, hungerRate: 0.914,
     // dropInterval is this pure Scavenger's eat cooldown, same "up to 3
@@ -2257,6 +2263,7 @@ export const SCIENCE_LAB_UPGRADES = {
   // chain was pure friction.
   recipe_bio_feeder: {
     id: 'recipe_bio_feeder', name: 'Mutagen Paste Recipe', icon: '🩷', scienceCost: 90, goldCost: 7000,
+    description: 'Unlocks the Manufacturer\'s Food+Biomass recipe, producing Mutagen Paste. Feeding it to a non-Adult fish instantly grows it to Adult; feeding it to an already-Adult fish instead gives a temporary 2x coin-drop buff with a glowing visual.',
     requires: ['manufacturer'], grants: {},
   },
   // Per direct request, now requires Bubble Cap 30 AND the Alien Egg recipe
@@ -2353,12 +2360,12 @@ export const SCIENCE_LAB_UPGRADES = {
   // Suckerfish itself), so dropping the separate direct requirement here
   // doesn't loosen anything.
   hybrid_buffer_fish: {
-    id: 'hybrid_buffer_fish', name: 'Buffer Fish', icon: '🧲', scienceCost: 40, goldCost: 4000,
+    id: 'hybrid_buffer_fish', name: 'Magnet Fish', icon: '🧲', scienceCost: 40, goldCost: 4000,
     requires: ['science_cap_3'], grants: { species: ['buffer_fish'] },
   },
   hybrid_eel_blimp: {
     id: 'hybrid_eel_blimp', name: 'Blimp-Battery', icon: '🔋', scienceCost: 60, goldCost: 8000,
-    requires: ['science_cap_3'], grants: { species: ['eel_blimp'] },
+    requires: ['science_cap_4'], grants: { species: ['eel_blimp'] }, // moved from Bubble Cap 60 to 80, per direct request
   },
   // The one hybrid node requiring Green Science as well as Blue, per direct
   // request ("everything that requires green science to be unlocked[...]

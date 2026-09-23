@@ -27,6 +27,7 @@ let musicLowpassFilter = null;
 let musicHighpassFilter = null;
 let wantMuffle = false; // desired state, reapplied once the nodes actually exist
 let wantSpeedBoost = false;
+let wantPausedSlow = false; // per direct request ("slow down music 2% for paused time") — see setMusicPaused below
 // Per direct request ("when time is paused, add a muffle effect to the
 // music, so it sounds like it's under water") — a lowpass sweeps down to
 // this cutoff; fully open (no audible filtering) is MUSIC_FILTER_OPEN_HZ.
@@ -46,6 +47,12 @@ const MUSIC_HIGHPASS_OPEN_HZ = 20;
 // actually shift pitch instead of the browser's default time-stretch-only
 // behavior).
 const MUSIC_SPEED_BOOST_RATE = 1.03;
+// Per direct request ("slow down music 2% for paused time") — combines
+// multiplicatively with MUSIC_SPEED_BOOST_RATE via currentTargetPlaybackRate
+// below, so the (unlikely) case of pausing during a 2x-speed boost still
+// lands on a sensible combined rate instead of one flag clobbering the other.
+const MUSIC_PAUSED_SLOW_RATE = 0.98;
+const MUSIC_PAUSED_FADE_MS = 300;
 // How quickly the underwater-muffle lowpass ramps to its new target —
 // smooth enough to avoid an audible pop/step, the standard `setTargetAtTime`
 // "time constant" shape (not a linear duration — ~5x this value is roughly
@@ -88,8 +95,11 @@ let bossActive = false;
 // directly any time they change after that. musicVolume/sfxVolume are the
 // slider's own 0-1 FRACTION (what the slider displays, 0.5 = "50%"), not the
 // final gain — see MUSIC_VOLUME_MAX_GAIN/SFX_VOLUME_MAX_GAIN below for the
-// separate scale-down applied on top. Per direct request, both start at 50%.
-let musicVolume = 0.5;
+// separate scale-down applied on top. Both used to start at 50% — per direct
+// request ("make the max music 10% quieter and also start 10% quieter, but
+// keep the sound effects untouched"), music's own starting fraction is now
+// 45% (50% * 0.9); sfxVolume is untouched.
+let musicVolume = 0.45;
 let sfxVolume = 0.5;
 // Per direct request ("the max loudness the music and sound effects can get
 // are 30% quieter than they are now") — a slider at 100% used to map
@@ -99,7 +109,11 @@ let sfxVolume = 0.5;
 // point. Applied as a multiplier in setMusicVolume/setSfxVolume and in
 // ensureContext's own initial gain-node setup below, so both paths (a slider
 // drag, and the very first AudioContext creation) always agree.
-const MUSIC_VOLUME_MAX_GAIN = 0.7;
+// MUSIC_VOLUME_MAX_GAIN is a further 10% quieter on top of that (0.7 * 0.9),
+// per direct request ("make the max music 10% quieter... the 3 music tracks
+// over-power the sound effects by default") — SFX_VOLUME_MAX_GAIN is
+// deliberately untouched, only the music ceiling moved.
+const MUSIC_VOLUME_MAX_GAIN = 0.63;
 const SFX_VOLUME_MAX_GAIN = 0.7;
 
 function ensureContext() {
@@ -142,6 +156,14 @@ export function setMusicUnderwaterMuffle(active) {
 // AudioParam ramp, and a manual rAF-driven ramp of every music <audio>
 // element's playbackRate (see rampMusicPlaybackRate below —
 // HTMLMediaElement.playbackRate has no AudioParam equivalent to lean on).
+// The two playbackRate modifiers (2x-speed boost, paused slow-down)
+// multiply together rather than one overwriting the other, so pausing while
+// already sped up (an unlikely but real combination) still lands on a
+// sensible combined rate instead of losing one effect.
+function currentTargetPlaybackRate() {
+  return (wantSpeedBoost ? MUSIC_SPEED_BOOST_RATE : 1.0) * (wantPausedSlow ? MUSIC_PAUSED_SLOW_RATE : 1.0);
+}
+
 export function setMusicSpeedBoost(active) {
   wantSpeedBoost = active;
   const fadeMs = active ? MUSIC_SPEED_FADE_IN_MS : MUSIC_SPEED_FADE_OUT_MS;
@@ -155,7 +177,16 @@ export function setMusicSpeedBoost(active) {
     musicHighpassFilter.frequency.setValueAtTime(musicHighpassFilter.frequency.value, now);
     musicHighpassFilter.frequency.linearRampToValueAtTime(target, now + fadeMs / 1000);
   }
-  rampMusicPlaybackRate(active ? MUSIC_SPEED_BOOST_RATE : 1.0, fadeMs);
+  rampMusicPlaybackRate(currentTargetPlaybackRate(), fadeMs);
+}
+
+// Per direct request ("slow down music 2% for paused time") — no filter
+// effect, just a small playbackRate dip while the pause menu is open, same
+// ramp mechanism setMusicSpeedBoost already uses. Called from main.js's own
+// pause toggle.
+export function setMusicPaused(active) {
+  wantPausedSlow = active;
+  rampMusicPlaybackRate(currentTargetPlaybackRate(), MUSIC_PAUSED_FADE_MS);
 }
 
 // Smoothly ramps Game/Battle/Boss's playbackRate together, in lockstep —
@@ -348,9 +379,19 @@ export function playEat() {
 // still reads as "this fish wants food" without sounding like something
 // broke. playFishDeath below is what should read as the actually bad
 // outcome — this stays clearly gentler than that.
-export function playHunger() {
-  playTone(196, 0.1, { type: 'triangle', gain: 0.06, attack: 0.01, release: 0.06 }); // G3
-  playTone(174.61, 0.14, { type: 'triangle', gain: 0.05, attack: 0.01, release: 0.08, when: 0.1 }); // F3
+// chimeIndex: which of the 4 escalating hunger chimes this is (0 = first,
+// 3 = last, right before the fish would starve) — per direct request
+// ("increase the base volume of the first chime" and "make the second
+// hunger chimes increasingly louder slightly each time"), the base gains
+// below are already raised from their old 0.06/0.05, and each later chime
+// in the same fish's sequence rides a further +15%-per-step multiplier on
+// top of that, so the urgency audibly escalates alongside the already-
+// faster rhythm (FISH_HUNGER_CHIME_FRACTIONS' own shrinking gaps) and the
+// "aggressive bounce" the on-screen "!!" gets after the 2nd chime.
+export function playHunger(chimeIndex = 0) {
+  const volumeMultiplier = 1 + chimeIndex * 0.15;
+  playTone(196, 0.1, { type: 'triangle', gain: 0.09 * volumeMultiplier, attack: 0.01, release: 0.06 }); // G3
+  playTone(174.61, 0.14, { type: 'triangle', gain: 0.075 * volumeMultiplier, attack: 0.01, release: 0.08, when: 0.1 }); // F3
 }
 
 // A short descending sad phrase — a fish starving.
@@ -639,7 +680,7 @@ function ensureMusicTracks() {
   // prefixes included, so setMusicSpeedBoost's playbackRate ramp actually
   // shifts pitch as a natural side effect of playing faster, per direct
   // request, rather than staying pitch-flat.
-  const initialRate = wantSpeedBoost ? MUSIC_SPEED_BOOST_RATE : 1.0;
+  const initialRate = currentTargetPlaybackRate();
   [gameMusicEl, battleMusicEl, bossMusicEl].forEach((el) => {
     el.preservesPitch = false;
     el.mozPreservesPitch = false;

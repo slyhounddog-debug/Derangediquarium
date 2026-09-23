@@ -98,7 +98,7 @@ import {
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
-import { playUpgrade, setMusicVolume, setSfxVolume, getMusicVolume, getSfxVolume, playPanelOpen, playPanelClose, playInsufficientFunds, setMusicUnderwaterMuffle, setMusicSpeedBoost } from './Sound.js';
+import { playUpgrade, setMusicVolume, setSfxVolume, getMusicVolume, getSfxVolume, playPanelOpen, playPanelClose, playInsufficientFunds, setMusicUnderwaterMuffle, setMusicSpeedBoost, setMusicPaused } from './Sound.js';
 import { hasSaveGame, saveGame, loadSaveGame } from './Save.js';
 import { pushGameNotification } from './Notifications.js';
 
@@ -135,7 +135,8 @@ let buildingInfoTileKey = null; // "row,col" key of whichever placed building th
 let platformFilterMenuOpen = false;
 let platformFilterMenuClosing = false;
 let platformFilterMenuCloseTimer = null;
-let platformFilterTileKey = null; // "row,col" key of whichever placed Platform this item-filter pop-up is currently open for
+let platformFilterTileKey = null; // "row,col" key of whichever placed Platform/Fan this item-filter pop-up is currently open for
+let platformFilterFishId = null; // Magnet Fish's own use of this SAME pop-up (its magnetFilterItems, not a building's filterItems) — mutually exclusive with platformFilterTileKey, see openMagnetFishFilterMenu
 let storageChestMenuOpen = false;
 let storageChestMenuClosing = false;
 let storageChestMenuCloseTimer = null;
@@ -281,6 +282,7 @@ function pushUiNotification(state, text) {
 export function initUI(state) {
   els = {
     hud: document.getElementById('hud'),
+    minimapWrap: document.getElementById('minimap-wrap'),
     money: document.getElementById('hud-money'),
     scienceCap: document.getElementById('hud-science-cap'),
     cleanliness: document.getElementById('hud-cleanliness'),
@@ -620,7 +622,7 @@ export function initUI(state) {
     powerGraphOpen = !powerGraphOpen;
     els.powerGraph.classList.toggle('hidden', !powerGraphOpen);
     els.powerArrow.classList.toggle('open', powerGraphOpen); // flips the chevron to point up while the graph is showing
-    if (powerGraphOpen) renderPowerGraph(state);
+    if (powerGraphOpen) { positionPowerGraph(state); renderPowerGraph(state); }
     (powerGraphOpen ? playPanelOpen : playPanelClose)();
   });
 
@@ -779,6 +781,7 @@ function refreshTimeControlButtons(state) {
   els.timeSpeedBtn.classList.toggle('active', state.ui.speedX2);
   setMusicUnderwaterMuffle(state.ui.timePaused);
   setMusicSpeedBoost(state.ui.speedX2);
+  setMusicPaused(state.ui.timePaused); // per direct request ("slow down music 2% for paused time") — a small playbackRate dip layered on top of the existing muffle effect, see Sound.js
 }
 
 export function toggleTimePause(state) {
@@ -1004,6 +1007,7 @@ export function openPlatformFilterMenu(state, tileKey) {
   platformFilterMenuOpen = true;
   platformFilterMenuClosing = false;
   platformFilterTileKey = tileKey;
+  platformFilterFishId = null; // mutually exclusive with a Magnet Fish's own use of this same pop-up
   if (platformFilterMenuCloseTimer !== null) { clearTimeout(platformFilterMenuCloseTimer); platformFilterMenuCloseTimer = null; }
   closeSidePanels(state); // keep the Shop/Tank Upgrades panel from sitting open behind this, same as every other fly-out pop-up
   els.platformFilterOverlay.classList.remove('hidden');
@@ -1016,11 +1020,38 @@ export function openPlatformFilterMenu(state, tileKey) {
   playPanelOpen();
 }
 
+// Magnet Fish's own use of the exact same filter pop-up — per direct
+// request ("right click on the buffer fish, bring up a filter modal like on
+// platforms to allow which object(s) the buffer fish attracts"). Reuses
+// every DOM element/transition/position-tracking mechanism
+// openPlatformFilterMenu already has; refreshPlatformFilterMenu/
+// updatePlatformFilterMenuPosition/togglePlatformFilterItem/
+// clearPlatformFilter each branch on platformFilterFishId vs
+// platformFilterTileKey to read/write fish.magnetFilterItems instead of a
+// building's data.filterItems.
+export function openMagnetFishFilterMenu(state, fishId) {
+  platformFilterMenuOpen = true;
+  platformFilterMenuClosing = false;
+  platformFilterFishId = fishId;
+  platformFilterTileKey = null;
+  if (platformFilterMenuCloseTimer !== null) { clearTimeout(platformFilterMenuCloseTimer); platformFilterMenuCloseTimer = null; }
+  closeSidePanels(state);
+  els.platformFilterOverlay.classList.remove('hidden');
+  refreshPlatformFilterMenu(state);
+  updatePlatformFilterMenuPosition(state);
+
+  els.platformFilterMenu.classList.add('platform-filter-menu-closed');
+  void els.platformFilterMenu.offsetWidth;
+  els.platformFilterMenu.classList.remove('platform-filter-menu-closed');
+  playPanelOpen();
+}
+
 export function closePlatformFilterMenu() {
   if (!platformFilterMenuOpen) return;
   platformFilterMenuOpen = false;
   platformFilterMenuClosing = true;
   platformFilterTileKey = null;
+  platformFilterFishId = null;
   els.platformFilterMenu.classList.add('platform-filter-menu-closed');
   platformFilterMenuCloseTimer = setTimeout(() => {
     els.platformFilterOverlay.classList.add('hidden');
@@ -1030,46 +1061,75 @@ export function closePlatformFilterMenu() {
   playPanelClose();
 }
 
+// Resolves whichever target (a Platform/Fan tile, or a Magnet Fish) this
+// shared pop-up is currently open for — a fish's own worldX/worldY are read
+// LIVE every call (not cached), so a Magnet Fish's popup genuinely follows
+// it around while it keeps swimming, the same way a building's popup
+// already tracks camera pans (both go through this same position function,
+// called every frame while open — see updateHUD). Returns null if the
+// underlying fish/building is gone (dead, demolished, moved).
+function activeFilterTarget(state) {
+  if (platformFilterFishId != null) {
+    const fish = state.level.entities.find((e) => e.id === platformFilterFishId && e.type === 'fish' && !e.dying);
+    if (!fish) return null;
+    if (!fish.magnetFilterItems) fish.magnetFilterItems = ['waste']; // lazy-migrate a fish loaded from a save written before this field existed
+    return { kind: 'fish', array: fish.magnetFilterItems, worldX: fish.x, worldY: fish.y - 24 };
+  }
+  if (platformFilterTileKey != null) {
+    const data = state.level.buildingData[platformFilterTileKey];
+    if (!data) return null;
+    const [row, col] = platformFilterTileKey.split(',').map(Number);
+    return { kind: 'building', array: data.filterItems, isFan: BUILDING_FAMILIES.fan.includes(data.type), worldX: col * TILE_SIZE + TILE_SIZE / 2, worldY: row * TILE_SIZE };
+  }
+  return null;
+}
+
 function updatePlatformFilterMenuPosition(state) {
-  if (!platformFilterTileKey) return;
-  const [row, col] = platformFilterTileKey.split(',').map(Number);
-  const worldX = col * TILE_SIZE + TILE_SIZE / 2;
-  const worldY = row * TILE_SIZE;
-  const screen = worldToScreen(worldX, worldY, state.camera);
+  const target = activeFilterTarget(state);
+  if (!target) return;
+  const screen = worldToScreen(target.worldX, target.worldY, state.camera);
   els.platformFilterAnchor.style.left = `${screen.x}px`;
   els.platformFilterAnchor.style.top = `${screen.y - MOUND_MENU_GAP_PX}px`;
 }
 
-// Rebuilds the item grid for whichever Platform sits at
-// platformFilterTileKey — called only on open and after a mutation (item
+// Rebuilds the item grid for whichever Platform/Fan/Magnet Fish this pop-up
+// is currently open for — called only on open and after a mutation (item
 // toggle, clear all, or a drag-copy landing on this exact tile — see
 // copyPlatformFilter below), NOT every frame, same "don't tear down the DOM
 // under a real click" fix the recipe menu's own refreshRecipeMenu comment
 // documents. The much lighter per-frame check in updateHUD just closes the
-// popup if the underlying tile gets demolished/moved out from under it,
-// without touching this DOM at all.
+// popup if the underlying tile/fish is gone, without touching this DOM at all.
 function refreshPlatformFilterMenu(state) {
-  if (!platformFilterTileKey) return;
-  const data = state.level.buildingData[platformFilterTileKey];
-  if (!data) { closePlatformFilterMenu(); return; }
+  const target = activeFilterTarget(state);
+  if (!target) { closePlatformFilterMenu(); return; }
 
   // Per direct request ("make fans work as filters the same as
   // platforms") — the pop-up itself is fully shared (same fields, same
-  // buttons), but a Platform "blocks" an item (collision) while a Fan
-  // "blows" one (force) — different enough verbs that the static
-  // Platform-only copy would read oddly reused verbatim for a Fan.
-  const isFan = BUILDING_FAMILIES.fan.includes(data.type);
-  els.platformFilterTitle.textContent = isFan ? 'Fan Filter' : 'Item Filter';
-  els.platformFilterHint.textContent = isFan
-    ? 'Everything is blown by default — click an item to exclude it from this fan’s force.'
-    : 'Everything is blocked by default — click an item to let it pass through.';
-  els.platformFilterClearBtn.title = isFan
-    ? 'Back to a plain Fan — blows everything again'
-    : 'Back to a plain, always-solid Platform — everything blocked';
+  // buttons), but a Platform "blocks" an item (collision), a Fan "blows"
+  // one (force), and a Magnet Fish "attracts" one (per a later direct
+  // request, "bring up a filter modal like on platforms to allow which
+  // object(s) the buffer fish attracts") — different enough verbs that a
+  // single static copy would read oddly reused verbatim across all three.
+  // A Magnet Fish is also the one INCLUDE-list case (checked = attracted,
+  // starting from NOTHING attracted) rather than an EXCLUDE-list (checked =
+  // let through/not blown, starting from EVERYTHING affected) — the
+  // checkbox mechanics underneath (a plain array of item-type ids) are
+  // identical either way, only the wording differs.
+  els.platformFilterTitle.textContent = target.kind === 'fish' ? 'Magnet Filter' : target.isFan ? 'Fan Filter' : 'Item Filter';
+  els.platformFilterHint.textContent = target.kind === 'fish'
+    ? 'Nothing is attracted by default — click an item to have this fish\'s magnet pull it in too.'
+    : target.isFan
+      ? 'Everything is blown by default — click an item to exclude it from this fan’s force.'
+      : 'Everything is blocked by default — click an item to let it pass through.';
+  els.platformFilterClearBtn.title = target.kind === 'fish'
+    ? 'Back to attracting Waste only'
+    : target.isFan
+      ? 'Back to a plain Fan — blows everything again'
+      : 'Back to a plain, always-solid Platform — everything blocked';
 
   els.platformFilterItems.innerHTML = '';
   for (const itemDef of PLATFORM_FILTER_ITEM_TYPES) {
-    const isListed = data.filterItems.includes(itemDef.id);
+    const isListed = target.array.includes(itemDef.id);
     const btn = document.createElement('button');
     btn.className = 'platform-filter-item' + (isListed ? ' pass' : ' block');
     // Real item art instead of the plain emoji — per direct request ("change
@@ -1164,7 +1224,14 @@ function refreshStorageChestModal(state) {
   } else {
     const label = PLATFORM_FILTER_ITEM_TYPES.find((t) => t.id === data.lockedItemType)?.label || data.lockedItemType;
     els.storageChestIcon.innerHTML = itemIconImgHtml(data.lockedItemType, 26);
-    els.storageChestCount.textContent = `${data.count} / ${capacity} ${label}`;
+    // Per direct request — a coin-holding chest also shows the total real
+    // dollar value of everything stored, not just the unit count (coinQueue
+    // is a real FIFO of each coin's own individual value, not a pooled
+    // average — see Grid.js's own comment on why — so this sum is exact).
+    const totalValueSuffix = data.lockedItemType === 'coin'
+      ? ` ($${data.coinQueue.reduce((sum, v) => sum + v, 0)} total)`
+      : '';
+    els.storageChestCount.textContent = `${data.count} / ${capacity} ${label}${totalValueSuffix}`;
   }
   // A genuine toggle now, per direct request — only disabled while there's
   // no remembered direction to pause/resume at all yet (never dragged).
@@ -1188,22 +1255,29 @@ function refreshStorageChestModal(state) {
 // Toggled from red x's to green checks and back — re-clicking an already-
 // whitelisted item removes it, flipping it back to the red-X default.
 function togglePlatformFilterItem(state, itemId) {
-  if (!platformFilterTileKey) return;
-  const data = state.level.buildingData[platformFilterTileKey];
-  if (!data) return;
-  const idx = data.filterItems.indexOf(itemId);
-  if (idx === -1) data.filterItems.push(itemId);
-  else data.filterItems.splice(idx, 1);
+  const target = activeFilterTarget(state);
+  if (!target) return;
+  const idx = target.array.indexOf(itemId);
+  if (idx === -1) target.array.push(itemId);
+  else target.array.splice(idx, 1);
   refreshPlatformFilterMenu(state);
 }
 
-// Back to a plain, always-solid Platform — every item red-X again, nothing
-// whitelisted.
+// Back to a plain, always-solid Platform/Fan (every item red-X again,
+// nothing whitelisted) — or, for a Magnet Fish, back to attracting Waste
+// only (its original fixed behavior), not an empty list, since "clear" on
+// an opt-IN filter reading as "attract nothing at all" would be a strange
+// reset for a magnet fish the player just turned on.
 function clearPlatformFilter(state) {
-  if (!platformFilterTileKey) return;
-  const data = state.level.buildingData[platformFilterTileKey];
-  if (!data) return;
-  data.filterItems = [];
+  const target = activeFilterTarget(state);
+  if (!target) return;
+  if (target.kind === 'fish') {
+    const fish = state.level.entities.find((e) => e.id === platformFilterFishId && e.type === 'fish');
+    if (fish) fish.magnetFilterItems = ['waste'];
+  } else {
+    const data = state.level.buildingData[platformFilterTileKey];
+    if (data) data.filterItems = [];
+  }
   refreshPlatformFilterMenu(state);
 }
 
@@ -3869,6 +3943,38 @@ function cleanlinessColor(cleanliness) {
   return `rgb(${r}, ${g}, ${b})`;
 }
 
+// Per direct request — the electricity graph popup used to anchor under
+// its own HUD pill and could end up partly covered by the minimap; this
+// instead positions it live off #hud's and #minimap-wrap's REAL current
+// bounding boxes (both are independently right-anchored, variable-width
+// `position: fixed` elements — there's no fixed relationship between them
+// in plain CSS alone): left-aligned with the HUD's own left edge, top-
+// aligned with the minimap and the same height, sized to fit the gap
+// between the HUD's left edge and the minimap's left edge (minus a small
+// margin on each side so it never touches either). The canvas's own
+// width/height attributes (not just its CSS box) are resized to match —
+// renderPowerGraph already reads canvas.width/height directly, so it draws
+// correctly at whatever size lands here with no separate scaling logic
+// needed. Called once on open and every frame it stays open (see
+// updateHUD), so it also tracks a live window resize.
+function positionPowerGraph(state) {
+  const hudRect = els.hud.getBoundingClientRect();
+  const minimapRect = els.minimapWrap.getBoundingClientRect();
+  const gap = 8;
+  const paddingEachSide = 10; // matches #hud-power-graph's own CSS padding
+  const outerWidth = Math.max(100, minimapRect.left - hudRect.left - gap);
+  const outerHeight = minimapRect.height;
+  els.powerGraph.style.left = `${hudRect.left}px`;
+  els.powerGraph.style.top = `${minimapRect.top}px`;
+  const canvasWidth = Math.round(outerWidth - paddingEachSide * 2);
+  const canvasHeight = Math.round(outerHeight - paddingEachSide * 2);
+  if (els.powerGraphCanvas.width !== canvasWidth || els.powerGraphCanvas.height !== canvasHeight) {
+    els.powerGraphCanvas.width = canvasWidth;
+    els.powerGraphCanvas.height = canvasHeight;
+    if (powerGraphOpen) renderPowerGraph(state);
+  }
+}
+
 // Rolling one-minute (POWER_HISTORY_MAX samples, one per second) area/line
 // graph of demand vs. supply — matches the game's own poppy pastel aesthetic
 // (cream card, pink/blue accents) rather than a generic chart style.
@@ -4036,7 +4142,7 @@ export function updateHUD(state) {
     const history = state.level.powerHistory;
     const last = history[history.length - 1];
     els.powerText.textContent = last ? `⚡ ${last.demand}/${last.supply} mw` : '⚡ 0/0 mw';
-    if (powerGraphOpen) renderPowerGraph(state);
+    if (powerGraphOpen) { positionPowerGraph(state); renderPowerGraph(state); }
   } else if (powerGraphOpen) {
     powerGraphOpen = false;
     els.powerGraph.classList.add('hidden');
@@ -4063,8 +4169,10 @@ export function updateHUD(state) {
   // Same lighter per-frame check as the recipe/building-info pop-ups above —
   // the item grid's own DOM is only ever rebuilt on open or after a real
   // mutation (see refreshPlatformFilterMenu's own comment), never every
-  // frame; this just closes the popup if the underlying tile is gone.
-  if (platformFilterMenuOpen && !state.level.buildingData[platformFilterTileKey]) closePlatformFilterMenu();
+  // frame; this just closes the popup if the underlying tile/fish is gone.
+  // activeFilterTarget covers both this pop-up's building and Magnet Fish
+  // uses in one check.
+  if (platformFilterMenuOpen && !activeFilterTarget(state)) closePlatformFilterMenu();
   if (platformFilterMenuOpen || platformFilterMenuClosing) updatePlatformFilterMenuPosition(state);
   if (storageChestMenuOpen && !state.level.buildingData[storageChestTileKey]) closeStorageChestModal(); // the tile it's showing got demolished (or moved) out from under it
   // Unlike the Platform filter menu above, this DOES refresh every frame

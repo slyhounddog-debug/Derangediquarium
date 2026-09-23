@@ -3941,7 +3941,7 @@ function renderChestContentsIcon(ctx, itemType, cx, cy, r) {
   if (itemType === 'waste' || itemType === 'coin') {
     ctx.beginPath();
     ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fillStyle = itemType === 'coin' ? COIN_TIERS[2].color : WASTE_COLOR;
+    ctx.fillStyle = itemType === 'coin' ? COIN_TIERS[1].color : WASTE_COLOR; // silver, per direct request (was gold, COIN_TIERS[2])
     ctx.fill();
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
     ctx.lineWidth = Math.max(1, r * 0.14);
