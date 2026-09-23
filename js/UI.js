@@ -311,6 +311,7 @@ export function initUI(state) {
     buildingMoveLegendLine1: document.getElementById('building-move-legend-line1'),
     buildingMoveLegendLine2: document.getElementById('building-move-legend-line2'),
     buildingMoveLegendLine3: document.getElementById('building-move-legend-line3'),
+    fishMergeLegend: document.getElementById('fish-merge-legend'),
     hotkeyLegendE: document.getElementById('hotkey-legend-e'),
     hotkeyLegendQ: document.getElementById('hotkey-legend-q'),
     hotkeyLegendUndo: document.getElementById('hotkey-legend-undo'),
@@ -577,7 +578,6 @@ export function initUI(state) {
   });
   els.tankCollapseBtn.addEventListener('click', () => {
     toggleTankPanel(state);
-    if (!state.ui.tankPanelCollapsed) advanceTutorialFlow(state, 'tankpoint', 'tankbtn');
   });
 
   // The dedicated pause-menu button is gone per direct request — Escape is
@@ -3113,13 +3113,6 @@ function buildTankPanel(state) {
     state.level.upgrades.foodQuality += 1;
     playUpgrade();
     refreshTankPanel(state);
-    // Tank-Point guided tutorial's second (final) step stops on this exact
-    // button — see TUTORIAL_FLOWS. Level 1 costs only 1 Tank Point (see
-    // Config.js's FOOD_QUALITY_UPGRADE_COSTS) specifically so a player who
-    // just earned their very first Tank Point can always afford this — per
-    // direct request, this replaces the old Coin Capacity node as both the
-    // panel's first card AND this tutorial's own target.
-    advanceTutorialFlow(state, 'tankpoint', 'foodqualitybuy');
   });
   fishMovement.buyBtn.addEventListener('click', () => {
     const level = state.level.upgrades.fishMovement;
@@ -4141,7 +4134,13 @@ export function updateHUD(state) {
   if (eelUnlocked) {
     const history = state.level.powerHistory;
     const last = history[history.length - 1];
-    els.powerText.textContent = last ? `⚡ ${last.demand}/${last.supply} mw` : '⚡ 0/0 mw';
+    // 3rd stat, per direct request ("no visual for how much battery power is
+    // stored"), reordered to Using/Generating/Stored per a later direct
+    // follow-up — last.raw is the actual generation THIS second before any
+    // battery draw/charge is netted in (see main.js's own comment),
+    // batteryStoredMw is the live charge level, not the capacity.
+    const storedMw = Math.round(state.level.batteryStoredMw);
+    els.powerText.textContent = last ? `⚡ ${last.demand}/${last.raw}/${storedMw} mw` : `⚡ 0/0/${storedMw} mw`;
     if (powerGraphOpen) { positionPowerGraph(state); renderPowerGraph(state); }
   } else if (powerGraphOpen) {
     powerGraphOpen = false;
@@ -4312,7 +4311,17 @@ export function updateHUD(state) {
   }
   els.buildingMoveLegend.classList.toggle('hidden', !buildingMoveLegendVisible);
 
-  if (buildLegendVisible || tutorialActive || buildingMoveLegendVisible) positionBottomLeftLegends();
+  // Fish merge/splice hover legend — main.js's render() already only fills
+  // in state.ui.fishMergeHoverLines while none of the legends above are
+  // active (see its own comment), so no extra mutual-exclusivity check is
+  // needed here beyond just reading it.
+  const fishMergeLegendVisible = !tutorialActive && state.ui.fishMergeHoverLines != null;
+  if (fishMergeLegendVisible) {
+    els.fishMergeLegend.innerHTML = state.ui.fishMergeHoverLines.map((line) => `<div>${line}</div>`).join('');
+  }
+  els.fishMergeLegend.classList.toggle('hidden', !fishMergeLegendVisible);
+
+  if (buildLegendVisible || tutorialActive || buildingMoveLegendVisible || fishMergeLegendVisible) positionBottomLeftLegends();
 
   // Persistent E/Q hotkey reminder, bottom-left corner — per direct
   // request, always visible (unlike the two legends above), re-worded live
@@ -4382,6 +4391,8 @@ function positionBottomLeftLegends() {
   els.tutorialSkipLegend.style.bottom = bottom;
   els.buildingMoveLegend.style.right = right;
   els.buildingMoveLegend.style.bottom = bottom;
+  els.fishMergeLegend.style.right = right;
+  els.fishMergeLegend.style.bottom = bottom;
   // "Shift+Click: Replace" sits directly above the cost legend, per direct
   // request — stacked off the cost legend's own live measured height (a
   // separate top-level sibling, not a DOM parent/child, same as every other
@@ -4629,10 +4640,6 @@ const TUTORIAL_FLOWS = {
       },
     },
   ],
-  tankpoint: [
-    { id: 'tankbtn', text: 'Open Tank Upgrades to spend your Tank Point!', tool: 'food', getCircle: () => tutorialCircleForDom(els.tankCollapseBtn) },
-    { id: 'foodqualitybuy', text: 'Buy your first Food Quality upgrade!', tool: 'food', getCircle: () => tutorialCircleForDom(tankCards?.foodQuality.buyBtn) },
-  ],
   postalien: [
     { id: 'shop', text: 'Time to arm up — open the Shop!', tool: 'food', getCircle: () => tutorialCircleForDom(els.shopCollapseBtn) },
     { id: 'turret', text: 'Grab the Waste Turret!', tool: 'food', getCircle: () => tutorialCircleForDom(familyButtons.turret?.btn) },
@@ -4724,14 +4731,6 @@ function onTutorialFlowComplete(state, id) {
     // also what starts the 30-second countdown to the Tank Upgrades icon's
     // own bounce reminder (see scheduleTankButtonReminder above).
     setTimeout(() => scheduleTankButtonReminder(state), TANK_BUTTON_REMINDER_START_DELAY_MS);
-  } else if (id === 'tankpoint') {
-    // Per direct request: after this tutorial, grant one more Tank Point
-    // with its own chat message — deliberately NOT routed through
-    // awardTankPoint (that's a per-fish-growth award with its own
-    // "isFirst" bookkeeping this isn't part of).
-    state.level.tankPoints.total += 1;
-    state.level.tankPoints.available += 1;
-    pushUiNotification(state, "Here's an extra tank point, don't spend it all in one place");
   } else if (id === 'postalien' || id === 'wastedrag') {
     // Same closing line for both — 'wastedrag' is teaching the exact same
     // "you've got a Turret, now feed it" lesson, just entered from the

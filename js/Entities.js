@@ -2328,19 +2328,11 @@ function awardTankPoint(state, fish) {
   state.meta.stats.tankPointsEarned += TANK_POINT_PER_ADULT_FISH; // tank_points_10/50 achievements
   state.level.floatingTexts.push(createPickupText(fish.x, fish.y, '+1 Tank Point!', TANK_POINT_COLOR));
   playTankPoint();
-  if (isFirst) {
-    pushStoryNotification(state, TANK_POINT_TUTORIAL_MESSAGE);
-    // Per direct request: the first-ever Tank Point also kicks off a guided
-    // tutorial (Tank Upgrades -> Coin Capacity's buy button) — see UI.js's
-    // TUTORIAL_FLOWS/updateTutorialOverlay. Gated the same one-time way
-    // every other tutorial trigger in this file already is, and only if the
-    // start-of-game tutorial isn't still active (it always finishes first —
-    // a fish can't reach Adult before the player has even bought one).
-    if (!state.level.tutorialFlags.tankPointTutorialShown && !state.level.tutorialFlow) {
-      state.level.tutorialFlags.tankPointTutorialShown = true;
-      state.level.tutorialFlow = { id: 'tankpoint', step: 'tankbtn' };
-    }
-  }
+  // Per direct request, the guided Tank Upgrades tutorial that used to fire
+  // here (freezing the game on "Open Tank Upgrades to spend your Tank
+  // Point!") is gone entirely — the plain notification below is the only
+  // explanation a first-ever Tank Point still gets.
+  if (isFirst) pushStoryNotification(state, TANK_POINT_TUTORIAL_MESSAGE);
 }
 
 // Starts the death animation instead of removing the fish outright, per

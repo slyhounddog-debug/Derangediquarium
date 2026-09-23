@@ -76,10 +76,10 @@
 <div id="hud">
   <div id="hud-money" class="sheen-target" title="Money — spend it on fish and food in the shop">💰 $0</div>
   <div id="hud-science-cap" class="sheen-target hidden" title="Science Bubbles currently sitting in the tank, uncollected — capped by the Science Lab's Bubble Capacity upgrade">🔬 0/5</div>
-  <div id="hud-cleanliness" class="sheen-target" title="Tank cleanliness — a dirty tank stresses your fish: they get hungrier faster and produce money less often">✨ 100%</div>
+  <div id="hud-cleanliness" class="sheen-target" title="Tank cleanliness — a dirty tank's fish produce less money, down to half at 0% clean">✨ 100%</div>
   <div id="hud-power-wrap">
-    <button id="hud-power" class="sheen-target hidden" title="Electricity — current draw / accumulated capacity. Click for a rolling graph.">
-      <span id="hud-power-text">⚡ 0/0 mw</span>
+    <button id="hud-power" class="sheen-target hidden" title="Electricity — Using / Generating / Stored mw. Click for a rolling graph.">
+      <span id="hud-power-text">⚡ 0/0/0 mw</span>
       <span id="hud-power-arrow">▾</span>
     </button>
     <div id="hud-power-graph" class="hidden"><canvas id="hud-power-graph-canvas" width="220" height="90"></canvas></div>
@@ -168,6 +168,16 @@
   <div id="building-move-legend-line2" class="hidden"></div>
   <div id="building-move-legend-line3" class="hidden"></div>
 </div>
+<!-- Fish merge/splice hover legend — per direct request ("when you hover
+     over a fish have a bubble legend... that shows what fish can be merged
+     with the fish being hovered on, and what the fish would be created when
+     merged"). Same "plain top-level sibling, positioned live off the Shop
+     button" treatment as the legends above, mutually exclusive with all of
+     them (main.js's render() only computes state.ui.fishMergeHoverLines
+     while none of the others are active). Populated live by UI.js's
+     updateHUD, one line per element since the line count varies with how
+     many compatible partners currently exist. -->
+<div id="fish-merge-legend" class="hidden"></div>
 
 <!-- Persistent, always-on hotkey reminder, bottom-left corner — per direct
      request. Small white text, dynamically re-worded by UI.js's updateHUD

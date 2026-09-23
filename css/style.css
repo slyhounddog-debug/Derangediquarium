@@ -98,6 +98,7 @@ body.alt-mode #notification-ticker,
 body.alt-mode #build-legend,
 body.alt-mode #tutorial-skip-legend,
 body.alt-mode #building-move-legend,
+body.alt-mode #fish-merge-legend,
 body.alt-mode #alien-countdown,
 body.alt-mode #boss-health-bar-wrap,
 body.alt-mode #save-toast,
@@ -316,7 +317,7 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
    updateHUD never shows both at once — the purchase legend is suppressed
    entirely while a tutorial's active), so they can safely share the exact
    same sizing/position logic. */
-#build-legend, #tutorial-skip-legend, #building-move-legend, #build-replace-legend {
+#build-legend, #tutorial-skip-legend, #building-move-legend, #build-replace-legend, #fish-merge-legend {
   position: fixed;
   padding: 9px 20px;
   background: linear-gradient(160deg, #fffdf8 0%, #ffe9f4 100%);
@@ -330,7 +331,7 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
   white-space: nowrap;
 }
 #build-legend { display: flex; gap: 14px; }
-#build-legend.hidden, #tutorial-skip-legend.hidden, #building-move-legend.hidden, #build-replace-legend.hidden { display: none; }
+#build-legend.hidden, #tutorial-skip-legend.hidden, #building-move-legend.hidden, #build-replace-legend.hidden, #fish-merge-legend.hidden { display: none; }
 /* Shift-click Replace's own "Shift+Click: Replace" pill, per direct request
    — sits directly above #build-legend (positioned live off its measured
    height, see UI.js's positionBottomLeftLegends), a blue tint to match the
@@ -347,6 +348,11 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
 #building-move-legend { display: flex; flex-direction: column; gap: 3px; text-align: center; }
 #building-move-legend:has(#building-move-legend-line2:not(.hidden)), #building-move-legend:has(#building-move-legend-line3:not(.hidden)) { border-radius: 20px; }
 #building-move-legend-line2.hidden, #building-move-legend-line3.hidden { display: none; }
+/* #fish-merge-legend's line count varies (one per currently-eligible
+   partner, or a single "No available fish to merge." line) — same stacked,
+   variable-height treatment as #building-move-legend above rather than the
+   fixed pill shape #build-legend uses. */
+#fish-merge-legend { display: flex; flex-direction: column; gap: 3px; text-align: center; border-radius: 20px; }
 
 /* Persistent, always-on hotkey reminder — per direct request, small white
    text in the literal bottom-left corner of the viewport (distinct from

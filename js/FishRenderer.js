@@ -590,7 +590,10 @@ function drawSuckerfishBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGr
 // perpendicular to the swim direction by a sine wave whose phase shifts
 // along the body — the same underlying idea Ambience.js's seaweed sway
 // uses, just applied along a horizontal body instead of a vertical stem.
-function drawEelBody(ctx, x, y, size, facing, tailPhase, isFullyGrown, color, eyeDirection) {
+// widthScale/bumps are both purely for the Feeder Fish/Blimp-Battery hybrid
+// bodies below (drawHybridBody) — a plain Electric Eel always calls this with
+// the defaults (1, false), identical to its old behavior.
+function drawEelBody(ctx, x, y, size, facing, tailPhase, isFullyGrown, color, eyeDirection, widthScale = 1, bumps = false) {
   const length = size * 1.5;
   const segments = 7;
   const points = [];
@@ -598,7 +601,7 @@ function drawEelBody(ctx, x, y, size, facing, tailPhase, isFullyGrown, color, ey
     const t = i / segments; // 0 = tail end, 1 = head end
     const px = x - facing * length * (0.5 - t);
     const wave = Math.sin(tailPhase - t * 3.2) * size * 0.22 * (1 - t * 0.3); // undulation eases off toward the head
-    points.push({ x: px, y: y + wave, width: size * (0.1 + t * 0.16) }); // tapers thin at the tail, wider at the head
+    points.push({ x: px, y: y + wave, width: size * (0.1 + t * 0.16) * widthScale }); // tapers thin at the tail, wider at the head
   }
   ctx.fillStyle = color;
   ctx.beginPath();
@@ -614,6 +617,20 @@ function drawEelBody(ctx, x, y, size, facing, tailPhase, isFullyGrown, color, ey
     ctx.lineTo(points[i].x, points[i].y - points[i].width * 0.5);
   }
   ctx.stroke();
+
+  // Feeder Fish (Electric Eel x Suckerfish) — a row of sucker bumps riding
+  // along the eel's own undulating back, per direct request that a hybrid
+  // should visibly carry a trait from each of its two parents.
+  if (bumps) {
+    const b1 = points[2];
+    const b2 = points[4];
+    ctx.fillStyle = color;
+    for (const p of [b1, b2, points[3]]) {
+      ctx.beginPath();
+      ctx.arc(p.x, p.y - p.width - size * 0.08, size * 0.1, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
 
   if (isFullyGrown) {
     const head = points[points.length - 1];
@@ -659,6 +676,88 @@ function drawOctopusBody(ctx, x, y, size, facing, tailPhase, isFullyGrown, color
   }
 }
 
+// ---- Gene-Splicing hybrid bodies ----
+// Per direct request ("give all the splice/hybrid fish distinct visuals
+// that look like the two fish that make them were spliced together...
+// octopus arms, the bumps from the suckerfish, and the electric eel form")
+// — an Adult hybrid's body is composed from whichever of these 3 signature
+// utility traits its own `parents` pair actually includes (electric_eel's
+// undulating form, suckerfish's back bumps, octopus's tentacles), layered
+// onto a base silhouette. Among the current 5 hybrids no pair combines
+// electric_eel with octopus, so that specific overlap is left unhandled
+// (falls through to the eel form alone) rather than speculatively built for
+// a combination that doesn't exist yet.
+function drawHybridTentacles(ctx, x, attachY, size, facing, tailPhase, color, tentacleCount = 3) {
+  ctx.strokeStyle = color;
+  ctx.lineCap = 'round';
+  ctx.lineWidth = Math.max(1, size * 0.09);
+  for (let i = 0; i < tentacleCount; i++) {
+    const spread = (i - (tentacleCount - 1) / 2) * size * 0.22;
+    const wave = Math.sin(tailPhase + i * 1.3) * size * 0.12;
+    ctx.beginPath();
+    ctx.moveTo(x + spread, attachY);
+    ctx.quadraticCurveTo(x + spread + wave, attachY + size * 0.3, x + spread + wave * 0.6, attachY + size * 0.55);
+    ctx.stroke();
+  }
+}
+
+function drawHybridBackBumps(ctx, x, topY, size, color) {
+  ctx.fillStyle = color;
+  for (let i = -1; i <= 1; i++) {
+    ctx.beginPath();
+    ctx.arc(x + i * size * 0.2, topY, size * 0.11, 0, Math.PI * 2);
+    ctx.fill();
+  }
+}
+
+// Returns the {headX, headY, headSize} anchor for a worn hat, same
+// convention drawFish's other body branches already compute for themselves.
+function drawHybridBody(ctx, x, y, size, facing, tailPhase, stage, color, eyeDirection, def) {
+  const hasEel = def.parents.includes('electric_eel');
+  const hasOctopus = def.parents.includes('octopus');
+  const hasSuckerfish = def.parents.includes('suckerfish');
+  const shapeParent = def.parents.find((p) => p === 'dartfin' || p === 'blimpfish');
+  const bodyShape = shapeParent === 'dartfin' ? 'slim' : shapeParent === 'blimpfish' ? 'round' : 'normal';
+
+  if (hasEel) {
+    // Blimp-Battery (Electric Eel x Blimpfish) reads as a plumper eel — its
+    // "blimp" half shows as extra girth on the same undulating silhouette
+    // rather than a second, competing body shape.
+    const widthScale = bodyShape === 'round' ? 1.4 : 1;
+    drawEelBody(ctx, x, y, size, facing, tailPhase, true, color, eyeDirection, widthScale, hasSuckerfish);
+    const length = size * 1.5;
+    const t = 1; // head end, mirrors drawEelBody's own point math
+    const headPx = x - facing * length * (0.5 - t);
+    const headWave = Math.sin(tailPhase - t * 3.2) * size * 0.22 * (1 - t * 0.3);
+    const headWidth = size * (0.1 + t * 0.16) * widthScale;
+    return {
+      headX: headPx + facing * headWidth * 0.1,
+      headY: y + headWave - headWidth * 1.4,
+      headSize: headWidth * 2.1,
+    };
+  }
+
+  // Everything else: the standard oval body (shaped per whichever base
+  // feeder — Guppy/Dartfin/Blimpfish — the hybrid's other parent is), with
+  // octopus tentacles hanging below if this hybrid has an Octopus parent.
+  // (No current hybrid combines Octopus with Suckerfish, so bumps-on-oval
+  // is left unbuilt too — Magnet Fish, the one Suckerfish hybrid without an
+  // Eel parent, is handled below instead.)
+  drawStandardBody(ctx, x, y, size, facing, tailPhase, stage, true, color, eyeDirection, bodyShape);
+  const shape = BODY_SHAPE_RATIOS[bodyShape] || BODY_SHAPE_RATIOS.normal;
+  if (hasSuckerfish) {
+    drawHybridBackBumps(ctx, x, y - size * shape.bodyH * 0.85, size, color);
+  }
+  if (hasOctopus) {
+    drawHybridTentacles(ctx, x, y + size * shape.bodyH * 0.7, size, facing, tailPhase, color, 3);
+  }
+  return {
+    headX: x + facing * size * shape.bodyW * 0.15,
+    headY: y - size * shape.bodyH * 0.85,
+    headSize: size * shape.bodyW * 0.85,
+  };
+}
+
 // grayed (0-1) tints toward ALIEN_BLOCKED_GRAY — a fish that either has a
 // living alien nearby (continuous, see Entities.js's fish.alienNearby) or
 // just had a coin drop blocked by the Coin Cap (timed, ~1s, see
@@ -687,11 +786,12 @@ export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDire
   // Suckerfish/Electric Eel/Science Octopus each get a visually distinct
   // body shape — per direct request that the 3 utility species "look
   // visually distinct" from each other and from the standard fish shape.
-  // Checked by exact speciesId, not a behavior tag, so every Gene-Splicing
-  // hybrid (a different id, e.g. 'eel_blimp') falls through to the
-  // standard shape automatically with no extra logic needed — see that
-  // function's own comment. Per a later direct request, this unique shape
-  // now only shows at the Adult stage — as a baby/mid (utility fish grow up
+  // Checked by exact speciesId, not a behavior tag, so a Gene-Splicing
+  // hybrid (a different id, e.g. 'eel_blimp') never matches one of these 3
+  // branches directly — it gets its own dedicated composed body instead,
+  // see the `def.parents` branch below and drawHybridBody's own comment.
+  // Per a later direct request, unique shapes now only show at the Adult
+  // stage — as a baby/mid (utility fish grow up
   // through the same 3-stage ladder as the base feeders now) they render via
   // the plain drawStandardBody instead, just tinted their own species color,
   // "so it looks like the [base] fish, but with the utility fish colors."
@@ -732,6 +832,14 @@ export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDire
     headX = x + facing * size * 0.15;
     headY = y - size * 0.42;
     headSize = size * 0.6;
+  } else if (isFullyGrown && def.parents) {
+    // A Gene-Splicing hybrid's Adult body is composed from its own two
+    // parents' signature traits (eel form / sucker bumps / octopus
+    // tentacles) — see drawHybridBody's own header comment.
+    const anchor = drawHybridBody(ctx, x, y, size, facing, tailPhase, stage, color, eyeDirection, def);
+    headX = anchor.headX;
+    headY = anchor.headY;
+    headSize = anchor.headSize;
   } else {
     // A hybrid's own body SHAPE follows whichever base feeder it was spliced
     // from (def.parents' second entry, per the [utilityId, economyId]
@@ -740,7 +848,9 @@ export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDire
     // precedent this function's color-blending already follows. Falls back
     // to the species' own id for a non-hybrid, and to 'normal' for anything
     // that isn't Dartfin/Blimpfish (Guppy included, and every
-    // utility-utility hybrid with no feeder parent at all).
+    // utility-utility hybrid with no feeder parent at all). Only reached for
+    // a hybrid's baby/mid stages (the branch above owns Adult) or a plain
+    // non-special species.
     const shapeSourceId = def.parents ? def.parents[1] : speciesId;
     const bodyShape = shapeSourceId === 'dartfin' ? 'slim' : shapeSourceId === 'blimpfish' ? 'round' : 'normal';
     drawStandardBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGrown, color, eyeDirection, bodyShape);

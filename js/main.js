@@ -133,6 +133,7 @@ import {
   isSpliceTargetCandidate,
   canSpliceFish,
   spliceFish,
+  getHybridSpeciesId,
   canSpliceOctopusWithAlien,
   spliceOctopusWithAlien,
   createMotherAlienFish,
@@ -571,6 +572,16 @@ const state = {
     // progress yet.
     buildingMoveArmed: false,
     buildingMoveHoverLabel: null,
+    // Fish merge/splice hover legend — per direct request ("when you hover
+    // over a fish have a bubble legend... that shows what fish can be
+    // merged with the fish being hovered on, and what the fish would be
+    // created when merged"). Written fresh every render() frame; null while
+    // the hovered fish isn't merge/splice-eligible at all (hides the legend
+    // entirely), otherwise an array of description lines, one per currently-
+    // present compatible partner, or a single "No available fish to merge."
+    // line when the hovered fish IS eligible but nothing in the tank right
+    // now actually pairs with it. See main.js's describeFishMergeOptions.
+    fishMergeHoverLines: null,
     paused: false, // pause menu open/closed (Escape); update() below skips simulating entirely while true
     // Time-manipulation HUD buttons, per direct request. timePaused freezes
     // fish/alien/building simulation while still letting the player build/
@@ -726,13 +737,9 @@ let catalystArmedFishId = null;
 input.mouseDownHandlers.push((sx, sy) => {
   fishDragArmed = false;
   if (state.ui.paused) return;
-  // Combining/splicing now requires the dedicated Merge tool (🧤) to be
-  // selected first — per direct request, this no longer fires just because
-  // a mousedown happened to land on an eligible fish while some other tool
-  // was active (Food, a building, Blueprint). See UI.js's tool-merge-btn.
-  if (state.ui.selectedTool !== 'merge') return;
   const world = screenToWorld(sx, sy, state.camera);
   const fish = findFishAt(state, world.x, world.y);
+  if (!fish) return;
   // A fish can be a legal drag SOURCE for either interaction — Economy Fish
   // Combining or (Phase 4) Gene-Splicing. Per direct bug report ("it only
   // seems to work if I grab one of the two specifically first... fix it so
@@ -744,7 +751,16 @@ input.mouseDownHandlers.push((sx, sy) => {
   // handler and the hover-highlight below both already try both dragged/
   // target orderings, so it no longer matters which half of a pair gets
   // grabbed first.
-  if (fish && (isCombinableFish(state, fish) || isSpliceSource(state, fish) || isSpliceTargetCandidate(state, fish))) {
+  const spliceEligible = isSpliceSource(state, fish) || isSpliceTargetCandidate(state, fish);
+  // Economy Fish Combining still requires the dedicated Merge tool (🧤) to be
+  // selected first — deliberate anti-accidental-drag fix, unchanged (the
+  // mouseup handler below re-checks this too, since spliceEligible can now
+  // arm a drag from any tool — see its own comment for why that 2nd check
+  // still matters). Gene-Splicing, per direct request ("make it so you can
+  // use the splice tool at any time"), no longer needs that same explicit
+  // tool switch at all — any press landing on a splice-eligible fish arms
+  // the drag regardless of what's currently selected.
+  if ((state.ui.selectedTool === 'merge' && isCombinableFish(state, fish)) || spliceEligible) {
     draggedFishId = fish.id;
     fishDragArmed = true;
   }
@@ -756,7 +772,12 @@ input.mouseUpHandlers.push((sx, sy) => {
   const dragged = state.level.entities.find((e) => e.id === draggedFishId);
   const target = findFishAt(state, world.x, world.y, draggedFishId);
   if (dragged && target) {
-    if (canCombineFish(state, dragged, target)) {
+    // Combining still requires 'merge' to have been selected AT THE DROP —
+    // splicing can now arm this drag from any tool (see the mousedown
+    // handler's own comment), so this guard is what stops two same-species
+    // fish from accidentally combining mid-splice-drag while some other
+    // tool (Food, a building, Blueprint) is actually active.
+    if (state.ui.selectedTool === 'merge' && canCombineFish(state, dragged, target)) {
       combineFish(state, dragged, target);
       // The first-time merge guided tutorial's own final step — a no-op
       // unless that exact flow/step is currently active (see UI.js's
@@ -790,6 +811,39 @@ input.mouseUpHandlers.push((sx, sy) => {
   }
   draggedFishId = null;
 });
+
+// Fish merge/splice hover legend — per direct request. Returns null if
+// `fish` doesn't qualify for either mechanic at all (hides the legend),
+// otherwise one description line per currently-living, currently-eligible
+// partner already in the tank (deduped by resulting text — several same-
+// species Guppies all read as one "Merge with Guppy -> ..." line), or a
+// single "No available fish to merge." line if `fish` qualifies in shape but
+// nothing pairs with it right now. Checked both drag orderings for splicing,
+// same as the real mouseup resolution above, so it doesn't matter whether
+// `fish` is the utility half or the target half of a pair.
+function describeFishMergeOptions(state, fish) {
+  const combineSource = isCombinableFish(state, fish);
+  const spliceSource = isSpliceSource(state, fish);
+  const spliceTarget = isSpliceTargetCandidate(state, fish);
+  if (!combineSource && !spliceSource && !spliceTarget) return null;
+  const lines = [];
+  const seen = new Set();
+  for (const other of state.level.entities) {
+    if (other.type !== 'fish' || other.id === fish.id || other.dying) continue;
+    let desc = null;
+    if (combineSource && canCombineFish(state, fish, other)) {
+      desc = `Merge with ${SPECIES[other.speciesId].name} → Tier ${(fish.starTier || 1) + 1} ${SPECIES[fish.speciesId].name}`;
+    } else if (spliceSource && canSpliceFish(state, fish, other)) {
+      const hybridId = getHybridSpeciesId(other.speciesId, fish.speciesId);
+      desc = `Splice with ${SPECIES[other.speciesId].name} → ${SPECIES[hybridId].name}`;
+    } else if (spliceTarget && canSpliceFish(state, other, fish)) {
+      const hybridId = getHybridSpeciesId(fish.speciesId, other.speciesId);
+      desc = `Splice with ${SPECIES[other.speciesId].name} → ${SPECIES[hybridId].name}`;
+    }
+    if (desc && !seen.has(desc)) { seen.add(desc); lines.push(desc); }
+  }
+  return lines.length > 0 ? lines : ['No available fish to merge.'];
+}
 
 // Whether the "drag Waste into the Turret" guided-tutorial step is the one
 // currently active — shared by the mousedown-arming gate below, update()'s
@@ -1991,8 +2045,7 @@ input.clickHandlers.push((sx, sy) => {
     // ALREADY-PLACED fan (no cost, no affordability check, nothing to
     // undo beyond the original placement). A same-family Fan-on-Fan
     // replace never even reaches this branch — see click 1's own comment.
-    const key = buildingKey(fanAimingCell.col, fanAimingCell.row);
-    const data = state.level.buildingData[key];
+    const data = state.level.buildingData[`${fanAimingCell.row},${fanAimingCell.col}`];
     if (data) data.angle = angle;
     fanAimingCell = null;
     return;
@@ -2461,6 +2514,16 @@ input.keydownHandlers.push((e) => {
       const rawTool = state.ui.selectedTool;
       if (rawTool !== 'cursor') {
         cancelActiveTool(state);
+        // Same fix as the right-click universal-cancel handler above, and
+        // for the same reason (see its own comment) — cancelActiveTool only
+        // clears selectedTool, which just makes isFanAimingActive() self-heal
+        // to false for NOW. The stale {col, row, buildingId} left behind
+        // would otherwise silently reactivate the instant this exact fan
+        // tier is armed again later (Q's own "reselect last tool" branch, a
+        // fresh shop click, anything) — per direct bug report, a fan cancelled
+        // with Q went right back into aiming its old, already-cancelled spot
+        // the next time that tier was picked.
+        fanAimingCell = null;
       } else {
         const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
         const fish = findFishForPipetteAt(state, world.x, world.y);
@@ -3094,7 +3157,11 @@ function update(dtMs) {
     }
     state.level.batteryCapacityMw = batteryCapacity;
     const history = state.level.powerHistory;
-    history.push({ demand, supply: effectiveSupply });
+    // raw (generation before any battery draw/charge is netted in) is kept
+    // alongside the existing demand/effectiveSupply pair purely for the
+    // HUD's 3rd "Generating" stat below — supply stays effectiveSupply
+    // everywhere else (efficiency calc, the rolling graph) unchanged.
+    history.push({ demand, supply: effectiveSupply, raw: rawSupply });
     if (history.length > POWER_HISTORY_MAX) history.shift();
     state.level.powerEfficiency = computePowerEfficiency(effectiveSupply, demand);
     // power_deficit_60s / power_surplus_60s achievements — this exact
@@ -4513,6 +4580,24 @@ function render() {
     } else {
       state.ui.buildingMoveHoverLabel = null;
     }
+  }
+
+  // Fish merge/splice hover legend — see state.ui.fishMergeHoverLines' own
+  // comment. Only computed while nothing else is already claiming the
+  // bottom-left legend spot (no building hovered/moving, no cost legend for
+  // an armed build:/fish: tool) and no drag is in progress, so this never
+  // fights those for the same on-screen slot. Splicing now works "at any
+  // time" (see the mousedown handler's own comment), so this hover legend
+  // deliberately isn't gated on any particular tool either.
+  if (
+    input.mouse.inside && !state.ui.paused && !state.level.tutorialFlow &&
+    draggedFishId == null && !state.ui.buildingMoveArmed && state.ui.buildingMoveHoverLabel == null &&
+    !hoverEffectiveTool.startsWith('build:') && !hoverEffectiveTool.startsWith('fish:') && blueprintClipboard == null
+  ) {
+    const hoverFish = findFishAt(state, hoverWorld.x, hoverWorld.y);
+    state.ui.fishMergeHoverLines = hoverFish ? describeFishMergeOptions(state, hoverFish) : null;
+  } else {
+    state.ui.fishMergeHoverLines = null;
   }
 
   // The cinematic first-alien intro's spotlight is drawn by UI.js's
