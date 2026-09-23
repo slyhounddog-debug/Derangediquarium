@@ -1040,20 +1040,29 @@ export function placeTile(state, col, row, buildingId, angle = 0) {
   return true;
 }
 
-// Refunds a fraction of the removed building's cost — computed off its
-// current live cost (getBuildingCost, evaluated before this tile is actually
-// removed from the count) rather than its static base cost, so a full-refund
-// (TILE_REFUND_FRACTION = 1.0) place-then-immediately-demolish stays exactly
-// cost-neutral even at a higher placed count, instead of refunding less than
-// the dynamic price actually paid. Never removes a tile an item happens to
-// be riding mid-tick; physics only ever reads the grid at the start of an
-// item's step, so a same-tick removal is safe either way.
+// Refunds a fraction of the removed building's cost — computed off what THIS
+// EXACT tile actually cost when it was placed (its own count EXCLUDING
+// itself, i.e. the live count at the moment it was bought), not the current
+// live shop price (which already counts this tile among its own total, so
+// it's really the price for buying the NEXT one — one full compounding step
+// higher). Real bug, fixed per direct report ("refunds give the next
+// building's worth instead of the current building's worth... you can keep
+// replacing buildings to profit forever") — the old getBuildingCost-based
+// version systematically overpaid every refund by that one step, so even a
+// plain place-then-immediately-demolish minted a small profit every cycle,
+// compounding into an infinite-money loop when repeated. With
+// TILE_REFUND_FRACTION = 1.0, this version is now genuinely cost-neutral:
+// getBuildingCostExcluding(existing, col, row) reconstructs the exact price
+// this tile was bought at, since excluding itself from the count reproduces
+// the count placeTile actually charged against. Never removes a tile an item
+// happens to be riding mid-tick; physics only ever reads the grid at the
+// start of an item's step, so a same-tick removal is safe either way.
 export function removeTile(state, col, row) {
   if (row < SEABED_ROW_START || row >= WORLD_TILES_H || col < 0 || col >= WORLD_TILES_W) return false;
   const existing = state.level.grid[row][col];
   if (existing === TILE_EMPTY) return false;
   const building = BUILDING_TYPES[existing];
-  const liveCost = getBuildingCost(state, existing);
+  const liveCost = getBuildingCostExcluding(state, existing, col, row);
   state.level.grid[row][col] = TILE_EMPTY;
   delete state.level.buildingData[buildingKey(col, row)];
   if (building) state.level.money += Math.floor(liveCost * TILE_REFUND_FRACTION);
@@ -1140,7 +1149,12 @@ export function describeReplacement(state, col, row, buildingId, shiftHeld, igno
     // the compounding cost curve). A genuine tier swap, not a sale.
     return { ok: true, reason: null, replacing: true, replacedType: existingType, sameFamily: true, refund: 0, newCost: 0, netCost: 0 };
   }
-  const refund = Math.floor(getBuildingCost(state, existingType) * TILE_REFUND_FRACTION);
+  // getBuildingCostExcluding, not getBuildingCost — refund off what THIS
+  // tile actually cost when placed (its own count excluding itself), not
+  // the current live shop price for a fresh one (which is one compounding
+  // step higher and used to let a replace round trip mint free money — see
+  // removeTile's own comment for the full bug writeup).
+  const refund = Math.floor(getBuildingCostExcluding(state, existingType, col, row) * TILE_REFUND_FRACTION);
   const newCost = getBuildingCostExcluding(state, buildingId, col, row);
   const netCost = newCost - refund;
   const affordable = ignoreCost || netCost <= state.level.money;
@@ -1436,7 +1450,12 @@ export function computeBlueprintCostWithReplace(state, baseCol, baseRow, cells, 
         if (existingBuilding) {
           const removedSoFar = removedCounts[existingType] || 0;
           const placedSoFar = extraCounts[existingType] || 0;
-          const nExisting = Math.max(0, countPlacedOfType(state.level.grid, existingType) - removedSoFar + placedSoFar);
+          // -1: refund off what THIS tile actually cost when placed (its own
+          // count excluding itself), not the live count including it — same
+          // fix as describeReplacement/removeTile's own (see removeTile's
+          // comment for the full bug writeup: using the inclusive count
+          // systematically overpaid every refund by one compounding step).
+          const nExisting = Math.max(0, countPlacedOfType(state.level.grid, existingType) - removedSoFar + placedSoFar - 1);
           totalRefund += Math.floor(Math.ceil(existingBuilding.cost * Math.pow(buildingCostGrowthRate(existingBuilding.cost), nExisting)) * TILE_REFUND_FRACTION);
         }
       }
