@@ -70,9 +70,6 @@ import {
   BUILDING_UPTIME_SAMPLE_INTERVAL_MS,
   BUILDING_UPTIME_SAMPLE_COUNT,
   HUNGER_SEEK_THRESHOLD,
-  CATALYST_BUFF_MULTIPLIER,
-  CATALYST_BUFF_MULTIPLIER_MUTAGEN,
-  CATALYST_FLASH_DURATION_MS,
   WASTE_TURRET_SHOTS_PER_WASTE,
   WASTE_TURRET_MAX_AMMO,
   WASTE_TURRET_MAX_WASTE,
@@ -1796,27 +1793,6 @@ function handleLanding() {
 // Collector tile itself gets torn down mid-process, this bails out and hands
 // the item back to normal physics next tick, restoring its real mass, rather
 // than leaving it frozen forever at a now-empty spot.
-// Catalyst Fish's "linked building runs faster" mechanic — per direct spec,
-// scans state.level.entities for a living catalyst_fish whose own
-// linkedBuildingKey matches, returning 1 (no buff at all) if none is linked,
-// or if the linked fish IS currently hungry (per spec, "when the fish isn't
-// hungry" — HUNGER_SEEK_THRESHOLD is the same "actively seeking food" line
-// every other hunger-gated mechanic in this game already uses). A non-hungry
-// link gets CATALYST_BUFF_MULTIPLIER (1.5x), raised to
-// CATALYST_BUFF_MULTIPLIER_MUTAGEN (1.75x) while that fish is under its own
-// Mutagen Paste buff. Called fresh at every progress-advancing site
-// (Collector/Refinery/Manufacturer/Power Plant/Turret) rather than
-// precomputed once per tick — entity/building counts are small enough in
-// this game that an O(entities) scan per call is negligible.
-export function getCatalystSpeedMultiplier(state, buildingKey) {
-  for (const entity of state.level.entities) {
-    if (entity.type !== 'fish' || entity.speciesId !== 'catalyst_fish') continue;
-    if (entity.linkedBuildingKey !== buildingKey) continue;
-    if (entity.hunger >= HUNGER_SEEK_THRESHOLD) return 1;
-    return entity.mutagenBuffActive ? CATALYST_BUFF_MULTIPLIER_MUTAGEN : CATALYST_BUFF_MULTIPLIER;
-  }
-  return 1;
-}
 
 // Applies globally to EVERY turret tier at once, per direct request
 // ("increase all turrets firerate by 20%... increase it by another 20%") —
@@ -1858,13 +1834,7 @@ function stepCollectorProcessing(item, state, dt) {
   // once supply can't cover demand at all, while still allowing a genuine
   // partial shortfall to just slow things down rather than halt them.
   const appliedEfficiency = powerCost > 0 ? state.level.powerEfficiency : 1;
-  // A linked, non-hungry Catalyst Fish speeds this exact tile up — see
-  // getCatalystSpeedMultiplier's own comment. The key is derived from the
-  // item's own stored collector center, since this runs per-ITEM (called
-  // from stepItemOnGrid), not from updateBuildings' own per-tile loop.
-  const buildingKey = `${Math.floor(item.collectorCenterY / TILE_SIZE)},${Math.floor(item.collectorCenterX / TILE_SIZE)}`;
-  const catalystMultiplier = getCatalystSpeedMultiplier(state, buildingKey);
-  item.collectorProgressMs += dt * 1000 * appliedEfficiency * catalystMultiplier;
+  item.collectorProgressMs += dt * 1000 * appliedEfficiency;
   // Target duration is resolved once, at the moment processing started (see
   // beginCollectorProcessing) — coin vs Science Bubble, and which tier of
   // Processor tile, per PROCESSOR_STATS.
@@ -2334,13 +2304,10 @@ export function updateBuildings(state, dtMs) {
       // Fan force/Collector/Refinery/Manufacturer progress, which genuinely
       // slow down); firing itself is a hard binary gate instead, requiring
       // FULL power availability (powerEfficiency === 1, i.e. the grid — Eels
-      // plus whatever a Blimp-Battery is covering — meets 100% of
+      // plus whatever a Battery fish is covering — meets 100% of
       // total demand this second) rather than just "> 0." A free tier
-      // (Waste Turret) never checks this at all. A linked, non-hungry
-      // Catalyst Fish still speeds the cooldown up regardless — that's a
-      // genuine bonus, not tied to grid power at all, so it doesn't
-      // contradict "no efficiency reduction" above.
-      data.cooldownMs = Math.max(0, data.cooldownMs - dtMs * getCatalystSpeedMultiplier(state, key));
+      // (Waste Turret) never checks this at all.
+      data.cooldownMs = Math.max(0, data.cooldownMs - dtMs);
       const hasAmmo = !TURRET_AMMO_TILES.has(data.type) || data.ammoWaste + data.ammoBiomass > 0;
       const hasPower = turretStats.powerCostPerSec <= 0 || state.level.powerEfficiency >= 1;
       // Found every tick regardless of the firing gate below (cooldown/ammo/
@@ -2488,7 +2455,7 @@ export function updateBuildings(state, dtMs) {
         // is still the only place power gates anything, so a hold is never
         // even started without at least 50% grid power in the first place.
         const efficiency = stats.powerCostPerSec > 0 ? state.level.powerEfficiency : 1;
-        data.progressMs += dtMs * efficiency * getCatalystSpeedMultiplier(state, key);
+        data.progressMs += dtMs * efficiency;
         // Bio-Sludge -> Biomass takes ALIEN_DNA_REFINERY_TIME_MULTIPLIER
         // times as long as the same tile's own Waste -> Food recipe, per
         // direct spec ("50% longer for alien DNA").
@@ -2568,7 +2535,7 @@ export function updateBuildings(state, dtMs) {
         // here, so this always applies the grid's live efficiency while
         // actively processing.
         const efficiency = state.level.powerEfficiency;
-        data.progressMs += dtMs * efficiency * getCatalystSpeedMultiplier(state, key);
+        data.progressMs += dtMs * efficiency;
         // Per direct spec: a flat duration by ITEM TYPE, not by recipe —
         // waste 2s, food 4s, biomass 8s at base.
         if (data.progressMs >= MANUFACTURER_ITEM_PROCESS_MS[data.currentItemType]) {
@@ -2617,10 +2584,8 @@ export function updateBuildings(state, dtMs) {
         }
       } else {
         // Never power-gated itself — it's the thing GENERATING power, not
-        // drawing it — but a linked, non-hungry Catalyst Fish still speeds
-        // it up like any other building.
-        const rate = getCatalystSpeedMultiplier(state, key);
-        data.progressMs += dtMs * rate;
+        // drawing it.
+        data.progressMs += dtMs;
         // Per direct request ("powerplants should produce the EXACT same
         // thing as electric eels — the same resource/utility pool should be
         // used for both"): credits state.level.powerGenAccumMw
@@ -2639,7 +2604,7 @@ export function updateBuildings(state, dtMs) {
         // branch already uses (`powerGenAccumMw += 1` per distance step) —
         // both sources now feed the identical shared accumulator the same
         // continuous way.
-        state.level.powerGenAccumMw += recipe.powerOutputMw * (dtMs / 1000) * rate;
+        state.level.powerGenAccumMw += recipe.powerOutputMw * (dtMs / 1000);
         if (data.progressMs >= recipe.durationMs) {
           data.fueled = false;
           data.progressMs = 0;
@@ -3187,23 +3152,6 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
         const size = TILE_SIZE * camera.zoom;
         const data = state.level.buildingData[buildingKey(col, row)];
         renderTileShape(ctx, type, building.color, screen.x, screen.y, size, data, state.level.elapsed);
-        // A pulsing glow whenever a linked, non-hungry Catalyst Fish is
-        // actively buffing this exact tile — per direct spec ("give the
-        // buffed building a visual glow so it's obvious it's buffed").
-        if (data && getCatalystSpeedMultiplier(state, buildingKey(col, row)) > 1) {
-          renderCatalystGlow(ctx, screen.x, screen.y, size, state.level.elapsed);
-        }
-        // A brief brighter flash on either a fresh Catalyst Fish link or a
-        // re-click revealing an existing one — see main.js's click handler.
-        if (data && data.catalystFlashUntilMs > state.level.elapsed) {
-          const flashT = (data.catalystFlashUntilMs - state.level.elapsed) / CATALYST_FLASH_DURATION_MS;
-          ctx.save();
-          ctx.globalAlpha = Math.max(0, flashT);
-          ctx.strokeStyle = '#ffe066';
-          ctx.lineWidth = 4;
-          ctx.strokeRect(screen.x, screen.y, size, size);
-          ctx.restore();
-        }
         // Fans are drawn separately below (renderFanIndicators), over EVERY
         // fan in state.level.buildingData rather than just the on-screen-tile-
         // culled ones this loop already skipped past — a Fan's cone can reach
@@ -4107,9 +4055,9 @@ function renderPlatformFilterBadge(ctx, x, y, size, data) {
 // within a family still shares its own function unchanged — only the tile's
 // own configured `color` and the corner tier badge (renderTierBadge) tell
 // tiers apart, same as before this rework. The progress/ammo/ingredient
-// dots, the machine-active pulse, the power-shortage overlay, and the
-// Catalyst glow are all separate render passes (see the per-tile render
-// loop above) and are completely untouched by this dispatch.
+// dots, the machine-active pulse, and the power-shortage overlay are all
+// separate render passes (see the per-tile render loop above) and are
+// completely untouched by this dispatch.
 //
 // Exported (not just used internally) because it's a pure function of its
 // own arguments — no `state` needed anywhere in it or anything it calls —
@@ -4239,23 +4187,6 @@ function renderProcessDots(ctx, x, y, size, zoom, fraction, mode) {
   }
 }
 
-// A soft pulsing gold outline around a Catalyst-Fish-buffed building — per
-// direct spec ("give the buffed building a visual glow so it's obvious it's
-// buffed"). Pulses via elapsed time so it reads as "active" rather than a
-// static highlight, same "sin(elapsed/x)" pulse technique
-// renderPowerShortageOverlay's own stalled-badge already uses.
-function renderCatalystGlow(ctx, x, y, size, elapsedMs) {
-  const pulse = 0.55 + 0.45 * Math.sin(elapsedMs / 260);
-  ctx.save();
-  ctx.globalAlpha = pulse;
-  ctx.strokeStyle = '#ffe066';
-  ctx.lineWidth = 3;
-  ctx.shadowColor = '#ffe066';
-  ctx.shadowBlur = 10;
-  ctx.strokeRect(x + 1.5, y + 1.5, size - 3, size - 3);
-  ctx.restore();
-}
-
 // A gentle, subtle pulse on a Refinery/Collector/Manufacturer/Power Plant
 // while it's actively processing something — per direct request. Originally
 // just a pulsing border outline; per a later direct report ("increase the
@@ -4263,12 +4194,10 @@ function renderCatalystGlow(ctx, x, y, size, elapsedMs) {
 // the border"), most of the tile's own body now pulses too — a translucent
 // fill layered on top of the tile's already-drawn icon/shape, kept low-alpha
 // enough that the icon underneath stays legible through it, with the
-// original border riding the exact same pulse for a stronger edge. Still a
-// different color and a much gentler peak alpha than renderCatalystGlow
-// above (a soft white/cyan "machine humming" cue, low-key enough to sit
-// quietly on every currently-working building at once without the screen
-// turning into a light show), and the same slower period so it doesn't
-// compete visually with the Catalyst Fish's own buff glow.
+// original border riding the exact same pulse for a stronger edge. A soft
+// white/cyan "machine humming" cue, low-key enough to sit quietly on every
+// currently-working building at once without the screen turning into a
+// light show.
 function renderActiveMachinePulse(ctx, x, y, size, elapsedMs) {
   const pulse = 0.25 + 0.25 * Math.sin(elapsedMs / 420); // 0-0.5, same range/period as before
   ctx.save();

@@ -58,7 +58,7 @@ export function loadLevel(state, levelId) {
     // Power is still NOT a battery by default — Eels (and the Power Plant
     // building) generate MW that has to be used the instant it's generated
     // or it's gone forever, recalculated fresh every real second rather than
-    // accumulating in a growing pool. The ONE exception is the Blimp-Battery
+    // accumulating in a growing pool. The ONE exception is the Battery fish
     // hybrid (species id eel_blimp), which per direct spec genuinely IS a
     // living battery for the grid — batteryStoredMw/batteryCapacityMw below
     // are that exception's own state, both otherwise inert (stay at 0) if
@@ -66,8 +66,8 @@ export function loadLevel(state, levelId) {
     // once-per-second power sampling block for the full mechanism.
     powerGenAccumMw: 0, // MW generated so far THIS in-progress real second — see Entities.js's updateFish GENERATOR branch and Grid.js's updateBuildings Power Plant branch. Read and reset to 0 once per real second by main.js's update()
     turretPowerDemandAccumMw: 0, // MW actually drawn by Electric/Advanced Turret shots fired so far THIS in-progress real second — see Grid.js's updateBuildings turret-fire branch. A turret's own draw is a single-tick pulse (a shot), not a sustained state like a Fan's, so it's accumulated the same incremental way powerGenAccumMw is rather than sampled as an instantaneous snapshot (see main.js's own comment on why a snapshot undercounts it). Read and reset to 0 once per real second alongside powerGenAccumMw
-    batteryStoredMw: 0, // Blimp-Battery charge, 0 if none has ever generated a surplus — see main.js's once-per-second power sampling block
-    batteryCapacityMw: 0, // this second's live total capacity across every living Blimp-Battery (Entities.js's computeEelBlimpBatteryCapacityMw) — recomputed fresh every second, not persisted independently of the fish that provide it
+    batteryStoredMw: 0, // Battery fish charge, 0 if none has ever generated a surplus — see main.js's once-per-second power sampling block
+    batteryCapacityMw: 0, // this second's live total capacity across every living Battery fish (Entities.js's computeEelBlimpBatteryCapacityMw) — recomputed fresh every second, not persisted independently of the fish that provide it
     powerEfficiency: 1, // 0-1 fraction, recomputed once per real second from that second's generated-plus-battery-drawn-vs-consumed MW (Grid.js's computePowerEfficiency) — applied as a live throughput multiplier to every power-costing building (Fan force, Collector/Refinery/Manufacturer progress) EXCEPT Turrets, which instead hard-gate on powerEfficiency === 1 and don't fire at all otherwise, per direct request. 0 supply (plus battery) against real demand drives this to 0, genuinely halting those buildings — see Grid.js's applyPowerEfficiency
     powerHistory: [], // rolling { demand, supply } samples, one per real sim-second, capped at POWER_HISTORY_MAX — see main.js's update(). supply is now that second's actual generated-plus-battery-drawn MW, not a running total, so this can (and should) go up AND down frame to frame, not just up — the HUD/graph both read this array unchanged
     entities: [],

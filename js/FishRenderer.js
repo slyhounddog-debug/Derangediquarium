@@ -590,7 +590,7 @@ function drawSuckerfishBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGr
 // perpendicular to the swim direction by a sine wave whose phase shifts
 // along the body — the same underlying idea Ambience.js's seaweed sway
 // uses, just applied along a horizontal body instead of a vertical stem.
-// widthScale/bumps are both purely for the Feeder Fish/Blimp-Battery hybrid
+// widthScale/bumps are both purely for the Feeder Fish/Battery fish hybrid
 // bodies below (drawHybridBody) — a plain Electric Eel always calls this with
 // the defaults (1, false), identical to its old behavior.
 function drawEelBody(ctx, x, y, size, facing, tailPhase, isFullyGrown, color, eyeDirection, widthScale = 1, bumps = false) {
@@ -720,7 +720,7 @@ function drawHybridBody(ctx, x, y, size, facing, tailPhase, stage, color, eyeDir
   const bodyShape = shapeParent === 'dartfin' ? 'slim' : shapeParent === 'blimpfish' ? 'round' : 'normal';
 
   if (hasEel) {
-    // Blimp-Battery (Electric Eel x Blimpfish) reads as a plumper eel — its
+    // Battery fish (Electric Eel x Blimpfish) reads as a plumper eel — its
     // "blimp" half shows as extra girth on the same undulating silhouette
     // rather than a second, competing body shape.
     const widthScale = bodyShape === 'round' ? 1.4 : 1;
@@ -843,7 +843,7 @@ export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDire
   } else {
     // A hybrid's own body SHAPE follows whichever base feeder it was spliced
     // from (def.parents' second entry, per the [utilityId, economyId]
-    // convention — e.g. Blimp-Battery's own economy parent is 'blimpfish'),
+    // convention — e.g. Battery fish's own economy parent is 'blimpfish'),
     // same "should look like the guppy/dartfin/blimpfish that was used"
     // precedent this function's color-blending already follows. Falls back
     // to the species' own id for a non-hybrid, and to 'normal' for anything

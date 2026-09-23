@@ -1413,18 +1413,19 @@ export const SPECIES = {
   // code changes at all, only new data here. `behavior` is deliberately NOT
   // the union of both parents' tags any more for any of these three — each
   // one's real mechanic is hand-implemented in Entities.js/Grid.js by
-  // checking `fish.speciesId` directly (see updateFish's dedicated branches
-  // and Grid.js's getCatalystSpeedMultiplier), so the generic FEEDER/
+  // checking `fish.speciesId` directly (see updateFish's dedicated
+  // branches), so the generic FEEDER/
   // SCAVENGER/GENERATOR/RESEARCHER production paths would only get in the
   // way if left on. Buffer Fish is the one exception, keeping the
   // SCAVENGER tag — its bespoke "eats Waste, produces Food" mechanic is
   // layered ON TOP of the ordinary Suckerfish-style eat-cooldown/targeting
   // that tag already provides, rather than replacing it.
-  // Renamed 'Eel-Blimp' -> 'Blimp-Battery' per direct request — the id
-  // (eel_blimp) is left alone, an internal identifier other code/nodes
-  // reference, not a player-facing "mention."
+  // Renamed 'Eel-Blimp' -> 'Blimp-Battery' -> 'Battery fish' across two
+  // separate direct requests — the id (eel_blimp) is left alone both times,
+  // an internal identifier other code/nodes reference, not a player-facing
+  // "mention."
   eel_blimp: {
-    id: 'eel_blimp', name: 'Blimp-Battery', tier: 4, unlockPhase: 4, cost: 130,
+    id: 'eel_blimp', name: 'Battery fish', tier: 4, unlockPhase: 4, cost: 130,
     description: 'Electric Eel × Blimpfish — a living 1GW battery for the power grid. Stores surplus generation and covers shortfalls before efficiency ever drops. Feed it Mutagen Paste for double production and a temporary 2GW capacity boost.',
     behavior: [], dropType: 'battery', parents: ['electric_eel', 'blimpfish'],
     swimSpeed: 19, lifespan: 300000, hungerRate: 1.068,
@@ -1449,14 +1450,6 @@ export const SPECIES = {
     // dropInterval is this pure Scavenger's eat cooldown, same "up to 3
     // times/min" cap every other pure Scavenger shares.
     growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 20000, dropValue: 0 }],
-    unlockedByDefault: false,
-  },
-  catalyst_fish: {
-    id: 'catalyst_fish', name: 'Catalyst Fish', tier: 4, unlockPhase: 4, cost: 120,
-    description: 'Science Octopus × Dartfin — click it, then click a building to link them. While not hungry, the linked building runs 50% faster (75% while it\'s under a Mutagen Paste buff). Click the fish again to see (or change) its current link.',
-    behavior: [], dropType: 'catalyst', parents: ['octopus', 'dartfin'],
-    swimSpeed: 45, lifespan: 300000, hungerRate: 0.708,
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropValue: 0 }],
     unlockedByDefault: false,
   },
   // Two more bespoke hybrids, per direct spec. Both keep the SCAVENGER/
@@ -1492,7 +1485,7 @@ export const SPECIES = {
   // that specifically hatched from an Alien Egg (Entities.js's own
   // hatchedFromEgg flag) — an ordinary wave-spawned Tier 1 does NOT qualify.
   xeno_octopus: {
-    id: 'xeno_octopus', name: 'Xeno Octopus', tier: 4, unlockPhase: 4, cost: 100, parents: ['octopus', 'alien_t1'],
+    id: 'xeno_octopus', name: 'Bio Fish', tier: 4, unlockPhase: 4, cost: 100, parents: ['octopus', 'alien_t1'], // renamed from 'Xeno Octopus' per direct request; id left alone, same precedent as eel_blimp's own rename
     description: 'A hybrid of an Alien and a Science Octopus — not purchasable directly. Drag a grown Octopus onto a Tier 1 alien that hatched from an Alien Egg (an ordinary wave-spawned alien won\'t do) to splice them together. Double-click it to toggle Bio-Sludge mode (single-click opens its info instead) — while on, it brews and spits out Bio-Sludge every 8 seconds instead of Science Bubbles. Still needs to be fed like any other fish.',
     behavior: ['RESEARCHER'], dropType: 'science_blue',
     swimSpeed: 25, lifespan: 300000, hungerRate: 0.468,
@@ -2186,9 +2179,8 @@ export const SCIENCE_LAB_UPGRADES = {
   // Per direct request — Tier 1 Storage Chest is granted by the Mound's own
   // $75 tease (see Mound.js), not the Lab; these 2 nodes are its only
   // further upgrades, each gated behind a single Bubble Cap milestone and
-  // nothing else, same single-requirement shape as electric_collector/
-  // hybrid_catalyst_fish above (both already precedent for "gated on just
-  // one science_cap_N node").
+  // nothing else, same single-requirement shape as electric_collector above
+  // (already precedent for "gated on just one science_cap_N node").
   storage_chest_t2: {
     id: 'storage_chest_t2', name: 'Storage Chest II', icon: '📦', scienceCost: 80, goldCost: 4500,
     requires: ['science_cap_2'], grants: { buildings: [TILE_STORAGE_CHEST_T2] },
@@ -2363,44 +2355,34 @@ export const SCIENCE_LAB_UPGRADES = {
     id: 'hybrid_buffer_fish', name: 'Magnet Fish', icon: '🧲', scienceCost: 40, goldCost: 4000,
     requires: ['science_cap_3'], grants: { species: ['buffer_fish'] },
   },
+  // Per direct request ("Have the only requirement for the Blimp-Battery be
+  // the Powerplant building"), regated off the 'power_plant' lab node (the
+  // one that grants the Power Plant building itself) instead of a Bubble Cap
+  // tier — thematically tighter anyway, since a Blimp-Battery is a power-grid
+  // fish.
   hybrid_eel_blimp: {
-    id: 'hybrid_eel_blimp', name: 'Blimp-Battery', icon: '🔋', scienceCost: 60, goldCost: 8000,
-    requires: ['science_cap_4'], grants: { species: ['eel_blimp'] }, // moved from Bubble Cap 60 to 80, per direct request
-  },
-  // The one hybrid node requiring Green Science as well as Blue, per direct
-  // request ("everything that requires green science to be unlocked[...]
-  // should also require green science as a resource... at about half as
-  // much as blue science") — scienceGreenCost is ADDITIVE now, not an
-  // exclusive alternative to scienceCost (see labNodeHasEnoughScience's own
-  // comment in UI.js for the full mechanism).
-  // Per direct request, locked behind just Bubble Cap 40 now (the separate
-  // green_science_tech requirement is gone) — it still costs real Green
-  // Science (scienceGreenCost below), which self-gates it economically
-  // behind actually having researched that recipe anyway, without a second
-  // explicit prerequisite on top.
-  hybrid_catalyst_fish: {
-    id: 'hybrid_catalyst_fish', name: 'Catalyst Fish', icon: '🎯', scienceCost: 80, scienceGreenCost: 40, goldCost: 15000,
-    requires: ['science_cap_4'], grants: { species: ['catalyst_fish'] },
+    id: 'hybrid_eel_blimp', name: 'Battery fish', icon: '🔋', scienceCost: 60, goldCost: 8000,
+    requires: ['power_plant'], grants: { species: ['eel_blimp'] },
   },
   // Two more hybrids, per direct request — each gated behind a Manufacturer
   // recipe instead of a Bubble Cap tier, since both are thematically tied to
   // that production chain rather than raw research depth. Feeder Fish
-  // (Electric Eel × Suckerfish) is spliced like the 3 hybrids above it (both
+  // (Electric Eel × Suckerfish) is spliced like the hybrid above it (both
   // parents are real fish, via the standard getHybridSpeciesId pipeline);
-  // Xeno Octopus (Octopus × a Tier 1 Alien-Egg-hatched alien) is spliced too,
+  // Bio Fish (Octopus × a Tier 1 Alien-Egg-hatched alien) is spliced too,
   // per a later direct request, just via its own bespoke alien-aware
   // splice pair (Entities.js's canSpliceOctopusWithAlien/
   // spliceOctopusWithAlien) rather than that standard fish+fish pipeline —
   // see xeno_octopus's own SPECIES row comment for why.
-  // Per direct request, locked behind just Bubble Cap 30 now (was
-  // 'manufacturer' — Bubble Cap 30 already requires the Manufacturer
-  // transitively, so this is a strictly later gate, not a looser one).
+  // Per direct request ("Have the only requirement for the feeder fish be
+  // the mutagen paste recipe"), regated off 'recipe_bio_feeder' (the node
+  // that unlocks the Mutagen Paste recipe) instead of a Bubble Cap tier.
   hybrid_zap_sucker: {
     id: 'hybrid_zap_sucker', name: 'Feeder Fish', icon: '🔌', scienceCost: 70, goldCost: 9000,
-    requires: ['science_cap_3'], grants: { species: ['zap_sucker'] },
+    requires: ['recipe_bio_feeder'], grants: { species: ['zap_sucker'] },
   },
   hybrid_xeno_octopus: {
-    id: 'hybrid_xeno_octopus', name: 'Xeno Octopus', icon: '👽', scienceCost: 90, goldCost: 12000,
+    id: 'hybrid_xeno_octopus', name: 'Bio Fish', icon: '👽', scienceCost: 90, goldCost: 12000,
     requires: ['recipe_alien_egg'], grants: { species: ['xeno_octopus'] },
   },
 
@@ -2540,16 +2522,19 @@ export const GREEN_SCIENCE_LAB_ID = 'green_science_tech';
 // applying immediately to every species' live shop price.
 export const FISH_SCALING_LAB_ID = 'fish_scaling';
 
-// ---- Hybrid Mechanics (Blimp-Battery, Buffer Fish, Catalyst Fish) ----
-// Each of the 3 reworked hybrids gets a genuinely unique, hand-built
-// mechanic (see the SPECIES table's own comment above) rather than a
-// generic behavior-tag formula — these are the tunable numbers each one
-// reads directly by speciesId. Constant names below still say EEL_BLIMP
-// (the species' own internal id, `eel_blimp`, unchanged since its display
-// name was renamed to "Blimp-Battery" — same "keep the internal identifier,
-// change what's shown" precedent every other rename in this project follows).
+// ---- Hybrid Mechanics (Battery fish, Magnet Fish) ----
+// Each hybrid gets a genuinely unique, hand-built mechanic (see the SPECIES
+// table's own comment above) rather than a generic behavior-tag formula —
+// these are the tunable numbers each one reads directly by speciesId.
+// Constant names below still say EEL_BLIMP/BUFFER_FISH (the species' own
+// internal ids, unchanged since their display names were renamed to
+// "Battery fish"/"Magnet Fish" — same "keep the internal identifier, change
+// what's shown" precedent every other rename in this project follows).
+// Catalyst Fish's own linking mechanic (CATALYST_BUFF_MULTIPLIER etc.) was
+// removed along with the species itself, per direct request ("Remove the
+// catalyst fish from the game completely").
 
-// Blimp-Battery: acts as a living battery for the whole power grid (see
+// Battery fish: acts as a living battery for the whole power grid (see
 // main.js's once-per-second power-sampling block and Entities.js's
 // computeEelBlimpBatteryCapacityMw). Each living one contributes this much
 // capacity normally, or the buffed amount while its own mutagenBuffActive is
@@ -2572,19 +2557,6 @@ export const EEL_BLIMP_MUTAGEN_PRODUCTION_MULTIPLIER = 2;
 export const BUFFER_FISH_MAGNET_RADIUS = 346; // px — 260 * 1.33, per direct request ("Increase the range of the magnet fish by 33%")
 export const BUFFER_FISH_MAGNET_FORCE = 220; // force magnitude at the fish's own position, decaying linearly to 0 at MAGNET_RADIUS
 
-// Catalyst Fish: click it, then click a building to link them (main.js's
-// click handler, state.ui.catalystArmedFishId) — the linked building
-// processes faster while the fish isn't hungry (Grid.js's
-// getCatalystSpeedMultiplier), scaling every progress-advancing dtMs it
-// reads by this multiplier. Raised to the Mutagen-buffed multiplier while
-// the fish is under a Mutagen Paste buff, per spec ("75% faster").
-export const CATALYST_BUFF_MULTIPLIER = 1.5;
-export const CATALYST_BUFF_MULTIPLIER_MUTAGEN = 1.75;
-// How long the "you just linked/re-selected this" flash lasts on both the
-// fish and its (new or existing) linked building, per spec ("both the fish
-// and the building will flash").
-export const CATALYST_FLASH_DURATION_MS = 700;
-
 // Feeder Fish: click it to toggle an automatic Food dispenser (fish.autoFoodOn,
 // toggled by main.js's click handler) — while on, it spits out one real Food
 // item every ELECTRIC_SUCKER_FOOD_INTERVAL_MS with no feeding required to
@@ -2592,7 +2564,7 @@ export const CATALYST_FLASH_DURATION_MS = 700;
 // generates power like a plain Electric Eel instead (see updateFish's
 // isPureGenerator branch and fish.autoFoodTimerMs).
 export const ELECTRIC_SUCKER_FOOD_INTERVAL_MS = 6000;
-// Xeno Octopus: click it to toggle Bio-Sludge mode (fish.alienDnaModeOn) —
+// Bio Fish: click it to toggle Bio-Sludge mode (fish.alienDnaModeOn) —
 // while on, its normal long Science brew cycle is replaced entirely by a
 // fixed SCIENCE_ALIEN_DNA_INTERVAL_MS timer that spits out one Bio-Sludge
 // (type `alien_dna`) item instead of a Science Bubble, per spec ("every 8

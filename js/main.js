@@ -47,7 +47,10 @@ import {
   BIOMASS_COLOR_CORE,
   MUTAGEN_PASTE_COLOR,
   BUFFER_FISH_MAGNET_RADIUS,
-  CATALYST_FLASH_DURATION_MS,
+  FISH_BUBBLE_RADIUS_MIN,
+  FISH_BUBBLE_RADIUS_MAX,
+  FISH_BUBBLE_RISE_SPEED_MIN,
+  FISH_BUBBLE_RISE_SPEED_MAX,
   FOOD_STALE_FRACTION,
   FOOD_STALE_COLOR,
   FOOD_STATIONARY_TO_WASTE_MS,
@@ -741,19 +744,11 @@ function isShiftHeld() {
 let draggedFishId = null;
 let fishDragArmed = false;
 
-// Catalyst Fish's click-to-arm-then-click-a-building-to-link flow — the id
-// of whichever Catalyst Fish was most recently clicked, waiting for its
-// linking building click; null the rest of the time. See the click
-// handler's own two dedicated branches below.
-let catalystArmedFishId = null;
-
 // Which hybrids have a real on/off ability toggle — Magnet Fish (magnet),
-// Feeder Fish (auto-Food dispenser), Xeno Octopus (Bio-Sludge mode) — per
+// Feeder Fish (auto-Food dispenser), Bio Fish (Bio-Sludge mode) — per
 // direct request, all 3 now require a genuine DOUBLE-click to flip (see the
 // click handler's own comment for why: a single click on any fish opens its
-// info modal instead now). Catalyst Fish's click-to-arm-link isn't an
-// on/off toggle, so it's deliberately not in this list — unchanged,
-// single-click, same as always.
+// info modal instead now).
 const TOGGLEABLE_FISH_SPECIES = ['buffer_fish', 'zap_sucker', 'xeno_octopus'];
 const FISH_DOUBLE_CLICK_MS = 350;
 const FISH_TOGGLE_BOUNCE_DURATION_MS = 400;
@@ -801,15 +796,18 @@ input.mouseDownHandlers.push((sx, sy) => {
   // target orderings, so it no longer matters which half of a pair gets
   // grabbed first.
   const spliceEligible = isSpliceSource(state, fish) || isSpliceTargetCandidate(state, fish);
-  // Economy Fish Combining still requires the dedicated Merge tool (🧤) to be
-  // selected first — deliberate anti-accidental-drag fix, unchanged (the
-  // mouseup handler below re-checks this too, since spliceEligible can now
-  // arm a drag from any tool — see its own comment for why that 2nd check
-  // still matters). Gene-Splicing, per direct request ("make it so you can
-  // use the splice tool at any time"), no longer needs that same explicit
-  // tool switch at all — any press landing on a splice-eligible fish arms
-  // the drag regardless of what's currently selected.
-  if ((state.ui.selectedTool === 'merge' && isCombinableFish(state, fish)) || spliceEligible) {
+  // Both Economy Fish Combining AND Gene-Splicing now require the dedicated
+  // Merge tool (🧤) to be selected first — per direct request ("Make it so
+  // the merge/hybrid tool needs to be selected to actually merge fish. If
+  // the default cursor is selected, don't let it merge fish. That way, the
+  // info modal works correctly on fish that can be merged"). An earlier
+  // round had relaxed this for splicing only ("use the splice tool at any
+  // time"), which meant a plain cursor-tool press on a splice-eligible fish
+  // armed a drag instead of falling through to the fish info modal's own
+  // click handling further down — reverted back to requiring 'merge' for
+  // both, so a cursor-tool click on ANY fish (mergeable or not) reliably
+  // opens its info modal instead.
+  if (state.ui.selectedTool === 'merge' && (isCombinableFish(state, fish) || spliceEligible)) {
     draggedFishId = fish.id;
     fishDragArmed = true;
   }
@@ -821,11 +819,12 @@ input.mouseUpHandlers.push((sx, sy) => {
   const dragged = state.level.entities.find((e) => e.id === draggedFishId);
   const target = findFishAt(state, world.x, world.y, draggedFishId);
   if (dragged && target) {
-    // Combining still requires 'merge' to have been selected AT THE DROP —
-    // splicing can now arm this drag from any tool (see the mousedown
-    // handler's own comment), so this guard is what stops two same-species
-    // fish from accidentally combining mid-splice-drag while some other
-    // tool (Food, a building, Blueprint) is actually active.
+    // draggedFishId can now only ever have been armed while 'merge' was
+    // selected (see the mousedown handler above) — this check is kept
+    // anyway as a defensive belt-and-suspenders in case the tool changed
+    // mid-drag (e.g. a hotkey swapped it while the mouse button was still
+    // down), so combining can't fire off a drag that started as one thing
+    // and ended as another.
     if (state.ui.selectedTool === 'merge' && canCombineFish(state, dragged, target)) {
       combineFish(state, dragged, target);
       // The first-time merge guided tutorial's own final step — a no-op
@@ -845,7 +844,7 @@ input.mouseUpHandlers.push((sx, sy) => {
       spliceFish(state, target, dragged);
     }
   } else if (dragged) {
-    // Xeno Octopus's own one-off splice target is an alien, not a fish —
+    // Bio Fish's own one-off splice target is an alien, not a fish —
     // findFishAt (fish-only) never matches it, so this only runs as a
     // fallback once no fish target was found, reusing the same hit-test
     // radius the click-damage loop above already uses for aliens.
@@ -1964,7 +1963,7 @@ input.clickHandlers.push((sx, sy) => {
     }
   }
 
-  // Magnet Fish/Feeder Fish/Xeno Octopus each have an on/off ability toggle
+  // Magnet Fish/Feeder Fish/Bio Fish each have an on/off ability toggle
   // (magnet, auto-Food dispenser, Bio-Sludge mode) — per direct request, a
   // single click on any fish now opens its info modal instead (see the
   // generic fallback further below), so toggling one of these abilities
@@ -1995,42 +1994,6 @@ input.clickHandlers.push((sx, sy) => {
       }
     }, FISH_DOUBLE_CLICK_MS);
     return;
-  }
-
-  // Catalyst Fish: click arms it for linking (and, if it's already linked
-  // to something, also flashes that building so its current link is
-  // visible) — per direct spec, "click the fish, then click a building to
-  // link them... click the fish again [to] have the linked building
-  // flash... but also click a different building to relink it instead."
-  if (clickedFish && clickedFish.speciesId === 'catalyst_fish') {
-    catalystArmedFishId = clickedFish.id;
-    clickedFish.catalystFlashUntilMs = state.level.elapsed + CATALYST_FLASH_DURATION_MS;
-    if (clickedFish.linkedBuildingKey) {
-      const linkedData = state.level.buildingData[clickedFish.linkedBuildingKey];
-      if (linkedData) linkedData.catalystFlashUntilMs = state.level.elapsed + CATALYST_FLASH_DURATION_MS;
-    }
-    return;
-  }
-
-  // Second half of the Catalyst Fish flow — a fish is currently armed
-  // (from the branch above, on a PREVIOUS click) and this click lands on a
-  // real building tile: link them (replacing any previous link this fish
-  // had, so it's "never locked to a building forever" per spec), flash
-  // both, and clear the armed state. Left armed (not cancelled) if this
-  // click doesn't land on a building, so a stray click elsewhere doesn't
-  // lose the in-progress gesture.
-  if (catalystArmedFishId !== null) {
-    const armedFish = state.level.entities.find((e) => e.id === catalystArmedFishId && e.type === 'fish');
-    const { col, row } = worldToTile(world.x, world.y);
-    const tile = getTile(state.level.grid, col, row);
-    if (armedFish && tile && tile !== TILE_EMPTY) {
-      const newKey = `${row},${col}`;
-      armedFish.linkedBuildingKey = newKey;
-      armedFish.catalystFlashUntilMs = state.level.elapsed + CATALYST_FLASH_DURATION_MS;
-      state.level.buildingData[newKey].catalystFlashUntilMs = state.level.elapsed + CATALYST_FLASH_DURATION_MS;
-      catalystArmedFishId = null;
-      return;
-    }
   }
 
   // A Fan's click-2 must work regardless of where it lands — including open
@@ -2174,12 +2137,9 @@ input.clickHandlers.push((sx, sy) => {
     if (buildingInfo) { openBuildingInfoMenu(state, buildingInfo.key); return; }
     // Every fish opens its own read-only info modal on a plain click — per
     // direct request ("click on every fish... to bring up the fish modal
-    // like the building modal"). Only reached here for a species with no
-    // more specific single-click job of its own (Catalyst Fish's own
-    // click-to-arm-link above already returned first; a toggle-capable
-    // fish's click is deferred through the double-click check above and
-    // only ever reaches openFishInfoMenu through ITS OWN timeout, never
-    // through this line).
+    // like the building modal"). A toggle-capable fish's click is deferred
+    // through the double-click check above instead, and only ever reaches
+    // openFishInfoMenu through ITS OWN timeout, never through this line.
     if (clickedFish) { openFishInfoMenu(state, clickedFish.id); return; }
   }
   // Per direct request ("the default cursor CANNOT drop food. The food tool
@@ -2918,6 +2878,57 @@ function updateFishDrag() {
   dragged.vy = 0;
 }
 
+// Running Refineries/Manufacturers/Collectors/Power Plants occasionally
+// spit out a bubble, per direct request — reuses the exact same transient
+// effect list/shape a fish's own mouth-bubble already uses
+// (state.level.fishBubbleEffects, see Entities.js's emitFishBubble), just
+// spawned from a building's tile center instead of a swimming fish's mouth.
+// Rolled on a shared timer (not every real tick) rather than per-frame, so
+// the rate doesn't implicitly scale with frame rate/time-scale debug cheats.
+const BUILDING_BUBBLE_TILE_IDS = [...BUILDING_FAMILIES.refinery, ...BUILDING_FAMILIES.collector, TILE_MANUFACTURER, TILE_POWER_PLANT];
+const BUILDING_BUBBLE_ROLL_INTERVAL_MS = 1500;
+const BUILDING_BUBBLE_CHANCE_PER_ROLL = 0.3;
+let buildingBubbleTimerMs = 0;
+
+// A Collector has no persistent "am I running" flag of its own (unlike a
+// Refinery/Manufacturer's heldItemId or a Power Plant's fueled) — its own
+// held item tracks ITS progress directly (Grid.js's stepCollectorProcessing/
+// collectorProgressMs), so "is this exact tile currently running" is
+// answered by checking whether any item is mid-process at this tile's
+// center instead.
+function isBuildingRunningForBubbles(state, data, centerX, centerY) {
+  if (data.type === TILE_POWER_PLANT) return data.fueled === true;
+  if (BUILDING_FAMILIES.collector.includes(data.type)) {
+    return state.level.items.some((it) => it.collectorProgressMs != null && it.collectorCenterX === centerX && it.collectorCenterY === centerY);
+  }
+  return data.heldItemId != null; // Refinery and Manufacturer both track it this same way
+}
+
+function updateBuildingBubbles(dtMs) {
+  buildingBubbleTimerMs += dtMs;
+  if (buildingBubbleTimerMs < BUILDING_BUBBLE_ROLL_INTERVAL_MS) return;
+  buildingBubbleTimerMs -= BUILDING_BUBBLE_ROLL_INTERVAL_MS;
+  for (const key in state.level.buildingData) {
+    const data = state.level.buildingData[key];
+    if (!BUILDING_BUBBLE_TILE_IDS.includes(data.type)) continue;
+    const [row, col] = key.split(',').map(Number);
+    const centerX = col * TILE_SIZE + TILE_SIZE / 2;
+    const centerY = row * TILE_SIZE + TILE_SIZE / 2;
+    if (!isBuildingRunningForBubbles(state, data, centerX, centerY)) continue;
+    if (Math.random() > BUILDING_BUBBLE_CHANCE_PER_ROLL) continue;
+    state.level.fishBubbleEffects.push({
+      x: centerX + (Math.random() * 2 - 1) * TILE_SIZE * 0.25,
+      y: centerY,
+      radius: FISH_BUBBLE_RADIUS_MIN + Math.random() * (FISH_BUBBLE_RADIUS_MAX - FISH_BUBBLE_RADIUS_MIN),
+      age: 0,
+      riseSpeed: FISH_BUBBLE_RISE_SPEED_MIN + Math.random() * (FISH_BUBBLE_RISE_SPEED_MAX - FISH_BUBBLE_RISE_SPEED_MIN),
+      wobbleFreq: 1.2 + Math.random() * 1.6,
+      wobblePhase: Math.random() * Math.PI * 2,
+      wobbleAmp: 2 + Math.random() * 4,
+    });
+  }
+}
+
 // Keeps whichever fish the info modal is currently open for "locked into
 // place" — per direct request ("Keep that one fish locked into place and
 // highlight the fish while it's modal is open so it's visually obvious what
@@ -3155,6 +3166,7 @@ function update(dtMs) {
   // objects") and the level clock, while update() keeps running every real
   // frame so the drag/move functions below stay responsive.
   if (!state.ui.timePaused) updateEntities(state, dtMs);
+  if (!state.ui.timePaused) updateBuildingBubbles(dtMs);
   updateFishDrag();
   updateFishInfoModalFreeze();
   updateItemDrag();
@@ -3191,7 +3203,7 @@ function update(dtMs) {
     // a Fan/Processor/Refinery/Manufacturer's.
     const demand = computeCurrentPowerDemand(state) + state.level.turretPowerDemandAccumMw;
     const rawSupply = state.level.powerGenAccumMw; // whatever Eels/Blimp-Batteries generated during the window that just closed — see Levels.js's powerGenAccumMw
-    // Blimp-Battery — per direct spec ("power will need to be
+    // Battery fish — per direct spec ("power will need to be
     // calculated every second, and if there's excess, it can be stored...
     // if power usage exceeds power production, the stored electricity can
     // be used instead of reducing city efficiency"). Capacity is recomputed
@@ -4351,7 +4363,7 @@ function render() {
       ctx.restore();
     }
 
-    // Xeno Octopus's Bio-Sludge mode — a pulsing acid-green ring while
+    // Bio Fish's Bio-Sludge mode — a pulsing acid-green ring while
     // toggled on, matching Bio-Sludge's own item color.
     if (fish.speciesId === 'xeno_octopus' && fish.alienDnaModeOn) {
       const ringRadius = size * state.camera.zoom * (1.15 + 0.1 * Math.sin(performance.now() / 220));
@@ -4362,34 +4374,6 @@ function render() {
       ctx.arc(pos.x, pos.y, ringRadius, 0, Math.PI * 2);
       ctx.stroke();
       ctx.restore();
-    }
-
-    // Catalyst Fish — a steady gold ring while armed (waiting for the next
-    // building click) and a brief brighter flash on either a fresh link or
-    // a re-click revealing the current one, per direct spec ("both the fish
-    // and the building will flash").
-    if (fish.speciesId === 'catalyst_fish') {
-      if (catalystArmedFishId === fish.id) {
-        ctx.save();
-        ctx.strokeStyle = 'rgba(255, 224, 102, 0.85)';
-        ctx.lineWidth = 2;
-        ctx.setLineDash([4, 3]);
-        ctx.beginPath();
-        ctx.arc(pos.x, pos.y, size * state.camera.zoom * 1.2, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.restore();
-      }
-      if (fish.catalystFlashUntilMs > state.level.elapsed) {
-        const flashT = (fish.catalystFlashUntilMs - state.level.elapsed) / CATALYST_FLASH_DURATION_MS;
-        ctx.save();
-        ctx.globalAlpha = Math.max(0, flashT);
-        ctx.strokeStyle = '#ffe066';
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.arc(pos.x, pos.y, size * state.camera.zoom * 1.35, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.restore();
-      }
     }
 
     // Shimmer/gleam, per direct request — placed, grown a stage, or
@@ -4409,7 +4393,7 @@ function render() {
 
     // Persistent, subtler recurring shimmer for as long as a toggleable
     // hybrid's ability stays ON (Magnet Fish's magnet, Feeder Fish's
-    // dispenser, Xeno Octopus's Bio-Sludge mode) — per direct request
+    // dispenser, Bio Fish's Bio-Sludge mode) — per direct request
     // ("during the time the fish ability is on, have the fish shimmer
     // slightly"). Same recurring-sweep machinery the Mound/Science Lab
     // already use, just lazily created per-fish the first time it's needed,
@@ -4724,9 +4708,9 @@ function render() {
   // comment. Only computed while nothing else is already claiming the
   // bottom-left legend spot (no building hovered/moving, no cost legend for
   // an armed build:/fish: tool) and no drag is in progress, so this never
-  // fights those for the same on-screen slot. Splicing now works "at any
-  // time" (see the mousedown handler's own comment), so this hover legend
-  // deliberately isn't gated on any particular tool either.
+  // fights those for the same on-screen slot. Purely informational (what
+  // WOULD merge/splice if the Merge tool were selected) — deliberately not
+  // gated on the Merge tool itself, unlike the real drag-arm gesture below.
   if (
     input.mouse.inside && !state.ui.paused && !state.level.tutorialFlow &&
     draggedFishId == null && !state.ui.buildingMoveArmed && state.ui.buildingMoveHoverLabel == null &&
