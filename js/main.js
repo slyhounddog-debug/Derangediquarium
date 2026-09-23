@@ -46,6 +46,7 @@ import {
   BIOMASS_COLOR,
   BIOMASS_COLOR_CORE,
   MUTAGEN_PASTE_COLOR,
+  BUFFER_FISH_MAGNET_RADIUS,
   CATALYST_FLASH_DURATION_MS,
   FOOD_STALE_FRACTION,
   FOOD_STALE_COLOR,
@@ -133,7 +134,7 @@ import {
   isSpliceTargetCandidate,
   canSpliceFish,
   spliceFish,
-  getHybridSpeciesId,
+  describeFishMergeOptions,
   canSpliceOctopusWithAlien,
   spliceOctopusWithAlien,
   createMotherAlienFish,
@@ -179,7 +180,7 @@ import {
 } from './Grid.js';
 import { isPointOnMound, crackMound, renderMound, centerCameraOnMound, isPointOnScienceLab, renderScienceLab } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
-import { oneShotShimmerProgress, drawShimmerSweep, shimmerFadeAlpha } from './Shimmer.js';
+import { oneShotShimmerProgress, drawShimmerSweep, shimmerFadeAlpha, createShimmerTimer, updateShimmerTimer } from './Shimmer.js';
 import {
   initUI,
   updateHUD,
@@ -194,6 +195,8 @@ import {
   openBuildingInfoMenu,
   openPlatformFilterMenu,
   openMagnetFishFilterMenu,
+  openFishInfoMenu,
+  closeFishInfoMenu,
   copyPlatformFilter,
   openStorageChestModal,
   toggleFavoriteForSelectedTool,
@@ -582,6 +585,16 @@ const state = {
     // line when the hovered fish IS eligible but nothing in the tank right
     // now actually pairs with it. See main.js's describeFishMergeOptions.
     fishMergeHoverLines: null,
+    // The fish info modal's own locked-fish tracking — per direct request,
+    // written by UI.js's openFishInfoMenu/closeFishInfoMenu (main.js can't
+    // import UI.js back without a circular dependency, so this is the same
+    // cross-module-flag pattern buildingMoveHoverLabel etc. already use).
+    // fishInfoModalFrozenX/Y are captured once, at open time, and re-applied
+    // every tick (see main.js's updateFishInfoModalFreeze) so the fish stays
+    // visibly still for as long as its modal is open.
+    fishInfoModalFishId: null,
+    fishInfoModalFrozenX: 0,
+    fishInfoModalFrozenY: 0,
     paused: false, // pause menu open/closed (Escape); update() below skips simulating entirely while true
     // Time-manipulation HUD buttons, per direct request. timePaused freezes
     // fish/alien/building simulation while still letting the player build/
@@ -734,6 +747,42 @@ let fishDragArmed = false;
 // handler's own two dedicated branches below.
 let catalystArmedFishId = null;
 
+// Which hybrids have a real on/off ability toggle — Magnet Fish (magnet),
+// Feeder Fish (auto-Food dispenser), Xeno Octopus (Bio-Sludge mode) — per
+// direct request, all 3 now require a genuine DOUBLE-click to flip (see the
+// click handler's own comment for why: a single click on any fish opens its
+// info modal instead now). Catalyst Fish's click-to-arm-link isn't an
+// on/off toggle, so it's deliberately not in this list — unchanged,
+// single-click, same as always.
+const TOGGLEABLE_FISH_SPECIES = ['buffer_fish', 'zap_sucker', 'xeno_octopus'];
+const FISH_DOUBLE_CLICK_MS = 350;
+const FISH_TOGGLE_BOUNCE_DURATION_MS = 400;
+const FISH_TOGGLE_BOUNCE_AMOUNT = 0.22;
+let pendingFishToggleClickId = null;
+let pendingFishToggleClickTimeout = null;
+
+// Per direct request ("Add in a shimmer and bounce animation anytime a
+// hybrid fish with an ability is toggled on. During the time the fish
+// ability is on, have the fish shimmer slightly") — toggling ON restarts
+// the same one-shot shimmer sweep a fresh placement/growth/splice already
+// gets (fish.shimmerStartedAt, see FishRenderer.js/main.js's own render
+// code) for the bounce+shimmer burst, and sets abilityToggleOnSince so
+// render() can apply a persistent, subtler shimmer for as long as the
+// ability stays on. Toggling OFF just clears the persistent flag — no
+// burst animation for turning something off, only for turning it on.
+function toggleFishAbility(state, fish) {
+  let turningOn;
+  if (fish.speciesId === 'buffer_fish') { fish.magnetOn = !fish.magnetOn; turningOn = fish.magnetOn; }
+  else if (fish.speciesId === 'zap_sucker') { fish.autoFoodOn = !fish.autoFoodOn; turningOn = fish.autoFoodOn; }
+  else if (fish.speciesId === 'xeno_octopus') { fish.alienDnaModeOn = !fish.alienDnaModeOn; turningOn = fish.alienDnaModeOn; }
+  else return;
+  fish.abilityToggleOnSince = turningOn ? state.level.elapsed : null;
+  if (turningOn) {
+    fish.shimmerStartedAt = state.level.elapsed;
+    fish.toggleBounceStartedAt = state.level.elapsed;
+  }
+}
+
 input.mouseDownHandlers.push((sx, sy) => {
   fishDragArmed = false;
   if (state.ui.paused) return;
@@ -811,39 +860,6 @@ input.mouseUpHandlers.push((sx, sy) => {
   }
   draggedFishId = null;
 });
-
-// Fish merge/splice hover legend — per direct request. Returns null if
-// `fish` doesn't qualify for either mechanic at all (hides the legend),
-// otherwise one description line per currently-living, currently-eligible
-// partner already in the tank (deduped by resulting text — several same-
-// species Guppies all read as one "Merge with Guppy -> ..." line), or a
-// single "No available fish to merge." line if `fish` qualifies in shape but
-// nothing pairs with it right now. Checked both drag orderings for splicing,
-// same as the real mouseup resolution above, so it doesn't matter whether
-// `fish` is the utility half or the target half of a pair.
-function describeFishMergeOptions(state, fish) {
-  const combineSource = isCombinableFish(state, fish);
-  const spliceSource = isSpliceSource(state, fish);
-  const spliceTarget = isSpliceTargetCandidate(state, fish);
-  if (!combineSource && !spliceSource && !spliceTarget) return null;
-  const lines = [];
-  const seen = new Set();
-  for (const other of state.level.entities) {
-    if (other.type !== 'fish' || other.id === fish.id || other.dying) continue;
-    let desc = null;
-    if (combineSource && canCombineFish(state, fish, other)) {
-      desc = `Merge with ${SPECIES[other.speciesId].name} → Tier ${(fish.starTier || 1) + 1} ${SPECIES[fish.speciesId].name}`;
-    } else if (spliceSource && canSpliceFish(state, fish, other)) {
-      const hybridId = getHybridSpeciesId(other.speciesId, fish.speciesId);
-      desc = `Splice with ${SPECIES[other.speciesId].name} → ${SPECIES[hybridId].name}`;
-    } else if (spliceTarget && canSpliceFish(state, other, fish)) {
-      const hybridId = getHybridSpeciesId(fish.speciesId, other.speciesId);
-      desc = `Splice with ${SPECIES[other.speciesId].name} → ${SPECIES[hybridId].name}`;
-    }
-    if (desc && !seen.has(desc)) { seen.add(desc); lines.push(desc); }
-  }
-  return lines.length > 0 ? lines : ['No available fish to merge.'];
-}
 
 // Whether the "drag Waste into the Turret" guided-tutorial step is the one
 // currently active — shared by the mousedown-arming gate below, update()'s
@@ -1948,28 +1964,36 @@ input.clickHandlers.push((sx, sy) => {
     }
   }
 
-  // Buffer Fish: click toggles its Waste-attracting magnet on/off, per
-  // direct spec — always works regardless of the selected tool, same
-  // precedent alien-click-damage above already has. Reuses findFishAt's
-  // existing hit-radius rather than a bespoke check.
+  // Magnet Fish/Feeder Fish/Xeno Octopus each have an on/off ability toggle
+  // (magnet, auto-Food dispenser, Bio-Sludge mode) — per direct request, a
+  // single click on any fish now opens its info modal instead (see the
+  // generic fallback further below), so toggling one of these abilities
+  // now needs a genuine DOUBLE-click to disambiguate from that. A first
+  // click on one of these 3 species is deferred (setTimeout) rather than
+  // acted on immediately: if a second click on the SAME fish lands within
+  // FISH_DOUBLE_CLICK_MS, that's the real double-click — toggle the
+  // ability and cancel the pending open; otherwise the timer fires on its
+  // own and opens the info modal, exactly as an ordinary single click on
+  // any other fish already would.
   const clickedFish = findFishAt(state, world.x, world.y);
-  if (clickedFish && clickedFish.speciesId === 'buffer_fish') {
-    clickedFish.magnetOn = !clickedFish.magnetOn;
-    return;
-  }
-
-  // Feeder Fish: click toggles its automatic Food dispenser on/off (and
-  // with it, whether it generates power instead — see updateFish's
-  // isPureGenerator branch), per direct spec — same click-to-toggle
-  // precedent as the Buffer Fish's own magnet above.
-  if (clickedFish && clickedFish.speciesId === 'zap_sucker') {
-    clickedFish.autoFoodOn = !clickedFish.autoFoodOn;
-    return;
-  }
-
-  // Xeno Octopus: click toggles Bio-Sludge mode on/off, per direct spec.
-  if (clickedFish && clickedFish.speciesId === 'xeno_octopus') {
-    clickedFish.alienDnaModeOn = !clickedFish.alienDnaModeOn;
+  if (clickedFish && TOGGLEABLE_FISH_SPECIES.includes(clickedFish.speciesId)) {
+    if (pendingFishToggleClickId === clickedFish.id) {
+      clearTimeout(pendingFishToggleClickTimeout);
+      pendingFishToggleClickId = null;
+      pendingFishToggleClickTimeout = null;
+      toggleFishAbility(state, clickedFish);
+      return;
+    }
+    pendingFishToggleClickId = clickedFish.id;
+    const fishId = clickedFish.id;
+    pendingFishToggleClickTimeout = setTimeout(() => {
+      pendingFishToggleClickId = null;
+      pendingFishToggleClickTimeout = null;
+      const fish = state.level.entities.find((e) => e.id === fishId && e.type === 'fish');
+      if (fish && !state.ui.paused && !state.level.tutorialFlow) {
+        openFishInfoMenu(state, fishId);
+      }
+    }, FISH_DOUBLE_CLICK_MS);
     return;
   }
 
@@ -2148,6 +2172,15 @@ input.clickHandlers.push((sx, sy) => {
     if (chestKey) { openStorageChestModal(state, chestKey); return; }
     const buildingInfo = getBuildingInfoKeyAt(state, world.x, world.y);
     if (buildingInfo) { openBuildingInfoMenu(state, buildingInfo.key); return; }
+    // Every fish opens its own read-only info modal on a plain click — per
+    // direct request ("click on every fish... to bring up the fish modal
+    // like the building modal"). Only reached here for a species with no
+    // more specific single-click job of its own (Catalyst Fish's own
+    // click-to-arm-link above already returned first; a toggle-capable
+    // fish's click is deferred through the double-click check above and
+    // only ever reaches openFishInfoMenu through ITS OWN timeout, never
+    // through this line).
+    if (clickedFish) { openFishInfoMenu(state, clickedFish.id); return; }
   }
   // Per direct request ("the default cursor CANNOT drop food. The food tool
   // has to be selected to drop food") — this is the ONE and only place Food
@@ -2333,6 +2366,14 @@ input.keydownHandlers.push((e) => {
   // sub-views) is the only thing on screen, and it has its own buttons for
   // navigating back, not Escape.
   if (!state.ui.gameStarted) return;
+  // The fish info modal closes on literally ANY hotkey, per direct request
+  // ("Clicking anywhere outside the modal or using any hotkey will close
+  // the modal") — checked first, ahead of every other branch below, and
+  // deliberately doesn't `return`: whatever hotkey triggered the close
+  // still goes on to do its own normal job the same tick (e.g. pressing E
+  // both closes the modal AND opens the Shop), rather than needing two
+  // separate presses.
+  if (state.ui.fishInfoModalFishId != null) closeFishInfoMenu(state);
   // The debug overlay toggle is a pure observability tool, not a gameplay
   // action — deliberately never blocked by anything below (the cinematic
   // intro/tutorial-flow gates included), so it's always reachable for QA.
@@ -2877,6 +2918,24 @@ function updateFishDrag() {
   dragged.vy = 0;
 }
 
+// Keeps whichever fish the info modal is currently open for "locked into
+// place" — per direct request ("Keep that one fish locked into place and
+// highlight the fish while it's modal is open so it's visually obvious what
+// fish the modal belongs to"). Same override-after-updateEntities shape
+// updateFishDrag above already uses, just holding a fixed world position
+// (state.ui.fishInfoModalFrozenX/Y, captured once by UI.js's
+// openFishInfoMenu) instead of following the cursor.
+function updateFishInfoModalFreeze() {
+  const fishId = state.ui.fishInfoModalFishId;
+  if (fishId == null) return;
+  const fish = state.level.entities.find((e) => e.id === fishId && e.type === 'fish');
+  if (!fish || fish.dying) { closeFishInfoMenu(state); return; } // the fish it's showing died/despawned out from under it
+  fish.x = state.ui.fishInfoModalFrozenX;
+  fish.y = state.ui.fishInfoModalFrozenY;
+  fish.vx = 0;
+  fish.vy = 0;
+}
+
 // Mirrors Engine.js's own updateCamera vertical clamp (camera.y's max is
 // WORLD_H + CAMERA_BOTTOM_BUFFER_PX - viewH) to answer "is the camera
 // currently panned all the way down" — used by the post-alien guided
@@ -3097,6 +3156,7 @@ function update(dtMs) {
   // frame so the drag/move functions below stay responsive.
   if (!state.ui.timePaused) updateEntities(state, dtMs);
   updateFishDrag();
+  updateFishInfoModalFreeze();
   updateItemDrag();
   updateChestAimDrag();
   updateRecipeDrag();
@@ -4185,7 +4245,49 @@ function render() {
       ctx.fill();
       ctx.restore();
     }
+
+    // Magnet Fish's own area-of-effect ring, drawn only while its magnet is
+    // actually on — per direct request ("Add in an area of affect animation
+    // that shows the area of the magnet for the magnet fish"). A soft
+    // filled disc plus a crisper outline ring at the true force radius, both
+    // gently pulsing, so the range reads clearly without looking like a
+    // static UI overlay.
+    if (fish.speciesId === 'buffer_fish' && fish.magnetOn) {
+      const magnetScreenRadius = BUFFER_FISH_MAGNET_RADIUS * state.camera.zoom;
+      const pulse = 0.85 + 0.15 * Math.sin(performance.now() / 500);
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, magnetScreenRadius, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(160, 100, 255, ${0.06 * pulse})`;
+      ctx.fill();
+      ctx.strokeStyle = `rgba(160, 100, 255, ${0.35 * pulse})`;
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // A quick one-shot squash/stretch bounce the instant a toggleable
+    // hybrid's ability is turned ON (see toggleFishAbility) — per direct
+    // request. Plays once off a plain elapsed-time check (no field needs
+    // clearing once it's done — FISH_TOGGLE_BOUNCE_DURATION_MS after
+    // toggleBounceStartedAt, this branch simply stops matching).
+    let bounceX = 1, bounceY = 1;
+    if (fish.toggleBounceStartedAt != null) {
+      const bounceT = (state.level.elapsed - fish.toggleBounceStartedAt) / FISH_TOGGLE_BOUNCE_DURATION_MS;
+      if (bounceT >= 0 && bounceT < 1) {
+        const wobble = Math.sin(bounceT * Math.PI) * (1 - bounceT);
+        bounceX = 1 + wobble * FISH_TOGGLE_BOUNCE_AMOUNT;
+        bounceY = 1 - wobble * FISH_TOGGLE_BOUNCE_AMOUNT;
+      }
+    }
+    if (bounceX !== 1 || bounceY !== 1) {
+      ctx.save();
+      ctx.translate(pos.x, pos.y);
+      ctx.scale(bounceX, bounceY);
+      ctx.translate(-pos.x, -pos.y);
+    }
     drawFish(ctx, pos.x, pos.y, fish.speciesId, fish.stage, facing, fish.tailPhase, eyeDirection, fish.starTier || 1, sickness, grayed, state.meta.equippedHatId);
+    if (bounceX !== 1 || bounceY !== 1) ctx.restore();
 
     // A fish's health bar only ever renders while it's actually missing
     // health, per direct request — full health, no bar at all. Same
@@ -4305,6 +4407,28 @@ function render() {
       ctx.restore();
     }
 
+    // Persistent, subtler recurring shimmer for as long as a toggleable
+    // hybrid's ability stays ON (Magnet Fish's magnet, Feeder Fish's
+    // dispenser, Xeno Octopus's Bio-Sludge mode) — per direct request
+    // ("during the time the fish ability is on, have the fish shimmer
+    // slightly"). Same recurring-sweep machinery the Mound/Science Lab
+    // already use, just lazily created per-fish the first time it's needed,
+    // at a lower peak alpha than the one-shot growth/placement sweep above
+    // so it genuinely reads as "slight."
+    if (fish.abilityToggleOnSince != null) {
+      if (!fish.abilityShimmerTimer) fish.abilityShimmerTimer = createShimmerTimer();
+      const abilityShimmerT = updateShimmerTimer(fish.abilityShimmerTimer, state.level.elapsed);
+      if (abilityShimmerT !== null) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.arc(pos.x, pos.y, size, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.globalAlpha = shimmerFadeAlpha(abilityShimmerT) * 0.5;
+        drawShimmerSweep(ctx, abilityShimmerT, pos.x - size, pos.y - size, size * 2, size * 2);
+        ctx.restore();
+      }
+    }
+
     // Economy Fish Combining: a soft ring around the fish currently being
     // dragged, and a green/red ring around whatever it's hovering over.
     if (fish.id === draggedFishId) {
@@ -4318,6 +4442,20 @@ function render() {
       ctx.lineWidth = 3;
       ctx.beginPath();
       ctx.arc(pos.x, pos.y, size * 0.75, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+
+    // The fish info modal's own locked fish gets a highlight ring — per
+    // direct request ("Keep that one fish locked into place and highlight
+    // the fish while it's modal is open so it's visually obvious what fish
+    // the modal belongs to"). A gently pulsing gold ring, distinct from the
+    // white/green/red combine-drag rings just above.
+    if (fish.id === state.ui.fishInfoModalFishId) {
+      const ringPulse = 0.8 + 0.2 * Math.sin(performance.now() / 400);
+      ctx.strokeStyle = `rgba(255, 200, 60, ${ringPulse})`;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, size * 0.85, 0, Math.PI * 2);
       ctx.stroke();
     }
 

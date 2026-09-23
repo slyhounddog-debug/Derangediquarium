@@ -363,6 +363,67 @@ export function computeTheoreticalWastePerMinute(state) {
   return total;
 }
 
+// Per-fish version of the 4 aggregate computeTheoretical*PerMinute functions
+// above, for the fish info modal (UI.js) — per direct request ("gold/min (if
+// applicable)... waste/min... science/min (if applicable)... food/min").
+// Each field is null when it doesn't apply to this fish at all (a
+// Scavenger's foodPerMin/wastePerMin, a non-FEEDER's goldPerMin, a non-
+// RESEARCHER's sciencePerMin) — the caller decides whether to show the row.
+// goldPerMin is at the CURRENT (possibly dirty-tank-penalized) rate;
+// goldPenaltyPerMin is how much MORE it would be at 100% clean, i.e. exactly
+// the red "(-N)" amount the modal shows — both 0/null together for a fish
+// currently blocked by alien proximity, same as the aggregate stat treats it.
+export function computeFishInfoModalStats(state, fish) {
+  const def = SPECIES[fish.speciesId];
+  const stageDef = def.growthStages[fish.stage];
+  const isFeeder = def.behavior.includes('FEEDER');
+  const isResearcher = def.behavior.includes('RESEARCHER');
+  const isScavenger = def.behavior.includes('SCAVENGER');
+  const blocked = fish.alienNearby || fish.dying;
+
+  let goldPerMin = null, goldPenaltyPerMin = null;
+  if (isFeeder) {
+    if (blocked) {
+      goldPerMin = 0;
+      goldPenaltyPerMin = 0;
+    } else {
+      const mutagenMultiplier = fish.mutagenBuffActive ? MUTAGEN_PASTE_COIN_MULTIPLIER : 1;
+      const baseDropValue = (fish.dropValueOverride != null
+        ? fish.dropValueOverride
+        : stageDef.dropValue * Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, (fish.starTier || 1) - 1)) * mutagenMultiplier;
+      const cleanRate = (baseDropValue / stageDef.dropInterval) * 60000;
+      goldPerMin = cleanRate * cleanlinessMoneyMultiplier(state);
+      goldPenaltyPerMin = cleanRate - goldPerMin;
+    }
+  }
+
+  let sciencePerMin = null;
+  if (isResearcher) sciencePerMin = blocked ? 0 : (stageDef.dropValue / stageDef.dropInterval) * 60000;
+
+  // A non-Scavenger's Waste/min is how much it POOPS out (a cost to the
+  // tank); a Scavenger instead EATS Waste, so the same "Waste/min" number
+  // would be misleading — wasteEatenPerMin (its eat-cooldown rate, the same
+  // "up to N times/min" cap every Scavenger shares) is reported separately
+  // instead, so a Scavenger's modal isn't just blank on this row.
+  let wastePerMin = null, wasteEatenPerMin = null;
+  if (isScavenger) {
+    wasteEatenPerMin = 60000 / stageDef.dropInterval;
+  } else {
+    const interval = WASTE_POOP_INTERVAL_MS * (def.wastePoopIntervalMultiplier || 1);
+    wastePerMin = 60000 / interval;
+  }
+
+  let foodPerMin = null;
+  if (!isScavenger) {
+    const relief = FOOD_HUNGER_RELIEF_BY_LEVEL[state.level.upgrades.foodQuality];
+    const alienHungerMultiplier = (fish.speciesId === 'suckerfish' && fish.alienNearby) ? 0.5 : 1;
+    const hungerRate = def.hungerRate * Math.pow(FISH_STAR_TIER_HUNGER_MULTIPLIER, (fish.starTier || 1) - 1) * alienHungerMultiplier;
+    foodPerMin = (hungerRate * 60) / relief;
+  }
+
+  return { goldPerMin, goldPenaltyPerMin, sciencePerMin, wastePerMin, wasteEatenPerMin, foodPerMin };
+}
+
 // A Manufacturer recipe's theoretical items/min, assuming it's fed
 // continuously — its total cycle time is the sum of its 2 ingredients' own
 // MANUFACTURER_ITEM_PROCESS_MS durations (see that constant's own comment),
@@ -1044,8 +1105,20 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
     alienNearby: false, // recomputed every tick in updateFish — true while a living alien is within ALIEN_INCOME_BLOCK_RADIUS, driving both the coin-production block and the continuous gray tint (main.js's render)
     capBlockedTintRemainingMs: 0, // counts down from FISH_BLOCKED_TINT_MS whenever a science drop is blocked by the Bubble Cap — the OTHER (timed) source of the gray tint, see triggerProductionBlocked
     mutagenBuffActive: false, // Adult-only Mutagen Paste buff — see updateFish's eat branch; cleared once hunger crosses back into HUNGER_CRITICAL_THRESHOLD
-    magnetOn: false, // Magnet Fish (buffer_fish) only — toggled by clicking the fish (main.js's click handler); pulls nearby items whose type is in magnetFilterItems toward it while true, see computeBufferFishMagnetForce
+    magnetOn: false, // Magnet Fish (buffer_fish) only — toggled by DOUBLE-clicking the fish (main.js's click handler); pulls nearby items whose type is in magnetFilterItems toward it while true, see computeBufferFishMagnetForce
     magnetFilterItems: ['waste'], // Magnet Fish only — which item types its magnet attracts, toggled via main.js's right-click filter modal (openMagnetFishFilterMenu), same checkbox UI a Platform's own filterItems uses. Defaults to Waste only, matching the original fixed behavior.
+    // Shared by every toggleable hybrid (Magnet Fish/Feeder Fish/Xeno
+    // Octopus) — per direct request ("shimmer and bounce animation anytime
+    // a hybrid fish with an ability is toggled on... during the time the
+    // fish ability is on, have the fish shimmer slightly"). Set/cleared by
+    // main.js's toggleFishAbility; abilityToggleOnSince != null drives a
+    // persistent recurring shimmer in render() (main.js lazily creates
+    // abilityShimmerTimer, a Shimmer.js createShimmerTimer(), the first time
+    // it's needed), toggleBounceStartedAt drives a one-shot squash/bounce
+    // burst that plays once and doesn't need clearing (render() just checks
+    // elapsed time since it fired).
+    abilityToggleOnSince: null,
+    toggleBounceStartedAt: null,
     linkedBuildingKey: null, // Catalyst Fish only — the "row,col" buildingData key it's currently linked to, or null; set by main.js's catalyst link-click flow, read by Grid.js's getCatalystSpeedMultiplier
     autoFoodOn: false, // Feeder Fish only — toggled by clicking the fish; while true, dispenses a real Food item every ELECTRIC_SUCKER_FOOD_INTERVAL_MS with no feeding required (and generates no power meanwhile — see updateFish's isPureGenerator branch) — see updateFish's own dedicated timer block
     autoFoodTimerMs: 0, // Feeder Fish only — counts up toward ELECTRIC_SUCKER_FOOD_INTERVAL_MS, only while autoFoodOn is true
@@ -1628,6 +1701,42 @@ export function isSpliceTargetCandidate(state, fish) {
     if (hybridId && state.meta.speciesUnlocked.includes(hybridId)) return true;
   }
   return false;
+}
+
+// Fish merge/splice hover legend / info-modal helper — per direct request.
+// Lives here (not main.js, where it originated) so BOTH the hover legend
+// (main.js) and the fish info modal (UI.js) can share it without either
+// module reaching into the other. Returns null if `fish` doesn't qualify
+// for either mechanic at all, otherwise one description line per currently-
+// living, currently-eligible partner already in the tank (deduped by
+// resulting text — several same-species Guppies all read as one "Merge with
+// Guppy -> ..." line), or a single "No available fish to merge." line if
+// `fish` qualifies in shape but nothing pairs with it right now. Checked
+// both drag orderings for splicing, same as the real mouseup resolution in
+// main.js, so it doesn't matter whether `fish` is the utility half or the
+// target half of a pair.
+export function describeFishMergeOptions(state, fish) {
+  const combineSource = isCombinableFish(state, fish);
+  const spliceSource = isSpliceSource(state, fish);
+  const spliceTarget = isSpliceTargetCandidate(state, fish);
+  if (!combineSource && !spliceSource && !spliceTarget) return null;
+  const lines = [];
+  const seen = new Set();
+  for (const other of state.level.entities) {
+    if (other.type !== 'fish' || other.id === fish.id || other.dying) continue;
+    let desc = null;
+    if (combineSource && canCombineFish(state, fish, other)) {
+      desc = `Merge with ${SPECIES[other.speciesId].name} → Tier ${(fish.starTier || 1) + 1} ${SPECIES[fish.speciesId].name}`;
+    } else if (spliceSource && canSpliceFish(state, fish, other)) {
+      const hybridId = getHybridSpeciesId(other.speciesId, fish.speciesId);
+      desc = `Splice with ${SPECIES[other.speciesId].name} → ${SPECIES[hybridId].name}`;
+    } else if (spliceTarget && canSpliceFish(state, other, fish)) {
+      const hybridId = getHybridSpeciesId(fish.speciesId, other.speciesId);
+      desc = `Splice with ${SPECIES[other.speciesId].name} → ${SPECIES[hybridId].name}`;
+    }
+    if (desc && !seen.has(desc)) { seen.add(desc); lines.push(desc); }
+  }
+  return lines.length > 0 ? lines : ['No available fish to merge.'];
 }
 
 const FIRST_SPLICE_MESSAGE =

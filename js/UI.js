@@ -88,6 +88,7 @@ import {
   getFishPurchaseCost, effectiveScienceCapacity, countTankItemsByType, hasAnyMergeOpportunity, resolveMergeTutorialPair,
   computeTheoreticalGoldPerMinute, computeTheoreticalCoinCountPerMinute, computeTheoreticalSciencePerMinute, computeTheoreticalFoodNeededPerMinute,
   computeTheoreticalWastePerMinute, computeTheoreticalManufacturerOutputPerMinute, computeTheoreticalBiomassPerMinute,
+  computeFishInfoModalStats, describeFishMergeOptions,
 } from './Entities.js';
 import {
   getTile, worldToTile, getBuildingCost, FAN_STATS,
@@ -132,6 +133,10 @@ let buildingInfoMenuOpen = false;
 let buildingInfoMenuClosing = false;
 let buildingInfoMenuCloseTimer = null;
 let buildingInfoTileKey = null; // "row,col" key of whichever placed building this generic info pop-up is currently open for
+let fishInfoMenuOpen = false;
+let fishInfoMenuClosing = false;
+let fishInfoMenuCloseTimer = null;
+const FISH_INFO_MENU_TRANSITION_MS = 220; // must match #fish-info-menu's CSS transition duration
 let platformFilterMenuOpen = false;
 let platformFilterMenuClosing = false;
 let platformFilterMenuCloseTimer = null;
@@ -380,6 +385,15 @@ export function initUI(state) {
     buildingInfoDesc: document.getElementById('building-info-desc'),
     buildingInfoStats: document.getElementById('building-info-stats'),
     buildingInfoLiveStats: document.getElementById('building-info-live-stats'),
+    fishInfoOverlay: document.getElementById('fish-info-overlay'),
+    fishInfoAnchor: document.getElementById('fish-info-anchor'),
+    fishInfoMenu: document.getElementById('fish-info-menu'),
+    fishInfoIconCanvas: document.getElementById('fish-info-icon-canvas'),
+    fishInfoName: document.getElementById('fish-info-name'),
+    fishInfoDesc: document.getElementById('fish-info-desc'),
+    fishInfoStats: document.getElementById('fish-info-stats'),
+    fishInfoMergeTitle: document.getElementById('fish-info-merge-title'),
+    fishInfoMergeLines: document.getElementById('fish-info-merge-lines'),
     platformFilterOverlay: document.getElementById('platform-filter-overlay'),
     platformFilterAnchor: document.getElementById('platform-filter-anchor'),
     platformFilterMenu: document.getElementById('platform-filter-menu'),
@@ -458,6 +472,9 @@ export function initUI(state) {
   els.buildingInfoOverlay.addEventListener('click', (e) => {
     if (e.target === els.buildingInfoOverlay) closeBuildingInfoMenu(); // same "click anywhere else closes it" precedent as the recipe/Mound pop-ups
   });
+  els.fishInfoOverlay.addEventListener('click', (e) => {
+    if (e.target === els.fishInfoOverlay) closeFishInfoMenu(state); // same "click anywhere else closes it" precedent as every other fly-out pop-up here
+  });
   els.platformFilterOverlay.addEventListener('click', (e) => {
     if (e.target === els.platformFilterOverlay) closePlatformFilterMenu(); // same "click anywhere else closes it" precedent as every other fly-out pop-up here
   });
@@ -474,12 +491,13 @@ export function initUI(state) {
   // don't cover this at all, since `contextmenu` is a separate event.
   // preventDefault stops the browser's own right-click context menu from
   // popping up in its place, same as Engine.js already does for the canvas.
-  for (const overlay of [els.recipeOverlay, els.buildingInfoOverlay, els.platformFilterOverlay, els.storageChestOverlay]) {
+  for (const overlay of [els.recipeOverlay, els.buildingInfoOverlay, els.fishInfoOverlay, els.platformFilterOverlay, els.storageChestOverlay]) {
     overlay.addEventListener('contextmenu', (e) => {
       if (e.target !== overlay) return; // right-clicked the card itself, not empty backdrop space — leave it open
       e.preventDefault();
       closeRecipeMenu();
       closeBuildingInfoMenu();
+      closeFishInfoMenu(state);
       closePlatformFilterMenu();
       closeStorageChestModal();
     });
@@ -985,6 +1003,102 @@ function refreshBuildingInfoLiveStats(state) {
     ? '⏱️ Uptime: <b>warming up...</b>'
     : `⏱️ Uptime (3 min): <b>${Math.round(uptimeFraction * 100)}%</b>`;
   els.buildingInfoLiveStats.innerHTML = `<div class="building-stat">${powerLine}</div><div class="building-stat">${uptimeLine}</div>`;
+}
+
+// ---- Fish info modal ----
+// Per direct request ("click on every fish when no cursor is selected to
+// bring up the fish modal like the building modal... gold/min (if
+// applicable)... waste/min... science/min (if applicable)... food/min...
+// list any available hybrids available here like in the hover for the
+// merge tool"). Same fly-out-of-its-anchor mechanic as the building info
+// pop-up above; the locked/highlighted fish itself is main.js's job (it
+// owns state.level.entities), driven by state.ui.fishInfoModalFishId which
+// this module writes.
+export function openFishInfoMenu(state, fishId) {
+  const fish = state.level.entities.find((e) => e.id === fishId && e.type === 'fish');
+  if (!fish) return;
+  fishInfoMenuOpen = true;
+  fishInfoMenuClosing = false;
+  state.ui.fishInfoModalFishId = fishId;
+  state.ui.fishInfoModalFrozenX = fish.x;
+  state.ui.fishInfoModalFrozenY = fish.y;
+  if (fishInfoMenuCloseTimer !== null) { clearTimeout(fishInfoMenuCloseTimer); fishInfoMenuCloseTimer = null; }
+  closeSidePanels(state);
+  els.fishInfoOverlay.classList.remove('hidden');
+  refreshFishInfoMenu(state);
+  updateFishInfoMenuPosition(state);
+
+  els.fishInfoMenu.classList.add('fish-info-menu-closed');
+  void els.fishInfoMenu.offsetWidth;
+  els.fishInfoMenu.classList.remove('fish-info-menu-closed');
+  playPanelOpen();
+}
+
+export function closeFishInfoMenu(state) {
+  if (!fishInfoMenuOpen) return;
+  fishInfoMenuOpen = false;
+  fishInfoMenuClosing = true;
+  state.ui.fishInfoModalFishId = null; // unfreezes/un-highlights the fish — see main.js's updateFishInfoModalFreeze/render
+  els.fishInfoMenu.classList.add('fish-info-menu-closed');
+  fishInfoMenuCloseTimer = setTimeout(() => {
+    els.fishInfoOverlay.classList.add('hidden');
+    fishInfoMenuClosing = false;
+    fishInfoMenuCloseTimer = null;
+  }, FISH_INFO_MENU_TRANSITION_MS);
+  playPanelClose();
+}
+
+function updateFishInfoMenuPosition(state) {
+  const screen = worldToScreen(state.ui.fishInfoModalFrozenX, state.ui.fishInfoModalFrozenY, state.camera);
+  els.fishInfoAnchor.style.left = `${screen.x}px`;
+  els.fishInfoAnchor.style.top = `${screen.y - MOUND_MENU_GAP_PX}px`;
+}
+
+function fishStatRowHtml(label, perMin, penaltyPerMin) {
+  const penalty = penaltyPerMin > 0.05 ? ` <span class="fish-info-penalty">(-${penaltyPerMin.toFixed(1)})</span>` : '';
+  return `<div>${label}: <b>${perMin.toFixed(1)}</b>${penalty}</div>`;
+}
+
+// Rebuilds the whole pop-up every frame it's open (unlike the building
+// info pop-up, which only rebuilds on open) — every one of these numbers
+// (gold/min, the dirtiness penalty, the merge/splice partner list) can
+// change from one frame to the next while it's sitting there open (the
+// player feeding/cleaning the tank, another fish growing up nearby), so
+// there's no "static content" half to split off the way
+// refreshBuildingInfoLiveStats does.
+export function refreshFishInfoMenu(state) {
+  if (!fishInfoMenuOpen) return;
+  const fishId = state.ui.fishInfoModalFishId;
+  const fish = state.level.entities.find((e) => e.id === fishId && e.type === 'fish');
+  if (!fish) { closeFishInfoMenu(state); return; }
+  const def = SPECIES[fish.speciesId];
+  els.fishInfoName.textContent = def.name;
+  els.fishInfoDesc.textContent = def.description;
+  // A real drawFish preview instead of an emoji — fish SPECIES rows have no
+  // `icon` field at all (they're canvas-drawn, not emoji), unlike a
+  // building. Same drawFish call the shop's own preview canvas uses, just a
+  // static single frame (no swim-facing animation loop) since this modal
+  // rebuilds every frame anyway.
+  const iconCtx = els.fishInfoIconCanvas.getContext('2d');
+  const iconSize = els.fishInfoIconCanvas.width;
+  iconCtx.clearRect(0, 0, iconSize, iconSize);
+  drawFish(iconCtx, iconSize / 2, iconSize / 2, fish.speciesId, def.growthStages.length - 1, 1, 0, { x: 1, y: 0 }, fish.starTier || 1);
+
+  const stats = computeFishInfoModalStats(state, fish);
+  const rows = [];
+  if (stats.goldPerMin != null) rows.push(fishStatRowHtml('Gold/min', stats.goldPerMin, stats.goldPenaltyPerMin));
+  if (stats.wastePerMin != null) rows.push(`<div>Waste/min: <b>${stats.wastePerMin.toFixed(1)}</b></div>`);
+  if (stats.wasteEatenPerMin != null) rows.push(`<div>Waste eaten/min: <b>${stats.wasteEatenPerMin.toFixed(1)}</b></div>`);
+  if (stats.sciencePerMin != null) rows.push(`<div>Science/min: <b>${stats.sciencePerMin.toFixed(1)}</b></div>`);
+  if (stats.foodPerMin != null) rows.push(`<div>Food/min: <b>${stats.foodPerMin.toFixed(1)}</b></div>`);
+  els.fishInfoStats.innerHTML = rows.join('');
+
+  const mergeLines = describeFishMergeOptions(state, fish);
+  els.fishInfoMergeTitle.classList.toggle('hidden', mergeLines == null);
+  els.fishInfoMergeLines.classList.toggle('hidden', mergeLines == null);
+  if (mergeLines != null) els.fishInfoMergeLines.innerHTML = mergeLines.map((line) => `<div>${line}</div>`).join('');
+
+  updateFishInfoMenuPosition(state);
 }
 
 // ---- Platform item-filter pop-up ----
@@ -3277,8 +3391,14 @@ export function toggleStatsPanel(state) {
 // but gated behind an upgrade/recipe the player hasn't bought yet, so the
 // panel still tells them it EXISTS without showing a live number for
 // something they can't act on yet.
-function statsPanelRowHtml(label, value) {
-  return `<div class="stats-panel-row"><span class="stats-panel-row-label">${label}</span><span class="stats-panel-row-value">${value}</span></div>`;
+// iconColor, when given, prepends a small colored dot matching the real
+// item's own color (FOOD_COLOR, the silver Coin tier, etc.) — per direct
+// request ("Add in an icon of the actual object in the info tab for each
+// stat"). Only Food/min and Coin/min actually pass one; every other row is
+// unchanged (no icon requested for Gold/min or anything else here).
+function statsPanelRowHtml(label, value, iconColor = null) {
+  const icon = iconColor ? `<span class="stats-panel-row-icon" style="background:${iconColor}"></span>` : '';
+  return `<div class="stats-panel-row"><span class="stats-panel-row-label">${icon}${label}</span><span class="stats-panel-row-value">${value}</span></div>`;
 }
 function statsPanelLockedHtml(text) {
   return `<div class="stats-panel-locked">${text}</div>`;
@@ -3294,9 +3414,13 @@ function refreshStatsPanel(state) {
   // actually handle it all. Both unconditional now — no Tank Upgrade left to
   // gate either (the old "Gold/min Stat" node is gone entirely, per direct
   // request: "give the player access to that info from the very beginning").
+  // Coin/min and Food/min needed now show a tenths-place decimal (were
+  // whole-number Math.round) — per direct request. Gold/min stays a whole
+  // dollar figure (a fractional cent reads oddly for a currency amount) and
+  // gets no icon, per the same request ("No icon for the gold/min needed").
   rows.push(statsPanelRowHtml('Gold/min', `$${Math.round(computeTheoreticalGoldPerMinute(state))}`));
-  rows.push(statsPanelRowHtml('Coin/min', Math.round(computeTheoreticalCoinCountPerMinute(state))));
-  rows.push(statsPanelRowHtml('Food/min needed', Math.round(computeTheoreticalFoodNeededPerMinute(state))));
+  rows.push(statsPanelRowHtml('Coin/min', computeTheoreticalCoinCountPerMinute(state).toFixed(1), COIN_TIERS[1].color));
+  rows.push(statsPanelRowHtml('Food/min needed', computeTheoreticalFoodNeededPerMinute(state).toFixed(1), FOOD_COLOR));
   rows.push(statsPanelRowHtml('Waste/min', computeTheoreticalWastePerMinute(state).toFixed(1)));
 
   const researcherUnlocked = state.meta.speciesUnlocked.some((id) => SPECIES[id].behavior.includes('RESEARCHER'));
@@ -4165,6 +4289,13 @@ export function updateHUD(state) {
   if (buildingInfoMenuOpen && !state.level.buildingData[buildingInfoTileKey]) closeBuildingInfoMenu(); // the tile it's showing got demolished (or moved) out from under it
   if (buildingInfoMenuOpen) refreshBuildingInfoLiveStats(state);
   if (buildingInfoMenuOpen || buildingInfoMenuClosing) updateBuildingInfoMenuPosition(state);
+  // Fish info modal — refreshFishInfoMenu both rebuilds the content AND
+  // repositions every frame it's open (see its own comment for why, unlike
+  // the building pop-up above); still needs a separate position-only call
+  // while closing so it doesn't jump right as the shrink-back animation
+  // starts, same as every other fly-out pop-up here.
+  if (fishInfoMenuOpen) refreshFishInfoMenu(state);
+  else if (fishInfoMenuClosing) updateFishInfoMenuPosition(state);
   // Same lighter per-frame check as the recipe/building-info pop-ups above —
   // the item grid's own DOM is only ever rebuilt on open or after a real
   // mutation (see refreshPlatformFilterMenu's own comment), never every

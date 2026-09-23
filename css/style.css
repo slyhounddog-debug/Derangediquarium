@@ -424,6 +424,7 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
 .stats-panel-row:last-child { border-bottom: none; }
 .stats-panel-row-label { opacity: 0.8; }
 .stats-panel-row-value { color: #d6336c; }
+.stats-panel-row-icon { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: middle; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2); }
 .stats-panel-locked {
   font-size: 12px;
   font-weight: 600;
@@ -727,6 +728,7 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
    standalone top-right cluster — per direct request, Shop moved to the left
    of the bottom toolbar, Tank Upgrades to the right of it. */
 #shop-collapse-btn, #tank-collapse-btn {
+  position: relative; /* anchors .panel-toggle-hotkey below */
   flex: none;
   width: 54px; height: 54px;
   display: flex; align-items: center; justify-content: center;
@@ -737,6 +739,29 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
   line-height: 1;
   box-shadow: 0 3px 8px rgba(255, 150, 200, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.8);
   transition: transform 0.12s ease, background 0.12s ease;
+}
+/* A persistent "E"/"P" hotkey badge on the Shop/Tank Upgrades toggle
+   buttons themselves — per direct request ("so the player can glance at
+   the buttons and be able to tell how to use them"), rather than relying on
+   the existing hover-only title tooltip. A small solid badge at the
+   button's top edge, sized/positioned independent of the emoji it overlaps
+   (an absolutely-positioned sibling, not a flex child, so it never pushes
+   the emoji off-center). */
+.panel-toggle-hotkey {
+  position: absolute;
+  top: -4px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #6b4c6b;
+  color: #ffffff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  padding: 2px 5px;
+  border-radius: 999px;
+  border: 1.5px solid #ffffff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+  pointer-events: none;
 }
 #shop-collapse-btn:hover, #tank-collapse-btn:hover { background: linear-gradient(160deg, #ffdcee 0%, #ffb0d8 100%); transform: scale(1.08); }
 /* Whichever panel is currently open needs to be obvious at a glance — both
@@ -1887,6 +1912,37 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
    (see UI.js's refreshBuildingInfoLiveStats) since these two numbers keep
    changing while it's sitting there open, unlike everything above it. */
 #building-info-live-stats { display: flex; flex-wrap: wrap; gap: 4px 8px; margin-top: 6px; padding-top: 6px; border-top: 1px dashed rgba(107, 76, 107, 0.25); }
+
+/* Fish info modal — same card look/fly-out mechanic as #building-info-menu
+   above, just its own ids so the two never fight over shared state. */
+#fish-info-overlay { position: fixed; inset: 0; z-index: 190; }
+#fish-info-overlay.hidden { display: none; }
+#fish-info-anchor { position: fixed; transform: translate(-50%, -100%); }
+#fish-info-menu {
+  width: 270px;
+  background: #fff8f0;
+  color: #6b4c6b;
+  border-radius: 21px;
+  padding: 16px 18px;
+  box-shadow: 0 14px 36px rgba(107, 76, 107, 0.4);
+  text-align: left;
+  transform-origin: 50% 100%;
+  transform: scale(1);
+  opacity: 1;
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.18s ease;
+}
+#fish-info-menu.fish-info-menu-closed { transform: scale(0.05); opacity: 0; }
+#fish-info-header-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+#fish-info-icon-canvas { width: 60px; height: 60px; flex: none; }
+#fish-info-name { font-size: 15px; font-weight: 800; color: #c25f8f; }
+#fish-info-desc { font-size: 12px; line-height: 1.4; opacity: 0.85; margin-bottom: 8px; }
+#fish-info-stats { display: flex; flex-direction: column; gap: 3px; font-size: 12px; font-weight: 700; }
+#fish-info-stats .fish-info-penalty { color: #e0392b; font-weight: 800; }
+#fish-info-merge-title {
+  font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em;
+  opacity: 0.65; margin-top: 10px; padding-top: 8px; border-top: 1px dashed rgba(107, 76, 107, 0.25);
+}
+#fish-info-merge-lines { font-size: 12px; line-height: 1.5; margin-top: 4px; }
 
 /* Platform item-filter pop-up — "like the recipe modals," per direct
    request: same fly-out-of-its-anchor mechanic as #recipe-menu/

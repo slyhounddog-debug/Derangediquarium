@@ -1443,7 +1443,7 @@ export const SPECIES = {
   // main.js's right-click filter modal (openMagnetFishFilterMenu).
   buffer_fish: {
     id: 'buffer_fish', name: 'Magnet Fish', tier: 4, unlockPhase: 4, cost: 70,
-    description: 'Suckerfish × Guppy — click it to toggle its magnet on/off, then right-click it to choose what it attracts (Waste by default). Still eats Waste like a Suckerfish, but converts what it eats into Food instead of just relieving its own hunger.',
+    description: 'Suckerfish × Guppy — double-click it to toggle its magnet on/off (single-click opens its info instead), then right-click it to choose what it attracts (Waste by default). Still eats Waste like a Suckerfish, but converts what it eats into Food instead of just relieving its own hunger.',
     behavior: ['SCAVENGER'], dropType: 'waste_to_food', parents: ['suckerfish', 'guppy'],
     swimSpeed: 33, lifespan: 300000, hungerRate: 0.914,
     // dropInterval is this pure Scavenger's eat cooldown, same "up to 3
@@ -1469,7 +1469,7 @@ export const SPECIES = {
   // isPureGenerator branch for the "no power while making food" half.
   zap_sucker: {
     id: 'zap_sucker', name: 'Feeder Fish', tier: 4, unlockPhase: 4, cost: 90,
-    description: 'Electric Eel × Suckerfish — click it to toggle its automatic Food dispenser on/off. While OFF, it generates power like an Electric Eel; while ON, it spits out one Food item every 6 seconds (no feeding required to trigger it) and generates no power at all. Still eats Waste either way.',
+    description: 'Electric Eel × Suckerfish — double-click it to toggle its automatic Food dispenser on/off (single-click opens its info instead). While OFF, it generates power like an Electric Eel; while ON, it spits out one Food item every 6 seconds (no feeding required to trigger it) and generates no power at all. Still eats Waste either way.',
     behavior: ['SCAVENGER', 'GENERATOR'], dropType: 'auto_food', parents: ['electric_eel', 'suckerfish'],
     swimSpeed: 30, lifespan: 300000, hungerRate: 0.9,
     // pixelsPerMW (Generator half) and dropInterval (Scavenger eat-cooldown
@@ -1493,7 +1493,7 @@ export const SPECIES = {
   // hatchedFromEgg flag) — an ordinary wave-spawned Tier 1 does NOT qualify.
   xeno_octopus: {
     id: 'xeno_octopus', name: 'Xeno Octopus', tier: 4, unlockPhase: 4, cost: 100, parents: ['octopus', 'alien_t1'],
-    description: 'A hybrid of an Alien and a Science Octopus — not purchasable directly. Drag a grown Octopus onto a Tier 1 alien that hatched from an Alien Egg (an ordinary wave-spawned alien won\'t do) to splice them together. Click it to toggle Bio-Sludge mode — while on, it brews and spits out Bio-Sludge every 8 seconds instead of Science Bubbles. Still needs to be fed like any other fish.',
+    description: 'A hybrid of an Alien and a Science Octopus — not purchasable directly. Drag a grown Octopus onto a Tier 1 alien that hatched from an Alien Egg (an ordinary wave-spawned alien won\'t do) to splice them together. Double-click it to toggle Bio-Sludge mode (single-click opens its info instead) — while on, it brews and spits out Bio-Sludge every 8 seconds instead of Science Bubbles. Still needs to be fed like any other fish.',
     behavior: ['RESEARCHER'], dropType: 'science_blue',
     swimSpeed: 25, lifespan: 300000, hungerRate: 0.468,
     growthStages: [
@@ -2569,7 +2569,7 @@ export const EEL_BLIMP_MUTAGEN_PRODUCTION_MULTIPLIER = 2;
 // continuously pulls any Waste within this radius toward the fish, same
 // linear-falloff-to-0-at-range shape a Fan's own cone force already uses —
 // see Entities.js's computeBufferFishMagnetForce.
-export const BUFFER_FISH_MAGNET_RADIUS = 260; // px
+export const BUFFER_FISH_MAGNET_RADIUS = 346; // px — 260 * 1.33, per direct request ("Increase the range of the magnet fish by 33%")
 export const BUFFER_FISH_MAGNET_FORCE = 220; // force magnitude at the fish's own position, decaying linearly to 0 at MAGNET_RADIUS
 
 // Catalyst Fish: click it, then click a building to link them (main.js's

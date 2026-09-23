@@ -278,6 +278,29 @@
   </div>
 </div>
 
+<!-- Fish info modal — per direct request ("click on every fish when no
+     cursor is selected to bring up the fish modal like the building
+     modal"). Same fly-out-of-its-anchor mechanic as #building-info-menu,
+     plus a live-refreshed stats block (gold/min with the dirtiness penalty
+     shown in parentheses, waste/min, science/min, food/min) and a merge/
+     splice section reusing the same hover-legend lines main.js's
+     #fish-merge-legend already computes (UI.js's own refreshFishInfoMenu
+     calls Entities.js's describeFishMergeOptions directly instead). -->
+<div id="fish-info-overlay" class="hidden">
+  <div id="fish-info-anchor">
+    <div id="fish-info-menu">
+      <div id="fish-info-header-row">
+        <canvas id="fish-info-icon-canvas" width="60" height="60"></canvas>
+        <div id="fish-info-name"></div>
+      </div>
+      <div id="fish-info-desc"></div>
+      <div id="fish-info-stats"></div>
+      <div id="fish-info-merge-title">Available Merges/Splices</div>
+      <div id="fish-info-merge-lines"></div>
+    </div>
+  </div>
+</div>
+
 <div id="platform-filter-overlay" class="hidden">
   <div id="platform-filter-anchor">
     <div id="platform-filter-menu">
@@ -372,7 +395,7 @@
 
 <div id="bottom-bar-row">
   <div id="shop-anchor">
-    <button id="shop-collapse-btn" title="Shop (E)">🛍️</button>
+    <button id="shop-collapse-btn" title="Shop (E)">🛍️<span class="panel-toggle-hotkey">E</span></button>
     <div id="shop-panel">
       <div id="shop-panel-scroll">
         <div id="shop-sticky-header">
@@ -425,7 +448,7 @@
   </div>
 
   <div id="tank-anchor">
-    <button id="tank-collapse-btn" title="Tank Upgrades (P)">🏆</button>
+    <button id="tank-collapse-btn" title="Tank Upgrades (P)">🏆<span class="panel-toggle-hotkey">P</span></button>
     <div id="tank-panel" class="collapsed">
       <div id="tank-panel-scroll">
         <!-- Per direct request, one panel (same size/position as the old
