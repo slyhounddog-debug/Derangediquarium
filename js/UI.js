@@ -1038,6 +1038,19 @@ export function closeFishInfoMenu(state) {
   if (!fishInfoMenuOpen) return;
   fishInfoMenuOpen = false;
   fishInfoMenuClosing = true;
+  // Per direct follow-up request ("fish should be able to move as soon as
+  // the modal disappears") — real bug fix: updateFish's own wander() still
+  // runs every tick while the fish is frozen (main.js's
+  // updateFishInfoModalFreeze only overrides its position/velocity AFTER
+  // updateEntities, it doesn't skip the fish's own AI), so wanderTimer keeps
+  // counting down and can fire — assigning a fresh heading that then gets
+  // immediately stomped back to 0 by the freeze override — while the modal
+  // is still open. Without this reset, unfreezing left the fish sitting at
+  // vx=vy=0 until THAT stolen heading's own full next interval (up to
+  // WANDER_INTERVAL_MAX_S, ~2s) elapsed on its own. Zeroing it here forces
+  // wander() to immediately pick a fresh heading on the very next real tick.
+  const fish = state.level.entities.find((e) => e.id === state.ui.fishInfoModalFishId && e.type === 'fish');
+  if (fish) fish.wanderTimer = 0;
   state.ui.fishInfoModalFishId = null; // unfreezes/un-highlights the fish — see main.js's updateFishInfoModalFreeze/render
   els.fishInfoMenu.classList.add('fish-info-menu-closed');
   fishInfoMenuCloseTimer = setTimeout(() => {
@@ -2757,20 +2770,45 @@ function drawBuildingIconCanvas(canvas, buildingId) {
   renderTileShape(ctx, buildingId, BUILDING_TYPES[buildingId].color, 0, 0, canvas.width);
 }
 
+// drawFish draws at a fixed real-world scale (FISH_BASE_SIZE and up — an
+// Electric-Eel-shaped body alone spans 1.5x that in length, before tails/
+// tentacles/fins), regardless of how small the destination canvas is — a
+// small icon canvas (the Lab tree's node/purchase-modal icons, the merge
+// hover legend's icons) cropped most of the fish off per direct report ("too
+// zoomed in so they can't all be seen"). This shrinks the draw around the
+// canvas's own center so the WHOLE fish fits, without changing the canvas
+// (icon) size itself — per direct request ("Dont make the icons bigger,
+// just make it so more of the fish is shown in the same area").
+// FISH_ICON_FULL_EXTENT_PX is a generous worst-case full width/height (a
+// standard body's tail reaches ~1.9x FISH_BASE_SIZE behind center; this
+// leaves real margin beyond that) that every body shape in FishRenderer.js
+// comfortably fits inside — the shrink factor scales proportionally to
+// whatever canvasSize the caller actually asks for.
+const FISH_ICON_FULL_EXTENT_PX = 64;
+function drawFishIconScaled(ctx, canvasSize, speciesId, stage, starTier = 1) {
+  const c = canvasSize / 2;
+  const shrink = canvasSize / FISH_ICON_FULL_EXTENT_PX;
+  ctx.save();
+  ctx.translate(c, c);
+  ctx.scale(shrink, shrink);
+  ctx.translate(-c, -c);
+  drawFish(ctx, c, c, speciesId, stage, 1, 0, { x: 1, y: 0 }, starTier);
+  ctx.restore();
+}
+
 // A small, static canvas rendering of a fish species' real look (an Adult,
 // facing right, no idle animation — matching drawBuildingIconCanvas's own
 // "one static frame" choice) — per direct request ("replace the rest of
 // the stuff in the science lab with the actual Fish/Objects that it
 // unlocks"). Reuses FishRenderer.js's real drawFish, the same function the
-// Customization preview/shop preview already animate.
+// Customization preview/shop preview already animate — shrunk to fit via
+// drawFishIconScaled above.
 function drawFishIconCanvas(canvas, speciesId) {
   const def = SPECIES[speciesId];
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, canvas.width, canvas.height);
   if (!def) return;
-  const c = canvas.width / 2;
-  const adultStage = def.growthStages.length - 1;
-  drawFish(ctx, c, c, speciesId, adultStage, 1, 0, { x: 1, y: 0 });
+  drawFishIconScaled(ctx, canvas.width, speciesId, def.growthStages.length - 1);
 }
 
 // Flat, representative colors for every item type that isn't one of the
@@ -4522,7 +4560,10 @@ function buildFishMergeIconCanvas(speciesId) {
   canvas.height = FISH_MERGE_ICON_SIZE;
   canvas.className = 'fish-merge-icon';
   const def = SPECIES[speciesId];
-  drawFish(canvas.getContext('2d'), FISH_MERGE_ICON_SIZE / 2, FISH_MERGE_ICON_SIZE / 2, speciesId, def.growthStages.length - 1, 1, 0, { x: 1, y: 0 });
+  // Shrunk to fit via drawFishIconScaled (see its own comment) — per direct
+  // follow-up request ("zoom out on the hover merge fish icons so the whole
+  // fish can be seen... Dont make the icons bigger").
+  drawFishIconScaled(canvas.getContext('2d'), FISH_MERGE_ICON_SIZE, speciesId, def.growthStages.length - 1);
   return canvas;
 }
 function refreshFishMergeLegendIcons(entries) {
