@@ -1679,7 +1679,12 @@ export function copyBuildingRecipe(state, sourceKey, targetKey) {
 // panning just because this is up). Called every render frame it's open,
 // from updateHUD.
 function updateMoundMenuPosition(state) {
-  const anchorWorld = { x: MOUND_X, y: SEABED_FLOOR_Y - MOUND_HEIGHT_PX };
+  // Per direct request ("make the mound also sit at the bottom of the upper
+  // tank, the same as the science lab") — Mound.js's own render/hit-test
+  // lifted the Mound's whole footprint up by one tile (see its
+  // MOUND_LIFT_PX), so this anchor follows it up by the same amount to stay
+  // glued to the dome's actual new top instead of floating a tile below it.
+  const anchorWorld = { x: MOUND_X, y: SEABED_FLOOR_Y - MOUND_HEIGHT_PX - TILE_SIZE };
   const screen = worldToScreen(anchorWorld.x, anchorWorld.y, state.camera);
   els.moundMenuAnchor.style.left = `${screen.x}px`;
   els.moundMenuAnchor.style.top = `${screen.y - MOUND_MENU_GAP_PX}px`;

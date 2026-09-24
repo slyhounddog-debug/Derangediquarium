@@ -220,10 +220,25 @@ export function updateAmbience(dtMs) {
   }
   updateCrabs(dt);
   updateTreasureChest(dt);
+  // Per direct request ("make the bubbles that spawn from the cursor have
+  // way more initial velocity, actually matching the cursor to start before
+  // slowing and going up") — a cursor-trail bubble now carries its own
+  // decaying "burst" velocity (b.vx/b.vy, set at spawn to roughly the
+  // cursor's own velocity — see spawnCursorBubbles) on TOP of the steady
+  // upward `speed` rise every bubble already had. dragMul is the same
+  // exponential-decay multiplier applied to every bubble this tick (dt is
+  // shared, so it's computed once here rather than per-bubble) — a chest
+  // bubble (spawnChestBubble) always spawns with vx/vy at 0, so this is a
+  // harmless no-op for it either way, letting both populations share this
+  // one loop/pool.
+  const dragMul = Math.exp(-CURSOR_BUBBLE_BURST_DRAG_PER_S * dt);
   for (let i = cursorBubbles.length - 1; i >= 0; i--) {
     const b = cursorBubbles[i];
     b.ageS += dt;
-    b.y -= b.speed * dt;
+    b.vx *= dragMul;
+    b.vy *= dragMul;
+    b.x += b.vx * dt;
+    b.y += b.vy * dt - b.speed * dt;
     if (b.ageS >= b.ttlS) cursorBubbles.splice(i, 1);
   }
 }
@@ -395,17 +410,21 @@ function drawOneBoulder(ctx, camera, canvasWidth, b) {
 // ---- Sand Castles ----
 // Per direct request ("add in a sand castle or two of varying sizes to the
 // background that's about from the size of the mound to a boulder and can
-// go behind coral, urchins and boulders") — a couple of static sand
-// structures, sized between a Boulder's own footprint (BOULDER_COUNT above,
-// diameter roughly 45-110px) and the Mound's (Mound.js's
-// MOUND_WIDTH_TILES(4.4) * TILE_SIZE(32) ≈ 141px). Depth is kept below every
-// Boulder's own 15-35 range so it always draws behind boulders (and, being
-// in the same behind-Lab band as boulders/seaweed, also always behind coral/
-// urchins/the Science Lab too) — same static "no per-frame animation, no
-// gameplay effect" rule as Boulders.
-const SAND_CASTLE_COUNT = 2;
-const SAND_CASTLE_MIN_WIDTH = 55; // a bit above a Boulder's own biggest footprint
-const SAND_CASTLE_MAX_WIDTH = 140; // ~ Mound.js's own MOUND_WIDTH_TILES * TILE_SIZE
+// go behind coral, urchins and boulders"), later bumped up ("make 2-3 sand
+// castles and make it so the range in size for sand castles is greater on
+// both extremes") — a few static sand structures, originally sized between
+// a Boulder's own footprint (BOULDER_COUNT above, diameter roughly 45-110px)
+// and the Mound's (Mound.js's MOUND_WIDTH_TILES(4.4) * TILE_SIZE(32) ≈
+// 141px); the range now runs noticeably smaller than a Boulder's own
+// smallest at one end and bigger than the Mound at the other, so 3 castles
+// read as more clearly varied rather than all clustering in that original
+// narrower band. Depth is kept below every Boulder's own 15-35 range so it
+// always draws behind boulders (and, being in the same behind-Lab band as
+// boulders/seaweed, also always behind coral/urchins/the Science Lab too) —
+// same static "no per-frame animation, no gameplay effect" rule as Boulders.
+const SAND_CASTLE_COUNT = 3;
+const SAND_CASTLE_MIN_WIDTH = 35; // was 55 — now noticeably below a Boulder's own smallest footprint
+const SAND_CASTLE_MAX_WIDTH = 180; // was 140 (~ the Mound's own width) — now bigger than the Mound
 function randomSandCastle() {
   const width = SAND_CASTLE_MIN_WIDTH + Math.random() * (SAND_CASTLE_MAX_WIDTH - SAND_CASTLE_MIN_WIDTH);
   return {
@@ -746,16 +765,28 @@ const treasureChest = {
 // every frame — no separate bubble system needed just for this.
 function spawnChestBubble(c) {
   if (cursorBubbles.length >= CURSOR_BUBBLE_MAX) cursorBubbles.shift();
+  const speed = 25 + Math.random() * 25;
+  const y = SEABED_FLOOR_Y - c.size * 0.3 + (Math.random() - 0.5) * 6;
   cursorBubbles.push({
     x: c.x + (Math.random() - 0.5) * c.size * 0.6,
-    y: SEABED_FLOOR_Y - c.size * 0.3 + (Math.random() - 0.5) * 6,
+    y,
+    vx: 0, // no cursor-style launch burst for a chest bubble — straight up only
+    vy: 0,
     radius: 2 + Math.random() * 3,
-    speed: 25 + Math.random() * 25,
+    speed,
     wobbleFreq: 0.8 + Math.random() * 1.4,
     wobblePhase: Math.random() * Math.PI * 2,
     wobbleAmp: 3 + Math.random() * 6,
     ageS: 0,
-    ttlS: 1.6 + Math.random() * 1.2,
+    // Per direct request ("make it so the bubbles the treasure chest travel
+    // basically all the way to the top of the tank before fading") — ttlS is
+    // set to exactly how long THIS bubble takes to rise from its own spawn
+    // depth to y=0 at its own fixed `speed`, instead of the short fixed
+    // 1.6-2.8s range spawnCursorBubbles' own mouse-trail bubbles still use.
+    // renderCursorBubbles only starts fading a bubble out over the LAST
+    // quarter of its life (see its own `fade`), so it stays fully visible
+    // until it's already ~3/4 of the way up.
+    ttlS: y / speed,
   });
 }
 
@@ -856,25 +887,30 @@ function drawOneTreasureChest(ctx, camera, canvasWidth, c) {
     ctx.restore();
   }
 
-  // Lid — pivots open around the back-top hinge line; lidT 0 = closed flat
-  // against the body, 1 = fully open (~112 degrees back).
+  // Lid — pivots open around its own bottom-left corner (per direct request,
+  // "hinge at the bottom left or right corner instead of the bottom middle
+  // of the lid") rather than the back-top-center line: the pivot point sits
+  // at the body's own top-left corner, and the lid shape spans from there
+  // (local x=0, the hinge, stays fixed) out to the far/right corner (local
+  // x=lidW, which is what actually swings up and back). lidT 0 = closed
+  // flat against the body, 1 = fully open (~112 degrees back).
   const lidAngle = -c.lidT * (Math.PI * 0.62);
   const lidW = bodyW * 1.02;
   const lidH = bodyH * 0.55;
   ctx.save();
-  ctx.translate(screen.x, bodyTop);
+  ctx.translate(screen.x - lidW / 2, bodyTop);
   ctx.rotate(lidAngle);
   ctx.fillStyle = '#7a4f29';
   ctx.beginPath();
-  ctx.moveTo(-lidW / 2, 0);
-  ctx.lineTo(-lidW / 2, -lidH * 0.15);
-  ctx.quadraticCurveTo(-lidW / 2, -lidH, 0, -lidH);
-  ctx.quadraticCurveTo(lidW / 2, -lidH, lidW / 2, -lidH * 0.15);
-  ctx.lineTo(lidW / 2, 0);
+  ctx.moveTo(0, 0);
+  ctx.lineTo(0, -lidH * 0.15);
+  ctx.quadraticCurveTo(0, -lidH, lidW / 2, -lidH);
+  ctx.quadraticCurveTo(lidW, -lidH, lidW, -lidH * 0.15);
+  ctx.lineTo(lidW, 0);
   ctx.closePath();
   ctx.fill();
   ctx.fillStyle = '#d4af37';
-  ctx.fillRect(-lidW / 2, -lidH * 0.42, lidW, lidH * 0.12);
+  ctx.fillRect(0, -lidH * 0.42, lidW, lidH * 0.12);
   ctx.restore();
 
   ctx.restore();
@@ -962,20 +998,45 @@ const CURSOR_BUBBLE_MAX = 40;
 const CURSOR_BUBBLE_MIN_SPEED = 60; // world px/sec floor below which nothing spawns — plain hovering shouldn't spam bubbles
 const CURSOR_BUBBLE_SPEED_FOR_MAX_RATE = 2200; // world px/sec at/above which spawn rate hits its cap
 const CURSOR_BUBBLE_MAX_RATE = 14; // bubbles/sec at top speed — several a second, per direct request
+// Per direct request ("make the bubbles that spawn from the cursor have way
+// more initial velocity, actually matching the cursor to start before
+// slowing and going up, and have the bubbles spawn slightly in front of the
+// cursor") — a bubble now launches carrying (a multiple of) the cursor's own
+// live velocity vector as a real, decaying burst (b.vx/b.vy — see
+// updateAmbience's own cursorBubbles loop), instead of spawning with zero
+// velocity and only ever drifting straight up. BURST_VELOCITY_MULTIPLIER
+// pushes it past a 1:1 match ("way more") since a literal 1:1 copy already
+// reads as fairly subdued once BURST_DRAG_PER_S's fast decay is applied.
+// AHEAD_PX offsets the spawn point itself forward along that same direction
+// (instead of spawning centered on/trailing the cursor), so a bubble looks
+// like it's being kicked out ahead of the cursor's own motion rather than
+// left behind it.
+const CURSOR_BUBBLE_BURST_VELOCITY_MULTIPLIER = 2.2;
+const CURSOR_BUBBLE_BURST_DRAG_PER_S = 5.5; // exponential decay rate — a burst is ~96% gone after 3/5.5 ≈ 0.55s ("...before slowing")
+const CURSOR_BUBBLE_AHEAD_MIN_PX = 8;
+const CURSOR_BUBBLE_AHEAD_MAX_PX = 20;
 const cursorBubbles = [];
 let cursorBubbleSpawnDebt = 0; // fractional-bubble accumulator so the spawn rate is smooth frame-to-frame instead of one-per-tick-if-any
 
-export function spawnCursorBubbles(worldX, worldY, speedPxPerSec, dtMs) {
+export function spawnCursorBubbles(worldX, worldY, vx, vy, dtMs) {
   const dt = dtMs / 1000;
+  const speedPxPerSec = Math.hypot(vx, vy);
   if (speedPxPerSec < CURSOR_BUBBLE_MIN_SPEED) { cursorBubbleSpawnDebt = 0; return; }
   const speedT = Math.min(1, (speedPxPerSec - CURSOR_BUBBLE_MIN_SPEED) / (CURSOR_BUBBLE_SPEED_FOR_MAX_RATE - CURSOR_BUBBLE_MIN_SPEED));
   cursorBubbleSpawnDebt += speedT * CURSOR_BUBBLE_MAX_RATE * dt;
+  // Unit vector along the cursor's current travel direction — used both to
+  // push the spawn point out ahead of the cursor and to aim the launch burst.
+  const dirX = vx / speedPxPerSec;
+  const dirY = vy / speedPxPerSec;
   while (cursorBubbleSpawnDebt >= 1) {
     cursorBubbleSpawnDebt -= 1;
     if (cursorBubbles.length >= CURSOR_BUBBLE_MAX) cursorBubbles.shift(); // drop the oldest rather than refusing to spawn, so a sustained fast drag still reads as continuous
+    const ahead = CURSOR_BUBBLE_AHEAD_MIN_PX + Math.random() * (CURSOR_BUBBLE_AHEAD_MAX_PX - CURSOR_BUBBLE_AHEAD_MIN_PX);
     cursorBubbles.push({
-      x: worldX + (Math.random() - 0.5) * 10,
-      y: worldY + (Math.random() - 0.5) * 10,
+      x: worldX + dirX * ahead + (Math.random() - 0.5) * 8,
+      y: worldY + dirY * ahead + (Math.random() - 0.5) * 8,
+      vx: vx * CURSOR_BUBBLE_BURST_VELOCITY_MULTIPLIER * (0.85 + Math.random() * 0.3),
+      vy: vy * CURSOR_BUBBLE_BURST_VELOCITY_MULTIPLIER * (0.85 + Math.random() * 0.3),
       radius: (2 + Math.random() * 3) * (0.6 + speedT * 0.8), // bigger bubbles at higher speed, per direct request
       speed: 30 + Math.random() * 30,
       wobbleFreq: 0.8 + Math.random() * 1.4,

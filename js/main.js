@@ -3331,8 +3331,13 @@ function update(dtMs) {
       if (lastCursorBubbleWorldX != null && dtMs > 0) {
         const dx = cursorWorldNow.x - lastCursorBubbleWorldX;
         const dy = cursorWorldNow.y - lastCursorBubbleWorldY;
-        const speed = Math.hypot(dx, dy) / (dtMs / 1000);
-        spawnCursorBubbles(cursorWorldNow.x, cursorWorldNow.y, speed, dtMs);
+        const dtS = dtMs / 1000;
+        // Per direct request ("make the bubbles that spawn from the cursor
+        // have way more initial velocity, actually matching the cursor")
+        // — the raw velocity VECTOR now goes to Ambience.js (not just its
+        // magnitude), so a spawned bubble can actually launch in the
+        // cursor's own direction of travel, not just spawn faster/bigger.
+        spawnCursorBubbles(cursorWorldNow.x, cursorWorldNow.y, dx / dtS, dy / dtS, dtMs);
       }
       lastCursorBubbleWorldX = cursorWorldNow.x;
       lastCursorBubbleWorldY = cursorWorldNow.y;
@@ -4014,17 +4019,21 @@ function render() {
   // import main.js — same state.ui cross-module signal pattern used
   // throughout this file.
   state.ui.fanAimingCell = fanAimingCell;
-  // Science Lab moved up here, between the two ambience halves, per direct
+  // Science Lab (and, per direct follow-up request, the Mound too — the two
+  // are mutually exclusive across the game's lifetime, tier < MOUND_MAX_TIER
+  // vs. >=) moved up here, between the two ambience halves, per direct
   // request ("coral, urchins, and crabs can walk/spawn in front of the
-  // science lab but seaweed and boulders can't") — renderAmbienceBehindLab
-  // above already covers the boulders/seaweed/kelp half, so the Lab draws on
-  // top of those, then renderAmbienceFrontLab draws coral/urchins/crabs (and
-  // bubbles) on top of the Lab in turn. See Ambience.js's own header comment
-  // for the full depth-layering scheme this participates in.
+  // science lab but seaweed and boulders can't"), later extended to the
+  // Mound itself ("with coral and sea urchins that can go in front of it") —
+  // renderAmbienceBehindLab above already covers the boulders/seaweed/kelp
+  // half, so whichever of the two is currently showing draws on top of
+  // those, then renderAmbienceFrontLab draws coral/urchins/crabs (and
+  // bubbles) on top of it in turn. See Ambience.js's own header comment for
+  // the full depth-layering scheme this participates in.
+  renderMound(ctx, state);
   renderScienceLab(ctx, state);
   renderAmbienceFrontLab(ctx, state, canvas.width, canvas.height);
   renderSeabedGrid(ctx, state, canvas.width, canvas.height);
-  renderMound(ctx, state);
   renderTankWalls(ctx, state, canvas.width);
 
   // Shared by every ghost-preview branch below, and — via effectiveToolAt —

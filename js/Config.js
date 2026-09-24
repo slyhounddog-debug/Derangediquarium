@@ -2669,7 +2669,20 @@ export const FISH_BUBBLE_INTERVAL_MAX_MS = 10000;
 // already a guaranteed extra bubble of its own), never stacking further.
 export const FISH_BUBBLE_SECOND_CHANCE = 0.25;
 export const FISH_BUBBLE_SECOND_DELAY_MS = 500;
-export const FISH_BUBBLE_LIFETIME_MS = 2500; // how long a bubble rises before fading out/aging away
+// Per direct request ("make it so the bubbles from fish also travel all the
+// way to the top before disappearing") — no longer a fixed short lifetime.
+// Now the same "rise until near the water's surface" pattern
+// BUILDING_BUBBLE_LIFETIME_MS/BUILDING_BUBBLE_TOP_MARGIN_PX already use below
+// (Entities.js's updateFishBubbleEffects culls once within
+// FISH_BUBBLE_TOP_MARGIN_PX of y=0), just with its own values: a fish can
+// sit right down near the seabed floor (FISH_MAX_Y, much deeper than most
+// buildings ever get placed), so at the slowest roll of
+// FISH_BUBBLE_RISE_SPEED_MIN this constant needs enough headroom to actually
+// reach the top from there rather than acting as the real cutoff — it's
+// still nominally just a safety ceiling for the (rare) case a bubble somehow
+// never gets there.
+export const FISH_BUBBLE_LIFETIME_MS = 40000;
+export const FISH_BUBBLE_TOP_MARGIN_PX = 40; // culled once within this many px of the water's top (y=0), same margin as BUILDING_BUBBLE_TOP_MARGIN_PX
 export const FISH_BUBBLE_RISE_SPEED_MIN = 18;
 export const FISH_BUBBLE_RISE_SPEED_MAX = 34;
 export const FISH_BUBBLE_RADIUS_MIN = 1.5;
@@ -2678,15 +2691,11 @@ export const FISH_BUBBLE_RADIUS_MAX = 4.5;
 // A running building's own bubble (main.js's updateBuildingBubbles) reuses
 // the same transient effect LIST as a fish's mouth bubble (state.level.
 // fishBubbleEffects), but per direct follow-up requests needs its own,
-// much longer-lived/bigger/further-rising look: a building usually sits
-// much lower in the tank than a fish, so the same short fish-bubble
-// lifetime (2.5s) meant it aged out and vanished long before getting
-// anywhere near the water's surface. BUILDING_BUBBLE_LIFETIME_MS is
-// deliberately generous — Entities.js's updateFishBubbleEffects culls a
-// building-sourced bubble once it's actually reached near the top of the
-// tank (BUILDING_BUBBLE_TOP_MARGIN_PX below y=0) OR this lifetime elapses,
-// whichever comes first, so this is really just a safety ceiling for a
-// bubble that somehow never reaches the top (rise speed rolled very low).
+// bigger/further-rising look — same "rise until near the top, OR this
+// lifetime elapses as a safety ceiling" cull Entities.js's
+// updateFishBubbleEffects now applies to a fish's own bubble too (see
+// FISH_BUBBLE_LIFETIME_MS/FISH_BUBBLE_TOP_MARGIN_PX above), just with its
+// own bigger radius/rise-speed range below.
 // Radius matches Ambience.js's own background bubbles ("closer to the
 // background bubbles in size", per direct request) rather than the
 // smaller fish mouth-bubble range.
@@ -3176,7 +3185,6 @@ export const ALIEN_CLICK_DAMAGE = 1; // per direct request — "clicking on them
 // own instance radius (alien.radius, from its archetype) now rather than a
 // flat ALIEN_RADIUS.
 export const ALIEN_CLICK_RADIUS_MULTIPLIER = 1.5;
-export const ALIEN_POOP_INTERVAL_MS = 8000; // was 4000 — halved again ("aliens poop out waste half as often"), same population-cap-softening rationale as every prior cut
 export const ALIEN_INCOME_BLOCK_RADIUS = 90; // px — a fish this close to a LIVING alien produces no coin on its drop timer at all, see Entities.js's updateFish
 // Originally a much tighter radius than ALIEN_AWARENESS_RADIUS (fish-chasing)
 // — "make it so aliens will go towards food only if it's close to them and

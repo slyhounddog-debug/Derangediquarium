@@ -42,6 +42,15 @@ export const MOUND_X = WORLD_W / 2; // world-space center, fixed for the life of
 // landing its base flush ON the floor line — resting on the upper tank's
 // floor, zero pixels into the city, instead of hovering above it.
 const SCIENCE_LAB_LIFT_PX = TILE_SIZE;
+// Per direct request ("make the mound also sit at the bottom of the upper
+// tank, the same as the science lab") — the Mound itself gets the exact same
+// 1-tile lift the Science Lab already has (see the comment above), for the
+// exact same reason: its base used to sink 1 tile INTO the buildable seabed/
+// city rows (bottom = SEABED_FLOOR_Y + TILE_SIZE below), same as the Lab did
+// before its own fix. Kept as a separate constant from SCIENCE_LAB_LIFT_PX
+// (even though the value's identical) since they're conceptually two
+// different objects that just happen to want the same lift.
+const MOUND_LIFT_PX = TILE_SIZE;
 
 // Shimmer/gleam, per direct request ("make it so the mound and the science
 // lab shimmer/gleen like the other objects, but every 10-50 seconds") — see
@@ -176,8 +185,8 @@ export function isPointOnMound(state, worldX, worldY) {
   if (state.level.tier >= MOUND_MAX_TIER) return false; // fully shattered — nothing left to click (Science Lab click target is Phase 4)
   const left = MOUND_X - MOUND_WIDTH_PX / 2;
   const right = MOUND_X + MOUND_WIDTH_PX / 2;
-  const top = SEABED_FLOOR_Y - MOUND_HEIGHT_PX;
-  const bottom = SEABED_FLOOR_Y + TILE_SIZE;
+  const top = SEABED_FLOOR_Y - MOUND_HEIGHT_PX - MOUND_LIFT_PX;
+  const bottom = SEABED_FLOOR_Y + TILE_SIZE - MOUND_LIFT_PX;
   return worldX >= left && worldX <= right && worldY >= top && worldY <= bottom;
 }
 
@@ -237,7 +246,7 @@ export function renderMound(ctx, state) {
   if (state.level.tier >= MOUND_MAX_TIER) return; // shattered — nothing to draw (Science Lab render is Phase 4)
   const { camera } = state;
   const crackCount = getMoundCrackCount(state);
-  const topLeft = worldToScreen(MOUND_X - MOUND_WIDTH_PX / 2, SEABED_FLOOR_Y - MOUND_HEIGHT_PX, camera);
+  const topLeft = worldToScreen(MOUND_X - MOUND_WIDTH_PX / 2, SEABED_FLOOR_Y - MOUND_HEIGHT_PX - MOUND_LIFT_PX, camera);
   const w = MOUND_WIDTH_PX * camera.zoom;
   const h = (MOUND_HEIGHT_PX + TILE_SIZE) * camera.zoom;
 

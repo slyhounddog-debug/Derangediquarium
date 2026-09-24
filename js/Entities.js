@@ -87,6 +87,7 @@ import {
   FISH_BUBBLE_SECOND_CHANCE,
   FISH_BUBBLE_SECOND_DELAY_MS,
   FISH_BUBBLE_LIFETIME_MS,
+  FISH_BUBBLE_TOP_MARGIN_PX,
   BUILDING_BUBBLE_LIFETIME_MS,
   BUILDING_BUBBLE_TOP_MARGIN_PX,
   FISH_BUBBLE_RISE_SPEED_MIN,
@@ -109,7 +110,6 @@ import {
   ALIEN_FLEE_CHANCE,
   ALIEN_WANDER_INTERVAL_MIN_S,
   ALIEN_WANDER_INTERVAL_MAX_S,
-  ALIEN_POOP_INTERVAL_MS,
   ALIEN_INCOME_BLOCK_RADIUS,
   ALIEN_PORTAL_OPEN_MS,
   ALIEN_PORTAL_CLOSE_MS,
@@ -681,7 +681,6 @@ export function createAlien(x, y, hp, archetypeId) {
     bodyHeightMul: archetype.bodyHeightMul,
     glow: archetype.glow,
     wanderTimer: 0, // 0 so the very first tick immediately picks a heading, same as fish's own wanderTimer
-    poopTimer: 0,
     hitFlashMs: 0, // counts down from ALIEN_HIT_FLASH_MS whenever damage is applied (Grid.js's Turret branch, main.js's click handler) — drives the red-flash/bounce read by main.js's render
     spawnProtectionUntilMs: 0, // Alien-Egg-hatched aliens only — see updateAlienEgg; a normal wave-spawned alien never has this set past 0, so every damage-site check below is a no-op for it
     risingToSurface: false, // Alien-Egg-hatched aliens only, and only when the egg hatched inside the seabed city — overrides all normal AI/movement in updateAlien until it clears SEABED_FLOOR_Y
@@ -714,7 +713,7 @@ export function createMotherAlienFish(x, y) {
     // fixed visual-distinction fields instead of copying an archetype's —
     // biggest spike count, bulkiest body, always glowing.
     spikes: 6, bodyWidthMul: 1.2, bodyHeightMul: 1.2, glow: true,
-    wanderTimer: 0, poopTimer: 0, hitFlashMs: 0, spawnProtectionUntilMs: 0, risingToSurface: false,
+    wanderTimer: 0, hitFlashMs: 0, spawnProtectionUntilMs: 0, risingToSurface: false,
     isBoss: true, minionSpawnTimerMs: 0,
     reservedDamage: 0, // see createAlien's own comment
   };
@@ -970,24 +969,12 @@ function updateAlien(alien, state, dtMs) {
     }
   }
 
-  // Alien-Egg hatch grace period — per direct spec, a freshly-hatched alien
-  // doesn't produce Waste for its first ALIEN_EGG_HATCH_INVULN_MS. Its
-  // poopTimer still accumulates underneath (not reset/paused), so it doesn't
-  // immediately spawn a burst of Waste the instant protection lapses.
+  // Per direct request ("make aliens not produce any waste at all") — aliens
+  // used to poop out a real Waste item every ALIEN_POOP_INTERVAL_MS (with a
+  // grace period right after an Alien-Egg hatch); that whole mechanic is
+  // gone now. `stillProtected` survives below — the fish-damage grace period
+  // a few lines down still needs it.
   const stillProtected = alien.spawnProtectionUntilMs > state.level.elapsed;
-  alien.poopTimer += dtMs;
-  if (!stillProtected && alien.poopTimer >= ALIEN_POOP_INTERVAL_MS) {
-    alien.poopTimer = 0;
-    // canSpawnMoreWaste: see Config.js's WASTE_MAX_ON_SCREEN — this is the
-    // single biggest source of runaway item counts (up to ALIEN_MAX_ALIVE
-    // aliens all pooping every couple seconds, indefinitely, if left
-    // unfought), so it's the most important of the 4 call sites this cap
-    // gates.
-    if (canSpawnMoreWaste(state)) {
-      state.level.items.push(createWaste(alien.x, alien.y));
-      adjustCleanliness(state, -CLEANLINESS_PER_WASTE_EVENT);
-    }
-  }
 
   // Aliens can now hurt and kill fish, per direct request/bug report — at
   // most once per second (ALIEN_FISH_DAMAGE_INTERVAL_MS) to EVERY fish this
@@ -1950,6 +1937,29 @@ function clampItemToWorldWalls(item) {
   }
 }
 
+// Per direct request ("make it so that objects don't continuously bounce on
+// the top of buildings when the building is placed at the top of the
+// city") — a building placed in the CITY'S OWN TOPMOST row has its top
+// surface sitting exactly AT SEABED_FLOOR_Y (that row's top edge IS the
+// boundary), so an item resting on it lands with its CENTER just above that
+// line (item.y = SEABED_FLOOR_Y - item.radius), same geometry as the
+// spawn-bounce bug BUILDING_OUTPUT_PORT_OFFSET_FRACTION's own comment
+// describes. Every updateXXX below used to branch on the item's raw center
+// position (item.y < SEABED_FLOOR_Y), which put that resting item back on
+// the OPEN-WATER side of the line every single tick: one tick of open-water
+// gravity drops it back across the boundary, stepItemOnGrid's own landing
+// snaps it right back up above it, forever — a continuous visible bounce.
+// Checking the item's BOTTOM edge (item.y + item.radius) instead means a
+// resting item there measures exactly SEABED_FLOOR_Y, not less than it, so
+// it correctly stays on the seabed-grid branch (stepItemOnGrid) instead of
+// flip-flopping every tick. Every other item type/position is unaffected —
+// this only shifts the open-water/seabed-grid transition earlier by exactly
+// one item radius, nowhere near enough to change any other observable
+// behavior (a Food pellet still visibly falls the same as before).
+function isItemInOpenWater(item) {
+  return item.y + item.radius < SEABED_FLOOR_Y;
+}
+
 function updateFood(item, state, dtMs) {
   const dt = dtMs / 1000;
   // Food Quality Tank Upgrade no longer slows food's fall — per direct
@@ -1957,7 +1967,7 @@ function updateFood(item, state, dtMs) {
   // bonus scaling with level instead (see COIN_TIMER_FEED_BONUS_FRACTION_BY_LEVEL
   // below). Fall physics are now always the flat base values.
   const physics = { gravity: FOOD_GRAVITY, maxFallSpeed: FOOD_MAX_FALL_SPEED };
-  if (item.y < SEABED_FLOOR_Y) {
+  if (isItemInOpenWater(item)) {
     // Fan force applies everywhere, not just the seabed band — see Grid.js's
     // computeFanForce/integrateItemForces. The continuous sway is a
     // separate flavor effect layered on top of (not replacing) the physics
@@ -2018,7 +2028,7 @@ function updateFood(item, state, dtMs) {
 function updateCoin(item, state, dtMs) {
   const dt = dtMs / 1000;
   const physics = { gravity: GRAVITY, maxFallSpeed: MAX_FALL_SPEED };
-  if (item.y < SEABED_FLOOR_Y) {
+  if (isItemInOpenWater(item)) {
     // Fan force applies everywhere, not just the seabed band — see Grid.js's
     // computeFanForce/integrateItemForces. A coin's high mass means it needs
     // strong or overlapping fan coverage to actually clear a ledge.
@@ -2050,7 +2060,7 @@ function updateCoin(item, state, dtMs) {
 function updateScience(item, state, dtMs) {
   const dt = dtMs / 1000;
   const physics = { gravity: GRAVITY, maxFallSpeed: MAX_FALL_SPEED };
-  if (item.y < SEABED_FLOOR_Y) {
+  if (isItemInOpenWater(item)) {
     const envForce = computeEnvironmentalForce(state, item);
     integrateItemForces(item, dt, physics, envForce);
     item.y += item.vy * dt;
@@ -2141,7 +2151,7 @@ function computeEnvironmentalForce(state, item) {
 function updateWaste(item, state, dtMs) {
   const dt = dtMs / 1000;
   const physics = { gravity: WASTE_GRAVITY, maxFallSpeed: WASTE_MAX_FALL_SPEED };
-  if (item.y < SEABED_FLOOR_Y) {
+  if (isItemInOpenWater(item)) {
     const envForce = computeEnvironmentalForce(state, item);
     integrateItemForces(item, dt, physics, envForce);
     item.fallTime += dt;
@@ -2169,7 +2179,7 @@ function updateWaste(item, state, dtMs) {
 function updateAlienDna(item, state, dtMs) {
   const dt = dtMs / 1000;
   const physics = { gravity: GRAVITY, maxFallSpeed: MAX_FALL_SPEED };
-  if (item.y < SEABED_FLOOR_Y) {
+  if (isItemInOpenWater(item)) {
     const envForce = computeEnvironmentalForce(state, item);
     integrateItemForces(item, dt, physics, envForce);
     item.y += item.vy * dt;
@@ -2186,7 +2196,7 @@ function updateAlienDna(item, state, dtMs) {
 function updateBiomass(item, state, dtMs) {
   const dt = dtMs / 1000;
   const physics = { gravity: GRAVITY, maxFallSpeed: MAX_FALL_SPEED };
-  if (item.y < SEABED_FLOOR_Y) {
+  if (isItemInOpenWater(item)) {
     const envForce = computeEnvironmentalForce(state, item);
     integrateItemForces(item, dt, physics, envForce);
     item.y += item.vy * dt;
@@ -2211,7 +2221,7 @@ function updateBiomass(item, state, dtMs) {
 function updateAlienEgg(item, state, dtMs) {
   const dt = dtMs / 1000;
   const physics = { gravity: GRAVITY, maxFallSpeed: MAX_FALL_SPEED };
-  if (item.y < SEABED_FLOOR_Y) {
+  if (isItemInOpenWater(item)) {
     const envForce = computeEnvironmentalForce(state, item);
     integrateItemForces(item, dt, physics, envForce);
     item.y += item.vy * dt;
@@ -2249,7 +2259,7 @@ function updateAlienEgg(item, state, dtMs) {
 function updateMutagenPaste(item, state, dtMs) {
   const dt = dtMs / 1000;
   const physics = { gravity: FOOD_GRAVITY, maxFallSpeed: FOOD_MAX_FALL_SPEED };
-  if (item.y < SEABED_FLOOR_Y) {
+  if (isItemInOpenWater(item)) {
     const envForce = computeEnvironmentalForce(state, item);
     integrateItemForces(item, dt, physics, envForce);
     item.fallTime += dt;
@@ -2271,7 +2281,7 @@ function updateMutagenPaste(item, state, dtMs) {
 function updateScienceGreen(item, state, dtMs) {
   const dt = dtMs / 1000;
   const physics = { gravity: GRAVITY, maxFallSpeed: MAX_FALL_SPEED };
-  if (item.y < SEABED_FLOOR_Y) {
+  if (isItemInOpenWater(item)) {
     const envForce = computeEnvironmentalForce(state, item);
     integrateItemForces(item, dt, physics, envForce);
     item.y += item.vy * dt;
@@ -3265,22 +3275,23 @@ function updateProductionBlockedEffects(state, dtMs) {
 
 // Same age-and-cull pattern as the two above, plus real motion (a fish
 // mouth bubble actually rises, unlike a death burst or a disintegrating
-// coin/science icon, which stay put and just fade) — see emitFishBubble.
-// A building-sourced bubble (main.js's updateBuildingBubbles, `fromBuilding:
-// true`) is culled differently — per direct request ("make the bubbles from
-// the buildings last longer, and at least until they get close to the upper
-// part of the tank"): it survives until it's actually risen to near the
-// water's surface (within BUILDING_BUBBLE_TOP_MARGIN_PX of y=0), with its
-// own much longer BUILDING_BUBBLE_LIFETIME_MS as just a safety ceiling for
-// the (rare) case it never gets there. A plain fish mouth-bubble is
-// unaffected, still culled purely by its own short fixed lifetime.
+// coin/science icon, which stay put and just fade) — see emitFishBubble. Per
+// direct request ("make it so the bubbles from fish also travel all the way
+// to the top before disappearing") both a plain fish mouth-bubble and a
+// building-sourced one (main.js's updateBuildingBubbles, `fromBuilding:
+// true`) now share the same cull: survive until actually risen to near the
+// water's surface (within its own TOP_MARGIN_PX of y=0), with its own much
+// longer LIFETIME_MS as just a safety ceiling for the (rare) case it never
+// gets there — a building usually sits lower in the tank and gets a bigger/
+// slower bubble, so it keeps its own separate constants rather than sharing
+// the fish ones.
 function updateFishBubbleEffects(state, dtMs) {
   const dt = dtMs / 1000;
   state.level.fishBubbleEffects = state.level.fishBubbleEffects.filter((b) => {
     b.age += dtMs;
     b.y -= b.riseSpeed * dt;
     if (b.fromBuilding) return b.age < BUILDING_BUBBLE_LIFETIME_MS && b.y > BUILDING_BUBBLE_TOP_MARGIN_PX;
-    return b.age < FISH_BUBBLE_LIFETIME_MS;
+    return b.age < FISH_BUBBLE_LIFETIME_MS && b.y > FISH_BUBBLE_TOP_MARGIN_PX;
   });
 }
 
