@@ -2672,6 +2672,15 @@ export function isMergeToolAvailable(state) {
 
 export function selectTool(state, tool) {
   if (tool === 'merge' && !isMergeToolAvailable(state)) return;
+  // Per direct request ("1-6 hotkeys (or clicking on the toolbar buttons)
+  // should work as a toggle to select/deselect the tool") — pressing the
+  // hotkey (or clicking the button) for whatever's ALREADY armed clears
+  // back to the plain cursor instead of just re-selecting the same thing.
+  if (state.ui.selectedTool === tool) {
+    state.ui.selectedTool = 'cursor';
+    updateToolbar(state);
+    return;
+  }
   state.ui.selectedTool = tool;
   closeSidePanels(state); // per direct request — picking a bottom-tool-bar tool (Food/Merge/Blueprint) closes the Shop/Tank Upgrades panel if it's open
   updateToolbar(state);
@@ -2788,6 +2797,16 @@ function refreshFavoriteSlots(state) {
     const tool = state.meta.favorites[index];
     const hotkeyNum = index + 4; // slots are hotkeys 4/5/6
     btn.innerHTML = '';
+    // Per direct request ("add in badges to the 1-6 tools in the toolbar,
+    // like the E and P badges") — this whole button's innerHTML gets wiped
+    // and rebuilt every refresh (unlike the 3 static tools' plain markup
+    // badges in index.html), so the badge has to be re-added here every
+    // time too, same .panel-toggle-hotkey class the Shop/Tank Upgrades
+    // toggle buttons already use.
+    const badge = document.createElement('span');
+    badge.className = 'panel-toggle-hotkey';
+    badge.textContent = String(hotkeyNum);
+    btn.appendChild(badge);
     if (!tool) {
       btn.dataset.tool = '';
       btn.title = `Empty favorite slot (${hotkeyNum}) — select a fish or building in the shop and press F to pin it here`;
@@ -2872,6 +2891,17 @@ export function removeFavoriteAtHoveredSlot(state) {
 export function selectFavorite(state, index) {
   const tool = state.meta.favorites[index];
   if (!tool) return;
+  // Per direct request ("1-6 hotkeys... should work as a toggle to select/
+  // deselect the tool/favorite") — same toggle shape selectTool's own build:/
+  // fish:-agnostic tools just got above: re-triggering an already-armed
+  // favorite clears back to the plain cursor instead of re-pipetting it
+  // (a no-op that also would have reset pipetteRecipeId/pipetteFilterItems
+  // for no reason).
+  if (state.ui.selectedTool === tool) {
+    state.ui.selectedTool = 'cursor';
+    updateToolbar(state);
+    return;
+  }
   if (tool.startsWith('build:')) pipetteSelectBuilding(state, tool.slice('build:'.length));
   else if (tool.startsWith('fish:')) pipetteSelectSpecies(state, tool.slice('fish:'.length));
 }

@@ -684,7 +684,17 @@ export const ITEM_PUSH_IMPULSE_SPEED = 3;
 // ---- Economy & feeding ----
 export const FOOD_COST = 3; // $ per food pellet, matches the Buy Food shop entry — lowered from 5 so the early economy isn't so punishing to get rolling
 export const FOOD_RADIUS = 6.6; // px, visual + despawn-on-floor check — 10% bigger (was 6) per direct request ("increase the size of all the objects by 10%")
-export const FOOD_COLOR = '#e74c3c'; // red — distinct from coins (bronze/silver/gold/diamond), waste (gray), and science (blue/purple)
+// Per direct request ("make the food color slightly lighter to a pink
+// salmon color, and make sure all the food icons throughout the game
+// match") — was a flat red (#e74c3c); still clearly distinct from coins
+// (bronze/silver/gold/diamond), waste (gray), and science (blue/purple),
+// just a lighter, warmer pink-salmon tone instead. Every food-colored icon
+// in the game (the item itself, the Food tool's own toolbar icon, hunger
+// indicators, stats-panel rows) all read this one constant — see this
+// constant's own reference list — so changing it here is the single source
+// of truth EXCEPT for css/style.css's .tool-icon-food, which can't import a
+// JS constant and has to be kept in sync by hand (see its own comment).
+export const FOOD_COLOR = '#ff9b8a';
 // Stationary-to-Waste (Entities.js's updateFood): replaces the old
 // FOOD_FLOOR_GRACE_MS despawn-on-the-floor mechanic and the Food Capacity
 // cap alike, per direct request — instead of limiting how much food can

@@ -454,13 +454,23 @@
     </div>
   </div>
 
+  <!-- Per direct request ("add in badges to the 1-6 tools in the toolbar,
+       like the E and P badges on the shop and tank point menu") — every
+       button here reuses that exact same .panel-toggle-hotkey badge (see
+       css/style.css's own comment on it), just showing 1-6 instead of E/P.
+       The 3 static tools' badges are plain markup below; the 3 Favorite
+       slots' own badges are injected live by UI.js's refreshFavoriteSlots
+       (their whole innerHTML is rebuilt every time a favorite changes, so a
+       static badge here would get wiped). -->
   <div id="bottom-tool-bar">
     <button id="tool-food-btn" class="tool-btn sheen-target" title="Food — $3 (1) — hover a building and press D (or hold D and drag) to delete it for a full refund">
       <span class="tool-icon tool-icon-food"></span>
+      <span class="panel-toggle-hotkey">1</span>
     </button>
-    <button id="tool-merge-btn" class="tool-btn sheen-target tool-btn-emoji" title="Merge — select this, then drag one Adult fish onto a matching one to combine or splice it (2)">🧤</button>
+    <button id="tool-merge-btn" class="tool-btn sheen-target tool-btn-emoji" title="Merge — select this, then drag one Adult fish onto a matching one to combine or splice it (2)">🧤<span class="panel-toggle-hotkey">2</span></button>
     <button id="tool-blueprint-btn" class="tool-btn sheen-target" title="Blueprint — drag a box over built buildings to copy them, then click to paste that layout elsewhere (3)">
       <span class="tool-icon tool-icon-blueprint"></span>
+      <span class="panel-toggle-hotkey">3</span>
     </button>
     <!-- 3 Favorite slots — per direct request: pick a fish/building in the
          shop and press F to pin it here (F again removes it), or hover one

@@ -1139,6 +1139,7 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
   margin-bottom: 6px;
 }
 .tool-btn {
+  position: relative; /* anchors .panel-toggle-hotkey (the 1-6 badges) — see index.html's own comment */
   width: 56px; height: 56px; flex: none; /* was 40px — now matches the species icons' original size, per direct request */
   display: flex; align-items: center; justify-content: center;
   background: linear-gradient(160deg, #fffdf8 0%, #fff0dc 100%);
@@ -1176,7 +1177,14 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
 .tool-btn-favorite-empty { font-size: 24px; color: rgba(107, 76, 107, 0.3); }
 .tool-btn-favorite-icon { display: block; border-radius: 10px; pointer-events: none; }
 .tool-icon { display: block; border-radius: 50%; }
-.tool-icon-food { width: 22px; height: 22px; background: #ffb238; box-shadow: 0 0 0 5px rgba(255, 178, 56, 0.3); } /* matches Config.js's FOOD_COLOR — was a green too close to Waste's own color to tell apart at a glance */
+/* Per direct request ("make sure the food tool icon matches the color of
+   the food") — this had drifted out of sync with Config.js's FOOD_COLOR at
+   some point (was #ffb238, an orange-yellow, while FOOD_COLOR was a red)
+   despite its own comment claiming they matched; now genuinely matches
+   FOOD_COLOR's current #ff9b8a (a lighter pink-salmon). CSS can't import a
+   JS constant, so if FOOD_COLOR ever changes again this needs updating by
+   hand to match. */
+.tool-icon-food { width: 22px; height: 22px; background: #ff9b8a; box-shadow: 0 0 0 5px rgba(255, 155, 138, 0.3); }
 .tool-btn-emoji { font-size: 26px; } /* the Merge button's 🧤 (Demolish's own 🔨 used this too, before that tool was removed) */
 /* A small sheet of blue blueprint paper — a fine white grid on a deep blue
    ground, per direct request ("make the blueprint on the toolbar look like
