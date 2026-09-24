@@ -4902,12 +4902,33 @@ function render() {
   if (!state.ui.paused) {
     const bubbleMarginX = 26;
     const bubbleY = 54;
+    // World-space margin, per direct bug report ("in full screen mode, the
+    // notification bubble shows up correctly. But when not in fullscreen,
+    // the fish has to be off screen for more than one scroll length before
+    // it shows"). The old check compared worldToScreen's OUTPUT (screen
+    // pixels) against a flat 60px screen margin — camera.zoom divides into
+    // that conversion, so at zoom=1 (a tall/maximized window, where the
+    // water column already fills the screen without needing to zoom out)
+    // 60 screen px is a 60-world-unit buffer, but at zoom<1 (a shorter
+    // window, where the camera zooms OUT further to still fit the whole
+    // water column vertically — see fitCameraZoom) that same 60 screen px
+    // covers proportionally MORE world space, silently inflating the buffer
+    // a fish had to cross before counting as "off screen." Comparing
+    // directly in world space against camera.x/y/viewWidth/viewHeight with a
+    // flat WORLD-unit margin instead makes the buffer zoom-independent — the
+    // same effective margin fullscreen already had.
+    const OFFSCREEN_MARGIN_WORLD = 60;
+    const camera = state.camera;
     for (const fish of state.level.entities) {
       if (fish.type !== 'fish' || fish.dying) continue;
       if (fish.hunger < HUNGER_CRITICAL_THRESHOLD) continue;
-      const pos = worldToScreen(fish.x, fish.y, state.camera);
-      const onScreen = pos.x >= -60 && pos.x <= canvas.width + 60 && pos.y >= -60 && pos.y <= canvas.height + 60;
+      const onScreen =
+        fish.x >= camera.x - OFFSCREEN_MARGIN_WORLD &&
+        fish.x <= camera.x + camera.viewWidth + OFFSCREEN_MARGIN_WORLD &&
+        fish.y >= camera.y - OFFSCREEN_MARGIN_WORLD &&
+        fish.y <= camera.y + camera.viewHeight + OFFSCREEN_MARGIN_WORLD;
       if (onScreen) continue;
+      const pos = worldToScreen(fish.x, fish.y, camera);
       const def = SPECIES[fish.speciesId];
       const hungerIconColor = def.behavior.includes('SCAVENGER') ? WASTE_COLOR : FOOD_COLOR;
       const bx = Math.max(bubbleMarginX, Math.min(canvas.width - bubbleMarginX, pos.x));
@@ -4916,11 +4937,18 @@ function render() {
       ctx.beginPath();
       ctx.roundRect(bx - 22, bubbleY - 14, 44, 26, 13);
       ctx.fill();
+      // Icon+text group re-centered on bx, per direct bug report ("center
+      // the food and exclamation mark in the bubble, they are biased to the
+      // left side now") — measured via ctx.measureText('!!') at this exact
+      // font (~10px advance width, glyphs starting ~1px left of the anchor)
+      // against the dot's own 4px radius: shifting both +6.5px from their
+      // old x lands the combined (dot + gap + "!!") visual span symmetric
+      // around bx instead of the old dot-anchored offset.
       ctx.fillStyle = '#ff3b3b';
       ctx.font = 'bold 15px sans-serif';
-      ctx.fillText('!!', bx - 5, bubbleY + 5);
+      ctx.fillText('!!', bx + 1.5, bubbleY + 5);
       ctx.beginPath();
-      ctx.arc(bx - 13, bubbleY - 2, 4, 0, Math.PI * 2);
+      ctx.arc(bx - 6.5, bubbleY - 2, 4, 0, Math.PI * 2);
       ctx.fillStyle = hungerIconColor;
       ctx.fill();
       ctx.restore();
