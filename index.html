@@ -74,9 +74,9 @@
 </div>
 
 <div id="hud">
-  <div id="hud-money" class="sheen-target" title="Money — spend it on fish and food in the shop">💰 $0</div>
-  <div id="hud-science-cap" class="sheen-target hidden" title="Science Bubbles currently sitting in the tank, uncollected — capped by the Science Lab's Bubble Capacity upgrade">🔬 0/5</div>
-  <div id="hud-cleanliness" class="sheen-target" title="Tank cleanliness — a dirty tank's fish produce less money, down to half at 0% clean">✨ 100%</div>
+  <div id="hud-money" class="sheen-target hud-clickable-stat">💰 $0</div>
+  <div id="hud-science-cap" class="sheen-target hud-clickable-stat hidden">🔬 0/5</div>
+  <div id="hud-cleanliness" class="sheen-target hud-clickable-stat">✨ 100%</div>
   <div id="hud-power-wrap">
     <button id="hud-power" class="sheen-target hidden" title="Electricity — Using / Generating / Stored mw. Click for a rolling graph.">
       <span id="hud-power-text">⚡ 0/0/0 mw</span>
@@ -85,6 +85,22 @@
     <div id="hud-power-graph" class="hidden"><canvas id="hud-power-graph-canvas" width="220" height="90"></canvas></div>
   </div>
 </div>
+
+<!-- Per direct request — clicking a HUD stat (money/science-cap/cleanliness;
+     electricity is excluded, it already has its own click-for-graph
+     behavior above) opens this instead of the old hover tooltip, sized to
+     match the minimap and positioned just to its left (UI.js's
+     openHudInfoModal/positionHudInfoModal). Closed by clicking anywhere
+     else or pressing any key (UI.js's own document-level listeners). -->
+<div id="hud-info-modal" class="hidden">
+  <div id="hud-info-modal-title"></div>
+  <div id="hud-info-modal-desc"></div>
+  <div id="hud-info-modal-stat"></div>
+</div>
+<!-- A small "?" bubble that follows the cursor while hovering one of the 3
+     clickable HUD stats above, hinting that a click opens more info — per
+     direct request. -->
+<div id="hud-hover-bubble" class="hidden">❓</div>
 
 <!-- Minimal minimap, per direct request — sits directly under #hud, same
      right-aligned corner. #minimap-canvas always renders the whole tank

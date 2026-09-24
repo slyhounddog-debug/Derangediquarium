@@ -1054,6 +1054,50 @@ export function placeTile(state, col, row, buildingId, angle = 0) {
 // the count placeTile actually charged against. Never removes a tile an item
 // happens to be riding mid-tick; physics only ever reads the grid at the
 // start of an item's step, so a same-tick removal is safe either way.
+// Per direct request ("deleting a chest spawns all contents in the world,
+// even paused" / "any building holding/processing an item, if deleted,
+// spawns item(s) even when paused") — must be called BEFORE removeTile below
+// (which is what actually clears buildingData). Two jobs:
+//  1. A Storage Chest's count/lockedItemType/coinQueue isn't backed by real
+//     item entities (see applyReplacementMutation's own identical comment for
+//     its cross-family-replace equivalent of this same drain) — this returns
+//     them as spawn-point records (same shape chestSpawnPoints/
+//     pendingChestEjectSpawnPoints already use) for the caller to materialize
+//     into real items. Grid.js can't construct items itself (this file's own
+//     header comment/circular-import note), hence returning records instead
+//     of pushing straight into state.level.items.
+//  2. Any item a Refinery/Manufacturer/Collector was physically holding mid-
+//     process (heldByKey/heldItemId, or a Collector's own collectorProgressMs)
+//     normally self-heals back to normal falling physics on the NEXT TICK,
+//     the instant stepHeldItem/stepCollectorProcessing notice their building
+//     is gone (see removeTile's own comment) — but nothing ticks at all while
+//     paused, so that self-heal would never actually run. This does the exact
+//     same reset SYNCHRONOUSLY instead, so the item is already visible and
+//     free the instant the building disappears, paused or not.
+export function collectDemolishSpawnPoints(state, col, row) {
+  const key = buildingKey(col, row);
+  const type = state.level.grid[row]?.[col];
+  const data = state.level.buildingData[key];
+  const centerX = col * TILE_SIZE + TILE_SIZE / 2;
+  const centerY = row * TILE_SIZE + TILE_SIZE / 2;
+  const spawnPoints = [];
+  if (data && STORAGE_CHEST_TILES.has(type)) {
+    while (data.count > 0) {
+      spawnPoints.push(ejectOneFromChest(state, data, null, centerX, centerY, null, null, 0));
+    }
+  }
+  for (const item of state.level.items) {
+    if (item.heldByKey === key) {
+      item.mass = item.heldOriginalMass;
+      item.heldByKey = null;
+    } else if (item.collectorProgressMs != null && item.collectorCenterX === centerX && item.collectorCenterY === centerY) {
+      item.mass = item.collectorOriginalMass;
+      item.collectorProgressMs = null;
+    }
+  }
+  return spawnPoints;
+}
+
 export function removeTile(state, col, row) {
   if (row < SEABED_ROW_START || row >= WORLD_TILES_H || col < 0 || col >= WORLD_TILES_W) return false;
   const existing = state.level.grid[row][col];
@@ -1262,6 +1306,27 @@ export function applyRecipeToBuilding(data, next) {
   }
 }
 
+// Per direct request ("pipette tool copies recipe/filter from pipetted
+// building") — applies whichever of state.ui.pipetteRecipeId/pipetteFilterItems
+// UI.js's pipetteSelectBuilding captured onto a freshly-placed building, at
+// main.js's own placement call sites (both the plain and Fan-specific
+// branches). Deliberately does NOT clear the pipette fields afterward — the
+// copied recipe/filter stays "loaded" for as long as this exact build tool
+// stays armed, so placing several copies in a row all match the pipetted
+// original, the same "stays armed across multiple placements" convenience
+// any other build tool already has. They're only ever cleared by a genuinely
+// new selection (UI.js's selectBuildingForPreview).
+export function applyPipetteData(state, col, row, buildingId) {
+  const data = state.level.buildingData[buildingKey(col, row)];
+  if (!data) return;
+  if (state.ui.pipetteRecipeId && (data.type === TILE_MANUFACTURER || data.type === TILE_POWER_PLANT)) {
+    applyRecipeToBuilding(data, state.ui.pipetteRecipeId);
+  }
+  if (state.ui.pipetteFilterItems && data.filterItems) {
+    data.filterItems = [...state.ui.pipetteFilterItems];
+  }
+}
+
 // ---- Blueprint tool ("Stamp") — per direct request: click-and-drag a box
 // over a built area to copy every building inside it, then paste that whole
 // layout somewhere else in one click. Mostly a LAYOUT copy, not an instance
@@ -1291,6 +1356,14 @@ export function captureBlueprint(state, colA, rowA, colB, rowB) {
         dCol: col - minCol, dRow: row - minRow, buildingId: type,
         angle: (data && data.angle) || 0,
         recipeId: (data && (MANUFACTURER_TILES.has(type) || POWER_PLANT_TILES.has(type))) ? data.recipeId : null,
+        // Per direct request ("blueprint tool copies all recipes/filters
+        // from copied buildings") — same idea as recipeId just above, for a
+        // Platform/Fan's own item-filter array (see UI.js's copyPlatformFilter
+        // for the single-tile drag-copy version of this same data). null
+        // (not just an empty array) when the tile has no filterItems at all,
+        // so placeBlueprint/placeBlueprintWithReplace below can tell "no
+        // filter to copy" apart from "copy this empty/cleared filter."
+        filterItems: (data && data.filterItems) ? [...data.filterItems] : null,
       });
     }
   }
@@ -1366,6 +1439,10 @@ export function placeBlueprint(state, baseCol, baseRow, cells) {
       if (cell.recipeId) {
         const data = state.level.buildingData[buildingKey(col, row)];
         if (data) applyRecipeToBuilding(data, cell.recipeId);
+      }
+      if (cell.filterItems) {
+        const data = state.level.buildingData[buildingKey(col, row)];
+        if (data && data.filterItems) data.filterItems = [...cell.filterItems];
       }
       placedCells.push({ col, row, buildingId: cell.buildingId });
     }
@@ -1504,6 +1581,10 @@ export function placeBlueprintWithReplace(state, baseCol, baseRow, cells, shiftH
     if (cell.recipeId) {
       const data = state.level.buildingData[buildingKey(col, row)];
       if (data) applyRecipeToBuilding(data, cell.recipeId);
+    }
+    if (cell.filterItems) {
+      const data = state.level.buildingData[buildingKey(col, row)];
+      if (data && data.filterItems) data.filterItems = [...cell.filterItems];
     }
     if (result.replaced) anyReplace = true;
     if (FAN_TILES.has(cell.buildingId)) anyFanPlaced = true;
@@ -2043,7 +2124,12 @@ export function stepItemOnGrid(item, state, dt, physics) {
 // failure is PERMANENT, not a one-tick fluke, so the intake silently never
 // fires again. TOUCH_EPSILON_PX is a small, deliberately generous tolerance
 // that absorbs both this exact float error and any similar near-miss.
-const TOUCH_EPSILON_PX = 0.5;
+// Bumped from the original 0.5 (float-error-only) to a genuine few-pixel
+// buffer, per direct request ("small buffer area around buildings for
+// acceptance") — an item hovering just barely short of the tile's edge (a
+// couple pixels off, not resting exactly flush) now still registers as
+// touching, instead of requiring pixel-perfect contact.
+const TOUCH_EPSILON_PX = 4;
 function isTouchingBuildingTile(centerX, centerY, itemX, itemY, itemRadius) {
   const half = TILE_SIZE / 2;
   const dx = Math.max(Math.abs(itemX - centerX) - half, 0);
@@ -3133,6 +3219,23 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
   ctx.fillRect(0, Math.max(0, topOfSeabed.y) + 4, canvasWidth, canvasHeight);
   ctx.restore();
 
+  // Alternating dirt/sand row tint — per direct request, a subtle pseudo-
+  // grid so each seabed ROW reads as its own strip at a glance (useful for
+  // eyeballing alignment while placing buildings) without drawing actual
+  // grid lines, which would be far too busy over a whole screen of tiles.
+  // Low alpha, alternating a hair lighter (sand) / darker (dirt) than the
+  // gradient+texture underneath, one flat fillRect per on-screen row — cheap,
+  // and skipped entirely (same rowStart <= rowEnd gate the real tile loop
+  // below uses) whenever no real seabed row is actually on screen.
+  if (rowStart <= rowEnd) {
+    for (let row = rowStart; row <= rowEnd; row++) {
+      const rowTop = worldToScreen(0, row * TILE_SIZE, camera).y;
+      const rowHeight = TILE_SIZE * camera.zoom;
+      ctx.fillStyle = row % 2 === 0 ? 'rgba(255, 227, 173, 0.05)' : 'rgba(0, 0, 0, 0.06)';
+      ctx.fillRect(0, rowTop, canvasWidth, rowHeight);
+    }
+  }
+
   renderCameraBottomBuffer(ctx, camera, canvasWidth, canvasHeight);
 
   // The real tile loop is skipped (not the whole function) once every real
@@ -3340,10 +3443,25 @@ function renderCameraBottomBuffer(ctx, camera, canvasWidth, canvasHeight) {
 // visually harmless.
 function renderFanIndicators(ctx, state, canvasWidth, canvasHeight) {
   const { camera } = state;
+  // Skip the fan currently being aimed (fanAimingCell, mirrored onto
+  // state.ui here since main.js owns that module-local variable) — its
+  // OWN live-following cone is drawn separately by renderFanAimGhost, and
+  // drawing this fixed-angle one underneath it is what caused the "two
+  // cones" bug report.
+  const aiming = state.ui.fanAimingCell;
+  // Per direct request, opening a Fan's building-info modal highlights that
+  // one fan's cone even while the G toggle (fanConesVisible) has every OTHER
+  // fan's cone hidden — the whole point of opening the modal is to see what
+  // that specific fan is doing. state.ui.buildingInfoTileKey is UI.js's own
+  // open-modal tile mirrored onto state (see openBuildingInfoMenu).
+  const highlightedKey = state.ui.buildingInfoTileKey;
   for (const key in state.level.buildingData) {
     const data = state.level.buildingData[key];
     if (!FAN_TILES.has(data.type)) continue;
+    const isHighlighted = key === highlightedKey;
+    if (!state.ui.fanConesVisible && !isHighlighted) continue; // G hotkey toggle — see main.js's KeyG handler and state.ui.fanConesVisible's own comment
     const [row, col] = key.split(',').map(Number);
+    if (aiming && aiming.col === col && aiming.row === row) continue;
     const centerX = col * TILE_SIZE + TILE_SIZE / 2;
     const centerY = row * TILE_SIZE + TILE_SIZE / 2;
     const screen = worldToScreen(centerX, centerY, camera);
@@ -3353,7 +3471,7 @@ function renderFanIndicators(ctx, state, canvasWidth, canvasHeight) {
       screen.y + range < 0 || screen.y - range > canvasHeight
     ) continue;
     const size = TILE_SIZE * camera.zoom;
-    renderDirectionIndicator(ctx, data.type, screen.x - size / 2, screen.y - size / 2, size, data.angle, camera.zoom);
+    renderDirectionIndicator(ctx, data.type, screen.x - size / 2, screen.y - size / 2, size, data.angle, camera.zoom, true, isHighlighted);
   }
 }
 
@@ -4468,20 +4586,31 @@ function renderPowerShortageOverlay(ctx, x, y, size, zoom, efficiency, elapsedMs
 // location" per direct report. Once click 1 arms a cell (main.js's
 // isFanAimingActive() branch), the cone reappears and rotates live with the
 // cursor for the real aiming step.
-function renderDirectionIndicator(ctx, type, x, y, size, angle, zoom, showCone = true) {
+function renderDirectionIndicator(ctx, type, x, y, size, angle, zoom, showCone = true, highlight = false) {
   if (!FAN_TILES.has(type) || !showCone) return;
   const cx = x + size / 2;
   const cy = y + size / 2;
   const stats = FAN_STATS[type];
   const range = stats.maxRange * zoom;
   ctx.save();
-  ctx.globalAlpha = 0.12;
-  ctx.fillStyle = '#ffffff';
+  // Per direct request, a Fan's cone reads as highlighted while its own
+  // building-info modal is open (see renderFanIndicators' highlightedKey) —
+  // a brighter gold fill/outline instead of the plain dim white every other
+  // fan's always-on cone uses, so it's unmistakable which fan the open modal
+  // belongs to even with several other cones on screen.
+  ctx.globalAlpha = highlight ? 0.3 : 0.12;
+  ctx.fillStyle = highlight ? '#ffd45e' : '#ffffff';
   ctx.beginPath();
   ctx.moveTo(cx, cy);
   ctx.arc(cx, cy, range, angle - FAN_CONE_HALF_ANGLE_RAD, angle + FAN_CONE_HALF_ANGLE_RAD);
   ctx.closePath();
   ctx.fill();
+  if (highlight) {
+    ctx.globalAlpha = 0.85;
+    ctx.strokeStyle = '#ffd45e';
+    ctx.lineWidth = Math.max(1.5, 2.5 * zoom);
+    ctx.stroke();
+  }
   ctx.restore();
 
   ctx.save();

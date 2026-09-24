@@ -21,7 +21,7 @@ let elapsed = 0; // seconds, drives every sway/wobble phase below
 // width) — keeps bubbles-per-px-of-width the same as before, rather than
 // cramming the original count into a much narrower column and reading
 // 2.67x busier than intended.
-const BUBBLE_COUNT = 11; // cut another 25% from 14 per direct request ("reduce the amount of bubbles the tank background makes by itself... so only some of the bubbles on-screen come from the background") — the rest now come from running buildings, see main.js's updateBuildingBubbles
+const BUBBLE_COUNT = 15; // increased back from 11 per direct request
 // Per direct request, a bubble grows to full size over this many seconds
 // after it spawns, instead of just appearing at full size — `age` (seconds
 // since spawn) drives the scale in renderBubbles below.
@@ -81,11 +81,44 @@ for (let i = 0; i < SEAWEED_COUNT; i++) {
     height: SEAWEED_MIN_HEIGHT + (SEAWEED_MAX_HEIGHT - SEAWEED_MIN_HEIGHT) * sizeT,
     width: SEAWEED_MIN_WIDTH + (SEAWEED_MAX_WIDTH - SEAWEED_MIN_WIDTH) * sizeT,
     blurFactor: 0.6 + 0.55 * sizeT, // 0.6x (crisper) at the smallest, 1.15x (slightly blurrier) at the biggest, vs. the old fixed 1.0x
-    sway: 10 + Math.random() * 16,
-    freq: 0.35 + Math.random() * 0.45,
+    sway: 16 + Math.random() * 24, // was 10 + rand*16 — bumped up per direct request for more noticeable background seaweed movement
+    freq: 0.5 + Math.random() * 0.6, // was 0.35 + rand*0.45 — faster sway to match the wider amplitude above
     phase: Math.random() * Math.PI * 2,
     hue: 90 + Math.random() * 35,
   });
+}
+
+// ---- Shadow Fish ----
+// Blurry, mostly-transparent fish silhouettes drifting slowly through the
+// open water column — per direct request, a purely atmospheric depth cue
+// ("something swimming further back in the tank"), never a real gameplay
+// fish; nothing here is clickable/feedable/counted anywhere. A fixed pool
+// recycles by simply reversing off-screen, same "no growing/shrinking
+// arrays" convention BUBBLE_COUNT already established.
+const SHADOW_FISH_COUNT = 5;
+const SHADOW_FISH_MIN_SIZE = 20;
+const SHADOW_FISH_MAX_SIZE = 42;
+function randomShadowFish() {
+  const dir = Math.random() < 0.5 ? 1 : -1;
+  return {
+    x: Math.random() * WORLD_W,
+    y: SEABED_FLOOR_Y * (0.12 + Math.random() * 0.7), // scattered through the open water column, never right at the very top or bottom
+    size: SHADOW_FISH_MIN_SIZE + Math.random() * (SHADOW_FISH_MAX_SIZE - SHADOW_FISH_MIN_SIZE),
+    dir,
+    speed: 8 + Math.random() * 14,
+    tailFreq: 1.4 + Math.random() * 1.2,
+    tailPhase: Math.random() * Math.PI * 2,
+    bobFreq: 0.2 + Math.random() * 0.25,
+    bobAmp: 6 + Math.random() * 14,
+    bobPhase: Math.random() * Math.PI * 2,
+    baseY: 0, // set below, before first use
+  };
+}
+const shadowFish = [];
+for (let i = 0; i < SHADOW_FISH_COUNT; i++) {
+  const f = randomShadowFish();
+  f.baseY = f.y;
+  shadowFish.push(f);
 }
 
 export function updateAmbience(dtMs) {
@@ -95,6 +128,15 @@ export function updateAmbience(dtMs) {
     b.y -= b.speed * dt;
     b.age += dt;
     if (b.y < -20) Object.assign(b, randomBubble());
+  }
+  for (const f of shadowFish) {
+    f.x += f.speed * f.dir * dt;
+    // Wraps around to the opposite edge (with a little off-screen margin)
+    // instead of respawning fresh, unlike a bubble — keeps its own size/
+    // speed/bob phase intact rather than reshuffling every lap, so it never
+    // visibly "pops."
+    if (f.dir > 0 && f.x > WORLD_W + 80) f.x = -80;
+    else if (f.dir < 0 && f.x < -80) f.x = WORLD_W + 80;
   }
 }
 
@@ -117,6 +159,53 @@ function renderBubbles(ctx, camera, canvasWidth, canvasHeight) {
     ctx.beginPath();
     ctx.arc(screen.x - r * 0.3, screen.y - r * 0.3, r * 0.28, 0, Math.PI * 2);
     ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
+// A simplified fish silhouette — an ellipse body plus a triangular tail,
+// drawn twice (a wide/very-transparent pass underneath a narrower/slightly-
+// more-opaque one) for the same cheap fake-blur renderSeaweed's own comment
+// explains, rather than a real ctx.filter blur (measured far too expensive
+// for several of these every frame). Faces its own direction of travel.
+function drawShadowFishSilhouette(ctx, x, y, size, dir, alphaMul) {
+  const bodyW = size;
+  const bodyH = size * 0.5;
+  const tailW = size * 0.45;
+  ctx.beginPath();
+  ctx.ellipse(x, y, bodyW / 2, bodyH / 2, 0, 0, Math.PI * 2);
+  ctx.moveTo(x - (bodyW / 2) * dir, y);
+  ctx.lineTo(x - (bodyW / 2 + tailW) * dir, y - bodyH * 0.45);
+  ctx.lineTo(x - (bodyW / 2 + tailW) * dir, y + bodyH * 0.45);
+  ctx.closePath();
+  ctx.globalAlpha = 0.05 * alphaMul;
+  ctx.lineWidth = size * 0.35;
+  ctx.strokeStyle = '#0a1420';
+  ctx.stroke();
+  ctx.fillStyle = '#0a1420';
+  ctx.fill();
+  ctx.globalAlpha = 0.12 * alphaMul;
+  ctx.fill();
+}
+
+function renderShadowFish(ctx, camera, canvasWidth, canvasHeight) {
+  ctx.save();
+  for (const f of shadowFish) {
+    const bobY = f.baseY + Math.sin(elapsed * f.bobFreq + f.bobPhase) * f.bobAmp;
+    const screen = worldToScreen(f.x, bobY, camera);
+    const size = f.size * camera.zoom;
+    if (screen.x < -size * 2 || screen.x > canvasWidth + size * 2 || screen.y < -size || screen.y > canvasHeight + size) continue;
+    // A slight tail-wag "squash" on the horizontal scale, same idea as a
+    // real fish's own tail animation, just baked into one silhouette shape
+    // rather than a separate animated tail segment — cheap enough to still
+    // read as "swimming," not just sliding.
+    const wag = 1 + Math.sin(elapsed * f.tailFreq + f.tailPhase) * 0.06;
+    ctx.save();
+    ctx.translate(screen.x, screen.y);
+    ctx.scale(wag, 1);
+    drawShadowFishSilhouette(ctx, 0, 0, size, f.dir, 1);
+    ctx.restore();
   }
   ctx.globalAlpha = 1;
   ctx.restore();
@@ -154,11 +243,110 @@ function renderSeaweed(ctx, camera, canvasWidth) {
   ctx.restore();
 }
 
-// Seaweed first (anchored right at the seabed line, reads as background
-// behind everything else on top of it) then bubbles (drift the whole water
-// column, so they should sit in front of the seaweed but — like everything
-// else this draws — still behind fish/items, which main.js renders after).
+// ---- Boulders ----
+// A handful of static, irregular rounded rock clusters sitting right on the
+// seabed floor line — per direct request ("major background additions...
+// boulders"), purely decorative scenery, same "no gameplay effect, nothing
+// outside this file ever reads it" rule as everything else here. Static
+// (no per-frame animation, unlike swaying seaweed) since a rock has no
+// reason to move — computed once at load and just redrawn every frame at
+// its own fixed spot.
+const BOULDER_COUNT = 7;
+function randomBoulder() {
+  const size = 26 + Math.random() * 30;
+  return {
+    x: Math.random() * WORLD_W,
+    size,
+    // Each boulder is a cluster of 3-4 overlapping circles at slightly
+    // different offsets/radii rather than one perfect circle, so the
+    // silhouette reads as "rock," not "ball."
+    bumps: Array.from({ length: 3 + Math.floor(Math.random() * 2) }, () => ({
+      dx: (Math.random() - 0.5) * size * 0.7,
+      r: size * (0.5 + Math.random() * 0.4),
+    })),
+    shade: 0.85 + Math.random() * 0.3, // per-boulder brightness variance so a cluster of them doesn't read as identical copies
+  };
+}
+const boulders = [];
+for (let i = 0; i < BOULDER_COUNT; i++) boulders.push(randomBoulder());
+
+function renderBoulders(ctx, camera, canvasWidth) {
+  ctx.save();
+  for (const b of boulders) {
+    const screen = worldToScreen(b.x, SEABED_FLOOR_Y, camera);
+    const size = b.size * camera.zoom;
+    if (screen.x < -size * 2 || screen.x > canvasWidth + size * 2) continue;
+    for (const bump of b.bumps) {
+      const r = bump.r * camera.zoom;
+      const grey = Math.round(90 * b.shade);
+      ctx.fillStyle = `rgb(${grey}, ${grey}, ${Math.round(grey * 1.08)})`;
+      ctx.beginPath();
+      ctx.arc(screen.x + bump.dx * camera.zoom, screen.y - r * 0.55, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    // A soft dark contact shadow where the boulder meets the floor, same
+    // "grounds it" trick the Mound's own rubble base uses.
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
+    ctx.beginPath();
+    ctx.ellipse(screen.x, screen.y, size * 0.75, size * 0.18, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// ---- Sea Urchins ----
+// Small spiky dark orbs dotted along the floor — per direct request ("major
+// background additions... sea urchins"). Static like boulders, just a
+// center dot plus a ring of thin radiating spike lines.
+const SEA_URCHIN_COUNT = 10;
+function randomSeaUrchin() {
+  return {
+    x: Math.random() * WORLD_W,
+    radius: 5 + Math.random() * 5,
+    spikeCount: 10 + Math.floor(Math.random() * 6),
+    hue: 265 + Math.random() * 30, // deep purple-violet, the classic urchin color
+  };
+}
+const seaUrchins = [];
+for (let i = 0; i < SEA_URCHIN_COUNT; i++) seaUrchins.push(randomSeaUrchin());
+
+function renderSeaUrchins(ctx, camera, canvasWidth) {
+  ctx.save();
+  for (const u of seaUrchins) {
+    const screen = worldToScreen(u.x, SEABED_FLOOR_Y, camera);
+    const r = u.radius * camera.zoom;
+    if (screen.x < -r * 4 || screen.x > canvasWidth + r * 4) continue;
+    const cy = screen.y - r * 0.6;
+    ctx.strokeStyle = `hsl(${u.hue}, 45%, 22%)`;
+    ctx.lineWidth = Math.max(1, camera.zoom);
+    for (let i = 0; i < u.spikeCount; i++) {
+      const angle = (i / u.spikeCount) * Math.PI * 2;
+      // Spikes only fan out through the upper half-ish (never straight down
+      // into the floor) — a real urchin's spines don't grow into the rock
+      // it's sitting on.
+      if (Math.sin(angle) > 0.7) continue;
+      ctx.beginPath();
+      ctx.moveTo(screen.x, cy);
+      ctx.lineTo(screen.x + Math.cos(angle) * r * 2.2, cy + Math.sin(angle) * r * 2.2);
+      ctx.stroke();
+    }
+    ctx.fillStyle = `hsl(${u.hue}, 40%, 16%)`;
+    ctx.beginPath();
+    ctx.arc(screen.x, cy, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// Boulders/urchins first (static seabed scenery, sits right at the floor),
+// then shadow fish (deep-background depth cue), then seaweed (anchored at
+// the same floor line), then bubbles (drift the whole water column, so they
+// sit in front of all of it) — but, like everything else this draws, still
+// behind the real fish/items main.js renders after.
 export function renderAmbience(ctx, state, canvasWidth, canvasHeight) {
+  renderBoulders(ctx, state.camera, canvasWidth);
+  renderSeaUrchins(ctx, state.camera, canvasWidth);
+  renderShadowFish(ctx, state.camera, canvasWidth, canvasHeight);
   renderSeaweed(ctx, state.camera, canvasWidth);
   renderBubbles(ctx, state.camera, canvasWidth, canvasHeight);
 }

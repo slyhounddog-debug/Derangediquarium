@@ -95,6 +95,7 @@ export function loadLevel(state, levelId) {
       firstFishDied: false,
       firstBuildingPlaced: false,
       firstCombine: false,
+      firstTier4Fish: false, // fires a chat message the first time any fish reaches Star Tier 4 (FISH_STAR_TIER_MAX) via combineFish — see Entities.js's own comment there
       firstFanPlaced: false,
       moneyMilestone1k: false,
       firstChatClosed: false, // fires the "you found the chat" line on the first CLOSE of the log, not the first open — see UI.js's notificationLatest click handler
@@ -158,7 +159,8 @@ export function loadLevel(state, levelId) {
     // very first encounter specifically comes noticeably sooner than every
     // later wave's own (now deterministic, not random) gap.
     alienNextWaveAtMs: Math.max(0, ALIEN_WAVE_INTERVAL_EARLY_MS - ALIEN_FIRST_WAVE_EARLY_MS),
-    nextAutosaveAtMs: AUTOSAVE_INTERVAL_MS, // Systems.js's updateAutosave — an absolute state.level.elapsed target, same shape as alienNextWaveAtMs above
+    nextAutosaveAtMs: AUTOSAVE_INTERVAL_MS, // Systems.js's updateAutosave — an absolute state.level.wallClockMs target (see that field's own comment), same shape as alienNextWaveAtMs above
+    wallClockMs: 0, // real dtMs added unconditionally every tick, paused or not (main.js's update()) — lets updateAutosave's 5-minute timer keep counting through a pause, unlike state.level.elapsed (real SIM time), which freezes solid the instant state.ui.paused is true
     nextPowerWarningCheckAtMs: POWER_WARNING_CHECK_INTERVAL_MS, // Systems.js's updatePowerWarnings — same absolute-target shape, checked (and re-rolled) every POWER_WARNING_CHECK_INTERVAL_MS regardless of whether a message actually posts that time
     alienWavesSpawned: 0,
     alienWaveActive: false, // true from the moment a wave spawns until every one of its portals has opened AND every alien it produced is dead — see Systems.js's updateAlienWaves; the next wave's own countdown doesn't even start until this clears

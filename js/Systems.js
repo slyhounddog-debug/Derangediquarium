@@ -173,7 +173,9 @@ function updateTurretTutorialTrigger(state) {
   if (flags.postAlienTutorialShown) return;
   flags.postAlienTutorialShown = true;
   if (!hasWasteTurretPlaced(state)) {
-    state.level.tutorialFlow = { id: 'postalien', step: 'shop' };
+    // Per direct request, skip the 'shop' step if the shop is already open.
+    const step = state.ui.shopCollapsed ? 'shop' : 'turret';
+    state.level.tutorialFlow = { id: 'postalien', step };
   }
 }
 
@@ -454,21 +456,24 @@ function updateRecipeCopyTip(state) {
   }
 }
 
-// Called once per tick from main.js's update().
-// Fires every AUTOSAVE_INTERVAL_MS of real elapsed sim time — since this is
-// only ever reached while the sim genuinely isn't paused/game-over/boss-
-// frozen (see main.js's update(), which gates every call to
-// updateStoryTriggers on those), it self-throttles for free with no extra
-// checks needed here. Reuses the exact same Save.js saveGame() the pause
-// menu's manual Save button already calls. Per direct request, the
+// Called once per tick directly from main.js's update(), ahead of the pause
+// gate — per direct request ("auto-save while paused, the 5 minute timer
+// should keep counting during pause"), so it's no longer scoped to
+// updateStoryTriggers (which IS still fully paused/game-over/boss-frozen).
+// Compares against state.level.wallClockMs (real dtMs, added unconditionally
+// every tick — see main.js's own comment on it) instead of the sim-time
+// state.level.elapsed this used to key off, which is what actually lets the
+// 5-minute interval keep counting through a pause instead of freezing solid
+// alongside everything else. Reuses the exact same Save.js saveGame() the
+// pause menu's manual Save button already calls. Per direct request, the
 // confirmation is a top-center toast (state.ui.toastText) rather than a
 // chat-log notification — a plain state.ui write, not rendering, so it
 // doesn't cross this module's own "no rendering" rule; UI.js's updateHUD is
 // what actually shows/hides it (see main.js's own state.ui.toastText
 // comment) — worded distinctly ("auto-saved," not "saved") so the player
 // can tell the two apart on the rare occasion they overlap.
-function updateAutosave(state) {
-  if (state.level.elapsed < state.level.nextAutosaveAtMs) return;
+export function updateAutosave(state) {
+  if (state.level.wallClockMs < state.level.nextAutosaveAtMs) return;
   state.level.nextAutosaveAtMs += AUTOSAVE_INTERVAL_MS;
   const ok = saveGame(state);
   state.ui.toastText = ok ? 'Game auto-saved. 💾' : 'Auto-save failed — your browser blocked it.';
@@ -556,7 +561,8 @@ export function updateStoryTriggers(state, dtMs) {
   updatePostAlienTutorial(state);
   updateMergeTutorialTrigger(state);
   updateRecipeCopyTip(state);
-  updateAutosave(state);
+  // updateAutosave(state) now runs from main.js directly, ahead of the pause
+  // gate this whole function is scoped behind — see its own comment.
   updatePowerWarnings(state);
   updateAchievements(state);
   updateIdlePurchaseHint(state);

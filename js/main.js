@@ -114,7 +114,7 @@ import {
 import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop } from './Engine.js';
 import { pushGameNotification } from './Notifications.js';
 import { loadLevel, LEVELS } from './Levels.js';
-import { updateStoryTriggers } from './Systems.js';
+import { updateStoryTriggers, updateAutosave } from './Systems.js';
 import { updateAmbience, renderAmbience } from './Ambience.js';
 import { resumeAudio, startGameMusic, playAlienHit, setBattleMusicActive, triggerBossMusic, playBuildPlace, playDemolish } from './Sound.js';
 import {
@@ -143,6 +143,7 @@ import {
   createMotherAlienFish,
   spawnTurretTutorialWaste,
   spawnChestTutorialWaste,
+  materializeChestSpawnPoints,
 } from './Entities.js';
 import {
   renderSeabedGrid,
@@ -179,6 +180,8 @@ import {
   isBuildingStalledOrPowerless,
   describeReplacement,
   placeTileWithReplace,
+  applyPipetteData,
+  collectDemolishSpawnPoints,
   computeBlueprintCostWithReplace,
   placeBlueprintWithReplace,
 } from './Grid.js';
@@ -561,6 +564,20 @@ const state = {
     undoAvailable: false, // whether main.js's Ctrl+Z undo stack currently has anything to undo — written by pushUndoEntry/performUndo, read by UI.js's bottom-left hotkey legend
     undoLabel: null, // 'Undo Place' | 'Undo Move' | 'Undo Sell' | null — what Ctrl+Z would currently do, shown in that same legend line
     shopCollapsed: true, // shop starts tucked away — just the toggle button — so it doesn't clutter the view
+    fanConesVisible: true, // whether every placed Fan's push-cone/arrow renders (Grid.js's renderFanIndicators) — G toggles this off/on for players with many fans cluttering the view; starts true, matching the old always-on behavior
+    buildingInfoTileKey: null, // "row,col" of whichever building's info modal is open, mirrored from UI.js's own module-local var (UI.js can't be imported back here) — Grid.js's renderFanIndicators reads this to highlight that one fan's cone while its modal is open
+    // Per direct request ("pipette tool copies recipe/filter from pipetted
+    // building") — UI.js's pipetteSelectBuilding captures the SPECIFIC
+    // pipetted tile's recipeId (Manufacturer/Power Plant)/filterItems
+    // (Platform/Fan) here; main.js's own placement code (both the plain and
+    // Fan-specific branches) applies whichever of these is non-null onto the
+    // freshly-placed building, then main.js clears them once placed (a
+    // pipetted recipe/filter is a one-time carry-over, not a standing "every
+    // future placement of this type" setting). selectBuildingForPreview
+    // resets both to null on every OTHER (non-pipette) selection, so they're
+    // never stale leftovers from an earlier, unrelated pipette.
+    pipetteRecipeId: null,
+    pipetteFilterItems: null,
     tankPanelCollapsed: true, // Tank Upgrades panel starts tucked away too — shares the shop's on-screen slot, only one is ever expanded (see UI.js's toggleShopCollapse/toggleTankPanel)
     tankPanelView: 'upgrades', // 'upgrades' | 'achievements' | 'customization' — which of the 3 views the Tank panel currently shows, see UI.js's setTankPanelView. Persists across a collapse/expand (only Escape/tool-select closes the panel, never resets which tab was showing)
     // Which hat the Customization preview canvas is currently showing —
@@ -604,6 +621,13 @@ const state = {
     fishInfoModalFishId: null,
     fishInfoModalFrozenX: 0,
     fishInfoModalFrozenY: 0,
+    // Same "captured once, at open time" snapshot as FrozenX/Y above, but for
+    // a Generator's (Electric Eel/Battery fish) last-completed-second MW
+    // total (fish.lastGeneratedMw) — per direct request, the modal shows
+    // what the fish was generating right before it opened, rather than a
+    // live figure that would just decay to 0 the instant the freeze above
+    // stops it from swimming (and thus producing) any further.
+    fishInfoModalFrozenGeneratedMw: 0,
     // Same locked-in-place freeze as the fish info modal above, for a Magnet
     // Fish's own item-filter modal — per direct request ("Make it so the
     // magnet fish stops when the filter modal is open just like when the
@@ -613,6 +637,11 @@ const state = {
     magnetFishFilterModalFishId: null,
     magnetFishFilterModalFrozenX: 0,
     magnetFishFilterModalFrozenY: 0,
+    // Mirrors the module-local fanAimingCell every render frame so Grid.js's
+    // renderFanIndicators can skip drawing that fan's OWN fixed-angle cone
+    // while renderFanAimGhost is drawing its live cursor-following one on
+    // top — see render()'s own comment.
+    fanAimingCell: null,
     paused: false, // pause menu open/closed (Escape); update() below skips simulating entirely while true
     // Time-manipulation HUD buttons, per direct request. timePaused freezes
     // fish/alien/building simulation while still letting the player build/
@@ -1817,6 +1846,13 @@ function recordAndRemoveTile(col, row) {
   if (!existingType || existingType === TILE_EMPTY) { removeTile(state, col, row); return; }
   const existingData = state.level.buildingData[`${row},${col}`];
   const clonedData = existingData ? JSON.parse(JSON.stringify(existingData)) : null;
+  // Per direct request — a Storage Chest's contents and any item mid-held by
+  // this tile (Refinery/Manufacturer/Collector) both get spawned/released
+  // right now, synchronously, BEFORE removeTile clears buildingData below —
+  // see collectDemolishSpawnPoints' own comment for why this can't just wait
+  // for the normal per-tick drain (it wouldn't run at all while paused).
+  const demolishSpawnPoints = collectDemolishSpawnPoints(state, col, row);
+  if (demolishSpawnPoints.length > 0) materializeChestSpawnPoints(state, demolishSpawnPoints);
   const moneyBefore = state.level.money;
   const removed = removeTile(state, col, row);
   if (!removed) return;
@@ -2118,6 +2154,7 @@ input.clickHandlers.push((sx, sy) => {
         // inherited-angle behavior requested.
         const result = placeTileWithReplace(state, col, row, buildingId, 0, shiftHeld);
         if (result.placed) {
+          applyPipetteData(state, col, row, buildingId);
           pushUndoEntry({ type: 'replace', col, row, oldBuildingId: result.oldBuildingId, oldData: result.oldData, netCost: result.info.netCost });
           showReplaceNetCostText(col * TILE_SIZE + TILE_SIZE / 2, row * TILE_SIZE + TILE_SIZE / 2, result.info.netCost);
         }
@@ -2130,6 +2167,7 @@ input.clickHandlers.push((sx, sy) => {
       const angle = angleFromTileToPoint(col, row, world.x, world.y);
       const result = placeTileWithReplace(state, col, row, buildingId, angle, shiftHeld);
       if (!result.placed) { handleBuildPlacementFailure(result.info.reason); return; }
+      applyPipetteData(state, col, row, buildingId);
       if (result.replaced) {
         pushUndoEntry({ type: 'replace', col, row, oldBuildingId: result.oldBuildingId, oldData: result.oldData, netCost: result.info.netCost });
         showReplaceNetCostText(col * TILE_SIZE + TILE_SIZE / 2, row * TILE_SIZE + TILE_SIZE / 2, result.info.netCost);
@@ -2191,7 +2229,8 @@ input.clickHandlers.push((sx, sy) => {
     // like the building modal"). A toggle-capable fish's click is deferred
     // through the double-click check above instead, and only ever reaches
     // openFishInfoMenu through ITS OWN timeout, never through this line.
-    if (clickedFish) { openFishInfoMenu(state, clickedFish.id); return; }
+    // Per direct request, the food tool prevents opening fish modals.
+    if (clickedFish && effectiveTool !== 'food') { openFishInfoMenu(state, clickedFish.id); return; }
   }
   // Per direct request ("the default cursor CANNOT drop food. The food tool
   // has to be selected to drop food") — this is the ONE and only place Food
@@ -2481,9 +2520,13 @@ input.keydownHandlers.push((e) => {
       state.level.scienceGreen += CHEAT_SCIENCE_GREEN_GRANT_AMOUNT; // per direct request, so Green-Science-gated Lab nodes/recipes can be tested without grinding a real Bio-Combuster/Manufacturer cycle
       state.meta.fishyGems += CHEAT_FISHY_GEMS_GRANT_AMOUNT; // per direct request, so the Customization panel's hats can be tested without grinding real achievement claims first
       break;
-    case 'KeyG': { // spawn selected species at cursor; Shift+G spawns fully grown
-      const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
-      spawnFishCheat(state, state.debug.selectedSpecies, world.x, world.y, e.shiftKey);
+    case 'KeyG': { // toggles every placed Fan's cone/arrow visibility on/off; Shift+G keeps the old debug "spawn selected species, fully grown, at cursor" cheat
+      if (e.shiftKey) {
+        const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
+        spawnFishCheat(state, state.debug.selectedSpecies, world.x, world.y, true);
+      } else {
+        state.ui.fanConesVisible = !state.ui.fanConesVisible;
+      }
       break;
     }
     case 'KeyU': // unlock all species, buildings, and every Science Lab tree node (including the whole Gene-Splicing hybrid tree)
@@ -2599,7 +2642,7 @@ input.keydownHandlers.push((e) => {
           const { col, row } = worldToTile(world.x, world.y);
           const tileType = getTile(state.level.grid, col, row);
           if (tileType && tileType !== TILE_EMPTY) {
-            pipetteSelectBuilding(state, tileType);
+            pipetteSelectBuilding(state, tileType, `${row},${col}`);
           } else if (state.ui.lastArmedTool) {
             if (state.ui.lastArmedTool.startsWith('fish:')) pipetteSelectSpecies(state, state.ui.lastArmedTool.slice('fish:'.length));
             else if (state.ui.lastArmedTool.startsWith('build:')) pipetteSelectBuilding(state, state.ui.lastArmedTool.slice('build:'.length));
@@ -2824,6 +2867,7 @@ function updateBuildDrag() {
   if (!buildResult.placed) handleBuildPlacementFailure(buildResult.info.reason);
   const placed = buildResult.placed;
   if (placed) {
+    applyPipetteData(state, col, row, buildingId);
     if (buildResult.replaced) {
       pushUndoEntry({ type: 'replace', col, row, oldBuildingId: buildResult.oldBuildingId, oldData: buildResult.oldData, netCost: buildResult.info.netCost });
       showReplaceNetCostText(col * TILE_SIZE + TILE_SIZE / 2, row * TILE_SIZE + TILE_SIZE / 2, buildResult.info.netCost);
@@ -3142,6 +3186,19 @@ function update(dtMs) {
   // satisfying "the tank blurry behind it" — it's just not animating.
   if (state.ui.gameStarted) updateAmbience(dtMs);
   if (!state.ui.gameStarted) return; // frozen until the player clicks Start on the first-launch start screen — render() still runs (a static frame), same "frozen but visible" pattern the pause menu already uses
+  // Per direct request ("auto-save while paused, the 5 minute timer should
+  // keep counting during pause") — state.level.elapsed (what the autosave
+  // timer used to compare against) is real SIM time, which freezes solid the
+  // instant state.ui.paused is true, same as everything else gated behind
+  // the pause check below. state.level.wallClockMs is a second, dedicated
+  // clock that instead just adds real dtMs every tick unconditionally,
+  // whether paused or not — advanced here, ahead of that gate, specifically
+  // so this one timer keeps ticking through a pause. updateAutosave itself
+  // now reads THIS clock instead of elapsed (see its own comment in
+  // Systems.js) and is called from here alone, not from updateStoryTriggers
+  // any more, so it's reachable no matter what state the game's in.
+  state.level.wallClockMs += dtMs;
+  if (!state.level.gameOver) updateAutosave(state);
   updateBattleMusic(state);
   // Cross-module flag (UI.js's buyLabUpgrade sets it, same pattern
   // state.ui.wasteTurretAmmoGainedPending already established) — the Mother Alien
@@ -3160,6 +3217,16 @@ function update(dtMs) {
     // from UI.js's buyLabUpgrade.
     triggerBossMusic();
   }
+  // Per direct request ("deleting a chest spawns all contents... even
+  // paused" / "any building holding/processing an item, if deleted, spawns
+  // item(s) even when paused") — the D-key delete gesture used to be
+  // entirely unreachable while paused (this whole function returns at the
+  // very next line whenever state.ui.paused is true), so there was no way to
+  // demolish anything while the player had deliberately paused to plan a
+  // layout. Moved up here, ahead of that gate, rather than duplicated —
+  // still skipped once the game's genuinely over (gameOver), same as every
+  // other pause-adjacent action.
+  if (!state.level.gameOver) updateKeyDDelete();
   if (state.ui.paused) return; // frozen behind the pause menu — render() still runs so the tank stays visible
   if (state.level.gameOver) return; // lost — frozen the same way, but via a separate flag so Escape still reaches the pause menu's Restart without also un-freezing a lost game (see Systems.js's updateBankruptcy)
   // Mother Alien Fish end-game boss sequence — see updateBossSequence's own
@@ -3201,7 +3268,8 @@ function update(dtMs) {
 
   updateCamera(state.camera, input, canvas, dtMs);
   updateBuildDrag();
-  updateKeyDDelete();
+  // updateKeyDDelete() now runs earlier, ahead of the pause gate above — see
+  // that call site's own comment for why.
   updateBlueprintToolGate();
   // Guided tutorial flows (see UI.js's TUTORIAL_FLOWS) freeze everything
   // else below — fish AI, coin/waste production, aliens, elapsed time —
@@ -3365,8 +3433,9 @@ function update(dtMs) {
 // as the tank gets dirtier — there's enough physical objects to act as the
 // dirtiness now") — the gradient is a fixed pair of colors now, no longer a
 // function of cleanliness at all.
-const WATER_TOP_CLEAN = { r: 58, g: 138, b: 184 };
-const WATER_BOTTOM_CLEAN = { r: 32, g: 100, b: 145 };
+// Per direct request, lighter water color — increased RGB values to brighten the gradient.
+const WATER_TOP_CLEAN = { r: 100, g: 160, b: 200 };
+const WATER_BOTTOM_CLEAN = { r: 70, g: 130, b: 170 };
 function waterBackgroundGradient(ctx, canvasHeight) {
   const top = `rgb(${WATER_TOP_CLEAN.r}, ${WATER_TOP_CLEAN.g}, ${WATER_TOP_CLEAN.b})`;
   const bottom = `rgb(${WATER_BOTTOM_CLEAN.r}, ${WATER_BOTTOM_CLEAN.g}, ${WATER_BOTTOM_CLEAN.b})`;
@@ -3777,6 +3846,16 @@ function render() {
   // fish/items the way it was before.
   renderAmbience(ctx, state, canvas.width, canvas.height);
 
+  // Per direct bug report ("after placing a fan, it renders a static cone
+  // AND a cone that follows the cursor") — while a fan's angle is still
+  // being confirmed (fanAimingCell armed), the fan is already sitting in
+  // state.level.buildingData with its OLD angle, so renderFanIndicators
+  // below would draw that fixed cone underneath the live-following
+  // renderFanAimGhost cone drawn later this same frame. Written here (not
+  // read directly from the module-local fanAimingCell) since Grid.js can't
+  // import main.js — same state.ui cross-module signal pattern used
+  // throughout this file.
+  state.ui.fanAimingCell = fanAimingCell;
   renderSeabedGrid(ctx, state, canvas.width, canvas.height);
   renderMound(ctx, state);
   renderScienceLab(ctx, state);
@@ -4315,7 +4394,15 @@ function render() {
         if (d < nearestFoodDist) { nearestFoodDist = d; nearestFood = item; }
       }
       const cursorDist = Math.hypot(cursorWorld.x - fish.x, cursorWorld.y - fish.y);
-      const lookTarget = nearestFood && nearestFoodDist < cursorDist ? nearestFood : cursorWorld;
+      // The cursor only wins this comparison (gets looked at over nearby
+      // Food) once it's the CLOSER of the two — that comparison is the real
+      // "range" for cursor-tracking. Per direct request ("double the range
+      // for when the fish starts looking at the cursor"), the cursor's
+      // distance is halved here (never the raw value used for the actual
+      // look-direction math below) so it out-competes Food from twice as
+      // far away as before.
+      const cursorLookDist = cursorDist / 2;
+      const lookTarget = nearestFood && nearestFoodDist < cursorLookDist ? nearestFood : cursorWorld;
       const dx = lookTarget.x - fish.x;
       const dy = lookTarget.y - fish.y;
       const dist = Math.hypot(dx, dy) || 1;

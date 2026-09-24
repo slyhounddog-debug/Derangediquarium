@@ -61,6 +61,7 @@ import {
   TILE_TURRET_WASTE,
   WASTE_TURRET_SHOTS_PER_WASTE,
   WASTE_TURRET_MAX_WASTE,
+  WASTE_TURRET_MAX_AMMO,
   BIOMASS_TURRET_SHOTS_PER_AMMO,
   BIOMASS_TURRET_DAMAGE_MULTIPLIER,
   ACHIEVEMENTS,
@@ -165,6 +166,38 @@ const LAB_ZOOM_MAX = 1.6;
 const LAB_ZOOM_STEP = 0.15;
 let labPurchaseNodeId = null; // node id the confirmation modal is currently showing, if any — see openLabPurchaseModal/confirmLabPurchase
 let powerGraphOpen = false; // the small rolling-graph popup under the electricity HUD readout — see #hud-power's click listener
+let hudInfoModalOpen = null; // which HUD stat's info modal is open ('money'/'scienceCap'/'cleanliness'), or null — see openHudInfoModal
+
+// Per direct request (a previously-ignored one, reiterated verbatim) —
+// clicking money/science-cap/cleanliness on the HUD opens a small info modal
+// to the left of the minimap instead of the old hover title tooltip. The
+// description text here is exactly what those title attributes used to say
+// (index.html no longer carries them). statFn/statLabel supply the
+// "correlating stat/min" line using the same theoretical-per-minute
+// functions the Tab stats panel already shows (see that panel's own rows
+// around line 3495) — Gold/min for money, Science/min for the science cap
+// (bubbles awaiting collection), and Waste/min for cleanliness (waste is
+// what dirties the tank).
+const HUD_INFO_DATA = {
+  money: {
+    icon: '💰', title: 'Money',
+    desc: 'Money — spend it on fish and food in the shop.',
+    statLabel: 'Gold/min',
+    statFn: (state) => `$${Math.round(computeTheoreticalGoldPerMinute(state))}`,
+  },
+  scienceCap: {
+    icon: '🔬', title: 'Science Bubbles',
+    desc: "Science Bubbles currently sitting in the tank, uncollected — capped by the Science Lab's Bubble Capacity upgrade.",
+    statLabel: 'Science/min',
+    statFn: (state) => computeTheoreticalSciencePerMinute(state).toFixed(1),
+  },
+  cleanliness: {
+    icon: '✨', title: 'Cleanliness',
+    desc: "Tank cleanliness — a dirty tank's fish produce less money, down to half at 0% clean.",
+    statLabel: 'Waste/min',
+    statFn: (state) => computeTheoreticalWastePerMinute(state).toFixed(1),
+  },
+};
 // familyId -> currently-selected tile id within that family (see Config.js's
 // BUILDING_FAMILIES) — reset to the highest-unlocked tier every time
 // buildBuildPalette rebuilds (init, the U cheat key, a Mound crack), then
@@ -295,6 +328,11 @@ export function initUI(state) {
     powerText: document.getElementById('hud-power-text'),
     powerArrow: document.getElementById('hud-power-arrow'),
     powerGraph: document.getElementById('hud-power-graph'),
+    hudInfoModal: document.getElementById('hud-info-modal'),
+    hudInfoModalTitle: document.getElementById('hud-info-modal-title'),
+    hudInfoModalDesc: document.getElementById('hud-info-modal-desc'),
+    hudInfoModalStat: document.getElementById('hud-info-modal-stat'),
+    hudHoverBubble: document.getElementById('hud-hover-bubble'),
     alienCountdown: document.getElementById('alien-countdown'),
     alienCountdownWave: document.getElementById('alien-countdown-wave'),
     alienCountdownSeconds: document.getElementById('alien-countdown-seconds'),
@@ -470,7 +508,7 @@ export function initUI(state) {
     if (e.target === els.recipeOverlay) closeRecipeMenu(); // clicked the backdrop, not the card — per direct spec ("clicking anywhere else will close the pop-up")
   });
   els.buildingInfoOverlay.addEventListener('click', (e) => {
-    if (e.target === els.buildingInfoOverlay) closeBuildingInfoMenu(); // same "click anywhere else closes it" precedent as the recipe/Mound pop-ups
+    if (e.target === els.buildingInfoOverlay) closeBuildingInfoMenu(state); // same "click anywhere else closes it" precedent as the recipe/Mound pop-ups
   });
   els.fishInfoOverlay.addEventListener('click', (e) => {
     if (e.target === els.fishInfoOverlay) closeFishInfoMenu(state); // same "click anywhere else closes it" precedent as every other fly-out pop-up here
@@ -496,7 +534,7 @@ export function initUI(state) {
       if (e.target !== overlay) return; // right-clicked the card itself, not empty backdrop space — leave it open
       e.preventDefault();
       closeRecipeMenu();
-      closeBuildingInfoMenu();
+      closeBuildingInfoMenu(state);
       closeFishInfoMenu(state);
       closePlatformFilterMenu(state);
       closeStorageChestModal();
@@ -643,6 +681,30 @@ export function initUI(state) {
     if (powerGraphOpen) { positionPowerGraph(state); renderPowerGraph(state); }
     (powerGraphOpen ? playPanelOpen : playPanelClose)();
   });
+
+  // The 3 clickable HUD stats — see HUD_INFO_DATA/openHudInfoModal above.
+  // Click opens/toggles the info modal; hover shows a cursor-following "?"
+  // bubble hinting that a click does something (per direct request). The
+  // modal itself closes on ANY other click or hotkey — see the document-level
+  // listeners just below.
+  for (const key of Object.keys(HUD_INFO_DATA)) {
+    const el = els[key];
+    el.addEventListener('click', (e) => { e.stopPropagation(); openHudInfoModal(state, key); });
+    el.addEventListener('mouseenter', () => els.hudHoverBubble.classList.remove('hidden'));
+    el.addEventListener('mousemove', (e) => {
+      els.hudHoverBubble.style.left = `${e.clientX + 14}px`;
+      els.hudHoverBubble.style.top = `${e.clientY - 10}px`;
+    });
+    el.addEventListener('mouseleave', () => els.hudHoverBubble.classList.add('hidden'));
+  }
+  // Click anywhere that isn't the modal itself or one of its 3 trigger
+  // elements closes it — per direct request ("disappear when anything else
+  // is clicked"). The triggers stopPropagation above so their own click
+  // (which may instead be a re-open of a DIFFERENT stat, handled by
+  // openHudInfoModal's own toggle logic) doesn't immediately re-close it here.
+  document.addEventListener('click', () => closeHudInfoModal());
+  // "...or any other hotkey is clicked" — any keydown closes it too.
+  document.addEventListener('keydown', () => closeHudInfoModal());
 
   els.musicVolumeSlider.value = String(Math.round(getMusicVolume() * 100));
   els.sfxVolumeSlider.value = String(Math.round(getSfxVolume() * 100));
@@ -921,6 +983,7 @@ export function openBuildingInfoMenu(state, tileKey) {
   buildingInfoMenuOpen = true;
   buildingInfoMenuClosing = false;
   buildingInfoTileKey = tileKey;
+  state.ui.buildingInfoTileKey = tileKey; // cross-module mirror — Grid.js can't import UI.js's own module-local var, see renderFanIndicators' fan-cone highlight
   if (buildingInfoMenuCloseTimer !== null) { clearTimeout(buildingInfoMenuCloseTimer); buildingInfoMenuCloseTimer = null; }
   closeSidePanels(state);
   els.buildingInfoOverlay.classList.remove('hidden');
@@ -933,11 +996,12 @@ export function openBuildingInfoMenu(state, tileKey) {
   playPanelOpen();
 }
 
-export function closeBuildingInfoMenu() {
+export function closeBuildingInfoMenu(state) {
   if (!buildingInfoMenuOpen) return;
   buildingInfoMenuOpen = false;
   buildingInfoMenuClosing = true;
   buildingInfoTileKey = null;
+  state.ui.buildingInfoTileKey = null;
   els.buildingInfoMenu.classList.add('building-info-menu-closed');
   buildingInfoMenuCloseTimer = setTimeout(() => {
     els.buildingInfoOverlay.classList.add('hidden');
@@ -969,9 +1033,9 @@ function refreshBuildingInfoMenu(state) {
     const [row, col] = buildingInfoTileKey.split(',').map(Number);
     return getTile(state.level.grid, col, row);
   })();
-  if (!type) { closeBuildingInfoMenu(); return; }
+  if (!type) { closeBuildingInfoMenu(state); return; }
   const def = BUILDING_TYPES[type];
-  if (!def) { closeBuildingInfoMenu(); return; }
+  if (!def) { closeBuildingInfoMenu(state); return; }
   els.buildingInfoIcon.textContent = def.icon;
   els.buildingInfoName.textContent = def.name;
   els.buildingInfoDesc.textContent = def.description;
@@ -1002,7 +1066,15 @@ function refreshBuildingInfoLiveStats(state) {
   const uptimeLine = uptimeFraction === null
     ? '⏱️ Uptime: <b>warming up...</b>'
     : `⏱️ Uptime (3 min): <b>${Math.round(uptimeFraction * 100)}%</b>`;
-  els.buildingInfoLiveStats.innerHTML = `<div class="building-stat">${powerLine}</div><div class="building-stat">${uptimeLine}</div>`;
+  let html = `<div class="building-stat">${powerLine}</div><div class="building-stat">${uptimeLine}</div>`;
+  if (TURRET_AMMO_TILES.has(data.type)) {
+    const ammoWaste = data.ammoWaste || 0;
+    const ammoBiomass = data.ammoBiomass || 0;
+    const totalAmmo = ammoWaste + ammoBiomass;
+    const ammoLine = `${itemIconImgHtml('waste')} <b>${ammoWaste}</b> · ${itemIconImgHtml('biomass')} <b>${ammoBiomass}</b> (${totalAmmo}/${WASTE_TURRET_MAX_AMMO})`;
+    html += `<div class="building-stat">${ammoLine}</div>`;
+  }
+  els.buildingInfoLiveStats.innerHTML = html;
 }
 
 // ---- Fish info modal ----
@@ -1022,6 +1094,7 @@ export function openFishInfoMenu(state, fishId) {
   state.ui.fishInfoModalFishId = fishId;
   state.ui.fishInfoModalFrozenX = fish.x;
   state.ui.fishInfoModalFrozenY = fish.y;
+  state.ui.fishInfoModalFrozenGeneratedMw = fish.lastGeneratedMw || 0; // see this field's own comment in main.js's initial ui state
   if (fishInfoMenuCloseTimer !== null) { clearTimeout(fishInfoMenuCloseTimer); fishInfoMenuCloseTimer = null; }
   closeSidePanels(state);
   els.fishInfoOverlay.classList.remove('hidden');
@@ -1112,6 +1185,7 @@ export function refreshFishInfoMenu(state) {
   if (stats.wasteEatenPerMin != null) rows.push(`<div>Waste eaten/min: <b>${stats.wasteEatenPerMin.toFixed(1)}</b></div>`);
   if (stats.sciencePerMin != null) rows.push(`<div>Science/min: <b>${stats.sciencePerMin.toFixed(1)}</b></div>`);
   if (stats.foodPerMin != null) rows.push(`<div>Food/min: <b>${stats.foodPerMin.toFixed(1)}</b></div>`);
+  if (stats.generatedMwLastSec != null) rows.push(`<div>⚡ Electricity generated: <b>${stats.generatedMwLastSec}mw</b></div>`);
   els.fishInfoStats.innerHTML = rows.join('');
 
   const mergeLines = describeFishMergeOptions(state, fish);
@@ -1279,11 +1353,15 @@ function refreshPlatformFilterMenu(state) {
   // checkbox mechanics underneath (a plain array of item-type ids) are
   // identical either way, only the wording differs.
   els.platformFilterTitle.textContent = target.kind === 'fish' ? 'Magnet Filter' : target.isFan ? 'Fan Filter' : 'Item Filter';
+  // Per direct request, the hint also notes the drag-and-drop copy shortcut
+  // (main.js's platformFilterDragSourceKey/copyPlatformFilter above) — same
+  // "drag one placed tile onto another" gesture the Blueprint tool's own
+  // recipe-copy uses, not obvious from the pop-up alone.
   els.platformFilterHint.textContent = target.kind === 'fish'
     ? 'Nothing is attracted by default — click an item to have this fish\'s magnet pull it in too.'
     : target.isFan
-      ? 'Everything is blown by default — click an item to exclude it from this fan’s force.'
-      : 'Everything is blocked by default — click an item to let it pass through.';
+      ? 'Everything is blown by default — click an item to exclude it from this fan’s force. Drag this fan onto another to copy its filter.'
+      : 'Everything is blocked by default — click an item to let it pass through. Drag this platform onto another to copy its filter.';
   els.platformFilterClearBtn.title = target.kind === 'fish'
     ? 'Back to attracting Waste only'
     : target.isFan
@@ -1293,8 +1371,18 @@ function refreshPlatformFilterMenu(state) {
   els.platformFilterItems.innerHTML = '';
   for (const itemDef of PLATFORM_FILTER_ITEM_TYPES) {
     const isListed = target.array.includes(itemDef.id);
+    // A Fan's array is an EXCLUDE list (Grid.js's computeFanForce skips an
+    // item in it — "everything is blown by default, click to exclude"), the
+    // opposite sense of a Platform's/Magnet Fish's own INCLUDE list — so
+    // "this item is actively affected" (blown/passes/attracted) is isListed
+    // for those two but !isListed for a Fan. Per direct bug report, the
+    // checkmark/red-X and green/red border below were both still keying off
+    // the raw isListed for a Fan too, so a freshly-placed Fan (empty
+    // exclude array, "blows everything") showed every item as a red ❌
+    // "blocked" instead of the intended all-green ✅ "blown."
+    const affected = target.isFan ? !isListed : isListed;
     const btn = document.createElement('button');
-    btn.className = 'platform-filter-item' + (isListed ? ' pass' : ' block');
+    btn.className = 'platform-filter-item' + (affected ? ' pass' : ' block');
     // Real item art instead of the plain emoji — per direct request ("change
     // the filter icons in the filter modal to match the actual object in
     // the game rather than use emojis") — same drawItemIconCanvas every
@@ -1312,7 +1400,7 @@ function refreshPlatformFilterMenu(state) {
     label.textContent = itemDef.label;
     const badge = document.createElement('div');
     badge.className = 'platform-filter-item-badge';
-    badge.textContent = isListed ? '✅' : '❌';
+    badge.textContent = affected ? '✅' : '❌';
     btn.appendChild(icon);
     btn.appendChild(label);
     btn.appendChild(badge);
@@ -2160,9 +2248,9 @@ function fishEconomyStatsHtml(speciesId) {
   // Money line above uses.
   if (s.behavior.includes('GENERATOR') && !s.behavior.includes('FEEDER')) {
     const baseSpeed = s.swimSpeed * FISH_SPEED_MULTIPLIER;
-    const babyMwPerMin = (baseSpeed / baby.pixelsPerMW) * 60;
-    const adultMwPerMin = (baseSpeed / adult.pixelsPerMW) * 60;
-    html += `<div class="building-stat">⚡ Power: <b>${Math.round(babyMwPerMin)} - ${Math.round(adultMwPerMin)} mw/min</b></div>`;
+    const babyMwPerSec = baseSpeed / baby.pixelsPerMW;
+    const adultMwPerSec = baseSpeed / adult.pixelsPerMW;
+    html += `<div class="building-stat">⚡ Power: <b>${Math.round(babyMwPerSec)} - ${Math.round(adultMwPerSec)} mw/sec</b></div>`;
   }
   // Per direct request ("add in a stat line for the octopus in the shop for
   // how much blue science it makes"). A pure Researcher (RESEARCHER without
@@ -3794,9 +3882,22 @@ export function pipetteSelectSpecies(state, speciesId) {
   if (species) selectSpeciesForPreview(state, species);
 }
 
-export function pipetteSelectBuilding(state, buildingId) {
+// tileKey ("row,col") is the SPECIFIC pipetted building instance — per
+// direct request ("pipette tool copies recipe/filter from pipetted
+// building"), its own recipeId (Manufacturer/Power Plant)/filterItems
+// (Platform/Fan) rides along in state.ui.pipetteRecipeId/pipetteFilterItems
+// for main.js's placement code to apply to the next thing actually placed
+// with this tool. Optional/defaults to null so every OTHER caller (there are
+// none today, but keeps the signature safe) still works with just a
+// buildingId, same as before.
+export function pipetteSelectBuilding(state, buildingId, tileKey = null) {
   const building = BUILDING_TYPES[buildingId];
-  if (building) selectBuildingForPreview(state, building);
+  if (!building) return;
+  selectBuildingForPreview(state, building); // resets pipetteRecipeId/pipetteFilterItems to null first — see its own comment
+  const data = tileKey ? state.level.buildingData[tileKey] : null;
+  if (!data) return;
+  if (buildingId === TILE_MANUFACTURER || buildingId === TILE_POWER_PLANT) state.ui.pipetteRecipeId = data.recipeId || null;
+  if (data.filterItems) state.ui.pipetteFilterItems = [...data.filterItems];
 }
 
 // Buildings share the exact same preview window as species (same box, same
@@ -3806,6 +3907,12 @@ export function pipetteSelectBuilding(state, buildingId) {
 function selectBuildingForPreview(state, building) {
   currentPreviewBuilding = building;
   currentPreviewSpecies = null;
+  // A fresh (non-pipette) selection always starts clean — pipetteSelectBuilding
+  // below re-populates these right after calling this same function, for the
+  // one case they should actually be set. See state.ui.pipetteRecipeId's own
+  // comment in main.js's initial ui state.
+  state.ui.pipetteRecipeId = null;
+  state.ui.pipetteFilterItems = null;
   stopPreviewAnimation(); // no idle-swim animation for a building — it's a static tile icon
   els.previewEmpty.classList.add('hidden');
   els.previewContent.classList.remove('hidden');
@@ -4148,6 +4255,40 @@ function cleanlinessColor(cleanliness) {
 // correctly at whatever size lands here with no separate scaling logic
 // needed. Called once on open and every frame it stays open (see
 // updateHUD), so it also tracks a live window resize.
+// Toggle-aware, same as #hud-power's own click handler — clicking the
+// currently-open stat's element again closes it instead of re-opening.
+function openHudInfoModal(state, key) {
+  if (hudInfoModalOpen === key) { closeHudInfoModal(); return; }
+  hudInfoModalOpen = key;
+  const info = HUD_INFO_DATA[key];
+  els.hudInfoModalTitle.textContent = `${info.icon} ${info.title}`;
+  els.hudInfoModalDesc.textContent = info.desc;
+  els.hudInfoModalStat.textContent = `${info.statLabel}: ${info.statFn(state)}`;
+  els.hudInfoModal.classList.remove('hidden');
+  positionHudInfoModal();
+  playPanelOpen();
+}
+
+function closeHudInfoModal() {
+  if (hudInfoModalOpen === null) return;
+  hudInfoModalOpen = null;
+  els.hudInfoModal.classList.add('hidden');
+  playPanelClose();
+}
+
+// Sized/positioned off #minimap-wrap's real bounding box — "similar size as
+// the minimap", positioned just to its left — same live-bounding-box
+// technique positionPowerGraph uses just below, for the same reason (both
+// are independently right-anchored fixed elements with no fixed relationship
+// in CSS alone).
+function positionHudInfoModal() {
+  const minimapRect = els.minimapWrap.getBoundingClientRect();
+  const gap = 8;
+  els.hudInfoModal.style.width = `${Math.round(minimapRect.width)}px`;
+  els.hudInfoModal.style.left = `${Math.round(minimapRect.left - minimapRect.width - gap)}px`;
+  els.hudInfoModal.style.top = `${Math.round(minimapRect.top)}px`;
+}
+
 function positionPowerGraph(state) {
   const hudRect = els.hud.getBoundingClientRect();
   const minimapRect = els.minimapWrap.getBoundingClientRect();
@@ -4346,6 +4487,14 @@ export function updateHUD(state) {
     els.powerArrow.classList.remove('open');
   }
 
+  // Keep the HUD info modal's stat line and position live while it's open,
+  // same "refresh every frame it's open" precedent as the power graph above.
+  if (hudInfoModalOpen !== null) {
+    const info = HUD_INFO_DATA[hudInfoModalOpen];
+    els.hudInfoModalStat.textContent = `${info.statLabel}: ${info.statFn(state)}`;
+    positionHudInfoModal();
+  }
+
   refreshPreviewInfo(state);
   if (!state.ui.shopCollapsed) refreshShopPrices(state);
   if (moundMenuOpen) refreshMoundThrowButton(state);
@@ -4360,7 +4509,7 @@ export function updateHUD(state) {
   // the popup if the underlying tile gets demolished out from under it.
   if (recipeMenuOpen && !state.level.buildingData[recipeMenuTileKey]) closeRecipeMenu();
   if (recipeMenuOpen || recipeMenuClosing) updateRecipeMenuPosition(state);
-  if (buildingInfoMenuOpen && !state.level.buildingData[buildingInfoTileKey]) closeBuildingInfoMenu(); // the tile it's showing got demolished (or moved) out from under it
+  if (buildingInfoMenuOpen && !state.level.buildingData[buildingInfoTileKey]) closeBuildingInfoMenu(state); // the tile it's showing got demolished (or moved) out from under it
   if (buildingInfoMenuOpen) refreshBuildingInfoLiveStats(state);
   if (buildingInfoMenuOpen || buildingInfoMenuClosing) updateBuildingInfoMenuPosition(state);
   // Fish info modal — refreshFishInfoMenu both rebuilds the content AND

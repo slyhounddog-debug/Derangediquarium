@@ -381,7 +381,15 @@ export function computeFishInfoModalStats(state, fish) {
   const isFeeder = def.behavior.includes('FEEDER');
   const isResearcher = def.behavior.includes('RESEARCHER');
   const isScavenger = def.behavior.includes('SCAVENGER');
+  const isPureGenerator = def.behavior.includes('GENERATOR') && !isFeeder;
   const blocked = fish.alienNearby || fish.dying;
+
+  // Per direct request ("electric eel info modal shows electricity
+  // generated") — the snapshot UI.js's openFishInfoMenu captured right
+  // before freezing the fish in place (see state.ui.fishInfoModalFrozenGeneratedMw's
+  // own comment for why a live figure wouldn't work once frozen).
+  let generatedMwLastSec = null;
+  if (isPureGenerator || fish.speciesId === 'eel_blimp') generatedMwLastSec = state.ui.fishInfoModalFrozenGeneratedMw;
 
   let goldPerMin = null, goldPenaltyPerMin = null;
   if (isFeeder) {
@@ -423,7 +431,7 @@ export function computeFishInfoModalStats(state, fish) {
     foodPerMin = (hungerRate * 60) / relief;
   }
 
-  return { goldPerMin, goldPenaltyPerMin, sciencePerMin, wastePerMin, wasteEatenPerMin, foodPerMin };
+  return { goldPerMin, goldPenaltyPerMin, sciencePerMin, wastePerMin, wasteEatenPerMin, foodPerMin, generatedMwLastSec };
 }
 
 // A Manufacturer recipe's theoretical items/min, assuming it's fed
@@ -1091,6 +1099,7 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
     distanceAccumPx: 0, // pure-Generator only — pixels swum since the last MW produced, see updateFish's GENERATOR branch
     powerTextAccumMw: 0, // pure-Generator only — MW banked toward the next once-per-second floating text, see updateFish's GENERATOR branch
     powerTextTimerMs: 0, // pure-Generator only — counts up to 1000ms before flushing powerTextAccumMw into a floating text
+    lastGeneratedMw: 0, // pure-Generator only — the most recently completed second's total MW, snapshotted alongside the powerTextAccumMw flush below; the fish info modal shows this since generation stops the instant the modal freezes the fish in place, per direct request ("electric eel info modal shows electricity generated")
     researchTickIndex: 0, // pure-Researcher only — which tenth of the current brew cycle's "+0.1" progress bubbles have already fired, see updateFish's RESEARCHER branch
     hungerChimesPlayed: 0, // how many of FISH_HUNGER_CHIME_FRACTIONS' 4 hunger-chime thresholds have fired since crossing into HUNGER_CRITICAL_THRESHOLD, reset to 0 once hunger drops back below it (e.g. after eating) — see updateFish
     hungerSeekBubbleEmitted: false, // guaranteed mouth bubble once per crossing into HUNGER_SEEK_THRESHOLD (the first "!" stage), reset once hunger drops back below it — see updateFish
@@ -1549,6 +1558,8 @@ export function canCombineFish(state, a, b) {
 
 const FIRST_COMBINE_MESSAGE =
   "You just smooshed two fish into one bigger, shinier fish. They're fine. Probably. It's basically fusion, and fusion is science, and science is great.";
+const FIRST_TIER_4_FISH_MESSAGE =
+  "That fish is now 4 Stars — as big and shiny as it gets. Nothing left to smoosh it into.";
 
 // Consumes both fish and spawns one Adult fish of the next star tier at
 // their midpoint — see Config.js's FISH_STAR_TIER_VALUE_MULTIPLIER for the
@@ -1574,7 +1585,13 @@ export function combineFish(state, a, b) {
   state.level.floatingTexts.push(
     createPickupText(x, y, `${newTier}★ ${SPECIES[speciesId].name}!`, FISH_STAR_COLOR)
   );
-  if (newTier >= FISH_STAR_TIER_MAX) state.meta.stats.fourStarFishAchieved = 1; // four_star_fish achievement
+  if (newTier >= FISH_STAR_TIER_MAX) {
+    state.meta.stats.fourStarFishAchieved = 1; // four_star_fish achievement
+    if (!state.level.tutorialFlags.firstTier4Fish) {
+      state.level.tutorialFlags.firstTier4Fish = true;
+      pushStoryNotification(state, FIRST_TIER_4_FISH_MESSAGE);
+    }
+  }
   if (!state.level.tutorialFlags.firstCombine) {
     state.level.tutorialFlags.firstCombine = true;
     pushStoryNotification(state, FIRST_COMBINE_MESSAGE);
@@ -3031,6 +3048,7 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
     fish.powerTextTimerMs += dtMs;
     if (fish.powerTextTimerMs >= 1000) {
       fish.powerTextTimerMs -= 1000; // subtract rather than reset to 0, so a slight overshoot doesn't compound into drift over a long session
+      fish.lastGeneratedMw = fish.powerTextAccumMw; // snapshot BEFORE the reset below — see this field's own init comment
       if (fish.powerTextAccumMw > 0) {
         state.level.floatingTexts.push(createPickupText(fish.x, fish.y, `+${fish.powerTextAccumMw} ⚡`, POWER_COLOR));
         fish.powerTextAccumMw = 0;
@@ -3363,6 +3381,41 @@ function applyScatterLaunch(item) {
   item.vy = Math.sin(angle) * STORAGE_CHEST_SCATTER_LAUNCH_SPEED;
 }
 
+// Turns Grid.js's plain chest-eject spawn-point records (trickle/clear/
+// cross-family-replace, and now a plain demolish too — see its own
+// collectDemolishSpawnPoints) into real item entities. Exported (rather than
+// staying inlined in updateEntities below) specifically so main.js's
+// demolish handler can call it SYNCHRONOUSLY, at the moment a Storage Chest
+// is actually deleted, instead of only ever draining through the normal
+// per-tick pendingChestEjectSpawnPoints queue below — which wouldn't run at
+// all while paused. Every world-wide spawn cap (Waste/Biomass/Alien DNA/
+// Bubble Cap) still applies exactly the same way either way.
+export function materializeChestSpawnPoints(state, points) {
+  for (const point of points) {
+    let item = null;
+    if (point.itemType === 'coin') item = createCoin(point.x, point.y, point.coinValue);
+    else if (point.itemType === 'food') item = createFood(point.x, point.y);
+    else if (point.itemType === 'waste') { if (canSpawnMoreWaste(state)) item = createWaste(point.x, point.y); }
+    else if (point.itemType === 'science') { if (countScienceCapacityUsed(state) < effectiveScienceCapacity(state)) item = createScience(point.x, point.y); }
+    else if (point.itemType === 'science_green') { if (countScienceCapacityUsed(state) < effectiveScienceCapacity(state)) item = createScienceGreen(point.x, point.y); }
+    else if (point.itemType === 'biomass') { if (canSpawnMoreBiomass(state)) item = createBiomass(point.x, point.y); }
+    else if (point.itemType === 'alien_dna') { if (canSpawnMoreAlienDna(state)) item = createAlienDna(point.x, point.y); }
+    else if (point.itemType === 'mutagen_paste') item = createMutagenPaste(point.x, point.y);
+    else if (point.itemType === 'alien_egg') item = createAlienEgg(point.x, point.y);
+    if (!item) continue;
+    if (point.angle !== null) applyDistanceLaunch(item, point.angle, point.distanceTiles);
+    else applyScatterLaunch(item);
+    state.level.items.push(item);
+    // point.key is null for a Shift-click Replace's own chest eject (see
+    // Grid.js's applyReplacementMutation) — that exact "row,col" key may
+    // already belong to a brand-new, non-chest building's data by now, so
+    // this also confirms recentEjections itself exists (not just any truthy
+    // buildingData entry) before pushing onto it.
+    const chestData = point.key != null ? state.level.buildingData[point.key] : null;
+    if (chestData && chestData.recentEjections) chestData.recentEjections.push({ id: item.id, expiresAtMs: state.level.elapsed + point.cooldownMs });
+  }
+}
+
 export function updateEntities(state, dtMs) {
   maybeWarnBioSludgePile(state);
   updateAlienPortals(state);
@@ -3456,29 +3509,7 @@ export function updateEntities(state, dtMs) {
   // these) rather than a second, driftable copy of this dispatch.
   const replaceEjectPoints = state.level.pendingChestEjectSpawnPoints;
   state.level.pendingChestEjectSpawnPoints = [];
-  for (const point of [...chestSpawnPoints, ...replaceEjectPoints]) {
-    let item = null;
-    if (point.itemType === 'coin') item = createCoin(point.x, point.y, point.coinValue);
-    else if (point.itemType === 'food') item = createFood(point.x, point.y);
-    else if (point.itemType === 'waste') { if (canSpawnMoreWaste(state)) item = createWaste(point.x, point.y); }
-    else if (point.itemType === 'science') { if (countScienceCapacityUsed(state) < effectiveScienceCapacity(state)) item = createScience(point.x, point.y); }
-    else if (point.itemType === 'science_green') { if (countScienceCapacityUsed(state) < effectiveScienceCapacity(state)) item = createScienceGreen(point.x, point.y); }
-    else if (point.itemType === 'biomass') { if (canSpawnMoreBiomass(state)) item = createBiomass(point.x, point.y); }
-    else if (point.itemType === 'alien_dna') { if (canSpawnMoreAlienDna(state)) item = createAlienDna(point.x, point.y); }
-    else if (point.itemType === 'mutagen_paste') item = createMutagenPaste(point.x, point.y);
-    else if (point.itemType === 'alien_egg') item = createAlienEgg(point.x, point.y);
-    if (!item) continue;
-    if (point.angle !== null) applyDistanceLaunch(item, point.angle, point.distanceTiles);
-    else applyScatterLaunch(item);
-    state.level.items.push(item);
-    // point.key is null for a Shift-click Replace's own chest eject (see
-    // Grid.js's applyReplacementMutation) — that exact "row,col" key may
-    // already belong to a brand-new, non-chest building's data by now, so
-    // this also confirms recentEjections itself exists (not just any truthy
-    // buildingData entry) before pushing onto it.
-    const chestData = point.key != null ? state.level.buildingData[point.key] : null;
-    if (chestData && chestData.recentEjections) chestData.recentEjections.push({ id: item.id, expiresAtMs: state.level.elapsed + point.cooldownMs });
-  }
+  materializeChestSpawnPoints(state, [...chestSpawnPoints, ...replaceEjectPoints]);
   for (const shot of turretShots) state.level.turretProjectiles.push(createTurretProjectile(shot));
   // Runs before the entities filter loop below, same as the old direct-
   // mutation turret code did, so a lethal hit lands and gets cleaned up in

@@ -642,7 +642,7 @@ export const ITEM_PUSH_IMPULSE_SPEED = 3;
 // ---- Economy & feeding ----
 export const FOOD_COST = 3; // $ per food pellet, matches the Buy Food shop entry — lowered from 5 so the early economy isn't so punishing to get rolling
 export const FOOD_RADIUS = 6.6; // px, visual + despawn-on-floor check — 10% bigger (was 6) per direct request ("increase the size of all the objects by 10%")
-export const FOOD_COLOR = '#ffb238'; // orange — was a green (#8bc34a) close enough to WASTE_COLOR's olive-green to be hard to tell apart at a glance; per direct request, distinct now
+export const FOOD_COLOR = '#e74c3c'; // red — distinct from coins (bronze/silver/gold/diamond), waste (gray), and science (blue/purple)
 // Stationary-to-Waste (Entities.js's updateFood): replaces the old
 // FOOD_FLOOR_GRACE_MS despawn-on-the-floor mechanic and the Food Capacity
 // cap alike, per direct request — instead of limiting how much food can
@@ -1341,7 +1341,7 @@ export const SPECIES = {
   // isSpliceSource.
   suckerfish: {
     id: 'suckerfish', name: 'Suckerfish', tier: 2, unlockPhase: 3, cost: 20, // cut from 25 per direct request
-    description: 'Only eats Waste, never Food — keeps the tank clean.',
+    description: 'Only eats Waste, never Food — keeps the tank clean. Cannot die from hunger.',
     behavior: ['SCAVENGER'], dropType: 'waste_cleared',
     swimSpeed: 30, lifespan: 300000,
     hungerRate: 0.609, // 25% slower again per direct request — was 0.812. Entities.js's updateFish targets Waste items (never Food) for any species carrying the SCAVENGER tag. Deliberately flat across all 3 stages (unlike dropInterval below) — per direct request, a baby eats less OFTEN than an adult but still starves on the same overall clock.
@@ -1363,7 +1363,7 @@ export const SPECIES = {
   },
   electric_eel: {
     id: 'electric_eel', name: 'Electric Eel', tier: 2, unlockPhase: 3, cost: 35, // cut from 80 per direct request
-    description: 'Primary MW supply. Must be fed to keep generating.',
+    description: 'Primary MW supply based on movement speed. Must be fed to keep generating.',
     behavior: ['GENERATOR'], dropType: 'power',
     swimSpeed: 20, lifespan: 300000, hungerRate: 0.582, // 25% slower again per direct request — was 0.776
     // pixelsPerMW replaces the old timer+speed-multiplier scheme for a pure
@@ -1384,7 +1384,7 @@ export const SPECIES = {
   },
   octopus: {
     id: 'octopus', name: 'Science Octopus', tier: 3, unlockPhase: 4, cost: 60, // cut from 90 per direct request
-    description: 'Slowly brews Science Bubbles — collect them like coins.',
+    description: 'Slowly brews Science Bubbles — requires a Collector building to gather them.',
     behavior: ['RESEARCHER'], dropType: 'science_blue',
     swimSpeed: 25, lifespan: 300000, hungerRate: 0.468, // 25% slower again per direct request — was 0.624
     // dropInterval is now a real long brew cycle, not a short speed-scaled
@@ -1546,7 +1546,7 @@ export const BUILDING_COST_GROWTH_RATE_TIER3 = 1.09; // base cost > $200
 export const BUILDING_TYPES = {
   [TILE_PLATFORM]: {
     id: TILE_PLATFORM, name: 'Platform', icon: '🧱', cost: PLATFORM_FLAT_COST,
-    description: 'Solid floor. Items land and rest on top — cheap, optional item routing.',
+    description: 'Solid floor. Items land and rest on top — cheap, optional item routing. Click to filter which items pass through. Press R to cycle platform shape.',
     color: '#dba36f', unlockedByDefault: true, // available from level start, unchanged — no longer load-bearing for whether anything ELSE can be placed, though (see canPlaceTile's own comment)
   },
   // Same material/cost as plain Platform (see getBuildingCost's own
@@ -1597,36 +1597,36 @@ export const BUILDING_TYPES = {
   },
   [TILE_FAN_T2]: {
     id: TILE_FAN_T2, name: 'Rudimentary Fan', icon: '🌀', cost: 15,
-    description: `Blows a cone of force wherever you aim it. Free, but short reach (${FAN_T2_MAX_RANGE}px) and weak — struggles to lift a coin.`,
+    description: `Blows a cone of force wherever you aim it — you can filter what gets blown. Free, but short reach (${FAN_T2_MAX_RANGE}px) and weak — struggles to lift a coin. Press G to hide/show every fan's cone.`,
     color: '#9fd8ff', unlockedByDefault: true, // per direct request — no longer gated behind the Mound's old paid "Tier 1.75" step, available from level start alongside Platform/Waste Turret
   },
   [TILE_FAN_T3]: {
     id: TILE_FAN_T3, name: 'Electric Fan', icon: '💨', cost: 45,
-    description: `Draws power for medium reach (${FAN_T3_MAX_RANGE}px) — enough to route most coins.`,
+    description: `Draws power for medium reach (${FAN_T3_MAX_RANGE}px) — enough to route most coins. Press G to hide/show every fan's cone.`,
     color: '#5fb8ff', unlockedByDefault: false,
   },
   [TILE_FAN_T4]: {
     id: TILE_FAN_T4, name: 'Turbo Fan', icon: '🌪️', cost: 120,
-    description: `Longest reach (${FAN_T4_MAX_RANGE}px), gentle enough to suspend a coin mid-air. Draws power.`,
+    description: `Longest reach (${FAN_T4_MAX_RANGE}px), gentle enough to suspend a coin mid-air. Draws power. Press G to hide/show every fan's cone.`,
     color: '#2f7fd6', unlockedByDefault: false,
   },
   [TILE_TURRET_WASTE]: {
-    id: TILE_TURRET_WASTE, name: 'Waste Turret', icon: '🔫', cost: 25,
+    id: TILE_TURRET_WASTE, name: 'Waste Turret', icon: '🔫', cost: 40,
     // Per direct request ("change the description of turrets to mention
     // biomass as well") — Biomass now doubles as premium ammo (see
     // BIOMASS_TURRET_DAMAGE_MULTIPLIER/BIOMASS_TURRET_SHOTS_PER_AMMO), for
     // any tile in TURRET_AMMO_TILES (this tier and Electric, below).
-    description: 'Auto-fires on the nearest alien. Feeds itself from any Waste (or Biomass, for more damage per shot) touching it.',
+    description: 'Auto-fires on the nearest alien with global range. Feeds itself from any Waste (or Biomass, for more damage per shot) touching it.',
     color: '#9c8a6b', unlockedByDefault: true, // free from the start, alongside Platform — the only defense before the Science Lab exists
   },
   [TILE_TURRET_ELECTRIC]: {
     id: TILE_TURRET_ELECTRIC, name: 'Electric Waste Turret', icon: '🔫', cost: 55,
-    description: 'Faster and harder-hitting than the Waste Turret. Needs BOTH Waste (or Biomass) ammo and power to fire.',
+    description: 'Faster and harder-hitting than the Waste Turret with global range. Needs BOTH Waste (or Biomass) ammo and power to fire.',
     color: '#5fb8ff', unlockedByDefault: false,
   },
   [TILE_TURRET_ADVANCED]: {
     id: TILE_TURRET_ADVANCED, name: 'Advanced Turret', icon: '🔫', cost: 130,
-    description: 'The strongest turret — fastest, hardest-hitting.',
+    description: 'The strongest turret with global range — fastest, hardest-hitting.',
     color: '#c9a8ff', unlockedByDefault: false,
   },
   // Renamed per direct request, same reasoning/shift as the Collector family
@@ -2696,7 +2696,7 @@ export const ECONOMY_FISH_COST_GROWTH_RATE = 1.25; // was 1.4, reduced per direc
 // the adult sprite per tier — deliberately NOT a plain tier-1 count (Tier 2
 // jumps straight to 2 stars, not 1), per the design spec's exact table.
 export const FISH_STAR_TIER_MAX = 4;
-export const FISH_STAR_TIER_VALUE_MULTIPLIER = 1.8; // was 1.5, raised per direct request
+export const FISH_STAR_TIER_VALUE_MULTIPLIER = 2; // was 1.8 (before that 1.5) — raised per direct request so a Tier 4 fish makes exactly double a Tier 3 fish of the same species (and each tier step doubles the previous, since this is a flat per-step multiplier — see Entities.js's Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, starTier - 1) usage)
 // Each combine step also makes the resulting fish 10% less hungry than the
 // previous tier (compounding, same ^(starTier-1) pattern as the value
 // multiplier above) — see Entities.js's updateFish, applied to def.hungerRate
@@ -2752,8 +2752,8 @@ export const TURRET_TUTORIAL_DELAY_MS = 1000;
 // Turret's own base cost (BUILDING_TYPES[TILE_TURRET_WASTE].cost) exactly,
 // so the step is always affordable regardless of how the player already
 // spent their starting money.
-export const TURRET_TUTORIAL_GOLD_GRANT = 25;
-export const TURRET_TUTORIAL_GOLD_GRANT_MESSAGE = "Here's 25 gold — go place that turret.";
+export const TURRET_TUTORIAL_GOLD_GRANT = 40;
+export const TURRET_TUTORIAL_GOLD_GRANT_MESSAGE = "Here's 40 gold — go place that turret.";
 // Per direct request ("the tutorial can break if there's no waste on
 // screen... produce a waste slightly left from middle in the city, and make
 // that the waste that's used for the dragging part") — both paths that lead

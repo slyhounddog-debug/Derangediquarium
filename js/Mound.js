@@ -28,6 +28,14 @@ import { pushGameNotification } from './Notifications.js';
 
 const MOUND_WIDTH_PX = MOUND_WIDTH_TILES * TILE_SIZE;
 export const MOUND_X = WORLD_W / 2; // world-space center, fixed for the life of the level
+// Per direct request ("move science lab up, out of the city completely") —
+// the Lab used to sit at the exact same footprint the Mound occupied (see
+// isPointOnScienceLab/renderScienceLab below), which put its own base 1 tile
+// INTO the seabed/city build area, overlapping the same buildable rows a
+// player's factory lives in. 3 tiles clears its base (MOUND_HEIGHT_PX+TILE_SIZE
+// tall, so a lift of 3 tiles leaves 2 tiles of open water between its lowest
+// point and SEABED_FLOOR_Y) well above the city floor, into open water.
+const SCIENCE_LAB_LIFT_PX = TILE_SIZE * 3;
 
 // Shimmer/gleam, per direct request ("make it so the mound and the science
 // lab shimmer/gleen like the other objects, but every 10-50 seconds") — see
@@ -127,7 +135,11 @@ export function crackMound(state) {
     // comment — but state.level.tutorialFlow is just data main.js/UI.js poll
     // every frame regardless of who set it). Naturally one-shot: this whole
     // branch can never run again once moundTeased is true.
-    if (!state.level.tutorialFlow) state.level.tutorialFlow = { id: 'chest', step: 'shop' };
+    if (!state.level.tutorialFlow) {
+      // Per direct request, skip the 'shop' step if the shop is already open.
+      const step = state.ui.shopCollapsed ? 'shop' : 'select';
+      state.level.tutorialFlow = { id: 'chest', step };
+    }
     return true;
   }
 
@@ -303,34 +315,38 @@ export function renderMound(ctx, state) {
 }
 
 // ---- Science Lab (Phase 4) ----
-// Sits at the exact same footprint the Mound occupied, revealed the instant
-// the Mound shatters (state.level.tier >= MOUND_MAX_TIER — see
-// isPointOnMound/renderMound's own early-returns above, which is what
-// leaves this footprint clear). Clicking it opens UI.js's Lab popup (same
-// pattern as the Mound's own "Throw money" popup — main.js's click handler
-// calls isPointOnScienceLab and, if true, opens that modal instead of
-// calling into this file directly), which is where Gene-Splicing is
-// actually purchased. This module only owns the hit-test and the render.
+// Shares the Mound's horizontal (X) position, revealed the instant the Mound
+// shatters (state.level.tier >= MOUND_MAX_TIER — see isPointOnMound/
+// renderMound's own early-returns above, which is what leaves the Mound's
+// own footprint clear). Vertically it sits SCIENCE_LAB_LIFT_PX higher than
+// the Mound ever did, though — per direct request ("move science lab up, out
+// of the city completely") — so it no longer overlaps the buildable seabed
+// rows the way the Mound's own base briefly did. Clicking it opens UI.js's
+// Lab popup (same pattern as the Mound's own "Throw money" popup — main.js's
+// click handler calls isPointOnScienceLab and, if true, opens that modal
+// instead of calling into this file directly), which is where Gene-Splicing
+// is actually purchased. This module only owns the hit-test and the render.
 export function isPointOnScienceLab(state, worldX, worldY) {
   if (state.level.tier < MOUND_MAX_TIER) return false;
   const left = MOUND_X - MOUND_WIDTH_PX / 2;
   const right = MOUND_X + MOUND_WIDTH_PX / 2;
-  const top = SEABED_FLOOR_Y - MOUND_HEIGHT_PX;
-  const bottom = SEABED_FLOOR_Y + TILE_SIZE;
+  const top = SEABED_FLOOR_Y - MOUND_HEIGHT_PX - SCIENCE_LAB_LIFT_PX;
+  const bottom = SEABED_FLOOR_Y + TILE_SIZE - SCIENCE_LAB_LIFT_PX;
   return worldX >= left && worldX <= right && worldY >= top && worldY <= bottom;
 }
 
 export function renderScienceLab(ctx, state) {
   if (state.level.tier < MOUND_MAX_TIER) return;
   const { camera } = state;
-  const topLeft = worldToScreen(MOUND_X - MOUND_WIDTH_PX / 2, SEABED_FLOOR_Y - MOUND_HEIGHT_PX, camera);
+  const topLeft = worldToScreen(MOUND_X - MOUND_WIDTH_PX / 2, SEABED_FLOOR_Y - MOUND_HEIGHT_PX - SCIENCE_LAB_LIFT_PX, camera);
   const w = MOUND_WIDTH_PX * camera.zoom;
   const h = (MOUND_HEIGHT_PX + TILE_SIZE) * camera.zoom;
   const cx = topLeft.x + w / 2;
 
   // A small rounded structure with a glowing dome — reads as "lab," not
-  // "dirt mound," at a glance, sitting on the same rubble base the Mound
-  // left behind so the transition doesn't feel like a random prop swap.
+  // "dirt mound," at a glance, still built on the same rubble-base visual
+  // language the Mound used so the transition doesn't feel like a random
+  // prop swap, just relocated higher up, clear of the city below.
   ctx.fillStyle = '#5a5a6e';
   ctx.fillRect(topLeft.x + w * 0.1, topLeft.y + h * 0.55, w * 0.8, h * 0.45);
 

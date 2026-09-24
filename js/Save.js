@@ -43,6 +43,16 @@ export function loadSaveGame() {
     // no existence check of its own (every other transient level array is
     // always guaranteed present by Levels.js's own fresh-level factory).
     if (!Array.isArray(parsed.level.pendingChestEjectSpawnPoints)) parsed.level.pendingChestEjectSpawnPoints = [];
+    // A save written before the autosave-while-paused change won't have this
+    // field at all — Systems.js's updateAutosave now compares against it
+    // instead of state.level.elapsed (see its own comment), and
+    // `undefined += dtMs` would go NaN forever, which fails the `<` check
+    // unconditionally and fires a real save EVERY single tick from then on.
+    // Defaults to 0, same "one-time reset is an acceptable side effect of the
+    // migration" precedent as migrateTurretAmmoFields below — worst case, an
+    // existing save's very next autosave takes a little longer than usual to
+    // arrive, never a crash or a spam-save.
+    if (typeof parsed.level.wallClockMs !== 'number') parsed.level.wallClockMs = 0;
     return { meta: parsed.meta, level: parsed.level };
   } catch (err) {
     console.error('Derangiquarium: load failed', err);
