@@ -801,17 +801,28 @@ function buildingCostGrowthRate(baseCost) {
   return BUILDING_COST_GROWTH_RATE_TIER1;
 }
 
+// The shared formula behind getBuildingCost, taking the "already placed"
+// count as a plain argument instead of reading it live off the grid — pulled
+// out on its own so computeSnapLine below can simulate the progressively
+// climbing cost of several not-yet-placed tiles in a row (each one costing
+// more than the last, same as placing them one at a time for real would)
+// without needing to mutate the grid to find out.
+function getBuildingCostAtCount(buildingId, n) {
+  const building = BUILDING_TYPES[buildingId];
+  if (!building) return Infinity;
+  if (PLATFORM_FLAT_COST_TILES.has(buildingId)) return PLATFORM_FLAT_COST;
+  return Math.ceil(building.cost * Math.pow(buildingCostGrowthRate(building.cost), n));
+}
+
 // Every building's live shop cost — Platform (any of its 3 variants — see
 // PLATFORM_FLAT_COST_TILES) is a flat PLATFORM_FLAT_COST regardless of how
 // many exist; every other building's cost compounds at its own tiered rate
 // for each tile of that exact type already placed, rounded up — see
 // Config.js's comment above PLATFORM_FLAT_COST for the full rationale.
 export function getBuildingCost(state, buildingId) {
-  const building = BUILDING_TYPES[buildingId];
-  if (!building) return Infinity;
-  if (PLATFORM_FLAT_COST_TILES.has(buildingId)) return PLATFORM_FLAT_COST;
+  if (!BUILDING_TYPES[buildingId]) return Infinity;
   const n = countPlacedOfType(state.level.grid, buildingId);
-  return Math.ceil(building.cost * Math.pow(buildingCostGrowthRate(building.cost), n));
+  return getBuildingCostAtCount(buildingId, n);
 }
 
 // The last seabed row currently reachable/buildable at the player's purchased
@@ -820,6 +831,59 @@ export function getBuildingCost(state, buildingId) {
 // row beyond this line physically exists, just isn't unlocked yet).
 export function getUnlockedSeabedRowEnd(state) {
   return TANK_EXPANSION_BASE_ROW_END + state.level.upgrades.tankExpansionTier * TANK_EXPANSION_ROWS_PER_TIER;
+}
+
+// Shift+Click: Snap Placement — per direct request, holding Shift with a
+// build tool armed snaps a line of ghost buildings from the last-placed (or
+// last-pipetted — see UI.js's pipetteSelectBuilding) building's tile to the
+// cursor's tile, snapped to the nearest of the 8 compass directions
+// (horizontal/vertical/diagonal only, never an arbitrary angle). Returns
+// { tiles: [{col, row, cost, affordable}...], totalCost }, ordered nearest
+// the start outward, EXCLUDING the start tile itself (it's already occupied
+// by the reference building).
+//
+// The line stops at the first real obstruction (occupied/out of
+// bounds/tank-locked) — it does NOT replace through an occupied tile the
+// way a single Shift-click does; that's a deliberate scope cut, not an
+// oversight, since compounding per-tile replace refunds/costs into an
+// already-fairly-complex multi-tile cost simulation felt like more risk than
+// this feature needed. Cost is NOT read live off canPlaceTile's own
+// affordability check (which only ever knows about the grid as it actually
+// is right now) — instead a local `simulatedCount` walks the same
+// compounding formula getBuildingCost itself uses, one step per tile, so
+// e.g. a run of 5 turrets correctly prices the 5th as if the 4 before it in
+// this same line were already placed, not all 5 at today's identical
+// cheaper rate. `affordable` marks the running-total cutoff so the ghost
+// preview can tint the tiles that would still be within budget differently
+// from the ones that wouldn't — the actual placement (main.js's
+// placeSnapLineBuildings) still places tiles one at a time for real and
+// naturally stops for real once money actually runs out, this is only ever
+// a preview signal.
+export function computeSnapLine(state, lastCol, lastRow, cursorCol, cursorRow, buildingId) {
+  const result = { tiles: [], totalCost: 0 };
+  const dx = cursorCol - lastCol;
+  const dy = cursorRow - lastRow;
+  if (dx === 0 && dy === 0) return result;
+  const angle = Math.atan2(dy, dx);
+  const snappedAngle = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
+  const dirCol = Math.round(Math.cos(snappedAngle));
+  const dirRow = Math.round(Math.sin(snappedAngle));
+  const steps = Math.max(Math.abs(dx), Math.abs(dy));
+  let simulatedCount = countPlacedOfType(state.level.grid, buildingId);
+  let runningTotal = 0;
+  for (let i = 1; i <= steps; i++) {
+    const col = lastCol + dirCol * i;
+    const row = lastRow + dirRow * i;
+    // ignoreCost:true — pure occupancy/bounds/lock check; cost is simulated
+    // separately above, not read off canPlaceTile's own (unsimulated) check.
+    if (!canPlaceTile(state, col, row, buildingId, true).ok) break;
+    const cost = getBuildingCostAtCount(buildingId, simulatedCount);
+    runningTotal += cost;
+    simulatedCount++;
+    result.tiles.push({ col, row, cost, affordable: runningTotal <= state.level.money });
+  }
+  result.totalCost = runningTotal;
+  return result;
 }
 
 // Returns { ok, reason } rather than a bare bool so the build-mode UI can

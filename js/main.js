@@ -184,6 +184,7 @@ import {
   collectDemolishSpawnPoints,
   computeBlueprintCostWithReplace,
   placeBlueprintWithReplace,
+  computeSnapLine,
 } from './Grid.js';
 import { isPointOnMound, crackMound, renderMound, centerCameraOnMound, isPointOnScienceLab, renderScienceLab } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
@@ -578,6 +579,22 @@ const state = {
     // never stale leftovers from an earlier, unrelated pipette.
     pipetteRecipeId: null,
     pipetteFilterItems: null,
+    // Shift + Click: Snap Placement — per direct request, holding Shift with
+    // a build tool armed snaps a line of ghost buildings from here to the
+    // cursor (Grid.js's computeSnapLine). Set on every successful non-Fan
+    // placement (updateBuildDrag) and the Fan click handler's own two
+    // placement branches, AND by UI.js's pipetteSelectBuilding whenever a
+    // real tile is pipetted (per direct request, "if the player uses Q to
+    // pipette a building, have that act as the last placed building") — so
+    // it's always "wherever the player most recently placed OR pipetted
+    // something," never reset just because a different tool got armed.
+    lastPlacedTileCol: null,
+    lastPlacedTileRow: null,
+    // Live total $ cost of whatever snap line is currently being previewed,
+    // written fresh every render() frame (null whenever no line is
+    // showing) — read by UI.js's updateHUD for the cost legend, same
+    // cross-module-flag pattern blueprintCost above already uses.
+    snapLineCost: null,
     tankPanelCollapsed: true, // Tank Upgrades panel starts tucked away too — shares the shop's on-screen slot, only one is ever expanded (see UI.js's toggleShopCollapse/toggleTankPanel)
     tankPanelView: 'upgrades', // 'upgrades' | 'achievements' | 'customization' — which of the 3 views the Tank panel currently shows, see UI.js's setTankPanelView. Persists across a collapse/expand (only Escape/tool-select closes the panel, never resets which tab was showing)
     // Which hat the Customization preview canvas is currently showing —
@@ -2161,6 +2178,8 @@ input.clickHandlers.push((sx, sy) => {
         const result = placeTileWithReplace(state, col, row, buildingId, 0, shiftHeld);
         if (result.placed) {
           applyPipetteData(state, col, row, buildingId);
+          state.ui.lastPlacedTileCol = col;
+          state.ui.lastPlacedTileRow = row;
           pushUndoEntry({ type: 'replace', col, row, oldBuildingId: result.oldBuildingId, oldData: result.oldData, netCost: result.info.netCost });
           showReplaceNetCostText(col * TILE_SIZE + TILE_SIZE / 2, row * TILE_SIZE + TILE_SIZE / 2, result.info.netCost);
         }
@@ -2174,6 +2193,8 @@ input.clickHandlers.push((sx, sy) => {
       const result = placeTileWithReplace(state, col, row, buildingId, angle, shiftHeld);
       if (!result.placed) { handleBuildPlacementFailure(result.info.reason); return; }
       applyPipetteData(state, col, row, buildingId);
+      state.ui.lastPlacedTileCol = col;
+      state.ui.lastPlacedTileRow = row;
       if (result.replaced) {
         pushUndoEntry({ type: 'replace', col, row, oldBuildingId: result.oldBuildingId, oldData: result.oldData, netCost: result.info.netCost });
         showReplaceNetCostText(col * TILE_SIZE + TILE_SIZE / 2, row * TILE_SIZE + TILE_SIZE / 2, result.info.netCost);
@@ -2362,6 +2383,11 @@ input.middleClickHandlers.push((sx, sy) => {
 // (not once per physics tick) so dragging across several cells lays a row
 // without re-spending money on a cell it's already sitting over.
 let lastBuildCell = null;
+// Shift + Click: Snap Placement's own one-shot-per-press guard — cleared
+// alongside lastBuildCell on mouse-up, set the instant a press places its
+// line so holding the button down doesn't keep re-placing more lines every
+// tick the way normal drag-placement re-places a single tile per cell.
+let snapLinePlacedThisPress = false;
 
 // D-hotkey delete, including hold-and-drag — per direct request ("remove
 // the demolish tool... have it built into the food cursor tool via the D
@@ -2843,6 +2869,7 @@ let powerSampleAccumMs = 0;
 function updateBuildDrag() {
   if (!input.mouseDown) {
     lastBuildCell = null;
+    snapLinePlacedThisPress = false;
     return;
   }
   if (draggedFishId != null || draggedItemId != null) return; // a fish-combine or item drag is in progress — don't also place tiles under it
@@ -2859,6 +2886,29 @@ function updateBuildDrag() {
   // error every tick while dragging through open water.
   if (world.y < SEABED_FLOOR_Y) return;
   const { col, row } = worldToTile(world.x, world.y);
+
+  // Shift + Click: Snap Placement — per direct request, a discrete one-shot
+  // action (buy the WHOLE previewed line in a single click) rather than the
+  // normal continuous per-cell-entered drag-placement below, so it's gated
+  // on snapLinePlacedThisPress (cleared on mouse-up, same as lastBuildCell)
+  // instead of the per-cell dedup key. Only actually takes this path once
+  // there's a real reference point AND at least one tile of line to place —
+  // a 0-length line (the cursor's sitting right on the reference tile
+  // itself, or the very first step is already blocked) falls through to the
+  // normal single-tile placement/Replace path below instead of silently
+  // no-opping, matching exactly what render()'s own ghost preview shows for
+  // that same case (see its matching snap.tiles.length check).
+  if (isShiftHeld() && state.ui.lastPlacedTileCol != null) {
+    const snap = computeSnapLine(state, state.ui.lastPlacedTileCol, state.ui.lastPlacedTileRow, col, row, buildingId);
+    if (snap.tiles.length > 0) {
+      if (!snapLinePlacedThisPress) {
+        snapLinePlacedThisPress = true;
+        placeSnapLineTiles(state, buildingId, snap.tiles);
+      }
+      return;
+    }
+  }
+
   const cellKey = `${col},${row}`;
   if (cellKey === lastBuildCell) return;
   lastBuildCell = cellKey;
@@ -2876,6 +2926,8 @@ function updateBuildDrag() {
   const placed = buildResult.placed;
   if (placed) {
     applyPipetteData(state, col, row, buildingId);
+    state.ui.lastPlacedTileCol = col;
+    state.ui.lastPlacedTileRow = row;
     if (buildResult.replaced) {
       pushUndoEntry({ type: 'replace', col, row, oldBuildingId: buildResult.oldBuildingId, oldData: buildResult.oldData, netCost: buildResult.info.netCost });
       showReplaceNetCostText(col * TILE_SIZE + TILE_SIZE / 2, row * TILE_SIZE + TILE_SIZE / 2, buildResult.info.netCost);
@@ -2948,6 +3000,38 @@ function updateBuildDrag() {
       // spawnTurretTutorialWaste above.
       spawnChestTutorialWaste(state);
     }
+  }
+}
+
+// Shift + Click: Snap Placement's actual purchase — called once per press
+// from updateBuildDrag above with the SAME tile list its own computeSnapLine
+// call just produced (so what gets bought is exactly what the caller
+// decided was worth buying, no risk of recomputing against a since-changed
+// grid/cursor). Places each tile for real, one at a time, via the same
+// placeTileWithReplace/applyPipetteData/pushUndoEntry trio every other
+// placement path in this file already uses — so the line naturally stops
+// for real if money runs out partway through, even though the ghost preview
+// (render() below) shows the whole geometrically-valid line regardless of
+// affordability (computeSnapLine's own `affordable` flag just tints it).
+// Fans never reach this — updateBuildDrag's own FAN_BUILDING_IDS check
+// above returns before Shift-snap is even considered for one, since a Fan
+// needs its own aimed angle per tile, which doesn't fit a uniform batch
+// line. Per direct request ("make sure the whole line also inherits the
+// recipe/filter" if the reference building was pipetted) — applyPipetteData
+// already reads state.ui.pipetteRecipeId/pipetteFilterItems fresh for every
+// call, so calling it per tile here needs no new plumbing at all.
+function placeSnapLineTiles(state, buildingId, tiles) {
+  for (const t of tiles) {
+    const result = placeTileWithReplace(state, t.col, t.row, buildingId, 0, false);
+    if (!result.placed) break; // most likely ran out of money partway through — stop here, same as a plain single placement's own failed-purchase behavior
+    applyPipetteData(state, t.col, t.row, buildingId);
+    // Advances the anchor to wherever this line actually ended, per direct
+    // "acts as the last placed building" precedent — a second Shift+click
+    // naturally continues the same line further rather than restarting from
+    // the original start tile.
+    state.ui.lastPlacedTileCol = t.col;
+    state.ui.lastPlacedTileRow = t.row;
+    pushUndoEntry({ type: 'place', col: t.col, row: t.row, buildingId });
   }
 }
 
@@ -3914,6 +3998,11 @@ function render() {
   // "Shift+Click: Replace" label. Defaults null (not shown) unless one of
   // the build-ghost branches below actually sets it.
   state.ui.buildReplaceInfo = null;
+  // Shift + Click: Snap Placement's own live total — same "null unless a
+  // branch below actually sets it" pattern, read by UI.js's updateHUD for
+  // the cost legend (see its own comment for why it takes priority over
+  // buildReplaceInfo whenever both would otherwise apply).
+  state.ui.snapLineCost = null;
 
   if (isFanAimingActive() && input.mouse.inside && !state.ui.paused) {
     // Click 1 already happened — the ghost stays fixed at the armed cell
@@ -3938,16 +4027,44 @@ function render() {
     const { col, row } = worldToTile(world.x, world.y);
     const angle = angleFromTileToPoint(col, row, world.x, world.y);
     const shiftHeld = isShiftHeld();
-    // showCone: false — this is the plain-hover phase, before a Fan's
-    // placement cell has actually been armed by click 1 (see the
-    // isFanAimingActive() branch above for that real aiming step). The
-    // angle here is just wherever the cursor happens to be relative to
-    // whatever tile it's currently over, not a deliberate aim decision yet,
-    // so per direct report ("visually confusing to have the cone moving
-    // around while trying to choose the fan location") no cone shows until
-    // the location itself is actually confirmed.
-    renderBuildGhost(ctx, state, world.x, world.y, buildingId, angle, false, false, shiftHeld);
-    state.ui.buildReplaceInfo = describeReplacement(state, col, row, buildingId, shiftHeld);
+    // Shift + Click: Snap Placement — per direct request, a line of ghosts
+    // from state.ui.lastPlacedTileCol/Row (see its own comment for where
+    // that gets set — a real placement, a drag-placed tile, or a pipetted
+    // one) out to the cursor's tile, snapped to the nearest of the 8 compass
+    // directions. Fans are excluded (angle isn't shown for showCone:false
+    // ghosts below anyway, but more fundamentally they never take this path
+    // for real either — see placeSnapLineTiles' own comment) so a
+    // Fan-tool hover always falls through to the single-ghost branch below.
+    const snapEligible = shiftHeld && state.ui.lastPlacedTileCol != null && !FAN_BUILDING_IDS.includes(buildingId);
+    const snap = snapEligible ? computeSnapLine(state, state.ui.lastPlacedTileCol, state.ui.lastPlacedTileRow, col, row, buildingId) : null;
+    if (snap && snap.tiles.length > 0) {
+      for (const t of snap.tiles) {
+        const screen = worldToScreen(t.col * TILE_SIZE, t.row * TILE_SIZE, state.camera);
+        const size = TILE_SIZE * state.camera.zoom;
+        // Deliberately a plain fillRect for every building type, including
+        // Half Platforms (whose real placed shape — and single-ghost preview
+        // above — is a triangular wedge, not a full square, see
+        // renderBuildGhost's own RAMP_TRIANGLE_LOCAL_VERTS branch) — a minor,
+        // deliberate simplification for the line-ghost specifically, not
+        // worth duplicating that shape logic for every tile of a whole line.
+        ctx.globalAlpha = 0.45;
+        ctx.fillStyle = t.affordable ? '#8fe0b8' : '#ff6b6b';
+        ctx.fillRect(screen.x, screen.y, size, size);
+        ctx.globalAlpha = 1;
+      }
+      state.ui.snapLineCost = snap.totalCost;
+    } else {
+      // showCone: false — this is the plain-hover phase, before a Fan's
+      // placement cell has actually been armed by click 1 (see the
+      // isFanAimingActive() branch above for that real aiming step). The
+      // angle here is just wherever the cursor happens to be relative to
+      // whatever tile it's currently over, not a deliberate aim decision yet,
+      // so per direct report ("visually confusing to have the cone moving
+      // around while trying to choose the fan location") no cone shows until
+      // the location itself is actually confirmed.
+      renderBuildGhost(ctx, state, world.x, world.y, buildingId, angle, false, false, shiftHeld);
+      state.ui.buildReplaceInfo = describeReplacement(state, col, row, buildingId, shiftHeld);
+    }
   } else if (isCursorOrFoodTool(hoverEffectiveTool) && input.keysDown.has('KeyD') && input.mouse.inside && !state.ui.paused) {
     // Ghost-mode preview of whatever's under the cursor, plus the refund
     // it'll pay out — TILE_REFUND_FRACTION is 1.0 (a full refund) per

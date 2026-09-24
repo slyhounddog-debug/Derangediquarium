@@ -352,6 +352,7 @@ export function initUI(state) {
     scrollHintArrows: document.querySelectorAll('.scroll-hint-arrow'),
     buildLegend: document.getElementById('build-legend'),
     buildReplaceLegend: document.getElementById('build-replace-legend'),
+    buildSnapLegend: document.getElementById('build-snap-legend'),
     tutorialSkipLegend: document.getElementById('tutorial-skip-legend'),
     buildingMoveLegend: document.getElementById('building-move-legend'),
     buildingMoveLegendLine1: document.getElementById('building-move-legend-line1'),
@@ -3926,10 +3927,25 @@ export function pipetteSelectSpecies(state, speciesId) {
 // with this tool. Optional/defaults to null so every OTHER caller (there are
 // none today, but keeps the signature safe) still works with just a
 // buildingId, same as before.
+//
+// Also doubles as a Shift+Click: Snap Placement anchor, per direct request
+// ("if the player uses Q to pipette a building, have that act as the last
+// placed building") — a real tileKey means the player pipetted an actual
+// placed tile, which is just as valid a line-start point as one they placed
+// themselves this session, so it overwrites state.ui.lastPlacedTileCol/Row
+// the same way main.js's own placement code does. A tileKey-less call (Q's
+// "re-arm the last-used tool" shortcut with nothing under the cursor) leaves
+// the existing anchor untouched instead of clearing it — there's no new
+// position to anchor to, and the old one is still perfectly valid.
 export function pipetteSelectBuilding(state, buildingId, tileKey = null) {
   const building = BUILDING_TYPES[buildingId];
   if (!building) return;
   selectBuildingForPreview(state, building); // resets pipetteRecipeId/pipetteFilterItems to null first — see its own comment
+  if (tileKey) {
+    const [row, col] = tileKey.split(',').map(Number);
+    state.ui.lastPlacedTileCol = col;
+    state.ui.lastPlacedTileRow = row;
+  }
   const data = tileKey ? state.level.buildingData[tileKey] : null;
   if (!data) return;
   if (buildingId === TILE_MANUFACTURER || buildingId === TILE_POWER_PLANT) state.ui.pipetteRecipeId = data.recipeId || null;
@@ -4629,11 +4645,19 @@ export function updateHUD(state) {
     buildLegendText = formatBuildCostLegendText(state.ui.blueprintCost);
     showReplaceLabel = !!(state.ui.blueprintReplaceInfo && state.ui.blueprintReplaceInfo.replacing);
   } else if (state.ui.selectedTool.startsWith('build:')) {
-    // An 'occupied' rejection (hovering a placed building with Shift NOT
-    // held) has a meaningless netCost of 0 — falls back to the tool's own
-    // flat base cost instead of showing a misleading "Cost: $0", same as
-    // every other reason buildReplaceInfo isn't usable here.
-    if (state.ui.buildReplaceInfo && state.ui.buildReplaceInfo.reason !== 'occupied') {
+    // Shift + Click: Snap Placement's own live multi-building total — per
+    // direct request ("make sure the cost is dynamically updated to show
+    // the multi-building cost"), takes priority over the single-tile cost
+    // below whenever main.js's render() actually has a snap line showing
+    // (state.ui.snapLineCost, the same cross-module-flag pattern
+    // buildReplaceInfo itself already uses).
+    if (state.ui.snapLineCost != null) {
+      buildLegendText = `Cost: $${state.ui.snapLineCost}`;
+    } else if (state.ui.buildReplaceInfo && state.ui.buildReplaceInfo.reason !== 'occupied') {
+      // An 'occupied' rejection (hovering a placed building with Shift NOT
+      // held) has a meaningless netCost of 0 — falls back to the tool's own
+      // flat base cost instead of showing a misleading "Cost: $0", same as
+      // every other reason buildReplaceInfo isn't usable here.
       buildLegendText = formatBuildCostLegendText(state.ui.buildReplaceInfo.netCost);
       showReplaceLabel = !!state.ui.buildReplaceInfo.replacing;
     } else {
@@ -4645,6 +4669,15 @@ export function updateHUD(state) {
   els.buildLegend.textContent = buildLegendText;
   els.buildLegend.classList.toggle('hidden', !buildLegendVisible);
   els.buildReplaceLegend.classList.toggle('hidden', !(buildLegendVisible && showReplaceLabel));
+  // Shift + Click: Snap Placement's own hint pill, per direct request ("add
+  // into the legend above the cost a 'Shift + Click: Snap Placement'") —
+  // shares the exact same above-the-cost-legend slot as "Shift+Click:
+  // Replace" (positionBottomLeftLegends stacks whichever is visible), so the
+  // two are deliberately mutually exclusive: Replace only ever applies while
+  // hovering an occupied tile, Snap Placement everywhere else a build tool
+  // is armed (fish:/Blueprint excluded — this hint is buildings-only).
+  const showSnapLabel = buildLegendVisible && state.ui.selectedTool.startsWith('build:') && !showReplaceLabel;
+  els.buildSnapLegend.classList.toggle('hidden', !showSnapLabel);
   // Tutorial-skip legend — "(Esc) to skip tutorial" — shown for the whole
   // duration of any guided tutorial flow, per direct request; main.js's
   // Escape handler now actually honors this (see its own comment).
@@ -4835,7 +4868,12 @@ function positionBottomLeftLegends() {
   // getBoundingClientRect() height is never a stale/zero hidden-element read.
   els.buildReplaceLegend.style.right = right;
   const legendHeight = els.buildLegend.getBoundingClientRect().height || 0;
-  els.buildReplaceLegend.style.bottom = `${window.innerHeight - rect.bottom + legendHeight + 6}px`;
+  const stackedBottom = `${window.innerHeight - rect.bottom + legendHeight + 6}px`;
+  els.buildReplaceLegend.style.bottom = stackedBottom;
+  // "Shift + Click: Snap Placement" shares this exact same stacked slot —
+  // see updateHUD's own comment on why the two are mutually exclusive.
+  els.buildSnapLegend.style.right = right;
+  els.buildSnapLegend.style.bottom = stackedBottom;
 }
 
 // A row of bouncing down-arrows nudging the player to pan the camera down,

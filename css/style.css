@@ -365,7 +365,7 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
    updateHUD never shows both at once — the purchase legend is suppressed
    entirely while a tutorial's active), so they can safely share the exact
    same sizing/position logic. */
-#build-legend, #tutorial-skip-legend, #building-move-legend, #build-replace-legend, #fish-merge-legend {
+#build-legend, #tutorial-skip-legend, #building-move-legend, #build-replace-legend, #build-snap-legend, #fish-merge-legend {
   position: fixed;
   padding: 9px 20px;
   background: linear-gradient(160deg, #fffdf8 0%, #ffe9f4 100%);
@@ -379,7 +379,7 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
   white-space: nowrap;
 }
 #build-legend { display: flex; gap: 14px; }
-#build-legend.hidden, #tutorial-skip-legend.hidden, #building-move-legend.hidden, #build-replace-legend.hidden, #fish-merge-legend.hidden { display: none; }
+#build-legend.hidden, #tutorial-skip-legend.hidden, #building-move-legend.hidden, #build-replace-legend.hidden, #build-snap-legend.hidden, #fish-merge-legend.hidden { display: none; }
 /* Shift-click Replace's own "Shift+Click: Replace" pill, per direct request
    — sits directly above #build-legend (positioned live off its measured
    height, see UI.js's positionBottomLeftLegends), a blue tint to match the
@@ -387,6 +387,14 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
 #build-replace-legend {
   background: linear-gradient(160deg, #eaf6ff 0%, #d6ecff 100%);
   color: #2a6fa8;
+}
+/* Shift + Click: Snap Placement's own pill — shares #build-replace-legend's
+   exact stacked slot (the two are mutually exclusive, see UI.js's
+   updateHUD), a green tint to match the valid-placement ghost tint
+   (Grid.js's renderBuildGhost) instead of Replace's blue. */
+#build-snap-legend {
+  background: linear-gradient(160deg, #eefff5 0%, #d6ffe9 100%);
+  color: #2a8f5f;
 }
 /* #building-move-legend can show one, two, or three lines (a plain hover
    hint plus its optional Rotate/Delete extras, or the armed accept/cancel

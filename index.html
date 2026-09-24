@@ -166,6 +166,12 @@
      positionBottomLeftLegends stacks it live above #build-legend's own
      measured height. -->
 <div id="build-replace-legend" class="hidden">Shift+Click: Replace</div>
+<!-- Shift + Click: Snap Placement's own label, per direct request ("add into
+     the legend above the cost a 'Shift + Click: Snap Placement'") — shares
+     #build-replace-legend's exact stacked slot above #build-legend (the two
+     are mutually exclusive, see UI.js's updateHUD), toggled/positioned the
+     same live way. -->
+<div id="build-snap-legend" class="hidden">Shift + Click: Snap Placement</div>
 <div id="build-legend" class="hidden"></div>
 <div id="tutorial-skip-legend" class="hidden">(Esc) to skip tutorial</div>
 <!-- Building-move legend — same "plain top-level sibling, positioned
