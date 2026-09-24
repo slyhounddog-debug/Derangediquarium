@@ -1089,7 +1089,9 @@ const CURSOR_BUBBLE_MAX_RATE = 23; // bubbles/sec at top speed — several a sec
 // 1:1 match down to roughly half the cursor's own speed.
 // Per a further direct follow-up request ("make the bubble velocity...to be
 // .3 that of the cursor velocity instead of .5") — 0.5 -> 0.3.
-const CURSOR_BUBBLE_BURST_VELOCITY_MULTIPLIER = 0.3;
+// Per a further direct follow-up request ("reduce the velocity... to .15x
+// instead of .3x") — 0.3 -> 0.15.
+const CURSOR_BUBBLE_BURST_VELOCITY_MULTIPLIER = 0.15;
 const CURSOR_BUBBLE_BURST_DRAG_PER_S = 5.5; // exponential decay rate — a burst is ~96% gone after 3/5.5 ≈ 0.55s ("...before slowing")
 const CURSOR_BUBBLE_AHEAD_MIN_PX = 8;
 const CURSOR_BUBBLE_AHEAD_MAX_PX = 20;
