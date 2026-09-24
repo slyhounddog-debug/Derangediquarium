@@ -1063,7 +1063,9 @@ const CURSOR_BUBBLE_MIN_SPEED = 60; // world px/sec floor below which nothing sp
 const CURSOR_BUBBLE_SPEED_FOR_MAX_RATE = 2200; // world px/sec at/above which spawn rate hits its cap
 // Per direct follow-up request ("increase the amount of bubbles that spawn
 // at the cursor by 50%") — 14 -> 21.
-const CURSOR_BUBBLE_MAX_RATE = 21; // bubbles/sec at top speed — several a second, per direct request
+// Per a further direct follow-up request ("bump the amount of bubbles made
+// with the cursor by 10% more") — 21 -> 23 (21 * 1.1 = 23.1, rounded).
+const CURSOR_BUBBLE_MAX_RATE = 23; // bubbles/sec at top speed — several a second, per direct request
 // Per direct request ("make the bubbles that spawn from the cursor have way
 // more initial velocity, actually matching the cursor to start before
 // slowing and going up, and have the bubbles spawn slightly in front of the
@@ -1085,7 +1087,9 @@ const CURSOR_BUBBLE_MAX_RATE = 21; // bubbles/sec at top speed — several a sec
 // needs to be like half the cursor velocity when the bubbles spawn") — the
 // previous 1.8 was still read as far too fast, so this drops well below a
 // 1:1 match down to roughly half the cursor's own speed.
-const CURSOR_BUBBLE_BURST_VELOCITY_MULTIPLIER = 0.5;
+// Per a further direct follow-up request ("make the bubble velocity...to be
+// .3 that of the cursor velocity instead of .5") — 0.5 -> 0.3.
+const CURSOR_BUBBLE_BURST_VELOCITY_MULTIPLIER = 0.3;
 const CURSOR_BUBBLE_BURST_DRAG_PER_S = 5.5; // exponential decay rate — a burst is ~96% gone after 3/5.5 ≈ 0.55s ("...before slowing")
 const CURSOR_BUBBLE_AHEAD_MIN_PX = 8;
 const CURSOR_BUBBLE_AHEAD_MAX_PX = 20;

@@ -484,13 +484,6 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
 .stats-panel-row-label { opacity: 0.8; }
 .stats-panel-row-value { color: #d6336c; }
 .stats-panel-row-icon { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: middle; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2); }
-.stats-panel-locked {
-  font-size: 12px;
-  font-weight: 600;
-  opacity: 0.55;
-  font-style: italic;
-  padding: 5px 0;
-}
 
 /* Guided tutorial spotlight — see UI.js's TUTORIAL_FLOWS/
    updateTutorialOverlay. #tutorial-overlay covers the whole viewport and
@@ -991,6 +984,7 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
   margin-bottom: 8px;
 }
 #shop-header, .tank-header { font-size: 17px; font-weight: 800; color: #c25f8f; }
+#tank-upgrades-note { font-size: 12px; font-weight: 700; color: #8a7a8a; margin: -2px 0 8px; }
 
 #shop-money, #tank-points-display, #achievement-gems-display, #customization-gems-display {
   display: inline-block;

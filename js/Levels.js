@@ -83,9 +83,15 @@ export function loadLevel(state, levelId) {
     tankPoints: { total: 0, available: 0 }, // earned by Entities.js on fish adult-growth transitions, spent in UI.js's Tank Upgrades panel — see CLAUDE.md's "Tank Points & Tank Upgrades"
     upgrades: {
       foodQuality: 0, fishMovement: 0, scienceCapLevel: 0,
-      electricityGraphUnlocked: false, // Tank Upgrade (ELECTRICITY_GRAPH_UNLOCK_COST) — gates #hud-power's click-to-open rolling graph popup AND its dropdown arrow; the mw text readout itself is unaffected, still shown unconditionally once Electric Eel is unlocked
-      waveCountdownUnlocked: false, // Tank Upgrade (WAVE_COUNTDOWN_UNLOCK_COST) — reveals the Base Stats panel's Alien Wave/timer lines, see UI.js's statsPanel
+      // electricityGraphUnlocked/waveCountdownUnlocked Tank Upgrades are gone
+      // entirely, per direct request ("give the alien wave timer and the
+      // electricity graph to the player at the very start... remove those
+      // tank upgrades from the tank upgrade menu") — same "give it to the
+      // player unconditionally, no purchase needed" treatment Gold/min got
+      // earlier. #hud-power's graph popup/arrow and the Base Stats panel's
+      // Alien Wave/timer lines are now always available — see UI.js.
       tankExpansionTier: 0, // Tank Upgrade (TANK_EXPANSION_UPGRADE_COSTS), 0-TANK_EXPANSION_MAX_TIER — see Grid.js's getUnlockedSeabedRowEnd/canPlaceTile and Config.js's "Tank Expansion" comment
+      fishHealth: 0, // Tank Upgrade (FISH_HEALTH_UPGRADE_COSTS), 0-FISH_HEALTH_UPGRADE_MAX_LEVEL — each level adds FISH_HEALTH_UPGRADE_BONUS_PER_LEVEL max HP on top of the baby/mid/adult base table, see Entities.js's maxHpForStage
     }, // purchased Tank Upgrade levels, 0 = not yet bought; read live by Entities.js, not baked into fish/food at creation time. Fish Merging is no longer gated by a Tank Upgrade at all — see Entities.js's isCombinableFish. Coin Cap (and its own Tank Upgrade) is gone entirely, per direct request. scienceCapLevel is bought in the Science Lab instead (SCIENCE_CAP_UPGRADE_SCIENCE_COSTS/_GOLD_COSTS) — indexes into SCIENCE_CAP_BY_LEVEL. foodCapacity retired entirely — see Config.js's FOOD_STATIONARY_TO_WASTE_MS
     // One-time story/tutorial notification gates — see CLAUDE.md's "Story &
     // Tutorial Notifications". Level-scoped like everything else here, so a

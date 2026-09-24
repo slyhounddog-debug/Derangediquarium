@@ -66,6 +66,13 @@ export function loadSaveGame() {
     // old save's entire pre-existing city is already fully unlocked at tier
     // 0; nothing the player already built becomes newly inaccessible.
     if (typeof parsed.level.upgrades.tankExpansionTier !== 'number') parsed.level.upgrades.tankExpansionTier = 0;
+    // A save written before the Fish Health Tank Upgrade won't have this
+    // field at all — Entities.js's maxHpForStage multiplies it by
+    // FISH_HEALTH_UPGRADE_BONUS_PER_LEVEL, and `undefined * n` is NaN, which
+    // would contaminate every fish's maxHp/hp from that point on. Defaults
+    // to 0, same migration shape as tankExpansionTier just above.
+    if (typeof parsed.level.upgrades.fishHealth !== 'number') parsed.level.upgrades.fishHealth = 0;
+    return { meta: parsed.meta, level: parsed.level };
   } catch (err) {
     console.error('Derangiquarium: load failed', err);
     return null;

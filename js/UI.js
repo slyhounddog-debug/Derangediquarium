@@ -38,11 +38,12 @@ import {
   POWER_HISTORY_MAX,
   SCIENCE_LAB_UPGRADES,
   SCIENCE_LAB_UPGRADE_LIST,
-  ELECTRICITY_GRAPH_UNLOCK_COST,
-  WAVE_COUNTDOWN_UNLOCK_COST,
   TANK_EXPANSION_UPGRADE_COSTS,
   TANK_EXPANSION_MAX_TIER,
   TANK_EXPANSION_ROWS_PER_TIER,
+  FISH_HEALTH_UPGRADE_COSTS,
+  FISH_HEALTH_UPGRADE_MAX_LEVEL,
+  FISH_HEALTH_UPGRADE_BONUS_PER_LEVEL,
   WORLD_W,
   TILE_SIZE,
   ALIEN_RADIUS,
@@ -678,11 +679,11 @@ export function initUI(state) {
   // #hud is always visible now (top-right, never hidden while a panel is
   // open — see updateHUD's own comment), so this is clickable at any time.
   els.power.addEventListener('click', () => {
-    // Per direct request ("hide the electricity graph behind an unlock in
-    // the tank upgrade") — the mw text readout itself stays unconditionally
-    // visible once Electric Eel is unlocked (updateHUD's own concern); only
-    // the graph POPUP additionally requires this Tank Upgrade.
-    if (!state.level.upgrades.electricityGraphUnlocked) return;
+    // The graph popup used to require its own Tank Upgrade unlock; per a
+    // later direct request ("give... the electricity graph to the player at
+    // the very start") it's unconditional now, same as the mw text readout
+    // itself (still gated only on Electric Eel being unlocked at all — see
+    // updateHUD's own concern).
     powerGraphOpen = !powerGraphOpen;
     els.powerGraph.classList.toggle('hidden', !powerGraphOpen);
     els.powerArrow.classList.toggle('open', powerGraphOpen); // flips the chevron to point up while the graph is showing
@@ -3418,6 +3419,15 @@ function describeFishMovementLevel(level) {
   return `Swim speed <span class="stat-current">+${speed} px/sec</span> → <span class="stat-next">+${nextSpeed} px/sec</span>.`;
 }
 
+function describeFishHealthLevel(level) {
+  const hp = FISH_HEALTH_UPGRADE_BONUS_PER_LEVEL * level;
+  if (level >= FISH_HEALTH_UPGRADE_MAX_LEVEL) {
+    return `Max health +${hp}.`;
+  }
+  const nextHp = FISH_HEALTH_UPGRADE_BONUS_PER_LEVEL * (level + 1);
+  return `Max health <span class="stat-current">+${hp}</span> → <span class="stat-next">+${nextHp}</span>.`;
+}
+
 // Builds a single card's DOM once and returns references to the parts that
 // change over time (level readout, description, buy button) — refreshTankPanel
 // mutates these in place every frame the panel's open, rather than rebuilding
@@ -3440,16 +3450,15 @@ function createUpgradeCard(name, icon) {
   return { card, levelEl, descEl, buyBtn };
 }
 
-let tankCards = null; // { foodQuality, fishMovement, electricityGraph, waveCountdown, tankExpansion } — each { card, levelEl, descEl, buyBtn }. Splicing itself was never a purchase here — see Config.js's SCIENCE_LAB_UPGRADES' 3 flat hybrid nodes. Food Capacity retired entirely — see Config.js's FOOD_STATIONARY_TO_WASTE_MS. Coin Capacity is gone entirely, per direct request ("remove the coin cap limit from the game completely, and the upgrades for it"). "Gold/min Stat" is gone too, per a later direct request ("give the player access to that info from the very beginning, so remove it from the tank upgrade as well") — Gold/min is now an unconditional line in the Base Stats panel (statsPanel below).
+let tankCards = null; // { foodQuality, fishMovement, tankExpansion, fishHealth } — each { card, levelEl, descEl, buyBtn }. Splicing itself was never a purchase here — see Config.js's SCIENCE_LAB_UPGRADES' 3 flat hybrid nodes. Food Capacity retired entirely — see Config.js's FOOD_STATIONARY_TO_WASTE_MS. Coin Capacity is gone entirely, per direct request ("remove the coin cap limit from the game completely, and the upgrades for it"). "Gold/min Stat", "Electricity Graph" and "Wave Countdown" are gone too, per direct request(s) to give the player that info/access for free from the start — see Config.js's own comment where their cost constants used to live.
 
 function buildTankPanel(state) {
   els.tankUpgradeList.innerHTML = '';
   const foodQuality = createUpgradeCard('Food Quality', '🍽️');
   const fishMovement = createUpgradeCard('Fish Movement', '🏊');
-  const electricityGraph = createUpgradeCard('Electricity Graph', '📊');
-  const waveCountdown = createUpgradeCard('Wave Countdown', '⏱️');
   const tankExpansion = createUpgradeCard('Expand Tank', '🏗️');
-  tankCards = { foodQuality, fishMovement, electricityGraph, waveCountdown, tankExpansion };
+  const fishHealth = createUpgradeCard('Fish Health', '❤️');
+  tankCards = { foodQuality, fishMovement, tankExpansion, fishHealth };
 
   foodQuality.buyBtn.addEventListener('click', () => {
     const level = state.level.upgrades.foodQuality;
@@ -3471,29 +3480,8 @@ function buildTankPanel(state) {
     playUpgrade();
     refreshTankPanel(state);
   });
-  // Two new one-time boolean unlocks, per direct request — same
-  // buy-once/no-leveled-ladder shape the old Fish Merging card used before
-  // it was removed (see refreshTankPanel below for the shared "Unlocked"/
-  // "Unlock — cost" button-text pattern this reintroduces).
-  electricityGraph.buyBtn.addEventListener('click', () => {
-    if (state.level.upgrades.electricityGraphUnlocked) return;
-    if (state.level.tankPoints.available < ELECTRICITY_GRAPH_UNLOCK_COST) return;
-    state.level.tankPoints.available -= ELECTRICITY_GRAPH_UNLOCK_COST;
-    state.level.upgrades.electricityGraphUnlocked = true;
-    playUpgrade();
-    refreshTankPanel(state);
-  });
-  waveCountdown.buyBtn.addEventListener('click', () => {
-    if (state.level.upgrades.waveCountdownUnlocked) return;
-    if (state.level.tankPoints.available < WAVE_COUNTDOWN_UNLOCK_COST) return;
-    state.level.tankPoints.available -= WAVE_COUNTDOWN_UNLOCK_COST;
-    state.level.upgrades.waveCountdownUnlocked = true;
-    playUpgrade();
-    refreshTankPanel(state);
-  });
-  // A 5-tier leveled ladder, same shape as Food Quality/Fish Movement above
-  // (not a one-time boolean like Electricity Graph/Wave Countdown) — per
-  // direct request, each purchase permanently unlocks
+  // A 5-tier leveled ladder, same shape as Food Quality/Fish Movement above —
+  // per direct request, each purchase permanently unlocks
   // TANK_EXPANSION_ROWS_PER_TIER more buildable seabed rows at the bottom of
   // the city (see Grid.js's getUnlockedSeabedRowEnd/canPlaceTile and
   // Config.js's "Tank Expansion" comment for how that's actually enforced —
@@ -3508,14 +3496,28 @@ function buildTankPanel(state) {
     playUpgrade();
     refreshTankPanel(state);
   });
+  // Bottom-of-the-list 5-level ladder, per direct request — see Config.js's
+  // FISH_HEALTH_UPGRADE_* for the full reasoning on why this raises max HP
+  // rather than the separate (unenforced) `lifespan` species field.
+  fishHealth.buyBtn.addEventListener('click', () => {
+    const level = state.level.upgrades.fishHealth;
+    if (level >= FISH_HEALTH_UPGRADE_MAX_LEVEL) return;
+    const cost = FISH_HEALTH_UPGRADE_COSTS[level];
+    if (state.level.tankPoints.available < cost) return;
+    state.level.tankPoints.available -= cost;
+    state.level.upgrades.fishHealth += 1;
+    playUpgrade();
+    refreshTankPanel(state);
+  });
 
   // Fish Merging's own card is gone entirely — per direct request, merging
   // is always available now, no Tank Upgrade purchase needed (see
   // Entities.js's isCombinableFish). Coin Capacity is gone entirely too —
   // per direct request, Food Quality takes its place as the panel's FIRST
   // card (also its own removed slot's old spot in the tutorial — see
-  // foodQuality's buyBtn listener above).
-  els.tankUpgradeList.append(foodQuality.card, fishMovement.card, electricityGraph.card, waveCountdown.card, tankExpansion.card);
+  // foodQuality's buyBtn listener above). Fish Health is last, per direct
+  // request ("at the bottom of the list").
+  els.tankUpgradeList.append(foodQuality.card, fishMovement.card, tankExpansion.card, fishHealth.card);
 
   refreshTankPanel(state);
 }
@@ -3525,7 +3527,7 @@ function buildTankPanel(state) {
 // state can all change while the player has it open.
 function refreshTankPanel(state) {
   if (!tankCards) return;
-  const { foodQuality, fishMovement, electricityGraph, waveCountdown, tankExpansion } = tankCards;
+  const { foodQuality, fishMovement, tankExpansion, fishHealth } = tankCards;
   const available = state.level.tankPoints.available;
 
   const fqLevel = state.level.upgrades.foodQuality;
@@ -3552,31 +3554,6 @@ function refreshTankPanel(state) {
     fishMovement.buyBtn.disabled = available < cost;
   }
 
-  // Two one-time boolean unlocks — same "Unlocked" / "Unlock — cost"
-  // button-text pattern the old Fish Merging card used before it was
-  // removed, per direct request.
-  const egUnlocked = state.level.upgrades.electricityGraphUnlocked;
-  electricityGraph.levelEl.textContent = egUnlocked ? 'Unlocked' : 'Locked';
-  electricityGraph.descEl.textContent = 'Lets you click the electricity readout to open a rolling supply/demand graph.';
-  if (egUnlocked) {
-    electricityGraph.buyBtn.textContent = 'Unlocked ✓';
-    electricityGraph.buyBtn.disabled = true;
-  } else {
-    electricityGraph.buyBtn.textContent = `Unlock — ${ELECTRICITY_GRAPH_UNLOCK_COST} 🏆`;
-    electricityGraph.buyBtn.disabled = available < ELECTRICITY_GRAPH_UNLOCK_COST;
-  }
-
-  const wcUnlocked = state.level.upgrades.waveCountdownUnlocked;
-  waveCountdown.levelEl.textContent = wcUnlocked ? 'Unlocked' : 'Locked';
-  waveCountdown.descEl.textContent = 'Adds a live countdown to the HUD showing how long until the next alien wave arrives.';
-  if (wcUnlocked) {
-    waveCountdown.buyBtn.textContent = 'Unlocked ✓';
-    waveCountdown.buyBtn.disabled = true;
-  } else {
-    waveCountdown.buyBtn.textContent = `Unlock — ${WAVE_COUNTDOWN_UNLOCK_COST} 🏆`;
-    waveCountdown.buyBtn.disabled = available < WAVE_COUNTDOWN_UNLOCK_COST;
-  }
-
   const teLevel = state.level.upgrades.tankExpansionTier;
   const rowsUnlocked = teLevel * TANK_EXPANSION_ROWS_PER_TIER;
   tankExpansion.levelEl.textContent = `Tier ${teLevel} / ${TANK_EXPANSION_MAX_TIER}`;
@@ -3590,6 +3567,18 @@ function refreshTankPanel(state) {
       `+${rowsUnlocked} extra rows of city unlocked so far. Next tier adds ${TANK_EXPANSION_ROWS_PER_TIER} more rows to build on.`;
     tankExpansion.buyBtn.textContent = `${cost} 🏆`;
     tankExpansion.buyBtn.disabled = available < cost;
+  }
+
+  const fhLevel = state.level.upgrades.fishHealth;
+  fishHealth.levelEl.textContent = `Level ${fhLevel} / ${FISH_HEALTH_UPGRADE_MAX_LEVEL}`;
+  fishHealth.descEl.innerHTML = describeFishHealthLevel(fhLevel);
+  if (fhLevel >= FISH_HEALTH_UPGRADE_MAX_LEVEL) {
+    fishHealth.buyBtn.textContent = 'Maxed out';
+    fishHealth.buyBtn.disabled = true;
+  } else {
+    const cost = FISH_HEALTH_UPGRADE_COSTS[fhLevel];
+    fishHealth.buyBtn.textContent = `${cost} 🏆`;
+    fishHealth.buyBtn.disabled = available < cost;
   }
 
   els.tankPointsDisplay.textContent = `🏆 ${available}`;
@@ -3665,10 +3654,6 @@ function statsPanelRowHtml(label, value, iconColor = null) {
   const icon = iconColor ? `<span class="stats-panel-row-icon" style="background:${iconColor}"></span>` : '';
   return `<div class="stats-panel-row"><span class="stats-panel-row-label">${icon}${label}</span><span class="stats-panel-row-value">${value}</span></div>`;
 }
-function statsPanelLockedHtml(text) {
-  return `<div class="stats-panel-locked">${text}</div>`;
-}
-
 function refreshStatsPanel(state) {
   const rows = [];
 
@@ -3707,20 +3692,17 @@ function refreshStatsPanel(state) {
   }
 
   // Alien Wave/timer — moved off the HUD entirely, per direct request, into
-  // here instead. Same "hidden until its own Tank Upgrade is bought" gate
-  // the old #hud-wave-countdown readout used, and the same "wave in
-  // progress"/boss-fight fallback text (see the old updateHUD block this
+  // here instead. Used to be hidden until its own Tank Upgrade was bought;
+  // per a later direct request ("give the alien wave timer... to the player
+  // at the very start") it's unconditional now, same "wave in progress"/
+  // boss-fight fallback text as before (see the old updateHUD block this
   // replaced) rather than a stale/misleading numeric countdown.
-  if (state.level.upgrades.waveCountdownUnlocked) {
-    rows.push(statsPanelRowHtml('Alien Wave', state.level.alienWavesSpawned));
-    let timerText;
-    if (state.level.bossPhase) timerText = '—';
-    else if (state.level.alienWaveActive) timerText = 'in progress';
-    else timerText = `${Math.max(0, Math.ceil((state.level.alienNextWaveAtMs - state.level.elapsed) / 1000))}s`;
-    rows.push(statsPanelRowHtml('Next Wave', timerText));
-  } else {
-    rows.push(statsPanelLockedHtml('Alien Wave/Timer — buy Wave Countdown in Tank Upgrades'));
-  }
+  rows.push(statsPanelRowHtml('Alien Wave', state.level.alienWavesSpawned));
+  let waveTimerText;
+  if (state.level.bossPhase) waveTimerText = '—';
+  else if (state.level.alienWaveActive) waveTimerText = 'in progress';
+  else waveTimerText = `${Math.max(0, Math.ceil((state.level.alienNextWaveAtMs - state.level.elapsed) / 1000))}s`;
+  rows.push(statsPanelRowHtml('Next Wave', waveTimerText));
 
   els.statsPanelList.innerHTML = rows.join('');
 }
@@ -4583,10 +4565,8 @@ export function updateHUD(state) {
   // and wave timer from the HUD and add them in the informational tab";
   // later, "add Gold/min into the informational tab and remove it from the
   // HUD... give the player access to that info from the very beginning") —
-  // see statsPanel's own refresh below, which shows Alien Wave/timer (still
-  // gated on waveCountdownUnlocked, same Tank Upgrade that used to gate the
-  // old #hud-wave-countdown readout) and Gold/min (now unconditional, no
-  // Tank Upgrade left to gate it).
+  // see statsPanel's own refresh below, which shows Alien Wave/timer and
+  // Gold/min both unconditionally now, no Tank Upgrade left to gate either.
 
   // Electricity — only shown at all once Electric Eel is unlocked, per
   // direct request. Text only updates once a real second, matching the
@@ -4594,12 +4574,10 @@ export function updateHUD(state) {
   // itself only gains a new entry once a second (see main.js's update()).
   const eelUnlocked = state.meta.speciesUnlocked.includes('electric_eel');
   els.power.classList.toggle('hidden', !eelUnlocked);
-  // The dropdown arrow is a separate unlock from the mw text itself — per
-  // direct request, hidden until the Electricity Graph Tank Upgrade is
-  // bought (the click handler already no-ops without it — see els.power's
-  // own listener — this just stops the arrow from implying a working
-  // dropdown before it actually is one).
-  els.powerArrow.classList.toggle('hidden', !state.level.upgrades.electricityGraphUnlocked);
+  // The dropdown arrow used to be a separate unlock from the mw text itself
+  // (the old Electricity Graph Tank Upgrade); per a later direct request
+  // it's unconditional now, so it just mirrors els.power's own visibility.
+  els.powerArrow.classList.toggle('hidden', !eelUnlocked);
   if (eelUnlocked) {
     const history = state.level.powerHistory;
     const last = history[history.length - 1];

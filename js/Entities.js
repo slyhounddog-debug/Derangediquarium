@@ -129,6 +129,7 @@ import {
   FISH_HEALTH_BABY,
   FISH_HEALTH_MID,
   FISH_HEALTH_ADULT,
+  FISH_HEALTH_UPGRADE_BONUS_PER_LEVEL,
   ALIEN_FISH_DAMAGE_INTERVAL_MS,
   BOSS_FISH_DAMAGE_PER_SEC,
   FISH_HEALTH_REGEN_DURATION_MS,
@@ -1049,12 +1050,18 @@ function effectiveSwimSpeed(def, state) {
 // "mid," regardless of how many total growth stages that particular species
 // happens to have (every current species has exactly 3, but this stays
 // correct even for one that doesn't). Called on creation and again on every
-// growth-stage transition (see createFish/updateFish).
-function maxHpForStage(def, stage) {
+// growth-stage transition (see createFish/updateFish). The Fish Health Tank
+// Upgrade bonus is added on top of the flat base here (not baked in some
+// other way) — per direct request, +FISH_HEALTH_UPGRADE_BONUS_PER_LEVEL per
+// level, same "read the current upgrade level live" pattern
+// effectiveSwimSpeed already uses for Fish Movement, except this only takes
+// effect at creation/growth time (a full heal anyway), not retroactively on
+// an already-living fish — same prospective-only application Food Quality's
+// upgrade already uses.
+function maxHpForStage(def, stage, state) {
   const lastStage = def.growthStages.length - 1;
-  if (stage <= 0) return FISH_HEALTH_BABY;
-  if (stage >= lastStage) return FISH_HEALTH_ADULT;
-  return FISH_HEALTH_MID;
+  const base = stage <= 0 ? FISH_HEALTH_BABY : stage >= lastStage ? FISH_HEALTH_ADULT : FISH_HEALTH_MID;
+  return base + FISH_HEALTH_UPGRADE_BONUS_PER_LEVEL * state.level.upgrades.fishHealth;
 }
 
 export function createFish(speciesId, x, y, state, { grown = false, starTier = 1, dropValueOverride = null } = {}) {
@@ -1062,7 +1069,7 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
   const totalFeeds = grown ? def.growthStages[def.growthStages.length - 1].feedsRequired : 0;
   const speed = effectiveSwimSpeed(def, state);
   const stage = stageIndexForFeeds(def, totalFeeds);
-  const maxHp = maxHpForStage(def, stage);
+  const maxHp = maxHpForStage(def, stage, state);
   return {
     id: nextId(),
     type: 'fish',
@@ -2835,7 +2842,7 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
             // recompute can't accidentally walk the stage back down.
             fish.totalFeeds = Math.max(fish.totalFeeds, def.growthStages[fish.stage].feedsRequired);
             fish.shimmerStartedAt = state.level.elapsed; // a real stage advance, same "shimmers when it grows" rule every other growth path follows
-            fish.maxHp = maxHpForStage(def, fish.stage); // growing up is a full heal too, same as the ordinary feed-driven path below
+            fish.maxHp = maxHpForStage(def, fish.stage, state); // growing up is a full heal too, same as the ordinary feed-driven path below
             fish.hp = fish.maxHp;
             playGrowToAdult();
             awardTankPoint(state, fish);
@@ -2893,7 +2900,7 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
           // Sound.js's playGrowToMid/playGrowToAdult, per direct request.
           if (fish.stage > prevStage) {
             fish.shimmerStartedAt = state.level.elapsed;
-            fish.maxHp = maxHpForStage(def, fish.stage); // growing up is a full heal too, per direct request's baby/mid/adult health table
+            fish.maxHp = maxHpForStage(def, fish.stage, state); // growing up is a full heal too, per direct request's baby/mid/adult health table
             fish.hp = fish.maxHp;
             if (fish.stage === def.growthStages.length - 1) playGrowToAdult(); else playGrowToMid();
           }

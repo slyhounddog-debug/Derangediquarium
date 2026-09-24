@@ -71,7 +71,9 @@ export const WORLD_TILES_W = 56;
 // unlocked, the same as if the tank simply ended there.
 export const TANK_EXPANSION_ROWS_PER_TIER = 2;
 export const TANK_EXPANSION_MAX_TIER = 5;
-export const TANK_EXPANSION_UPGRADE_COSTS = [15, 30, 50, 75, 100]; // Tank Points, cost of tiers 1..5 respectively — scaled above Fish Movement's top cost (35) since this is a bigger, permanent structural unlock
+// Per direct request ("make the Expand tank upgrade start at 5 tank points,
+// and then 15, 25, 35, 50") — was [15, 30, 50, 75, 100].
+export const TANK_EXPANSION_UPGRADE_COSTS = [5, 15, 25, 35, 50]; // Tank Points, cost of tiers 1..5 respectively
 export const WORLD_TILES_H = 38 + TANK_EXPANSION_ROWS_PER_TIER * TANK_EXPANSION_MAX_TIER; // 48 — fully-expanded size (22 water + 26 city); see tank expansion comment above for how much of this is actually unlocked/reachable at any given tier
 // The last row unlocked at tier 0 (22 water rows + 16 base city rows - 1) —
 // Grid.js's getUnlockedSeabedRowEnd adds TANK_EXPANSION_ROWS_PER_TIER *
@@ -1194,21 +1196,31 @@ export const FISH_SPEED_MULTIPLIER = 1.1;
 // from the game completely, and the upgrades for it") — a fish's coin drop
 // is never blocked any more (see Entities.js's updateFish), so there's no
 // cap table/upgrade-cost table/max-level constant left to read here at all.
-// Two one-time Tank Upgrade unlocks, per direct request — same shape as the
-// old (now-removed) Fish Merging card: a flat cost, a boolean flag in
-// state.level.upgrades, no leveled ladder. "Electricity Graph" gates the
-// #hud-power click-to-open rolling graph popup AND its dropdown arrow (the mw
-// text readout itself still shows unconditionally once Electric Eel is
-// unlocked, unaffected — only the graph/arrow are hidden behind this);
-// "Wave Countdown" gates the Alien Wave/timer lines in the new Tab-toggled
-// Base Stats panel (UI.js's statsPanel) instead of a HUD readout — per
-// direct request, alien wave/timer moved off the HUD entirely. The old
-// "Gold/min Stat" Tank Upgrade is gone entirely, per a later direct request
-// ("give the player access to that info from the very beginning, so remove
-// it from the tank upgrade as well") — Gold/min is now an unconditional line
-// in the Base Stats panel, no purchase needed.
-export const ELECTRICITY_GRAPH_UNLOCK_COST = 2; // Tank Points
-export const WAVE_COUNTDOWN_UNLOCK_COST = 3; // Tank Points
+// The old "Electricity Graph" and "Wave Countdown" one-time Tank Upgrade
+// unlocks are gone entirely, per direct request ("give the alien wave timer
+// and the electricity graph to the player at the very start... remove those
+// tank upgrades from the tank upgrade menu") — same treatment the "Gold/min
+// Stat" Tank Upgrade got earlier ("give the player access to that info from
+// the very beginning, so remove it from the tank upgrade as well"). The
+// #hud-power click-to-open rolling graph popup/arrow, and the Base Stats
+// panel's Alien Wave/timer lines, are now unconditionally available from the
+// start — no purchase, no flag in state.level.upgrades, no cost constants
+// left to read here at all.
+
+// A 5-level leveled ladder, same shape as Food Quality/Fish Movement above —
+// per direct request ("Add in a tank upgrade at the bottom of the list with
+// 5 upgrades for increasing the life of the fish"). "Life" here means max HP
+// (FISH_HEALTH_BABY/MID/ADULT below), the only fish-survivability stat that
+// actually does anything right now — the separate `lifespan` field on each
+// SPECIES row is still unenforced (see its own comment), so an upgrade to
+// THAT would have no gameplay effect at all. Applied the same way maxHp
+// already is — baked in at creation and at every growth-stage transition
+// (Entities.js's maxHpForStage/createFish/updateFish), not retroactively on
+// an already-living fish, same as Food Quality's own prospective-only
+// application.
+export const FISH_HEALTH_UPGRADE_COSTS = [3, 8, 15, 25, 30]; // Tank Points
+export const FISH_HEALTH_UPGRADE_MAX_LEVEL = FISH_HEALTH_UPGRADE_COSTS.length;
+export const FISH_HEALTH_UPGRADE_BONUS_PER_LEVEL = 20; // +max HP per level, per direct request
 
 // Used by the Science Cap HUD readout (UI.js's updateHUD) — the live
 // count/max ratio at or above which the readout pulses red continuously, per
