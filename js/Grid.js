@@ -4536,6 +4536,29 @@ export function renderBuildGhost(ctx, state, worldX, worldY, buildingId, angle, 
   }
 }
 
+// Real bug fixed, per direct report ("after placing a fan, the cone will no
+// longer animate follow the cursor... stuck at a random angle until it's
+// fully placed"): a Fan's click-1 now genuinely places it for real (see
+// main.js's own click handler), so by the time click-2's re-aim step
+// renders its own live-tracking cone, the tile is no longer empty —
+// renderBuildGhost's own canPlaceTile check above always saw "occupied" and
+// silently suppressed the cone entirely, leaving only the REAL fan's own
+// normal per-tile render (frozen at whatever angle click-1 happened to
+// land on) visible underneath. This is the dedicated ghost for that exact
+// step instead — the Fan being aimed is unconditionally already a valid,
+// already-placed tile (there's nothing left to validate), so it skips
+// canPlaceTile entirely and always draws the cone, live, every frame.
+export function renderFanAimGhost(ctx, state, worldX, worldY, buildingId, angle) {
+  const { col, row } = worldToTile(worldX, worldY);
+  const screen = worldToScreen(col * TILE_SIZE, row * TILE_SIZE, state.camera);
+  const size = TILE_SIZE * state.camera.zoom;
+  ctx.globalAlpha = 0.45;
+  ctx.fillStyle = '#8fe0b8';
+  ctx.fillRect(screen.x, screen.y, size, size);
+  ctx.globalAlpha = 1;
+  renderDirectionIndicator(ctx, buildingId, screen.x, screen.y, size, angle, state.camera.zoom, true);
+}
+
 // The right-click-to-move mechanic's own ghost — per direct request, "a
 // ghost copy of the building" rather than the plain flat-colored square
 // renderBuildGhost's own new-placement ghost uses: a translucent copy of

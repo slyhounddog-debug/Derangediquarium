@@ -476,7 +476,7 @@ export function initUI(state) {
     if (e.target === els.fishInfoOverlay) closeFishInfoMenu(state); // same "click anywhere else closes it" precedent as every other fly-out pop-up here
   });
   els.platformFilterOverlay.addEventListener('click', (e) => {
-    if (e.target === els.platformFilterOverlay) closePlatformFilterMenu(); // same "click anywhere else closes it" precedent as every other fly-out pop-up here
+    if (e.target === els.platformFilterOverlay) closePlatformFilterMenu(state); // same "click anywhere else closes it" precedent as every other fly-out pop-up here
   });
   els.platformFilterClearBtn.addEventListener('click', () => clearPlatformFilter(state));
   els.storageChestOverlay.addEventListener('click', (e) => {
@@ -498,7 +498,7 @@ export function initUI(state) {
       closeRecipeMenu();
       closeBuildingInfoMenu();
       closeFishInfoMenu(state);
-      closePlatformFilterMenu();
+      closePlatformFilterMenu(state);
       closeStorageChestModal();
     });
   }
@@ -1061,10 +1061,18 @@ export function closeFishInfoMenu(state) {
   playPanelClose();
 }
 
+// A building's own info-modal anchor (MOUND_MENU_GAP_PX) works fine off a
+// tile's TOP edge, but a fish's x/y is its sprite's CENTER, not its top —
+// the same flat 12px gap left the modal visibly touching/overlapping the
+// fish's own head per direct report ("move the info modal up slightly on
+// all the fish so it's not touching the top of the fish"). A bigger flat
+// gap (not zoom-scaled, same convention every other one of these popups
+// already uses) clears a typical adult fish's sprite comfortably.
+const FISH_INFO_MENU_GAP_PX = 34;
 function updateFishInfoMenuPosition(state) {
   const screen = worldToScreen(state.ui.fishInfoModalFrozenX, state.ui.fishInfoModalFrozenY, state.camera);
   els.fishInfoAnchor.style.left = `${screen.x}px`;
-  els.fishInfoAnchor.style.top = `${screen.y - MOUND_MENU_GAP_PX}px`;
+  els.fishInfoAnchor.style.top = `${screen.y - FISH_INFO_MENU_GAP_PX}px`;
 }
 
 function fishStatRowHtml(label, perMin, penaltyPerMin) {
@@ -1165,6 +1173,17 @@ export function openMagnetFishFilterMenu(state, fishId) {
   platformFilterMenuClosing = false;
   platformFilterFishId = fishId;
   platformFilterTileKey = null;
+  // Freezes the fish in place while this pop-up is open, same as the fish
+  // info modal — per direct request. state.ui.magnetFishFilterModalFishId is
+  // main.js's own cross-module flag to read (it owns state.level.entities,
+  // UI.js doesn't reach in and mutate fish position itself) — see
+  // updateFishInfoModalFreeze's sibling handling for this field.
+  const fish = state.level.entities.find((e) => e.id === fishId && e.type === 'fish');
+  if (fish) {
+    state.ui.magnetFishFilterModalFishId = fishId;
+    state.ui.magnetFishFilterModalFrozenX = fish.x;
+    state.ui.magnetFishFilterModalFrozenY = fish.y;
+  }
   if (platformFilterMenuCloseTimer !== null) { clearTimeout(platformFilterMenuCloseTimer); platformFilterMenuCloseTimer = null; }
   closeSidePanels(state);
   els.platformFilterOverlay.classList.remove('hidden');
@@ -1177,10 +1196,23 @@ export function openMagnetFishFilterMenu(state, fishId) {
   playPanelOpen();
 }
 
-export function closePlatformFilterMenu() {
+export function closePlatformFilterMenu(state) {
   if (!platformFilterMenuOpen) return;
   platformFilterMenuOpen = false;
   platformFilterMenuClosing = true;
+  // Per direct request ("Make it so the magnet fish stops when the filter
+  // modal is open just like when the info modal is open") — unfreezes the
+  // Magnet Fish here (a plain Platform/Fan filter target has no fish to
+  // unfreeze, so this is a no-op for those). Also resets wanderTimer, same
+  // real bug fix the fish info modal's own closeFishInfoMenu already needed
+  // (see its own comment) — without it, the fish would sit motionless for
+  // up to WANDER_INTERVAL_MAX_S after this closes, not "just like" the info
+  // modal's own immediate resume.
+  if (platformFilterFishId != null && state) {
+    const fish = state.level.entities.find((e) => e.id === platformFilterFishId && e.type === 'fish');
+    if (fish) fish.wanderTimer = 0;
+    state.ui.magnetFishFilterModalFishId = null;
+  }
   platformFilterTileKey = null;
   platformFilterFishId = null;
   els.platformFilterMenu.classList.add('platform-filter-menu-closed');
@@ -1232,7 +1264,7 @@ function updatePlatformFilterMenuPosition(state) {
 // popup if the underlying tile/fish is gone, without touching this DOM at all.
 function refreshPlatformFilterMenu(state) {
   const target = activeFilterTarget(state);
-  if (!target) { closePlatformFilterMenu(); return; }
+  if (!target) { closePlatformFilterMenu(state); return; }
 
   // Per direct request ("make fans work as filters the same as
   // platforms") — the pop-up itself is fully shared (same fields, same
@@ -4344,7 +4376,7 @@ export function updateHUD(state) {
   // frame; this just closes the popup if the underlying tile/fish is gone.
   // activeFilterTarget covers both this pop-up's building and Magnet Fish
   // uses in one check.
-  if (platformFilterMenuOpen && !activeFilterTarget(state)) closePlatformFilterMenu();
+  if (platformFilterMenuOpen && !activeFilterTarget(state)) closePlatformFilterMenu(state);
   if (platformFilterMenuOpen || platformFilterMenuClosing) updatePlatformFilterMenuPosition(state);
   if (storageChestMenuOpen && !state.level.buildingData[storageChestTileKey]) closeStorageChestModal(); // the tile it's showing got demolished (or moved) out from under it
   // Unlike the Platform filter menu above, this DOES refresh every frame

@@ -147,6 +147,7 @@ import {
 import {
   renderSeabedGrid,
   renderBuildGhost,
+  renderFanAimGhost,
   placeTile,
   removeTile,
   cycleTileCheat,
@@ -198,6 +199,7 @@ import {
   openBuildingInfoMenu,
   openPlatformFilterMenu,
   openMagnetFishFilterMenu,
+  closePlatformFilterMenu,
   openFishInfoMenu,
   closeFishInfoMenu,
   copyPlatformFilter,
@@ -602,6 +604,15 @@ const state = {
     fishInfoModalFishId: null,
     fishInfoModalFrozenX: 0,
     fishInfoModalFrozenY: 0,
+    // Same locked-in-place freeze as the fish info modal above, for a Magnet
+    // Fish's own item-filter modal — per direct request ("Make it so the
+    // magnet fish stops when the filter modal is open just like when the
+    // info modal is open"). Written by UI.js's openMagnetFishFilterMenu/
+    // closePlatformFilterMenu; applied every tick by main.js's
+    // updateMagnetFishFilterModalFreeze.
+    magnetFishFilterModalFishId: null,
+    magnetFishFilterModalFrozenX: 0,
+    magnetFishFilterModalFrozenY: 0,
     paused: false, // pause menu open/closed (Escape); update() below skips simulating entirely while true
     // Time-manipulation HUD buttons, per direct request. timePaused freezes
     // fish/alien/building simulation while still letting the player build/
@@ -766,7 +777,7 @@ const FISH_TOGGLE_BOUNCE_AMOUNT = 0.22;
 // checked at the top of the click handler below to swallow the click that
 // follows the same press/release gesture, so it doesn't ALSO open the info
 // modal on release.
-const MAGNET_FISH_LONG_PRESS_MS = 500;
+const MAGNET_FISH_LONG_PRESS_MS = 280; // cut from 500 per direct follow-up request ("make the long press take less time")
 const MAGNET_FISH_LONG_PRESS_MOVE_TOLERANCE_PX = 8;
 let magnetFishLongPressTimeout = null;
 let magnetFishLongPressStartX = 0;
@@ -1769,6 +1780,26 @@ function performUndo() {
   }
 }
 
+// Cancels an UNCONFIRMED fresh fan placement/replace (click 1 already
+// bought/replaced it, click 2 hasn't confirmed the angle yet) by reversing
+// the exact undo entry click 1 itself just pushed — per direct spec
+// ("right-click, Q or esc to cancel and refund a placement of a fan if one
+// click has been made to buy the fan but not a second click to confirm the
+// angle"). The undo stack's top entry is guaranteed to still be this exact
+// fan's own 'place'/'replace' entry the whole time fanAimingCell stays
+// armed (isFanAimingActive() only stays true while THIS fan's own build
+// tool is still selected — see its own comment — so no other undo-worthy
+// action can be pushed in between). Never called for the OTHER
+// isFanAimingActive() case (a MOVED fan's own re-aim step,
+// fanAimingMoveData != null) — that's always free to begin with and
+// already has its own distinct put-back-at-origin cancel path (see the
+// move-cancel right-click handler), nothing to refund there.
+function cancelArmedFanPlacement() {
+  if (fanAimingCell == null || fanAimingMoveData != null) return;
+  performUndo();
+  fanAimingCell = null;
+}
+
 // Deletes a placed tile via a full refund, the same way removal always has,
 // but first snapshots it (type/instance-data/the exact refund actually
 // paid) so performUndo can restore it later, and posts a floating "+$xx"
@@ -2257,10 +2288,13 @@ input.rightClickHandlers.push(() => {
   // reactivated THIS same old angle-adjust step instead of starting a fresh
   // placement under the cursor. Per direct bug report (from back when click
   // 2 was still the real purchase): right-click must fully cancel it, no
-  // lingering spot for a later Q to pull back up. The Fan itself is already
-  // real/bought by this point now (purchase moved to click 1) — this just
-  // stops the free angle re-aim, it never un-places anything.
-  fanAimingCell = null;
+  // lingering spot for a later Q to pull back up. Per a later direct spec
+  // ("right-click, Q or esc to cancel and refund a placement of a fan if
+  // one click has been made to buy the fan but not a second click to
+  // confirm the angle"), this now actually UNDOES the click-1 purchase too
+  // (cancelArmedFanPlacement — a no-op for the move-in-progress case, which
+  // the handler above this one already fully resolved on its own).
+  cancelArmedFanPlacement();
 });
 
 // Middle-click-to-move — see movingBuilding's own comment above. Only arms
@@ -2415,8 +2449,16 @@ input.keydownHandlers.push((e) => {
   // close (Mound/recipe/building-info/platform-filter/Lab/Lab-purchase) also
   // already closes on a click anywhere outside it, so nothing is stranded
   // without a close path. Escape's own job is simply "toggle the pause
-  // menu," full stop, same as the new hamburger button.
+  // menu," full stop, same as the new hamburger button — with ONE later
+  // direct exception carved back out: an unconfirmed fan placement (click 1
+  // bought it, click 2 hasn't confirmed the angle yet) also cancels-and-
+  // refunds on Escape now, same as right-click/Q, per direct spec
+  // ("right-click, Q or esc to cancel and refund a placement of a fan").
   if (e.code === 'Escape') {
+    if (fanAimingCell != null && fanAimingMoveData == null) {
+      cancelArmedFanPlacement();
+      return;
+    }
     togglePauseMenu(state);
     return;
   }
@@ -2543,8 +2585,11 @@ input.keydownHandlers.push((e) => {
         // tier is armed again later (Q's own "reselect last tool" branch, a
         // fresh shop click, anything) — per direct bug report, a fan cancelled
         // with Q went right back into aiming its old, already-cancelled spot
-        // the next time that tier was picked.
-        fanAimingCell = null;
+        // the next time that tier was picked. Per a later direct spec, this
+        // now also actually undoes the click-1 purchase/replace for an
+        // unconfirmed fresh placement (cancelArmedFanPlacement — a no-op for
+        // a moved fan's own re-aim step, which stays free either way).
+        cancelArmedFanPlacement();
       } else {
         const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
         const fish = findFishForPipetteAt(state, world.x, world.y);
@@ -2974,6 +3019,22 @@ function updateFishInfoModalFreeze() {
   fish.vy = 0;
 }
 
+// Same freeze, for a Magnet Fish's own item-filter modal — per direct
+// request ("Make it so the magnet fish stops when the filter modal is open
+// just like when the info modal is open"). closePlatformFilterMenu already
+// resets wanderTimer on close, same "resume immediately, don't wait out a
+// stale timer" fix updateFishInfoModalFreeze's own closeFishInfoMenu needed.
+function updateMagnetFishFilterModalFreeze() {
+  const fishId = state.ui.magnetFishFilterModalFishId;
+  if (fishId == null) return;
+  const fish = state.level.entities.find((e) => e.id === fishId && e.type === 'fish');
+  if (!fish || fish.dying) { closePlatformFilterMenu(state); return; } // the fish it's showing died/despawned out from under it
+  fish.x = state.ui.magnetFishFilterModalFrozenX;
+  fish.y = state.ui.magnetFishFilterModalFrozenY;
+  fish.vx = 0;
+  fish.vy = 0;
+}
+
 // Mirrors Engine.js's own updateCamera vertical clamp (camera.y's max is
 // WORLD_H + CAMERA_BOTTOM_BUFFER_PX - viewH) to answer "is the camera
 // currently panned all the way down" — used by the post-alien guided
@@ -3203,6 +3264,7 @@ function update(dtMs) {
   if (!state.ui.timePaused) updateBuildingBubbles(dtMs);
   updateFishDrag();
   updateFishInfoModalFreeze();
+  updateMagnetFishFilterModalFreeze();
   updateItemDrag();
   updateChestAimDrag();
   updateRecipeDrag();
@@ -3750,7 +3812,7 @@ function render() {
     const angle = angleFromTileToPoint(fanAimingCell.col, fanAimingCell.row, hoverWorld.x, hoverWorld.y);
     const cellCenterX = fanAimingCell.col * TILE_SIZE + TILE_SIZE / 2;
     const cellCenterY = fanAimingCell.row * TILE_SIZE + TILE_SIZE / 2;
-    renderBuildGhost(ctx, state, cellCenterX, cellCenterY, fanAimingCell.buildingId, angle, true, true, false);
+    renderFanAimGhost(ctx, state, cellCenterX, cellCenterY, fanAimingCell.buildingId, angle);
   } else if (hoverEffectiveTool.startsWith('build:') && input.mouse.inside && !state.ui.paused) {
     const world = hoverWorld;
     const buildingId = hoverEffectiveTool.slice('build:'.length);
