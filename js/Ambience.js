@@ -1063,7 +1063,9 @@ const CURSOR_BUBBLE_MAX = 60;
 // velocity needed to spawn bubbles... it should spawn bubbles when even
 // moving really slowly") — 60 -> 10, so only near-zero/jitter movement fails
 // to spawn anything, not just slow deliberate movement.
-const CURSOR_BUBBLE_MIN_SPEED = 10; // world px/sec floor below which nothing spawns — plain hovering shouldn't spam bubbles
+// Per a further direct follow-up request ("reduce the cursor movement floor
+// down from 10 to 5, so even moving 6px accumulates spawn debt") — 10 -> 5.
+const CURSOR_BUBBLE_MIN_SPEED = 5; // world px/sec floor below which nothing spawns — plain hovering shouldn't spam bubbles
 const CURSOR_BUBBLE_SPEED_FOR_MAX_RATE = 2200; // world px/sec at/above which spawn rate hits its cap
 // Per direct follow-up request ("increase the amount of bubbles that spawn
 // at the cursor by 50%") — 14 -> 21.
@@ -1097,7 +1099,9 @@ const CURSOR_BUBBLE_MAX_RATE = 28; // bubbles/sec at top speed — several a sec
 // .3 that of the cursor velocity instead of .5") — 0.5 -> 0.3.
 // Per a further direct follow-up request ("reduce the velocity... to .15x
 // instead of .3x") — 0.3 -> 0.15.
-const CURSOR_BUBBLE_BURST_VELOCITY_MULTIPLIER = 0.15;
+// Per a further direct follow-up request ("increase the cursor bubble spawn
+// velocity slightly to .18x") — 0.15 -> 0.18.
+const CURSOR_BUBBLE_BURST_VELOCITY_MULTIPLIER = 0.18;
 const CURSOR_BUBBLE_BURST_DRAG_PER_S = 5.5; // exponential decay rate — a burst is ~96% gone after 3/5.5 ≈ 0.55s ("...before slowing")
 const CURSOR_BUBBLE_AHEAD_MIN_PX = 8;
 const CURSOR_BUBBLE_AHEAD_MAX_PX = 20;
