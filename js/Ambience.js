@@ -512,6 +512,14 @@ function randomSeaUrchin() {
     spikeCount: 10 + Math.floor(Math.random() * 6),
     hue: 265 + Math.random() * 30, // deep purple-violet, the classic urchin color
     depth: 45 + Math.random() * 20, // always >= LAB_DEPTH_THRESHOLD — urchins always draw in front of the Science Lab
+    // Per direct follow-up request ("have the sea urchins bob and bounce a
+    // little bit so it looks like they are alive") — a small vertical
+    // sine bob, same "pure function of the global elapsed clock" pattern
+    // drawOneKelp already uses for its sway, so no separate update() call
+    // is needed for it to animate.
+    bobFreq: 1 + Math.random() * 1.2,
+    bobPhase: Math.random() * Math.PI * 2,
+    bobAmp: 1.5 + Math.random() * 1.5,
   };
 }
 const seaUrchins = [];
@@ -522,7 +530,8 @@ function drawOneSeaUrchin(ctx, camera, canvasWidth, u) {
   const r = u.radius * camera.zoom;
   if (screen.x < -r * 4 || screen.x > canvasWidth + r * 4) return;
   ctx.save();
-  const cy = screen.y - r * 0.6;
+  const bob = Math.sin(elapsed * u.bobFreq + u.bobPhase) * u.bobAmp * camera.zoom;
+  const cy = screen.y - r * 0.6 - Math.abs(bob);
   ctx.strokeStyle = `hsl(${u.hue}, 45%, 22%)`;
   ctx.lineWidth = Math.max(1, camera.zoom);
   for (let i = 0; i < u.spikeCount; i++) {
@@ -660,6 +669,10 @@ function drawOneKelp(ctx, camera, canvasWidth, k) {
 // Bumped 4 -> 5 (25% more) per direct request ("increase the amount of...
 // crabs... by 25%").
 const CRAB_COUNT = 5;
+// Per direct follow-up request ("make the crabs occasionally spawn bubbles
+// when they are moving") — timer range a moving crab waits between bubbles.
+const CRAB_BUBBLE_MIN_S = 2;
+const CRAB_BUBBLE_MAX_S = 5;
 function randomCrab() {
   const homeX = Math.random() * WORLD_W;
   const depth = Math.random() < 0.75 ? 55 + Math.random() * 20 : 44 + Math.random() * 10;
@@ -673,11 +686,36 @@ function randomCrab() {
     legPhaseFreq: 6 + Math.random() * 3,
     hue: 10 + Math.random() * 20,
     pauseTimer: Math.random() * 2,
+    bubbleTimer: CRAB_BUBBLE_MIN_S + Math.random() * (CRAB_BUBBLE_MAX_S - CRAB_BUBBLE_MIN_S),
     depth,
   };
 }
 const crabs = [];
 for (let i = 0; i < CRAB_COUNT; i++) crabs.push(randomCrab());
+
+// Spawns one small bubble at a crab's own position, into the shared
+// cursorBubbles pool — same reasoning/pattern as spawnChestBubble: rides the
+// existing rise/wobble/fade update+render code, and per direct request
+// ("make sure the bubbles go all the way to the top") uses the same
+// ttlS = y/speed trick so it doesn't fade out early.
+function spawnCrabBubble(c) {
+  if (cursorBubbles.length >= CURSOR_BUBBLE_MAX) cursorBubbles.shift();
+  const speed = 20 + Math.random() * 20;
+  const y = SEABED_FLOOR_Y - c.size * 0.5 + (Math.random() - 0.5) * 4;
+  cursorBubbles.push({
+    x: c.x + (Math.random() - 0.5) * c.size,
+    y,
+    vx: 0,
+    vy: 0,
+    radius: 1 + Math.random() * 1.5,
+    speed,
+    wobbleFreq: 0.8 + Math.random() * 1.4,
+    wobblePhase: Math.random() * Math.PI * 2,
+    wobbleAmp: 2 + Math.random() * 4,
+    ageS: 0,
+    ttlS: y / speed,
+  });
+}
 
 function updateCrabs(dt) {
   for (const c of crabs) {
@@ -689,6 +727,12 @@ function updateCrabs(dt) {
     if (Math.abs(c.x - c.homeX) > c.range) {
       c.dir *= -1;
       c.pauseTimer = 0.4 + Math.random() * 1.2;
+    }
+    // Only bubbles while actually moving (i.e. not during the pause above).
+    c.bubbleTimer -= dt;
+    if (c.bubbleTimer <= 0) {
+      spawnCrabBubble(c);
+      c.bubbleTimer = CRAB_BUBBLE_MIN_S + Math.random() * (CRAB_BUBBLE_MAX_S - CRAB_BUBBLE_MIN_S);
     }
   }
 }
@@ -743,8 +787,16 @@ function drawOneCrab(ctx, camera, canvasWidth, c) {
 const CHEST_WAIT_MIN_S = 5;
 const CHEST_WAIT_MAX_S = 15;
 const CHEST_OPEN_DURATION_S = 0.6;
-const CHEST_HOLD_OPEN_DURATION_S = 1; // "waiting 1 second" before closing again, per direct request
+// Per direct follow-up request ("keep the chest lid open for 1.5 seconds
+// instead of 1 second") — 1 -> 1.5.
+const CHEST_HOLD_OPEN_DURATION_S = 1.5;
 const CHEST_CLOSE_DURATION_S = 0.5;
+// Per direct follow-up request ("make the chest bubbles take longer to spawn
+// all the bubbles, having the bubbles spawn not just while it's opening but
+// for the first half a second the chest lid is open") — the bubble budget
+// now trickles out over the whole 'opening' phase PLUS the first 0.5s of
+// 'open', instead of finishing the instant the lid finishes swinging open.
+const CHEST_BUBBLE_SPAWN_WINDOW_S = CHEST_OPEN_DURATION_S + 0.5;
 function randomChestWaitS() {
   return CHEST_WAIT_MIN_S + Math.random() * (CHEST_WAIT_MAX_S - CHEST_WAIT_MIN_S);
 }
@@ -756,6 +808,7 @@ const treasureChest = {
   lidT: 0, // 0 = fully closed, 1 = fully open — drives the lid's rotation and the treasure reveal
   bubbleBudget: 0,
   bubblesSpawned: 0,
+  bubbleElapsed: 0, // time since 'opening' began — spans the 'opening' phase AND the first CHEST_BUBBLE_SPAWN_WINDOW_S of 'open'
   depth: 50 + Math.random() * 10, // always >= LAB_DEPTH_THRESHOLD — same front-of-Lab band as coral/urchins
 };
 
@@ -799,13 +852,16 @@ function updateTreasureChest(dt) {
       c.timer = 0;
       c.bubbleBudget = 5 + Math.floor(Math.random() * 6); // 5-10, per direct request
       c.bubblesSpawned = 0;
+      c.bubbleElapsed = 0;
     }
   } else if (c.phase === 'opening') {
     c.timer += dt;
+    c.bubbleElapsed += dt;
     c.lidT = Math.min(1, c.timer / CHEST_OPEN_DURATION_S);
-    // Spreads the bubble budget out across the whole opening animation
+    // Spreads the bubble budget out across the whole opening animation PLUS
+    // the first half second of 'open' (see CHEST_BUBBLE_SPAWN_WINDOW_S)
     // instead of dumping them all in one frame.
-    const targetSpawned = Math.floor(c.lidT * c.bubbleBudget);
+    const targetSpawned = Math.floor(Math.min(1, c.bubbleElapsed / CHEST_BUBBLE_SPAWN_WINDOW_S) * c.bubbleBudget);
     while (c.bubblesSpawned < targetSpawned) {
       spawnChestBubble(c);
       c.bubblesSpawned++;
@@ -813,6 +869,12 @@ function updateTreasureChest(dt) {
     if (c.lidT >= 1) { c.phase = 'open'; c.timer = 0; }
   } else if (c.phase === 'open') {
     c.timer += dt;
+    c.bubbleElapsed += dt;
+    const targetSpawned = Math.floor(Math.min(1, c.bubbleElapsed / CHEST_BUBBLE_SPAWN_WINDOW_S) * c.bubbleBudget);
+    while (c.bubblesSpawned < targetSpawned) {
+      spawnChestBubble(c);
+      c.bubblesSpawned++;
+    }
     if (c.timer >= CHEST_HOLD_OPEN_DURATION_S) { c.phase = 'closing'; c.timer = 0; }
   } else if (c.phase === 'closing') {
     c.timer += dt;
@@ -994,10 +1056,14 @@ function drawOneSunRay(ctx, camera, canvasWidth, canvasHeight, ray) {
 // mouse-move read (world-space speed, px/sec) instead of recycling forever,
 // aging out via a TTL instead of wrapping back to the seabed. Capped so a
 // long fast drag can't grow the array unboundedly.
-const CURSOR_BUBBLE_MAX = 40;
+// Bumped 40 -> 60 (matching the 50% MAX_RATE bump below) so the higher spawn
+// rate doesn't just churn through the pool faster via `.shift()`.
+const CURSOR_BUBBLE_MAX = 60;
 const CURSOR_BUBBLE_MIN_SPEED = 60; // world px/sec floor below which nothing spawns — plain hovering shouldn't spam bubbles
 const CURSOR_BUBBLE_SPEED_FOR_MAX_RATE = 2200; // world px/sec at/above which spawn rate hits its cap
-const CURSOR_BUBBLE_MAX_RATE = 14; // bubbles/sec at top speed — several a second, per direct request
+// Per direct follow-up request ("increase the amount of bubbles that spawn
+// at the cursor by 50%") — 14 -> 21.
+const CURSOR_BUBBLE_MAX_RATE = 21; // bubbles/sec at top speed — several a second, per direct request
 // Per direct request ("make the bubbles that spawn from the cursor have way
 // more initial velocity, actually matching the cursor to start before
 // slowing and going up, and have the bubbles spawn slightly in front of the
@@ -1015,7 +1081,11 @@ const CURSOR_BUBBLE_MAX_RATE = 14; // bubbles/sec at top speed — several a sec
 // that spawn from the cursor") — 2.2 -> 1.8, still well past a 1:1 match
 // (still "way more" than the original zero-velocity spawn) but noticeably
 // less aggressive than the first pass.
-const CURSOR_BUBBLE_BURST_VELOCITY_MULTIPLIER = 1.8;
+// Per direct follow-up request ("the bubbles have way too much velocity...
+// needs to be like half the cursor velocity when the bubbles spawn") — the
+// previous 1.8 was still read as far too fast, so this drops well below a
+// 1:1 match down to roughly half the cursor's own speed.
+const CURSOR_BUBBLE_BURST_VELOCITY_MULTIPLIER = 0.5;
 const CURSOR_BUBBLE_BURST_DRAG_PER_S = 5.5; // exponential decay rate — a burst is ~96% gone after 3/5.5 ≈ 0.55s ("...before slowing")
 const CURSOR_BUBBLE_AHEAD_MIN_PX = 8;
 const CURSOR_BUBBLE_AHEAD_MAX_PX = 20;
