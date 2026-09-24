@@ -1108,7 +1108,15 @@ input.mouseDownHandlers.push((sx, sy) => {
   // (see its own comment), so both correctly still block a drag here
   // regardless of where the cursor is, matching "a fish selected for
   // purchasing" explicitly named in the request.
-  if (!isCursorOrFoodTool(effectiveToolAt(world.y))) return;
+  // Per direct follow-up report ("I keep grabbing food instead of spawning
+  // food") — the literal Food tool itself no longer starts an item drag at
+  // all, since a click with it armed is supposed to unambiguously drop a
+  // new pellet, not fight over whether the player meant to grab an existing
+  // one sitting nearby. A build/blueprint tool silently falling back to
+  // Food-like click behavior while hovering open water (effectiveToolAt,
+  // above) is a different, narrower case the report wasn't about — that
+  // still allows a drag, same as before.
+  if (!isCursorOrFoodTool(effectiveToolAt(world.y)) || state.ui.selectedTool === 'food') return;
   let best = null;
   let bestDistSq = Infinity;
   for (const item of state.level.items) {
@@ -4872,6 +4880,50 @@ function render() {
       ctx.arc(pos.x - 9, pos.y - size * 0.5 - 7, 3, 0, Math.PI * 2);
       ctx.fillStyle = hungerIconColor;
       ctx.fill();
+    }
+  }
+
+  // Off-screen critical-hunger notification bubbles — per direct request
+  // ("when time is unpaused and there are fish in the second stage of hunger
+  // that are not in view, add in a small hunger notification bubble at the
+  // top of the screen, horizontally matching the horizontal position of the
+  // fish"). Deliberately re-derived fresh every frame from live state,
+  // instead of tracked with its own show/hide flag per fish — the camera
+  // never pans horizontally (see Engine.js's updateCamera; a fish's own
+  // screen x is always meaningful regardless of vertical scroll), so "off
+  // view" here only ever means scrolled past vertically. Re-deriving every
+  // frame is what makes "scroll up to where the fish is -> bubble toggles
+  // off" and "scroll back down / unpause -> it shows back up" fall out for
+  // free: there's no persisted per-fish toggle state to get out of sync,
+  // just this frame's own camera position and pause flag. The main per-fish
+  // loop above already culls (skips entirely) any fish outside the exact
+  // same on-screen bounds, so a plain second pass here, looking for the ones
+  // THAT loop skipped, can't double-count or fight it for a frame.
+  if (!state.ui.paused) {
+    const bubbleMarginX = 26;
+    const bubbleY = 54;
+    for (const fish of state.level.entities) {
+      if (fish.type !== 'fish' || fish.dying) continue;
+      if (fish.hunger < HUNGER_CRITICAL_THRESHOLD) continue;
+      const pos = worldToScreen(fish.x, fish.y, state.camera);
+      const onScreen = pos.x >= -60 && pos.x <= canvas.width + 60 && pos.y >= -60 && pos.y <= canvas.height + 60;
+      if (onScreen) continue;
+      const def = SPECIES[fish.speciesId];
+      const hungerIconColor = def.behavior.includes('SCAVENGER') ? WASTE_COLOR : FOOD_COLOR;
+      const bx = Math.max(bubbleMarginX, Math.min(canvas.width - bubbleMarginX, pos.x));
+      ctx.save();
+      ctx.fillStyle = 'rgba(20, 20, 30, 0.6)';
+      ctx.beginPath();
+      ctx.roundRect(bx - 22, bubbleY - 14, 44, 26, 13);
+      ctx.fill();
+      ctx.fillStyle = '#ff3b3b';
+      ctx.font = 'bold 15px sans-serif';
+      ctx.fillText('!!', bx - 5, bubbleY + 5);
+      ctx.beginPath();
+      ctx.arc(bx - 13, bubbleY - 2, 4, 0, Math.PI * 2);
+      ctx.fillStyle = hungerIconColor;
+      ctx.fill();
+      ctx.restore();
     }
   }
 

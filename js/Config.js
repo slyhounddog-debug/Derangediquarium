@@ -1840,15 +1840,26 @@ export const PROCESSOR_STATS = {
 // shot, so a fully-upgraded turret does draw its power faster in real time,
 // same as it always would from firing more often, with no separate field
 // needed to track that).
+// powerCostPerShot bumped again per direct request ("make the advanced
+// turret take 40mw a shot instead of 15, and make the electric waste turret
+// take 10mw a shot") — Electric Waste Turret 6->10, Advanced Turret 15->40;
+// powerCostPerSec recomputed to match (powerCostPerShot * shotsPerSec), same
+// as every earlier tuning pass here.
 export const TURRET_STATS = {
   [TILE_TURRET_WASTE]: { shotsPerSec: 1.5, damage: 2, powerCostPerShot: 0, powerCostPerSec: 0 },
-  [TILE_TURRET_ELECTRIC]: { shotsPerSec: 1.75, damage: 6, powerCostPerShot: 6, powerCostPerSec: 10.5 },
-  [TILE_TURRET_ADVANCED]: { shotsPerSec: 2.5, damage: 8, powerCostPerShot: 15, powerCostPerSec: 37.5 },
+  [TILE_TURRET_ELECTRIC]: { shotsPerSec: 1.75, damage: 6, powerCostPerShot: 10, powerCostPerSec: 17.5 },
+  [TILE_TURRET_ADVANCED]: { shotsPerSec: 2.5, damage: 8, powerCostPerShot: 40, powerCostPerSec: 100 },
 };
-// Which turret tiers consume Waste as ammo (gating whether they can fire at
-// all, alongside the fire-rate cooldown) — per direct request, the Electric
-// tier ("Electric Waste Turret") now needs BOTH Waste ammo AND power to
-// shoot, not unlimited ammo any more; the Advanced tier stays ammo-free.
+// Which turret tiers consume Waste (or Biomass) as ammo (gating whether they
+// can fire at all, alongside the fire-rate cooldown) — per direct request,
+// the Electric tier ("Electric Waste Turret") now needs BOTH Waste ammo AND
+// power to shoot, not unlimited ammo any more; the Advanced tier stays
+// ammo-FREE (never gated on this set — see `hasAmmo` in Grid.js's
+// updateBuildings), but per a later direct request it can now optionally
+// take Biomass too, through its own entirely separate small pool — see
+// ADVANCED_TURRET_MAX_BIOMASS_AMMO/ADVANCED_TURRET_BIOMASS_DAMAGE below,
+// which deliberately don't live in this Set/the Waste+Biomass system above
+// at all (different cap, different per-shot damage rule, no Waste option).
 export const TURRET_AMMO_TILES = new Set([TILE_TURRET_WASTE, TILE_TURRET_ELECTRIC]);
 // Each of the two Turret Fire Rate Lab nodes (turret_fire_rate_1/_2, in
 // SCIENCE_LAB_UPGRADES) applies this exact same +20% multiplicatively —
@@ -1862,8 +1873,7 @@ export const TURRET_FIRE_RATE_UPGRADE_MULTIPLIER = 1.2;
 // for a timed process — there's no "processing duration" for a turret's own
 // intake, only the fire-rate cooldown on the OUTPUT side.
 export const WASTE_TURRET_SHOTS_PER_WASTE = 10;
-export const WASTE_TURRET_MAX_WASTE = 5; // -> 50 max stored shots
-export const WASTE_TURRET_MAX_AMMO = WASTE_TURRET_SHOTS_PER_WASTE * WASTE_TURRET_MAX_WASTE;
+export const WASTE_TURRET_MAX_WASTE = 5; // -> 50 max stored shots from Waste alone
 // Biomass doubles as a premium ammo source for any TURRET_AMMO_TILES tier —
 // per direct request, it's strictly better than Waste ammo: 50% more damage
 // per shot and 15 shots per unit loaded instead of Waste's 10. Tracked as a
@@ -1877,6 +1887,37 @@ export const WASTE_TURRET_MAX_AMMO = WASTE_TURRET_SHOTS_PER_WASTE * WASTE_TURRET
 // stays a meaningful choice rather than just stacking two full reserves.
 export const BIOMASS_TURRET_SHOTS_PER_AMMO = 15;
 export const BIOMASS_TURRET_DAMAGE_MULTIPLIER = 1.5;
+// Per direct report ("make sure the turrets aren't capped at 50 shots too,
+// in case they use biomass, it should be able to hold up to 75 shots") — a
+// real bug fix, not just a bump: this used to be WASTE_TURRET_SHOTS_PER_WASTE
+// * WASTE_TURRET_MAX_WASTE (10*5=50), the exact same cap whether a fully
+// Waste-loaded turret (5 waste * 10 = 50, legitimately maxed) OR a fully
+// Biomass-loaded one (5 biomass * 15 = 75 shots' worth) held it — the
+// Biomass case was silently capped 25 shots short of what 5 units of its own
+// premium ammo should have been worth. Deliberately no longer DERIVED from
+// WASTE_TURRET_MAX_WASTE at all (a flat number instead) — Waste alone still
+// naturally tops out at 50 (still only 5 Waste items ever needed), this cap
+// only ever matters once Biomass is involved.
+export const WASTE_TURRET_MAX_AMMO = 75;
+// ---- Advanced Turret's own optional Biomass-only ammo ----
+// Per direct request ("make it so that advanced turrets can accept just
+// biomass as ammo, and hold up to 5. The advanced turrets dont need biomass
+// to shoot, but if it does have biomass, those shots do 14 damage a shot")
+// — a deliberately separate, much smaller system from the Waste+Biomass one
+// above: no Waste option at all, no per-unit shots conversion (each absorbed
+// Biomass item is worth exactly 1 shot here, not
+// BIOMASS_TURRET_SHOTS_PER_AMMO's 15), a flat replacement damage rather than
+// a multiplier on the Advanced Turret's own base damage (TURRET_STATS' own
+// `damage: 8`), and — critically — never gates firing at all (the Advanced
+// Turret isn't in TURRET_AMMO_TILES, so `hasAmmo` in Grid.js's
+// updateBuildings is unconditionally true for it regardless of this pool);
+// it only ever changes what a shot fired WHILE this pool is non-empty does
+// extra damage. Tracked on the tile as data.ammoBiomassAdvanced, spent
+// before falling back to the turret's own free/ammo-less base-damage shot,
+// same "use the better ammo you just loaded immediately" precedent
+// BIOMASS_TURRET_DAMAGE_MULTIPLIER's own comment already established.
+export const ADVANCED_TURRET_MAX_BIOMASS_AMMO = 5;
+export const ADVANCED_TURRET_BIOMASS_DAMAGE = 14;
 // Retired in favor of a real circle-vs-tile touch test (Grid.js's
 // isTouchingBuildingTile) — per direct report, this fixed radius left the
 // tile's own corners (including the top edge) under-covered, so waste

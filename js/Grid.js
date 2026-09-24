@@ -77,6 +77,8 @@ import {
   WASTE_TURRET_MAX_WASTE,
   BIOMASS_TURRET_SHOTS_PER_AMMO,
   BIOMASS_TURRET_DAMAGE_MULTIPLIER,
+  ADVANCED_TURRET_MAX_BIOMASS_AMMO,
+  ADVANCED_TURRET_BIOMASS_DAMAGE,
   TILE_REFUND_FRACTION,
   GRID_SWEEP_SUBSTEP,
   ITEM_HORIZONTAL_DAMPING,
@@ -1077,13 +1079,18 @@ function writeFreshBuildingData(state, col, row, buildingId, angle) {
     // where aliens actually are) instead of sideways. `ammo` matters for any
     // tile in TURRET_AMMO_TILES (Waste + Electric Waste Turret — both start
     // empty, have to be fed, see updateBuildings' turret intake scan);
-    // Advanced ignores it entirely (unlimited ammo, a power cost instead).
+    // Advanced never needs it to fire (unlimited free shots, a power cost
+    // instead) but can optionally hold its own separate small Biomass-only
+    // reserve (ammoBiomassAdvanced, below — see
+    // ADVANCED_TURRET_MAX_BIOMASS_AMMO's own comment in Config.js).
     // `cooldownMs` counts down to the next shot regardless of tier — see
     // updateBuildings' turret-fire branch. `ammoWaste`/`ammoBiomass` are two
     // separate counters, not one pool, since Biomass ammo deals more damage
     // per shot than Waste (see BIOMASS_TURRET_DAMAGE_MULTIPLIER) — both
-    // start empty.
-    state.level.buildingData[buildingKey(col, row)] = { type: buildingId, ammoWaste: 0, ammoBiomass: 0, cooldownMs: 0, aimAngle: -Math.PI / 2 };
+    // start empty, same as ammoBiomassAdvanced (unused outside the Advanced
+    // tier, but harmless to carry on every turret's own data for one shared
+    // init shape).
+    state.level.buildingData[buildingKey(col, row)] = { type: buildingId, ammoWaste: 0, ammoBiomass: 0, ammoBiomassAdvanced: 0, cooldownMs: 0, aimAngle: -Math.PI / 2 };
   } else if (REFINERY_TILES.has(buildingId)) {
     // No `angle` — same fixed top-center output every recipe-driven building
     // shares (see updateBuildings). lockedRecipe is null while idle, else
@@ -1771,9 +1778,17 @@ export function cycleTileCheat(state, worldX, worldY) {
     state.level.buildingData[buildingKey(col, row)] = { type: next, angle: CHEAT_DEFAULT_ANGLE };
   } else if (TURRET_TILES.has(next)) {
     // Cheat-cycled turrets start pre-loaded with max ammo (any ammo-consuming
-    // tier — see TURRET_AMMO_TILES) so testing combat doesn't require
-    // grinding real Waste first.
-    state.level.buildingData[buildingKey(col, row)] = { type: next, ammoWaste: TURRET_AMMO_TILES.has(next) ? WASTE_TURRET_MAX_AMMO : 0, ammoBiomass: 0, cooldownMs: 0, aimAngle: -Math.PI / 2 };
+    // tier — see TURRET_AMMO_TILES — plus the Advanced tier's own separate
+    // Biomass-only reserve) so testing combat doesn't require grinding real
+    // Waste/Biomass first.
+    state.level.buildingData[buildingKey(col, row)] = {
+      type: next,
+      ammoWaste: TURRET_AMMO_TILES.has(next) ? WASTE_TURRET_MAX_AMMO : 0,
+      ammoBiomass: 0,
+      ammoBiomassAdvanced: next === TILE_TURRET_ADVANCED ? ADVANCED_TURRET_MAX_BIOMASS_AMMO : 0,
+      cooldownMs: 0,
+      aimAngle: -Math.PI / 2,
+    };
   } else if (REFINERY_TILES.has(next)) {
     state.level.buildingData[buildingKey(col, row)] = { type: next, lockedRecipe: null, progressMs: 0, heldItemId: null };
   } else if (MANUFACTURER_TILES.has(next)) {
@@ -2510,6 +2525,26 @@ export function updateBuildings(state, dtMs) {
         }
       }
 
+      // The Advanced Turret's own separate, Biomass-ONLY reserve — per
+      // direct request. Deliberately not folded into the block above: it's
+      // not in TURRET_AMMO_TILES (so it never gates firing — see `hasAmmo`
+      // below), doesn't accept Waste at all, and each absorbed Biomass item
+      // is worth exactly 1 shot here (not BIOMASS_TURRET_SHOTS_PER_AMMO's
+      // 15) up to its own much smaller ADVANCED_TURRET_MAX_BIOMASS_AMMO cap
+      // — see that constant's own comment in Config.js.
+      if (data.type === TILE_TURRET_ADVANCED && data.ammoBiomassAdvanced < ADVANCED_TURRET_MAX_BIOMASS_AMMO) {
+        for (let i = 0; i < items.length; i++) {
+          const it = items[i];
+          if (it.type !== 'biomass') continue;
+          if (isTouchingBuildingTile(centerX, centerY, it.x, it.y, it.radius)) {
+            items.splice(i, 1);
+            data.ammoBiomassAdvanced = Math.min(ADVANCED_TURRET_MAX_BIOMASS_AMMO, data.ammoBiomassAdvanced + 1);
+            playIntake();
+            break;
+          }
+        }
+      }
+
       // Fire — cooldown-gated, auto-targets the NEAREST living alien
       // anywhere in the level (no player-chosen aim, and — per direct
       // request — no range cutoff at all any more; see TURRET_STATS' own
@@ -2576,13 +2611,24 @@ export function updateBuildings(state, dtMs) {
           // Spends from the Biomass pool first whenever it's non-empty (see
           // BIOMASS_TURRET_DAMAGE_MULTIPLIER's own comment) — the better
           // ammo you just loaded takes effect immediately rather than
-          // sitting saved behind whatever Waste is already loaded.
+          // sitting saved behind whatever Waste is already loaded. The
+          // Advanced Turret's own separate Biomass-only reserve is checked
+          // FIRST and independently of all that — it's not in
+          // TURRET_AMMO_TILES at all, so `usingBiomass` below is always
+          // false for it; per direct request, that pool is spent whenever
+          // it's non-empty, at a flat ADVANCED_TURRET_BIOMASS_DAMAGE instead
+          // of a multiplier on the turret's own base damage.
+          const usingAdvancedBiomass = data.type === TILE_TURRET_ADVANCED && data.ammoBiomassAdvanced > 0;
           const usingBiomass = TURRET_AMMO_TILES.has(data.type) && data.ammoBiomass > 0;
-          const shotDamage = usingBiomass ? turretStats.damage * BIOMASS_TURRET_DAMAGE_MULTIPLIER : turretStats.damage;
+          const shotDamage = usingAdvancedBiomass
+            ? ADVANCED_TURRET_BIOMASS_DAMAGE
+            : usingBiomass ? turretStats.damage * BIOMASS_TURRET_DAMAGE_MULTIPLIER : turretStats.damage;
           turretShots.push({ x: centerX, y: centerY, targetId: nearestAlien.id, damage: shotDamage });
           nearestAlien.reservedDamage = (nearestAlien.reservedDamage || 0) + shotDamage;
           data.cooldownMs = 1000 / (turretStats.shotsPerSec * getTurretFireRateMultiplier(state));
-          if (TURRET_AMMO_TILES.has(data.type)) {
+          if (usingAdvancedBiomass) {
+            data.ammoBiomassAdvanced -= 1;
+          } else if (TURRET_AMMO_TILES.has(data.type)) {
             if (usingBiomass) data.ammoBiomass -= 1;
             else data.ammoWaste -= 1;
           }
@@ -3431,6 +3477,15 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
         }
         if (data && TURRET_AMMO_TILES.has(type)) {
           renderTurretAmmoDots(ctx, screen.x, screen.y, size, data.ammoWaste, data.ammoBiomass, camera.zoom);
+        }
+        // The Advanced Turret's own separate Biomass-only reserve — per
+        // direct request, only ever shown once at least one has actually
+        // been loaded (unlike the Waste/Electric dots above, which always
+        // show since that ammo is required to fire at all; this one is
+        // purely optional bonus ammo, so an empty row of dots on every
+        // single Advanced Turret would just be visual noise).
+        if (data && type === TILE_TURRET_ADVANCED && data.ammoBiomassAdvanced > 0) {
+          renderAdvancedTurretBiomassDots(ctx, screen.x, screen.y, size, data.ammoBiomassAdvanced, camera.zoom);
         }
         if (data && MANUFACTURER_TILES.has(type) && data.recipeId !== null) {
           renderManufacturerIngredientLights(ctx, screen.x, screen.y, size, data);
@@ -4610,6 +4665,29 @@ function renderTurretAmmoDots(ctx, x, y, size, ammoWaste, ammoBiomass, zoom) {
     ctx.beginPath();
     ctx.arc(startX + i * gap, dotY, dotRadius, 0, Math.PI * 2);
     ctx.fillStyle = i >= litDots ? 'rgba(0, 0, 0, 0.35)' : i < biomassDots ? BIOMASS_COLOR : '#ffe066';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.lineWidth = Math.max(0.5, zoom * 0.5);
+    ctx.stroke();
+  }
+}
+
+// The Advanced Turret's own separate Biomass-only ammo dots — same visual
+// language as renderTurretAmmoDots above (a lit-dot row, BIOMASS_COLOR when
+// filled), but a much simpler 1-shot-per-dot reading (no Math.ceil block
+// math needed — see ADVANCED_TURRET_MAX_BIOMASS_AMMO's own comment in
+// Config.js for why this pool never converts one absorbed item into more
+// than 1 shot, unlike BIOMASS_TURRET_SHOTS_PER_AMMO's 15).
+function renderAdvancedTurretBiomassDots(ctx, x, y, size, ammoBiomassAdvanced, zoom) {
+  const dotRadius = Math.max(1.5, size * 0.055);
+  const gap = dotRadius * 2.6;
+  const totalWidth = (ADVANCED_TURRET_MAX_BIOMASS_AMMO - 1) * gap;
+  const startX = x + size / 2 - totalWidth / 2;
+  const dotY = y + size * 0.14;
+  for (let i = 0; i < ADVANCED_TURRET_MAX_BIOMASS_AMMO; i++) {
+    ctx.beginPath();
+    ctx.arc(startX + i * gap, dotY, dotRadius, 0, Math.PI * 2);
+    ctx.fillStyle = i < ammoBiomassAdvanced ? BIOMASS_COLOR : 'rgba(0, 0, 0, 0.35)';
     ctx.fill();
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
     ctx.lineWidth = Math.max(0.5, zoom * 0.5);

@@ -61,11 +61,13 @@ import {
   TURRET_STATS,
   TURRET_AMMO_TILES,
   TILE_TURRET_WASTE,
+  TILE_TURRET_ADVANCED,
   WASTE_TURRET_SHOTS_PER_WASTE,
   WASTE_TURRET_MAX_WASTE,
-  WASTE_TURRET_MAX_AMMO,
   BIOMASS_TURRET_SHOTS_PER_AMMO,
   BIOMASS_TURRET_DAMAGE_MULTIPLIER,
+  ADVANCED_TURRET_MAX_BIOMASS_AMMO,
+  ADVANCED_TURRET_BIOMASS_DAMAGE,
   ACHIEVEMENTS,
   ACHIEVEMENT_LIST,
   ACHIEVEMENT_GEM_REWARD_BY_TIER,
@@ -444,6 +446,7 @@ export function initUI(state) {
     platformFilterClearBtn: document.getElementById('platform-filter-clear-btn'),
     platformFilterItems: document.getElementById('platform-filter-items'),
     platformFilterHint: document.getElementById('platform-filter-hint'),
+    platformFilterFanNote: document.getElementById('platform-filter-fan-note'),
     storageChestOverlay: document.getElementById('storage-chest-overlay'),
     storageChestAnchor: document.getElementById('storage-chest-anchor'),
     storageChestMenu: document.getElementById('storage-chest-menu'),
@@ -1075,8 +1078,22 @@ function refreshBuildingInfoLiveStats(state) {
   if (TURRET_AMMO_TILES.has(data.type)) {
     const ammoWaste = data.ammoWaste || 0;
     const ammoBiomass = data.ammoBiomass || 0;
+    // Per direct request ("change the ammo in the turret modal to not say
+    // out of 50 in the parentheses, just the total amount of shots") — was
+    // "(${totalAmmo}/${WASTE_TURRET_MAX_AMMO})"; the cap number added
+    // nothing a player could act on mid-fight, just noise next to the count
+    // that actually matters.
     const totalAmmo = ammoWaste + ammoBiomass;
-    const ammoLine = `${itemIconImgHtml('waste')} <b>${ammoWaste}</b> · ${itemIconImgHtml('biomass')} <b>${ammoBiomass}</b> (${totalAmmo}/${WASTE_TURRET_MAX_AMMO})`;
+    const ammoLine = `${itemIconImgHtml('waste')} <b>${ammoWaste}</b> · ${itemIconImgHtml('biomass')} <b>${ammoBiomass}</b> (${totalAmmo})`;
+    html += `<div class="building-stat">${ammoLine}</div>`;
+  } else if (data.type === TILE_TURRET_ADVANCED) {
+    // The Advanced Turret's own separate, optional Biomass-only reserve —
+    // per direct request. Always shown (unlike the ammo-tier line above,
+    // which only shows for a turret that's IN TURRET_AMMO_TILES at all)
+    // since it's worth knowing whether a loaded shot is about to fire at
+    // ADVANCED_TURRET_BIOMASS_DAMAGE even for a turret that's currently empty.
+    const ammoBiomassAdvanced = data.ammoBiomassAdvanced || 0;
+    const ammoLine = `${itemIconImgHtml('biomass')} <b>${ammoBiomassAdvanced}</b> (optional, +${ADVANCED_TURRET_BIOMASS_DAMAGE} dmg/shot)`;
     html += `<div class="building-stat">${ammoLine}</div>`;
   }
   els.buildingInfoLiveStats.innerHTML = html;
@@ -1372,6 +1389,10 @@ function refreshPlatformFilterMenu(state) {
     : target.isFan
       ? 'Back to a plain Fan — blows everything again'
       : 'Back to a plain, always-solid Platform — everything blocked';
+  // Per direct request — a reminder that G toggles every placed Fan's own
+  // cone/arrow visuals (main.js's KeyG handler), only relevant while this
+  // popup is actually open for a Fan.
+  els.platformFilterFanNote.classList.toggle('hidden', !target.isFan);
 
   els.platformFilterItems.innerHTML = '';
   for (const itemDef of PLATFORM_FILTER_ITEM_TYPES) {
@@ -4073,14 +4094,26 @@ function buildingStatsHtml(buildingId) {
     // ammo figures show as a Waste-to-Biomass range on any ammo-consuming
     // tier instead of one flat number.
     const isAmmoTurret = TURRET_AMMO_TILES.has(buildingId);
+    const isAdvancedTurret = buildingId === TILE_TURRET_ADVANCED;
     const biomassDamage = Math.round(t.damage * BIOMASS_TURRET_DAMAGE_MULTIPLIER * 10) / 10;
-    const damageText = isAmmoTurret ? `${t.damage}-${biomassDamage}` : `${t.damage}`;
+    // Per direct request ("make sure to show the damage of the advanced
+    // turret as a range in the shop") — the Advanced Turret now ALSO shows a
+    // range (base damage to ADVANCED_TURRET_BIOMASS_DAMAGE's flat 14),
+    // despite not being an "ammo turret" (TURRET_AMMO_TILES) at all — its
+    // own separate optional Biomass reserve (see that constant's own comment
+    // in Config.js) is what the higher end of this range refers to.
+    const damageText = isAmmoTurret ? `${t.damage}-${biomassDamage}` : isAdvancedTurret ? `${t.damage}-${ADVANCED_TURRET_BIOMASS_DAMAGE}` : `${t.damage}`;
     const ammoIcons = `${itemIconImgHtml('waste')}${itemIconImgHtml('biomass')}`;
     const ammoText = `${ammoIcons} <b>${WASTE_TURRET_SHOTS_PER_WASTE}-${BIOMASS_TURRET_SHOTS_PER_AMMO}</b>/ammo, holds <b>${WASTE_TURRET_MAX_WASTE}</b>`;
     const powerText = `⚡ <b>${t.powerCostPerShot}</b> mw/shot`;
     let line2;
     if (isAmmoTurret && t.powerCostPerShot > 0) line2 = `${ammoIcons} <b>${WASTE_TURRET_SHOTS_PER_WASTE}-${BIOMASS_TURRET_SHOTS_PER_AMMO}</b>/ammo · ${powerText}`;
     else if (isAmmoTurret) line2 = ammoText;
+    // Per direct request ("advanced turrets... don't need biomass to shoot,
+    // but if it does have biomass, those shots do 14 damage a shot") — the
+    // line makes clear Biomass is optional here, unlike the Waste/Electric
+    // tiers' own required ammo line just above.
+    else if (isAdvancedTurret) line2 = `${powerText} · ${itemIconImgHtml('biomass')} optional, holds <b>${ADVANCED_TURRET_MAX_BIOMASS_AMMO}</b>`;
     else line2 = powerText;
     return (
       `<div class="building-stat">🔫 <b>${t.shotsPerSec}</b>/sec · 💥 <b>${damageText}</b> dmg</div>` +

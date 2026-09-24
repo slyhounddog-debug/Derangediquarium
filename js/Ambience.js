@@ -1011,7 +1011,11 @@ const CURSOR_BUBBLE_MAX_RATE = 14; // bubbles/sec at top speed — several a sec
 // (instead of spawning centered on/trailing the cursor), so a bubble looks
 // like it's being kicked out ahead of the cursor's own motion rather than
 // left behind it.
-const CURSOR_BUBBLE_BURST_VELOCITY_MULTIPLIER = 2.2;
+// Per direct follow-up request ("slightly reduce the velocity of bubbles
+// that spawn from the cursor") — 2.2 -> 1.8, still well past a 1:1 match
+// (still "way more" than the original zero-velocity spawn) but noticeably
+// less aggressive than the first pass.
+const CURSOR_BUBBLE_BURST_VELOCITY_MULTIPLIER = 1.8;
 const CURSOR_BUBBLE_BURST_DRAG_PER_S = 5.5; // exponential decay rate — a burst is ~96% gone after 3/5.5 ≈ 0.55s ("...before slowing")
 const CURSOR_BUBBLE_AHEAD_MIN_PX = 8;
 const CURSOR_BUBBLE_AHEAD_MAX_PX = 20;
