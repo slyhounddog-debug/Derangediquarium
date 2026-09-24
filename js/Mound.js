@@ -28,14 +28,19 @@ import { pushGameNotification } from './Notifications.js';
 
 const MOUND_WIDTH_PX = MOUND_WIDTH_TILES * TILE_SIZE;
 export const MOUND_X = WORLD_W / 2; // world-space center, fixed for the life of the level
-// Per direct request ("move science lab up, out of the city completely") —
-// the Lab used to sit at the exact same footprint the Mound occupied (see
+// Per direct request ("move science lab down so it's on the floor of the
+// upper tank, and none of it is in the city part of the tank") — the Lab
+// used to sit at the exact same footprint the Mound occupied (see
 // isPointOnScienceLab/renderScienceLab below), which put its own base 1 tile
 // INTO the seabed/city build area, overlapping the same buildable rows a
-// player's factory lives in. 3 tiles clears its base (MOUND_HEIGHT_PX+TILE_SIZE
-// tall, so a lift of 3 tiles leaves 2 tiles of open water between its lowest
-// point and SEABED_FLOOR_Y) well above the city floor, into open water.
-const SCIENCE_LAB_LIFT_PX = TILE_SIZE * 3;
+// player's factory lives in. A LATER pass then over-corrected to a 3-tile
+// lift, floating it 2 tiles clear of the floor — this pulls it back down to
+// exactly 1 tile, which cancels out precisely the 1 tile it used to sink
+// into the city (see the bottom-edge math in isPointOnScienceLab/
+// renderScienceLab below: bottom = SEABED_FLOOR_Y + TILE_SIZE - LIFT_PX),
+// landing its base flush ON the floor line — resting on the upper tank's
+// floor, zero pixels into the city, instead of hovering above it.
+const SCIENCE_LAB_LIFT_PX = TILE_SIZE;
 
 // Shimmer/gleam, per direct request ("make it so the mound and the science
 // lab shimmer/gleen like the other objects, but every 10-50 seconds") — see
@@ -318,10 +323,10 @@ export function renderMound(ctx, state) {
 // Shares the Mound's horizontal (X) position, revealed the instant the Mound
 // shatters (state.level.tier >= MOUND_MAX_TIER — see isPointOnMound/
 // renderMound's own early-returns above, which is what leaves the Mound's
-// own footprint clear). Vertically it sits SCIENCE_LAB_LIFT_PX higher than
-// the Mound ever did, though — per direct request ("move science lab up, out
-// of the city completely") — so it no longer overlaps the buildable seabed
-// rows the way the Mound's own base briefly did. Clicking it opens UI.js's
+// own footprint clear). Vertically it sits SCIENCE_LAB_LIFT_PX (1 tile)
+// higher than the Mound ever did, resting flush on SEABED_FLOOR_Y — the
+// floor of the upper (water) tank — with zero pixels into the buildable
+// seabed rows below it, per direct request. Clicking it opens UI.js's
 // Lab popup (same pattern as the Mound's own "Throw money" popup — main.js's
 // click handler calls isPointOnScienceLab and, if true, opens that modal
 // instead of calling into this file directly), which is where Gene-Splicing

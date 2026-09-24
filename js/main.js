@@ -115,7 +115,7 @@ import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop
 import { pushGameNotification } from './Notifications.js';
 import { loadLevel, LEVELS } from './Levels.js';
 import { updateStoryTriggers, updateAutosave } from './Systems.js';
-import { updateAmbience, renderAmbience, spawnCursorBubbles } from './Ambience.js';
+import { updateAmbience, renderAmbienceBehindLab, renderAmbienceFrontLab, spawnCursorBubbles } from './Ambience.js';
 import { resumeAudio, startGameMusic, playAlienHit, setBattleMusicActive, triggerBossMusic, playBuildPlace, playDemolish } from './Sound.js';
 import {
   updateEntities,
@@ -3869,12 +3869,14 @@ function render() {
   ctx.fillStyle = waterBackgroundGradient(ctx, canvas.height);
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  // Ambience (bubbles/seaweed) renders immediately after the plain
-  // background fill and before anything else — per direct request, it
-  // needs to sit behind the seabed/city, the Mound/Science Lab, and every
-  // building/item/fish drawn later in this function, not just behind the
-  // fish/items the way it was before.
-  renderAmbience(ctx, state, canvas.width, canvas.height);
+  // Ambience (bubbles/seaweed/boulders/etc.) renders immediately after the
+  // plain background fill and before anything else — per direct request, it
+  // needs to sit behind the seabed/city and every building/item/fish drawn
+  // later in this function, not just behind the fish/items the way it was
+  // before. Split into two calls (this one, and renderAmbienceFrontLab
+  // below) with renderScienceLab sandwiched between them — see Ambience.js's
+  // header comment for why.
+  renderAmbienceBehindLab(ctx, state, canvas.width, canvas.height);
 
   // Per direct bug report ("after placing a fan, it renders a static cone
   // AND a cone that follows the cursor") — while a fan's angle is still
@@ -3886,9 +3888,17 @@ function render() {
   // import main.js — same state.ui cross-module signal pattern used
   // throughout this file.
   state.ui.fanAimingCell = fanAimingCell;
+  // Science Lab moved up here, between the two ambience halves, per direct
+  // request ("coral, urchins, and crabs can walk/spawn in front of the
+  // science lab but seaweed and boulders can't") — renderAmbienceBehindLab
+  // above already covers the boulders/seaweed/kelp half, so the Lab draws on
+  // top of those, then renderAmbienceFrontLab draws coral/urchins/crabs (and
+  // bubbles) on top of the Lab in turn. See Ambience.js's own header comment
+  // for the full depth-layering scheme this participates in.
+  renderScienceLab(ctx, state);
+  renderAmbienceFrontLab(ctx, state, canvas.width, canvas.height);
   renderSeabedGrid(ctx, state, canvas.width, canvas.height);
   renderMound(ctx, state);
-  renderScienceLab(ctx, state);
   renderTankWalls(ctx, state, canvas.width);
 
   // Shared by every ghost-preview branch below, and — via effectiveToolAt —
