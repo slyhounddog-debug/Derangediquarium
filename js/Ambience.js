@@ -309,7 +309,16 @@ function drawOneShadowFish(ctx, camera, canvasWidth, canvasHeight, f) {
 // depth order — see this file's header comment) showed straight through.
 // Fully opaque now, same "lighter halo behind a richer core" two-pass
 // technique drawOneShadowFish itself already uses, so it genuinely occludes
-// whatever's behind it while keeping the same soft-edged look.
+// whatever's behind it while keeping the same soft-edged look. Per a LATER
+// direct follow-up report ("the seaweed is too visually obtrusive now, make
+// it way less obtrusive... without changing size/shape/animation, but still
+// make the shadow fish disappear behind it completely") — an initial pass
+// (30/42% -> 12/18% saturation) still read as clearly green per a second
+// direct follow-up, so both tones dropped again, down to a near-neutral
+// 6/9% saturation and lightened further, close enough to the water's own
+// tone to read as barely-there texture rather than a distinct plant color —
+// while staying fully opaque (alpha untouched) so the occlusion fix above
+// still holds regardless of how muted the color itself gets.
 function drawOneSeaweed(ctx, camera, canvasWidth, w) {
   const screen = worldToScreen(w.x, SEABED_FLOOR_Y, camera);
   if (screen.x < -100 || screen.x > canvasWidth + 100) return;
@@ -321,10 +330,10 @@ function drawOneSeaweed(ctx, camera, canvasWidth, w) {
   ctx.beginPath();
   ctx.moveTo(screen.x, screen.y + 2);
   ctx.quadraticCurveTo(screen.x + sway, screen.y - h * 0.5, screen.x + sway * 0.4, screen.y - h);
-  ctx.strokeStyle = `hsl(${w.hue}, 30%, 46%)`;
+  ctx.strokeStyle = `hsl(${w.hue}, 6%, 55%)`;
   ctx.lineWidth = baseWidth * 2.2 * w.blurFactor;
   ctx.stroke();
-  ctx.strokeStyle = `hsl(${w.hue}, 42%, 32%)`;
+  ctx.strokeStyle = `hsl(${w.hue}, 9%, 45%)`;
   ctx.lineWidth = baseWidth;
   ctx.stroke();
   ctx.restore();

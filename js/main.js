@@ -84,7 +84,6 @@ import {
   COIN_RADIUS,
   PRODUCTION_BLOCKED_EFFECT_DURATION_MS,
   FISH_BUBBLE_LIFETIME_MS,
-  WORLD_H,
   WORLD_W,
   CAMERA_BOTTOM_BUFFER_PX,
   WASTE_RADIUS,
@@ -185,6 +184,7 @@ import {
   computeBlueprintCostWithReplace,
   placeBlueprintWithReplace,
   computeSnapLine,
+  getUnlockedWorldH,
 } from './Grid.js';
 import { isPointOnMound, crackMound, renderMound, centerCameraOnMound, isPointOnScienceLab, renderScienceLab } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
@@ -199,6 +199,8 @@ import {
   toggleTankPanel,
   openMoundMenu,
   openLabMenu,
+  closeLabMenu,
+  isLabMenuOpen,
   openRecipeMenu,
   openBuildingInfoMenu,
   openPlatformFilterMenu,
@@ -250,7 +252,7 @@ const minimapCanvas = document.getElementById('minimap-canvas');
 const minimapCtx = minimapCanvas.getContext('2d');
 
 function minimapScaleAndSize() {
-  const totalWorldH = WORLD_H + CAMERA_BOTTOM_BUFFER_PX;
+  const totalWorldH = getUnlockedWorldH(state) + CAMERA_BOTTOM_BUFFER_PX;
   const scale = Math.min(MINIMAP_BOX_W / WORLD_W, MINIMAP_BOX_H / totalWorldH);
   return { w: WORLD_W * scale, h: totalWorldH * scale, scale };
 }
@@ -264,7 +266,7 @@ minimapCanvas.addEventListener('click', (e) => {
   const clickY = (e.clientY - rect.top) * (minimapCanvas.height / rect.height);
   const { scale } = minimapScaleAndSize();
   const viewH = canvas.height / state.camera.zoom;
-  const maxY = Math.max(0, WORLD_H + CAMERA_BOTTOM_BUFFER_PX - viewH);
+  const maxY = Math.max(0, getUnlockedWorldH(state) + CAMERA_BOTTOM_BUFFER_PX - viewH);
   state.camera.y = Math.max(0, Math.min(clickY / scale - viewH / 2, maxY));
 });
 
@@ -281,16 +283,19 @@ minimapCanvas.addEventListener('click', (e) => {
 let tankZoomMode = null; // null | 'whole' | 'width'
 // Per direct report ("the zoom to fit isn't completely zoom to fit, I can
 // still scroll... zoom out enough that you can't scroll up or down at
-// all") — the real scrollable range Engine.js's updateCamera clamps
-// against is WORLD_H + CAMERA_BOTTOM_BUFFER_PX (the extra buffer strip
-// reserved for the fixed bottom tool-bar — see that constant's own
-// comment), NOT just WORLD_H on its own. Fitting zoom to WORLD_H alone left
-// viewH just short of the buffer's own height, so maxY (WORLD_H + buffer -
-// viewH) stayed slightly positive — a small but real amount of scroll was
-// still possible. Using the full scrollable height here instead makes
-// viewH >= that whole range, which drives maxY to (clamped) exactly 0.
+// all") — the real scrollable range Engine.js's updateCamera clamps against
+// is getUnlockedWorldH(state) + CAMERA_BOTTOM_BUFFER_PX (the extra buffer
+// strip reserved for the fixed bottom tool-bar — see that constant's own
+// comment), NOT just the tank's real bottom on its own. Fitting zoom to
+// that bottom alone left viewH just short of the buffer's own height, so
+// maxY (bottom + buffer - viewH) stayed slightly positive — a small but
+// real amount of scroll was still possible. Using the full scrollable
+// height here instead makes viewH >= that whole range, which drives maxY
+// to (clamped) exactly 0. (getUnlockedWorldH replaced a fixed WORLD_H
+// constant here once Tank Expansion made the tank's real bottom vary with
+// the player's purchased tier — see Grid.js's own comment on it.)
 function computeFitWholeTankZoom() {
-  return Math.min(canvas.width / WORLD_W, canvas.height / (WORLD_H + CAMERA_BOTTOM_BUFFER_PX));
+  return Math.min(canvas.width / WORLD_W, canvas.height / (getUnlockedWorldH(state) + CAMERA_BOTTOM_BUFFER_PX));
 }
 function computeFitWidthZoom() {
   return canvas.width / WORLD_W;
@@ -1247,8 +1252,8 @@ function updateItemDrag() {
   // object into the side glass panels or into the toolbar at the bottom").
   // The glass panels and the bottom tool-bar are purely screen-space
   // dressing sitting just outside the world's real x=0/WORLD_W and
-  // y=WORLD_H edges (see main.js's renderTankWalls and Grid.js's
-  // renderCameraBottomBuffer) — clamping to those same world coordinates,
+  // y=getUnlockedWorldH(state) edges (see main.js's renderTankWalls and
+  // Grid.js's renderCameraBottomBuffer) — clamping to those same world coordinates,
   // the exact ones Entities.js's clampItemToWorldWalls/Grid.js's
   // sweepVertical already enforce for ordinary (non-dragged) physics, keeps
   // a dragged item out of both for free, with no separate screen-space
@@ -1258,7 +1263,7 @@ function updateItemDrag() {
   // anywhere in the tank, city or open water alike.
   const margin = dragged.radius || 0;
   const clampedX = Math.min(Math.max(world.x, margin), WORLD_W - margin);
-  const clampedY = Math.min(Math.max(world.y, margin), WORLD_H - margin);
+  const clampedY = Math.min(Math.max(world.y, margin), getUnlockedWorldH(state) - margin);
   dragged.x = clampedX;
   dragged.y = clampedY;
   dragged.resting = false;
@@ -2519,17 +2524,34 @@ input.keydownHandlers.push((e) => {
   // universal-cancel handler still does. That's now entirely Q's (clearing
   // an armed tool) and right-click's (clearing a tool AND cancelling an
   // in-progress move/Blueprint-drag) job instead — every popup this used to
-  // close (Mound/recipe/building-info/platform-filter/Lab/Lab-purchase) also
+  // close (Mound/recipe/building-info/platform-filter/Lab-purchase) also
   // already closes on a click anywhere outside it, so nothing is stranded
-  // without a close path. Escape's own job is simply "toggle the pause
-  // menu," full stop, same as the new hamburger button — with ONE later
-  // direct exception carved back out: an unconfirmed fan placement (click 1
-  // bought it, click 2 hasn't confirmed the angle yet) also cancels-and-
-  // refunds on Escape now, same as right-click/Q, per direct spec
-  // ("right-click, Q or esc to cancel and refund a placement of a fan").
+  // without a close path.
+  //
+  // Per a later direct request ("Escape will close the shop menu, tank
+  // upgrade menu, or science lab if they are open. If none of them are
+  // open, Escape will pause the game") — a SPECIFIC, narrower piece of that
+  // old decision tree comes back: these three are the persistent, semi-
+  // modal side panels a player is likely to still have open when they reach
+  // for Escape expecting SOMETHING to happen right in front of them, rather
+  // than the game pausing behind it. Every other popup (Mound, recipe,
+  // building-info, platform-filter, fish-info) still relies purely on its
+  // own click-outside-to-close, same as before — only these three, plus the
+  // pre-existing fan-placement-cancel exception below, are special-cased
+  // here. See UI.js's updateHUD for the matching bottom-left legend text
+  // (dynamically "Close Menu" vs. "Pause Menu" depending on this same
+  // condition).
   if (e.code === 'Escape') {
     if (fanAimingCell != null && fanAimingMoveData == null) {
       cancelArmedFanPlacement();
+      return;
+    }
+    if (isLabMenuOpen()) {
+      closeLabMenu();
+      return;
+    }
+    if (!state.ui.shopCollapsed || !state.ui.tankPanelCollapsed) {
+      closeSidePanels(state);
       return;
     }
     togglePauseMenu(state);
@@ -2903,7 +2925,7 @@ function updateBuildDrag() {
     if (snap.tiles.length > 0) {
       if (!snapLinePlacedThisPress) {
         snapLinePlacedThisPress = true;
-        placeSnapLineTiles(state, buildingId, snap.tiles);
+        placeSnapLineTiles(state, buildingId, snap);
       }
       return;
     }
@@ -3020,10 +3042,25 @@ function updateBuildDrag() {
 // recipe/filter" if the reference building was pipetted) — applyPipetteData
 // already reads state.ui.pipetteRecipeId/pipetteFilterItems fresh for every
 // call, so calling it per tile here needs no new plumbing at all.
-function placeSnapLineTiles(state, buildingId, tiles) {
-  for (const t of tiles) {
-    const result = placeTileWithReplace(state, t.col, t.row, buildingId, 0, false);
-    if (!result.placed) break; // most likely ran out of money partway through — stop here, same as a plain single placement's own failed-purchase behavior
+// Per direct follow-up request ("the shift click to place a line should go
+// through already placed buildings, replacing any overlapping buildings...
+// make sure the total cost takes into account the refunds... like the
+// blueprint does") — the whole-line purchase is now all-or-nothing against
+// `snap.netCost` (computeSnapLine's own already-simulated total, refunds
+// included), checked ONCE upfront exactly like placeBlueprintWithReplace
+// checks its own preview total, rather than placing tiles one at a time
+// until money happens to run out. `shiftHeld: true` on every per-tile
+// placeTileWithReplace call is what actually turns each occupied tile into
+// a real replace (refund + charge the difference, or a free same-family
+// swap preserving recipe/filter/angle) instead of a rejected "occupied" —
+// computeSnapLine already only ever includes tiles it confirmed are either
+// empty or genuinely replaceable, so every one of these calls is expected
+// to succeed; the `if (!result.placed) break` is a defensive fallback only.
+function placeSnapLineTiles(state, buildingId, snap) {
+  if (snap.netCost > state.level.money) return;
+  for (const t of snap.tiles) {
+    const result = placeTileWithReplace(state, t.col, t.row, buildingId, 0, true);
+    if (!result.placed) break;
     applyPipetteData(state, t.col, t.row, buildingId);
     // Advances the anchor to wherever this line actually ended, per direct
     // "acts as the last placed building" precedent — a second Shift+click
@@ -3031,7 +3068,12 @@ function placeSnapLineTiles(state, buildingId, tiles) {
     // the original start tile.
     state.ui.lastPlacedTileCol = t.col;
     state.ui.lastPlacedTileRow = t.row;
-    pushUndoEntry({ type: 'place', col: t.col, row: t.row, buildingId });
+    if (result.replaced) {
+      pushUndoEntry({ type: 'replace', col: t.col, row: t.row, oldBuildingId: result.oldBuildingId, oldData: result.oldData, netCost: result.info.netCost });
+      showReplaceNetCostText(t.col * TILE_SIZE + TILE_SIZE / 2, t.row * TILE_SIZE + TILE_SIZE / 2, result.info.netCost);
+    } else {
+      pushUndoEntry({ type: 'place', col: t.col, row: t.row, buildingId });
+    }
   }
 }
 
@@ -3172,12 +3214,12 @@ function updateMagnetFishFilterModalFreeze() {
 }
 
 // Mirrors Engine.js's own updateCamera vertical clamp (camera.y's max is
-// WORLD_H + CAMERA_BOTTOM_BUFFER_PX - viewH) to answer "is the camera
-// currently panned all the way down" — used by the post-alien guided
-// tutorial's "scroll" step to know when to advance/skip itself.
+// getUnlockedWorldH(state) + CAMERA_BOTTOM_BUFFER_PX - viewH) to answer "is
+// the camera currently panned all the way down" — used by the post-alien
+// guided tutorial's "scroll" step to know when to advance/skip itself.
 function isScrolledToBottom(state) {
   const viewH = canvas.height / state.camera.zoom;
-  const maxY = Math.max(0, WORLD_H + CAMERA_BOTTOM_BUFFER_PX - viewH);
+  const maxY = Math.max(0, getUnlockedWorldH(state) + CAMERA_BOTTOM_BUFFER_PX - viewH);
   return state.camera.y >= maxY - 1;
 }
 
@@ -3375,12 +3417,12 @@ function update(dtMs) {
     // Nothing else runs either way (fish/aliens/elapsed all stay frozen),
     // preserving "the whole game pauses" the instant the alien IS visible.
     if (tutorialScrollDirectionNeeded(state)) {
-      updateCamera(state.camera, input, canvas, dtMs);
+      updateCamera(state.camera, input, canvas, dtMs, getUnlockedWorldH(state));
     }
     return;
   }
 
-  updateCamera(state.camera, input, canvas, dtMs);
+  updateCamera(state.camera, input, canvas, dtMs, getUnlockedWorldH(state));
   updateBuildDrag();
   // updateKeyDDelete() now runs earlier, ahead of the pause gate above — see
   // that call site's own comment for why.
@@ -3643,7 +3685,7 @@ function renderGlassWall(ctx, innerX, outerX, topY, bottomY) {
 }
 function renderTankWalls(ctx, state, canvasWidth) {
   const topY = worldToScreen(0, 0, state.camera).y;
-  const bottomY = worldToScreen(0, WORLD_H + CAMERA_BOTTOM_BUFFER_PX, state.camera).y;
+  const bottomY = worldToScreen(0, getUnlockedWorldH(state) + CAMERA_BOTTOM_BUFFER_PX, state.camera).y;
   const minWidthPx = TANK_WALL_MIN_WIDTH * state.camera.zoom;
   // The inner seam sits at the true world boundary whenever that's already
   // comfortably on-screen; otherwise it falls back to a fixed minimum
@@ -4047,12 +4089,16 @@ function render() {
         // renderBuildGhost's own RAMP_TRIANGLE_LOCAL_VERTS branch) — a minor,
         // deliberate simplification for the line-ghost specifically, not
         // worth duplicating that shape logic for every tile of a whole line.
+        // Tint matches the single-tile ghost's own convention (renderBuildGhost):
+        // blue for a tile that'll be replaced, green for a fresh empty one,
+        // red if the whole line (all-or-nothing, see computeSnapLine's own
+        // comment) isn't currently affordable — never per-tile partial.
         ctx.globalAlpha = 0.45;
-        ctx.fillStyle = t.affordable ? '#8fe0b8' : '#ff6b6b';
+        ctx.fillStyle = !t.affordable ? '#ff6b6b' : (t.occupied && !t.freeSwap ? '#5ab0ff' : '#8fe0b8');
         ctx.fillRect(screen.x, screen.y, size, size);
         ctx.globalAlpha = 1;
       }
-      state.ui.snapLineCost = snap.totalCost;
+      state.ui.snapLineCost = snap.netCost;
     } else {
       // showCone: false — this is the plain-hover phase, before a Fan's
       // placement cell has actually been armed by click 1 (see the

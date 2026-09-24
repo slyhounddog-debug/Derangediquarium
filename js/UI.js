@@ -44,7 +44,6 @@ import {
   TANK_EXPANSION_MAX_TIER,
   TANK_EXPANSION_ROWS_PER_TIER,
   WORLD_W,
-  WORLD_H,
   TILE_SIZE,
   ALIEN_RADIUS,
   POST_ALIEN_TUTORIAL_MESSAGE,
@@ -99,6 +98,7 @@ import {
   findNearestWasteTurretAndWaste, getRecipeBuildingKeyAt, renderTileShape,
   getBuildingCurrentPowerDraw, getBuildingUptimeFraction, applyRecipeToBuilding,
   getChestKeyAt, armChestTrickle, toggleChestTrickle,
+  getUnlockedWorldH,
 } from './Grid.js';
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
@@ -359,6 +359,7 @@ export function initUI(state) {
     buildingMoveLegendLine2: document.getElementById('building-move-legend-line2'),
     buildingMoveLegendLine3: document.getElementById('building-move-legend-line3'),
     fishMergeLegend: document.getElementById('fish-merge-legend'),
+    hotkeyLegendEsc: document.getElementById('hotkey-legend-esc'),
     hotkeyLegendE: document.getElementById('hotkey-legend-e'),
     hotkeyLegendQ: document.getElementById('hotkey-legend-q'),
     hotkeyLegendUndo: document.getElementById('hotkey-legend-undo'),
@@ -1735,6 +1736,15 @@ export function openLabMenu(state) {
   void els.labModal.offsetWidth; // forced reflow — same retrigger trick every other one-shot transition in this file uses
   els.labModal.classList.remove('lab-modal-closed');
   playPanelOpen();
+}
+
+// Per direct request ("Escape will close the shop menu, tank upgrade menu,
+// or science lab if they are open") — main.js's Escape handler needs to
+// know whether the Lab is currently open, but labMenuOpen itself is a
+// module-local transient like every other panel-open flag in this file (see
+// the comment above it).
+export function isLabMenuOpen() {
+  return labMenuOpen;
 }
 
 export function closeLabMenu() {
@@ -4647,12 +4657,16 @@ export function updateHUD(state) {
   } else if (state.ui.selectedTool.startsWith('build:')) {
     // Shift + Click: Snap Placement's own live multi-building total — per
     // direct request ("make sure the cost is dynamically updated to show
-    // the multi-building cost"), takes priority over the single-tile cost
-    // below whenever main.js's render() actually has a snap line showing
+    // the multi-building cost... take into account the refunds... like the
+    // blueprint does"), takes priority over the single-tile cost below
+    // whenever main.js's render() actually has a snap line showing
     // (state.ui.snapLineCost, the same cross-module-flag pattern
-    // buildReplaceInfo itself already uses).
+    // buildReplaceInfo itself already uses) — already a net figure
+    // (computeSnapLine's own totalCost - totalRefund), so the same
+    // "Profit: $N" formatting Replace's own net cost uses applies here too,
+    // for a line that refunds more than it costs.
     if (state.ui.snapLineCost != null) {
-      buildLegendText = `Cost: $${state.ui.snapLineCost}`;
+      buildLegendText = formatBuildCostLegendText(state.ui.snapLineCost);
     } else if (state.ui.buildReplaceInfo && state.ui.buildReplaceInfo.reason !== 'occupied') {
       // An 'occupied' rejection (hovering a placed building with Shift NOT
       // held) has a meaningless netCost of 0 — falls back to the tool's own
@@ -4744,11 +4758,17 @@ export function updateHUD(state) {
 
   if (buildLegendVisible || tutorialActive || buildingMoveLegendVisible || fishMergeLegendVisible) positionBottomLeftLegends();
 
+  // Esc — per direct request ("Escape will close the shop menu, tank
+  // upgrade menu, or science lab if they are open. If none of them are
+  // open, escape will pause the game... Update the legend... to dynamically
+  // switch from 'Close Menu' to 'Pause Menu'") — mirrors main.js's own
+  // Escape handler condition exactly (labMenuOpen is this same module's own
+  // transient, no cross-module flag needed).
+  els.hotkeyLegendEsc.textContent = `Esc: ${(labMenuOpen || !state.ui.shopCollapsed || !state.ui.tankPanelCollapsed) ? 'Close Menu' : 'Pause Menu'}`;
   // Persistent E/Q hotkey reminder, bottom-left corner — per direct
   // request, always visible (unlike the two legends above), re-worded live
   // to match what each key actually does right now. `toolIsPurchasable` is
-  // already computed above (a build:/fish: tool armed). The old dynamic Esc
-  // line is gone — see this function's own note further down.
+  // already computed above (a build:/fish: tool armed).
   els.hotkeyLegendE.textContent = `E: ${state.ui.shopCollapsed ? 'Open Shop' : 'Close Shop'}`;
   // Q is a genuine toggle, per direct request — Clear Cursor while ANY tool
   // is already armed ("something is being held" — build:/fish:, but also
@@ -4787,11 +4807,11 @@ export function updateHUD(state) {
   // changes — see that file's pushUndoEntry/performUndo).
   els.hotkeyLegendUndo.classList.toggle('hidden', !state.ui.undoAvailable);
   if (state.ui.undoAvailable) els.hotkeyLegendUndo.textContent = `Ctrl+Z: ${state.ui.undoLabel}`;
-  // The Esc line is gone entirely, per direct request — Escape's job is no
-  // longer context-dependent (see main.js's own simplified Escape handler),
-  // so there's nothing left to dynamically re-word here. The SEPARATE
-  // "(Esc) to skip tutorial" hint (#tutorial-skip-legend) is untouched —
-  // that's still real, distinct Escape behavior during a guided tutorial.
+  // The SEPARATE "(Esc) to skip tutorial" hint (#tutorial-skip-legend) is
+  // untouched by the Esc line above — that's still real, distinct Escape
+  // behavior during a guided tutorial (and the two never show at once, see
+  // buildLegendVisible's own tutorialActive gate near the top of this
+  // function).
 }
 
 // The bottom-left hover legend (#fish-merge-legend) draws each merge/splice
@@ -4989,17 +5009,22 @@ function startTutorialFishSpotWorld(state) {
 // tutorial step auto-closes the Shop (see the turret family button's click
 // handler above), there's nothing left to stay clear of, so the spot can be
 // the genuinely obvious, centered one. Vertically, it sits near — but not
-// exactly on — the world's real bottom edge (WORLD_H), matching the "scroll
-// all the way down" step immediately before this one. Real bug caught
-// during testing (Playwright, after the tank's own height shrank — see
-// Config.js's WORLD_TILES_H): a literal `WORLD_H - TILE_SIZE / 2` (dead
-// center of the very last seabed row) put this step's own spotlight circle
-// visibly overlapping the fixed bottom tool-bar, since the circle's radius
-// is a fixed 70 SCREEN px regardless of zoom while the toolbar sits at a
-// fixed CSS position — 3 tiles of headroom keeps the whole circle clear of
-// it at any reasonable viewport size, while staying comfortably inside the
+// exactly on — the tank's real bottom edge, matching the "scroll all the
+// way down" step immediately before this one. Real bug caught during
+// testing (Playwright, after the tank's own height shrank — see Config.js's
+// WORLD_TILES_H): a literal `bottom - TILE_SIZE / 2` (dead center of the
+// very last seabed row) put this step's own spotlight circle visibly
+// overlapping the fixed bottom tool-bar, since the circle's radius is a
+// fixed 70 SCREEN px regardless of zoom while the toolbar sits at a fixed
+// CSS position — 3 tiles of headroom keeps the whole circle clear of it at
+// any reasonable viewport size, while staying comfortably inside the
 // "scrolled to the bottom" view the previous step already established.
-const POST_ALIEN_TURRET_SPOT = { x: WORLD_W / 2, y: WORLD_H - TILE_SIZE * 3 };
+// A function, not a plain constant, since Tank Expansion made the tank's
+// real bottom vary with the player's purchased tier (getUnlockedWorldH)
+// rather than a fixed value computable once at module load.
+function getPostAlienTurretSpot(state) {
+  return { x: WORLD_W / 2, y: getUnlockedWorldH(state) - TILE_SIZE * 3 };
+}
 // Where the 'chest' guided flow's own Storage Chest gets placed — per direct
 // design, deliberately near the Mound itself (MOUND_X, already imported for
 // the Mound's own click-target/camera-centering) rather than the bottom of
@@ -5119,7 +5144,8 @@ const TUTORIAL_FLOWS = {
       text: 'Place the Waste Turret down here! (Here’s 25 gold to cover it.)',
       tool: `build:${TILE_TURRET_WASTE}`,
       getCircle: (state) => {
-        const screen = worldToScreen(POST_ALIEN_TURRET_SPOT.x, POST_ALIEN_TURRET_SPOT.y, state.camera);
+        const spot = getPostAlienTurretSpot(state);
+        const screen = worldToScreen(spot.x, spot.y, state.camera);
         return { cx: screen.x, cy: screen.y, r: 70 };
       },
     },

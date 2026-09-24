@@ -22,48 +22,66 @@ export const TILE_SIZE = 32; // px per tile — every coordinate transform is bu
 // BUBBLE_COUNT/SEAWEED_COUNT, both scaled down by the same ~0.375 ratio so
 // bubble/seaweed density (per px of width) stays what it was before, rather
 // than reading 2.67x busier crammed into a much narrower column.
-export const WORLD_TILES_W = 60; // world width in tiles — was 160
+// 56 tiles — narrowed 2 tiles further on each side per direct follow-up
+// request ("reduce the width of the tank... 2 tiles narrower on both
+// sides"), from the 60 an earlier pass shrank it to. Nothing else needed
+// touching for this: the whole coordinate system is derived from this one
+// constant (Engine.js's updateCamera centers the world around it, Mound.js's
+// MOUND_X is WORLD_W/2, every random spawn position in Ambience.js is
+// Math.random()*WORLD_W) with no fixed absolute-pixel reference anywhere, so
+// shrinking it narrows both edges symmetrically for free.
+export const WORLD_TILES_W = 56;
 // Per direct request ("shorter tank, 18 tile city and 20% shorter upper
 // tank, keeping the seaweed the same height") — both halves of the tank
-// shrink: the seabed city drops from 20 rows to 18 (SEABED_ROW_START..
-// WORLD_TILES_H-1), and the water column above it drops from 27 rows to 22
-// (27 * 0.8 = 21.6, rounded to the nearest whole tile — there's no such
-// thing as a fractional tile row). WORLD_TILES_H is just the sum of the two
-// (22 + 18 = 40). Seaweed itself needs no change to "keep the same height"
-// — Ambience.js's SEAWEED_MIN/MAX_HEIGHT are already fixed pixel values
-// anchored to SEABED_FLOOR_Y (the water/seabed boundary), not a fraction of
-// the water column, so they automatically stay exactly as tall as before;
-// they just now reach higher up the (now shorter) column in relative terms.
+// shrink: the seabed city drops from 20 rows to 18, and the water column
+// above it drops from 27 rows to 22 (27 * 0.8 = 21.6, rounded to the
+// nearest whole tile — there's no such thing as a fractional tile row).
+// Then, per a LATER direct follow-up request ("reduce the starting height
+// to 16 tiles"), the base city height shrinks again, 18 -> 16 (the water
+// column is untouched by this second pass). Seaweed itself needs no change
+// to "keep the same height" through either pass — Ambience.js's
+// SEAWEED_MIN/MAX_HEIGHT are already fixed pixel values anchored to
+// SEABED_FLOOR_Y (the water/seabed boundary), not a fraction of the water
+// column, so they automatically stay exactly as tall as before; they just
+// reach higher up the (now shorter) column in relative terms.
 //
 // ---- Tank Expansion (Tank Points upgrade progression) ----
 // Per direct request: a 5-tier Tank Upgrades panel purchase, each tier
 // permanently adding TANK_EXPANSION_ROWS_PER_TIER more buildable seabed rows
-// onto the bottom of the city. Rather than resizing state.level.grid at
-// runtime (WORLD_TILES_H/WORLD_TILES_W are read as hard array-bounds checks
-// in 40+ places across Grid.js alone — actually growing the array live would
-// mean re-auditing every one of them, the exact scope that got "narrow the
-// tank" skipped earlier), the grid is allocated at its FULLY-EXPANDED size up
-// front and a separate, additive gate — state.level.tankExpansionTier, see
-// Grid.js's getUnlockedSeabedRowEnd — controls how much of that
-// already-allocated space is actually reachable: canPlaceTile rejects
-// building beyond the unlocked line, and renderSeabedGrid fogs the
-// not-yet-unlocked rows. Every existing WORLD_TILES_H/WORLD_H bounds check
-// and camera/zoom/minimap/wall calculation stays completely untouched and
-// still correct, since the array really is this big now — tier 0 (a fresh
-// save) just can't reach most of it yet.
+// onto the bottom of the city (16 -> 26 at tier 5, per the same "reduce
+// starting height to 16... upgrades can make the full height 26" request
+// that shrank the base above — TANK_EXPANSION_ROWS_PER_TIER *
+// TANK_EXPANSION_MAX_TIER stayed 2*5=10 either way, only the BASE moved).
+// Rather than resizing state.level.grid at runtime (WORLD_TILES_H/
+// WORLD_TILES_W are read as hard array-bounds checks in 40+ places across
+// Grid.js alone — actually growing the array live would mean re-auditing
+// every one of them, the exact scope that got "narrow the tank" skipped
+// earlier), the grid is allocated at its FULLY-EXPANDED size up front and a
+// separate, additive gate — state.level.tankExpansionTier, see Grid.js's
+// getUnlockedSeabedRowEnd — controls how much of that already-allocated
+// space is actually reachable: canPlaceTile rejects building beyond the
+// unlocked line. Per a LATER direct follow-up request ("the actual bottom
+// of the tank needs to be the correct bottom height instead of always stuck
+// at [the max]... objects should fall just the unlocked tiles"), the
+// not-yet-unlocked rows are no longer just fogged-but-scrollable-into either
+// — Grid.js's getUnlockedWorldH is now the REAL runtime bottom every
+// camera/physics/render calculation uses (WORLD_TILES_H/WORLD_H below are
+// ONLY the fixed max the grid array/absolute bounds checks are sized to),
+// so the locked rows are never actually reachable or visible at all until
+// unlocked, the same as if the tank simply ended there.
 export const TANK_EXPANSION_ROWS_PER_TIER = 2;
 export const TANK_EXPANSION_MAX_TIER = 5;
 export const TANK_EXPANSION_UPGRADE_COSTS = [15, 30, 50, 75, 100]; // Tank Points, cost of tiers 1..5 respectively — scaled above Fish Movement's top cost (35) since this is a bigger, permanent structural unlock
-export const WORLD_TILES_H = 40 + TANK_EXPANSION_ROWS_PER_TIER * TANK_EXPANSION_MAX_TIER; // 50 — fully-expanded size; see tank expansion comment above for how much of this is actually unlocked at any given tier
-// The last row unlocked at tier 0, i.e. the old (pre-expansion) WORLD_TILES_H
-// - 1 — Grid.js's getUnlockedSeabedRowEnd adds TANK_EXPANSION_ROWS_PER_TIER *
+export const WORLD_TILES_H = 38 + TANK_EXPANSION_ROWS_PER_TIER * TANK_EXPANSION_MAX_TIER; // 48 — fully-expanded size (22 water + 26 city); see tank expansion comment above for how much of this is actually unlocked/reachable at any given tier
+// The last row unlocked at tier 0 (22 water rows + 16 base city rows - 1) —
+// Grid.js's getUnlockedSeabedRowEnd adds TANK_EXPANSION_ROWS_PER_TIER *
 // state.level.tankExpansionTier on top of this.
 export const TANK_EXPANSION_BASE_ROW_END = WORLD_TILES_H - 1 - TANK_EXPANSION_ROWS_PER_TIER * TANK_EXPANSION_MAX_TIER;
-export const WORLD_W = WORLD_TILES_W * TILE_SIZE; // 1920px
-export const WORLD_H = WORLD_TILES_H * TILE_SIZE; // 1280px
+export const WORLD_W = WORLD_TILES_W * TILE_SIZE; // 1792px
+export const WORLD_H = WORLD_TILES_H * TILE_SIZE; // fully-expanded max — see Grid.js's getUnlockedWorldH for the real runtime bottom
 
 export const SEABED_ROW_START = 22; // first seabed tile row; rows 0-21 are water column
-export const SEABED_ROW_END = WORLD_TILES_H - 1; // last seabed tile row (46)
+export const SEABED_ROW_END = WORLD_TILES_H - 1; // last seabed tile row (47, at the fully-expanded max)
 export const SEABED_FLOOR_Y = SEABED_ROW_START * TILE_SIZE; // world-y of the water/seabed boundary — Phase 1 renders this as a flat floor, Phase 2 replaces it with real tiles, but everything reads this one constant
 // A pure-visual strip the camera can scroll past the world's real bottom
 // edge (WORLD_H) into, per direct request — a permanent home for the fixed

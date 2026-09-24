@@ -208,18 +208,21 @@
      tool is currently armed), F between "Add Favorite"/"Remove Favorite"
      (hidden entirely when F would have nothing to do — see UI.js's own
      favoriteLegendText) — see main.js's KeyE/KeyQ/KeyF handlers for what
-     each actually does. The Esc line is gone per direct request ("remove
-     the Esc part of the legend... make it so the esc hotkey always opens
-     and closes the pause menu, since now we have Q and Right-Click to
-     cover all the canceling/clearing needs") — Esc's job is no longer
-     context-dependent, so there's nothing dynamic left to explain; the
-     minimap's own hamburger button (#pause-menu-btn) both does the same
-     thing and carries the "(Esc)" hint in its own title tooltip instead.
+     each actually does. The Esc line was removed once (per an EARLIER
+     direct request, "make it so the esc hotkey always opens and closes the
+     pause menu... Esc's job is no longer context-dependent"), then brought
+     back by a LATER direct request once Escape's job became
+     context-dependent again ("Escape will close the shop menu, tank
+     upgrade menu, or science lab if they are open... Update the legend...
+     to dynamically switch from 'Close Menu' to 'Pause Menu'") — flips
+     between the two exactly matching main.js's own Escape handler
+     condition (Shop/Tank Upgrades/Science Lab open vs. none of them).
      #hotkey-legend-alt is the one line exempted from Alt-mode's own
      "hide everything" rule (css's body.alt-mode selector) — per direct
      request, it's the only thing still shown while Alt-mode itself is on,
      re-worded live by UI.js's updateHUD same as every other line here. -->
 <div id="hotkey-legend">
+  <div id="hotkey-legend-esc">Esc: Pause Menu</div>
   <div id="hotkey-legend-e">E: Open Shop</div>
   <div id="hotkey-legend-q">Q: Pipette Tool</div>
   <div id="hotkey-legend-f" class="hidden">F: Add Favorite</div>

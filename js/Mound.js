@@ -25,6 +25,7 @@ import {
 import { worldToScreen } from './Engine.js';
 import { createShimmerTimer, updateShimmerTimer, drawShimmerSweep, UI_SHEEN_SWEEP_DURATION_MS } from './Shimmer.js';
 import { pushGameNotification } from './Notifications.js';
+import { playUpgrade } from './Sound.js';
 
 const MOUND_WIDTH_PX = MOUND_WIDTH_TILES * TILE_SIZE;
 export const MOUND_X = WORLD_W / 2; // world-space center, fixed for the life of the level
@@ -123,6 +124,11 @@ export function crackMound(state) {
   if (!canCrackMound(state)) return false;
   const cost = getMoundNextCost(state);
   state.level.money -= cost;
+  // Per direct request ("add a purchase sound effect when you buy a mound
+  // upgrade") — same playUpgrade() the Tank Upgrades panel's own cards
+  // already use, covering both branches below (the tease sub-step and a
+  // real tier crack) since both are real money spent progressing the Mound.
+  playUpgrade();
 
   if (state.level.tier === 1 && !state.level.moundTeased) {
     state.level.moundTeased = true;

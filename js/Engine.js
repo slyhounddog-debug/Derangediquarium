@@ -138,7 +138,14 @@ export function createInput(canvas) {
 // up and down. Everything should happen within the initial horizontal
 // viewport") — camera.x is no longer accumulated from any input at all, it's
 // derived fresh every call from the current viewport width, below.
-export function updateCamera(camera, input, canvas, dtMs) {
+// worldBottomY is the CURRENT real bottom of the tank (main.js passes
+// Grid.js's getUnlockedWorldH(state) — the player's Tank Expansion tier
+// determines this, not the fixed max the grid array is allocated at) —
+// Engine.js stays deliberately gameplay-agnostic (see this file's own header
+// comment) by taking it as a plain number rather than importing state/tier
+// logic itself. Defaults to WORLD_H (the old fixed behavior) only as a
+// defensive fallback; every real call site always passes the live value.
+export function updateCamera(camera, input, canvas, dtMs, worldBottomY = WORLD_H) {
   const dt = dtMs / 1000;
   let dy = 0;
 
@@ -174,7 +181,7 @@ export function updateCamera(camera, input, canvas, dtMs) {
   // edge — a pure-visual buffer strip, per direct request, that's always
   // reachable so the fixed bottom tool-bar has somewhere to live that never
   // covers real gameplay content.
-  camera.y = Math.max(0, Math.min(camera.y, Math.max(0, WORLD_H + CAMERA_BOTTOM_BUFFER_PX - viewH)));
+  camera.y = Math.max(0, Math.min(camera.y, Math.max(0, worldBottomY + CAMERA_BOTTOM_BUFFER_PX - viewH)));
 }
 
 // Fixed 60Hz accumulator loop (§3.4). rAF drives rendering only; update()

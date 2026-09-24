@@ -7,7 +7,6 @@ import {
   TILE_SIZE,
   WORLD_TILES_W,
   WORLD_TILES_H,
-  WORLD_H,
   SEABED_ROW_START,
   TANK_EXPANSION_ROWS_PER_TIER,
   TANK_EXPANSION_BASE_ROW_END,
@@ -833,56 +832,118 @@ export function getUnlockedSeabedRowEnd(state) {
   return TANK_EXPANSION_BASE_ROW_END + state.level.upgrades.tankExpansionTier * TANK_EXPANSION_ROWS_PER_TIER;
 }
 
+// The CURRENT real world-space Y of the tank's bottom — per direct request
+// ("the actual bottom of the tank needs to be the correct bottom height,
+// instead of always stuck at [the max]... objects should fall just the
+// unlocked tiles and there should be a bottom there"). WORLD_H (Config.js)
+// is now ONLY the fixed size the grid array/camera's absolute scroll ceiling
+// are allocated at (the fully-expanded max) — every place that used to read
+// WORLD_H as "the real, current bottom of the tank" (sweepVertical's hard
+// stop, the camera's own scroll clamp, wall/floor rendering, the minimap,
+// zoom-to-fit) now calls this instead, so the tank genuinely behaves as if
+// it ends here: nothing falls past it, the camera can't scroll past it, and
+// the not-yet-unlocked rows below it are never actually reachable/visible
+// (no separate "locked zone" fog needed any more — there's nothing to see).
+export function getUnlockedWorldH(state) {
+  return (getUnlockedSeabedRowEnd(state) + 1) * TILE_SIZE;
+}
+
 // Shift+Click: Snap Placement — per direct request, holding Shift with a
 // build tool armed snaps a line of ghost buildings from the last-placed (or
 // last-pipetted — see UI.js's pipetteSelectBuilding) building's tile to the
 // cursor's tile, snapped to the nearest of the 8 compass directions
 // (horizontal/vertical/diagonal only, never an arbitrary angle). Returns
-// { tiles: [{col, row, cost, affordable}...], totalCost }, ordered nearest
-// the start outward, EXCLUDING the start tile itself (it's already occupied
-// by the reference building).
+// { tiles: [{col, row, cost, occupied, freeSwap, replacedType,
+// affordable}...], totalCost, totalRefund, netCost, anyReplace }, ordered
+// nearest the start outward, EXCLUDING the start tile itself (it's already
+// occupied by the reference building).
 //
-// The line stops at the first real obstruction (occupied/out of
-// bounds/tank-locked) — it does NOT replace through an occupied tile the
-// way a single Shift-click does; that's a deliberate scope cut, not an
-// oversight, since compounding per-tile replace refunds/costs into an
-// already-fairly-complex multi-tile cost simulation felt like more risk than
-// this feature needed. Cost is NOT read live off canPlaceTile's own
-// affordability check (which only ever knows about the grid as it actually
-// is right now) — instead a local `simulatedCount` walks the same
-// compounding formula getBuildingCost itself uses, one step per tile, so
-// e.g. a run of 5 turrets correctly prices the 5th as if the 4 before it in
-// this same line were already placed, not all 5 at today's identical
-// cheaper rate. `affordable` marks the running-total cutoff so the ghost
-// preview can tint the tiles that would still be within budget differently
-// from the ones that wouldn't — the actual placement (main.js's
-// placeSnapLineBuildings) still places tiles one at a time for real and
-// naturally stops for real once money actually runs out, this is only ever
-// a preview signal.
+// Per a LATER direct follow-up request ("the shift click to place a line
+// should go through already placed buildings, replacing any overlapping
+// buildings like a normal shift + click to replace... normal replace
+// mechanics apply, preserving filter/recipe/angle if it's the same building
+// type, and only paying the difference... make sure the total cost takes
+// into account the refunds... like the blueprint does") — an occupied tile
+// no longer stops the line; it gets replaced instead, mirroring
+// computeBlueprintCostWithReplace's exact same-family-free-swap /
+// cross-family-refund-then-charge accounting (extraCounts/removedCounts
+// simulate the running "how many of each type will exist" count so a run of
+// several replacements prices correctly against each other, not all against
+// today's unchanged live grid). The line only ever stops at a genuine
+// geometric obstruction now — out of bounds, or beyond the player's current
+// Tank Expansion tier. `affordable` is applied uniformly to every tile
+// against the FINAL netCost (all-or-nothing, same as the Blueprint tool),
+// not a running partial total — main.js's placeSnapLineTiles checks this
+// same total upfront before placing anything, exactly like
+// placeBlueprintWithReplace does.
 export function computeSnapLine(state, lastCol, lastRow, cursorCol, cursorRow, buildingId) {
-  const result = { tiles: [], totalCost: 0 };
+  const result = { tiles: [], totalCost: 0, totalRefund: 0, netCost: 0, anyReplace: false };
   const dx = cursorCol - lastCol;
   const dy = cursorRow - lastRow;
   if (dx === 0 && dy === 0) return result;
+  const building = BUILDING_TYPES[buildingId];
+  if (!building) return result;
   const angle = Math.atan2(dy, dx);
   const snappedAngle = Math.round(angle / (Math.PI / 4)) * (Math.PI / 4);
   const dirCol = Math.round(Math.cos(snappedAngle));
   const dirRow = Math.round(Math.sin(snappedAngle));
   const steps = Math.max(Math.abs(dx), Math.abs(dy));
-  let simulatedCount = countPlacedOfType(state.level.grid, buildingId);
-  let runningTotal = 0;
+  const unlockedRowEnd = getUnlockedSeabedRowEnd(state);
+
+  let totalCost = 0;
+  let totalRefund = 0;
+  let anyReplace = false;
+  const extraCounts = {}; // buildingId -> how many of it this line will have newly placed, so far in the simulation
+  const removedCounts = {}; // buildingId -> how many of it this line will have newly removed, so far in the simulation
+
   for (let i = 1; i <= steps; i++) {
     const col = lastCol + dirCol * i;
     const row = lastRow + dirRow * i;
-    // ignoreCost:true — pure occupancy/bounds/lock check; cost is simulated
-    // separately above, not read off canPlaceTile's own (unsimulated) check.
-    if (!canPlaceTile(state, col, row, buildingId, true).ok) break;
-    const cost = getBuildingCostAtCount(buildingId, simulatedCount);
-    runningTotal += cost;
-    simulatedCount++;
-    result.tiles.push({ col, row, cost, affordable: runningTotal <= state.level.money });
+    if (row < SEABED_ROW_START || row >= WORLD_TILES_H || col < 0 || col >= WORLD_TILES_W) break;
+    if (row > unlockedRowEnd) break;
+
+    const existingType = state.level.grid[row][col];
+    const occupied = existingType !== TILE_EMPTY;
+    let freeSwap = false;
+    let tileCost = 0;
+    if (occupied) {
+      anyReplace = true;
+      freeSwap = sameBuildingFamily(existingType, buildingId);
+      if (!freeSwap) {
+        const existingBuilding = BUILDING_TYPES[existingType];
+        if (existingBuilding) {
+          const removedSoFar = removedCounts[existingType] || 0;
+          const placedSoFar = extraCounts[existingType] || 0;
+          // -1: refund off what THIS tile actually cost when placed (its own
+          // count excluding itself) — same fix computeBlueprintCostWithReplace's
+          // own comment explains in full.
+          const nExisting = Math.max(0, countPlacedOfType(state.level.grid, existingType) - removedSoFar + placedSoFar - 1);
+          totalRefund += Math.floor(Math.ceil(existingBuilding.cost * Math.pow(buildingCostGrowthRate(existingBuilding.cost), nExisting)) * TILE_REFUND_FRACTION);
+        }
+      }
+      removedCounts[existingType] = (removedCounts[existingType] || 0) + 1;
+    }
+    if (!freeSwap) {
+      if (PLATFORM_FLAT_COST_TILES.has(buildingId)) {
+        tileCost = PLATFORM_FLAT_COST;
+      } else {
+        const removedSoFarOfNew = removedCounts[buildingId] || 0;
+        const extra = extraCounts[buildingId] || 0;
+        const n = Math.max(0, countPlacedOfType(state.level.grid, buildingId) - removedSoFarOfNew + extra);
+        tileCost = getBuildingCostAtCount(buildingId, n);
+      }
+      totalCost += tileCost;
+    }
+    extraCounts[buildingId] = (extraCounts[buildingId] || 0) + 1;
+    result.tiles.push({ col, row, cost: tileCost, occupied, freeSwap, replacedType: occupied ? existingType : null });
   }
-  result.totalCost = runningTotal;
+
+  result.totalCost = totalCost;
+  result.totalRefund = totalRefund;
+  result.netCost = totalCost - totalRefund;
+  result.anyReplace = anyReplace;
+  const affordable = result.netCost <= state.level.money;
+  for (const t of result.tiles) t.affordable = affordable;
   return result;
 }
 
@@ -1840,6 +1901,11 @@ function sweepVertical(item, state, dy) {
   const grid = state.level.grid;
   const steps = Math.max(1, Math.ceil(Math.abs(dy) / GRID_SWEEP_SUBSTEP));
   const stepY = dy / steps;
+  // The tank's REAL current bottom (see getUnlockedWorldH's own comment) —
+  // per direct request ("objects should fall just the [unlocked] tiles...
+  // instead of always [falling to the max]"), this used to be the fixed max
+  // WORLD_H regardless of the player's actual Tank Expansion tier.
+  const worldBottomY = getUnlockedWorldH(state);
   for (let i = 0; i < steps; i++) {
     const nextBottom = item.y + stepY + item.radius;
     const tile = tileAt(grid, item.x, nextBottom);
@@ -1875,10 +1941,10 @@ function sweepVertical(item, state, dy) {
     // caught, which is also why stepItemOnGrid's 'lost' status below stays
     // effectively unreachable through normal gravity: kept purely as a
     // defensive fallback (see its own comment).
-    if (stepY > 0 && nextBottom >= WORLD_H) {
-      item.y = WORLD_H - item.radius;
+    if (stepY > 0 && nextBottom >= worldBottomY) {
+      item.y = worldBottomY - item.radius;
       item.vy = 0;
-      return { landed: true, tile: null, row: rowAt(WORLD_H), col: colAt(item.x) };
+      return { landed: true, tile: null, row: rowAt(worldBottomY), col: colAt(item.x) };
     }
     item.y += stepY;
     // Real Half Platform ramp collision — see resolveRampCollision's own
@@ -3253,6 +3319,13 @@ function getUndergroundTexturePattern(ctx) {
 export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
   const { camera } = state;
   const grid = state.level.grid;
+  // The tank's REAL current bottom — see this function's own getUnlockedWorldH
+  // import comment. Everything below used to read the fixed max WORLD_H;
+  // now it's this, so the not-yet-unlocked rows genuinely never render (the
+  // camera's own clamp already keeps them off-screen — see Engine.js's
+  // updateCamera — this just keeps the gradient/buffer/wall math honest
+  // about where the bottom actually is too).
+  const worldBottomY = getUnlockedWorldH(state);
 
   // Only iterate the tile columns/rows actually on screen, not the whole grid.
   const topLeft = { x: camera.x, y: camera.y };
@@ -3260,7 +3333,7 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
   const colStart = Math.max(0, colAt(topLeft.x) - 1);
   const colEnd = Math.min(WORLD_TILES_W - 1, colAt(bottomRight.x) + 1);
   const rowStart = Math.max(SEABED_ROW_START, rowAt(topLeft.y) - 1);
-  const rowEnd = Math.min(WORLD_TILES_H - 1, rowAt(bottomRight.y) + 1);
+  const rowEnd = Math.min(getUnlockedSeabedRowEnd(state), rowAt(bottomRight.y) + 1);
 
   // Base seabed color behind every tile, including empty ones, so the grid
   // still reads as "ground" before anything's been built on it. Deliberately
@@ -3281,7 +3354,7 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
   // color, bottom stop (at the world's real bottom edge) is the old
   // underground color — one continuous surface, not two.
   const topOfSeabed = worldToScreen(0, SEABED_ROW_START * TILE_SIZE, camera);
-  const bottomOfWorld = worldToScreen(0, WORLD_H, camera);
+  const bottomOfWorld = worldToScreen(0, worldBottomY, camera);
   const seabedGradient = ctx.createLinearGradient(0, topOfSeabed.y, 0, bottomOfWorld.y);
   seabedGradient.addColorStop(0, '#4a3624');
   seabedGradient.addColorStop(1, '#3d3122');
@@ -3313,7 +3386,7 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
     }
   }
 
-  renderCameraBottomBuffer(ctx, camera, canvasWidth, canvasHeight);
+  renderCameraBottomBuffer(ctx, camera, canvasWidth, canvasHeight, worldBottomY);
 
   // The real tile loop is skipped (not the whole function) once every real
   // tile row is off-screen — e.g. scrolled down into the camera buffer
@@ -3399,48 +3472,7 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
     }
   }
 
-  renderLockedZoneOverlay(ctx, state, canvasWidth, canvasHeight);
   renderFanIndicators(ctx, state, canvasWidth, canvasHeight);
-}
-
-// Fogs the seabed rows beyond the player's current Tank Expansion tier — per
-// direct request for a 5-tier Tank Points progression that grows the city by
-// TANK_EXPANSION_ROWS_PER_TIER rows each purchase. Those rows are real,
-// already-allocated grid space (see Config.js's "Tank Expansion" comment) —
-// canPlaceTile already refuses to build there — this is purely the visual
-// half: a dark overlay plus a boundary seam and a one-line hint, so scrolling
-// down reads as "there's more tank, but it's locked" instead of the rows
-// just silently not accepting anything.
-function renderLockedZoneOverlay(ctx, state, canvasWidth, canvasHeight) {
-  const tier = state.level.upgrades.tankExpansionTier;
-  if (tier >= TANK_EXPANSION_MAX_TIER) return; // fully expanded — nothing left to fog
-  const { camera } = state;
-  const lockedRowStart = getUnlockedSeabedRowEnd(state) + 1;
-  const topLeft = { x: camera.x, y: camera.y };
-  const bottomRight = { x: camera.x + canvasWidth / camera.zoom, y: camera.y + canvasHeight / camera.zoom };
-  const rowStart = Math.max(lockedRowStart, rowAt(topLeft.y) - 1);
-  const rowEnd = Math.min(WORLD_TILES_H - 1, rowAt(bottomRight.y) + 1);
-  if (rowStart > rowEnd) return; // locked zone entirely off-screen
-
-  const topScreenY = Math.max(0, worldToScreen(0, lockedRowStart * TILE_SIZE, camera).y);
-  const bottomScreenY = Math.min(canvasHeight, worldToScreen(0, WORLD_TILES_H * TILE_SIZE, camera).y);
-  if (bottomScreenY <= topScreenY) return;
-
-  ctx.save();
-  ctx.fillStyle = 'rgba(4, 6, 10, 0.5)';
-  ctx.fillRect(0, topScreenY, canvasWidth, bottomScreenY - topScreenY);
-  ctx.fillStyle = 'rgba(255, 204, 77, 0.5)';
-  ctx.fillRect(0, topScreenY, canvasWidth, Math.max(1, 2 * camera.zoom));
-
-  const centerY = (topScreenY + bottomScreenY) / 2;
-  if (centerY > -40 && centerY < canvasHeight + 40) {
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.font = `${Math.max(14, Math.round(22 * camera.zoom))}px sans-serif`;
-    ctx.fillStyle = 'rgba(255, 227, 173, 0.85)';
-    ctx.fillText('🔒 Locked — expand the tank in Tank Upgrades', canvasWidth / 2, centerY);
-  }
-  ctx.restore();
 }
 
 // The camera can now scroll CAMERA_BOTTOM_BUFFER_PX past the world's real
@@ -3473,9 +3505,9 @@ function renderLockedZoneOverlay(ctx, state, canvasWidth, canvasHeight) {
 // line partway down for real structure beyond a single gradient.
 const BUFFER_RIVET_SPACING = TILE_SIZE * 1.5;
 const BUFFER_RIVET_RADIUS = 3;
-function renderCameraBottomBuffer(ctx, camera, canvasWidth, canvasHeight) {
-  const topScreenY = worldToScreen(0, WORLD_H, camera).y;
-  const bottomScreenY = worldToScreen(0, WORLD_H + CAMERA_BOTTOM_BUFFER_PX, camera).y;
+function renderCameraBottomBuffer(ctx, camera, canvasWidth, canvasHeight, worldBottomY) {
+  const topScreenY = worldToScreen(0, worldBottomY, camera).y;
+  const bottomScreenY = worldToScreen(0, worldBottomY + CAMERA_BOTTOM_BUFFER_PX, camera).y;
   if (topScreenY > canvasHeight || bottomScreenY < 0) return; // buffer strip entirely off-screen
 
   const clampedTop = Math.max(0, topScreenY);
