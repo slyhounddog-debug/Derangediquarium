@@ -85,6 +85,7 @@ export function loadLevel(state, levelId) {
       foodQuality: 0, fishMovement: 0, scienceCapLevel: 0,
       electricityGraphUnlocked: false, // Tank Upgrade (ELECTRICITY_GRAPH_UNLOCK_COST) — gates #hud-power's click-to-open rolling graph popup AND its dropdown arrow; the mw text readout itself is unaffected, still shown unconditionally once Electric Eel is unlocked
       waveCountdownUnlocked: false, // Tank Upgrade (WAVE_COUNTDOWN_UNLOCK_COST) — reveals the Base Stats panel's Alien Wave/timer lines, see UI.js's statsPanel
+      tankExpansionTier: 0, // Tank Upgrade (TANK_EXPANSION_UPGRADE_COSTS), 0-TANK_EXPANSION_MAX_TIER — see Grid.js's getUnlockedSeabedRowEnd/canPlaceTile and Config.js's "Tank Expansion" comment
     }, // purchased Tank Upgrade levels, 0 = not yet bought; read live by Entities.js, not baked into fish/food at creation time. Fish Merging is no longer gated by a Tank Upgrade at all — see Entities.js's isCombinableFish. Coin Cap (and its own Tank Upgrade) is gone entirely, per direct request. scienceCapLevel is bought in the Science Lab instead (SCIENCE_CAP_UPGRADE_SCIENCE_COSTS/_GOLD_COSTS) — indexes into SCIENCE_CAP_BY_LEVEL. foodCapacity retired entirely — see Config.js's FOOD_STATIONARY_TO_WASTE_MS
     // One-time story/tutorial notification gates — see CLAUDE.md's "Story &
     // Tutorial Notifications". Level-scoped like everything else here, so a

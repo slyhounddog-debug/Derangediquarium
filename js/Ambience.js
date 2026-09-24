@@ -138,6 +138,13 @@ export function updateAmbience(dtMs) {
     if (f.dir > 0 && f.x > WORLD_W + 80) f.x = -80;
     else if (f.dir < 0 && f.x < -80) f.x = WORLD_W + 80;
   }
+  updateCrabs(dt);
+  for (let i = cursorBubbles.length - 1; i >= 0; i--) {
+    const b = cursorBubbles[i];
+    b.ageS += dt;
+    b.y -= b.speed * dt;
+    if (b.ageS >= b.ttlS) cursorBubbles.splice(i, 1);
+  }
 }
 
 function renderBubbles(ctx, camera, canvasWidth, canvasHeight) {
@@ -338,15 +345,310 @@ function renderSeaUrchins(ctx, camera, canvasWidth) {
   ctx.restore();
 }
 
-// Boulders/urchins first (static seabed scenery, sits right at the floor),
-// then shadow fish (deep-background depth cue), then seaweed (anchored at
-// the same floor line), then bubbles (drift the whole water column, so they
-// sit in front of all of it) — but, like everything else this draws, still
-// behind the real fish/items main.js renders after.
+// ---- Coral ----
+// Static multi-color fan-shaped clusters dotted along the floor — per direct
+// request ("major background additions... multi-color coral"), rounding out
+// the boulders/urchins pass with some actual color against all the muted
+// browns/greys. Same "no gameplay effect" rule, static like boulders/urchins.
+const CORAL_COUNT = 9;
+const CORAL_HUES = [340, 20, 280, 45]; // pink, orange, purple, golden-yellow
+function randomCoral() {
+  const size = 22 + Math.random() * 26;
+  const hue = CORAL_HUES[Math.floor(Math.random() * CORAL_HUES.length)];
+  const branchCount = 4 + Math.floor(Math.random() * 4);
+  return {
+    x: Math.random() * WORLD_W,
+    size,
+    hue,
+    // Each branch fans out mostly-upward (a narrow cone around straight up)
+    // rather than any random direction, so the cluster reads as one coral
+    // head, not a scribble.
+    branches: Array.from({ length: branchCount }, () => ({
+      angle: -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 0.8,
+      length: size * (0.6 + Math.random() * 0.6),
+      width: 3 + Math.random() * 4,
+    })),
+  };
+}
+const corals = [];
+for (let i = 0; i < CORAL_COUNT; i++) corals.push(randomCoral());
+
+function renderCoral(ctx, camera, canvasWidth) {
+  ctx.save();
+  ctx.lineCap = 'round';
+  for (const c of corals) {
+    const screen = worldToScreen(c.x, SEABED_FLOOR_Y, camera);
+    const size = c.size * camera.zoom;
+    if (screen.x < -size * 2 || screen.x > canvasWidth + size * 2) continue;
+    for (const br of c.branches) {
+      const len = br.length * camera.zoom;
+      const endX = screen.x + Math.cos(br.angle) * len;
+      const endY = screen.y + Math.sin(br.angle) * len;
+      ctx.strokeStyle = `hsl(${c.hue}, 60%, 55%)`;
+      ctx.lineWidth = Math.max(1.5, br.width * camera.zoom);
+      ctx.beginPath();
+      ctx.moveTo(screen.x, screen.y);
+      ctx.lineTo(endX, endY);
+      ctx.stroke();
+      ctx.fillStyle = `hsl(${c.hue}, 65%, 62%)`;
+      ctx.beginPath();
+      ctx.arc(endX, endY, Math.max(1.5, br.width * 0.6 * camera.zoom), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  ctx.restore();
+}
+
+// ---- Kelp (second seaweed variety) ----
+// Per direct request ("major background additions... a new seaweed type") —
+// taller, wider single blades in a golden-brown hue, rather than
+// renderSeaweed's thin multi-strand green fronds, so it reads as visibly a
+// different plant, not just a recolor. Sways the same sine-on-a-curve way,
+// just filled as one tapering blade instead of stroked as a thin line.
+const KELP_COUNT = 6;
+function randomKelp() {
+  return {
+    x: Math.random() * WORLD_W,
+    height: 160 + Math.random() * 110,
+    width: 10 + Math.random() * 6,
+    sway: 20 + Math.random() * 18,
+    freq: 0.3 + Math.random() * 0.35,
+    phase: Math.random() * Math.PI * 2,
+    hue: 40 + Math.random() * 20,
+  };
+}
+const kelps = [];
+for (let i = 0; i < KELP_COUNT; i++) kelps.push(randomKelp());
+
+function renderKelp(ctx, camera, canvasWidth) {
+  ctx.save();
+  for (const k of kelps) {
+    const screen = worldToScreen(k.x, SEABED_FLOOR_Y, camera);
+    if (screen.x < -100 || screen.x > canvasWidth + 100) continue;
+    const sway = Math.sin(elapsed * k.freq + k.phase) * k.sway * camera.zoom;
+    const h = k.height * camera.zoom;
+    const w = k.width * camera.zoom;
+    ctx.fillStyle = `hsla(${k.hue}, 45%, 30%, 0.55)`;
+    ctx.beginPath();
+    ctx.moveTo(screen.x - w / 2, screen.y);
+    ctx.quadraticCurveTo(screen.x + sway - w * 0.3, screen.y - h * 0.5, screen.x + sway * 0.4, screen.y - h);
+    ctx.quadraticCurveTo(screen.x + sway + w * 0.3, screen.y - h * 0.5, screen.x + w / 2, screen.y);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// ---- Crabs ----
+// Per direct request ("major background additions... crabs") — small
+// creatures that scuttle back and forth within a fixed range of their own
+// home spot, pausing briefly before reversing direction (reads as
+// "noticing" rather than an instant, mechanical about-face).
+const CRAB_COUNT = 4;
+function randomCrab() {
+  const homeX = Math.random() * WORLD_W;
+  return {
+    x: homeX,
+    homeX,
+    range: 60 + Math.random() * 100,
+    dir: Math.random() < 0.5 ? 1 : -1,
+    speed: 10 + Math.random() * 14,
+    size: 8 + Math.random() * 6,
+    legPhaseFreq: 6 + Math.random() * 3,
+    hue: 10 + Math.random() * 20,
+    pauseTimer: Math.random() * 2,
+  };
+}
+const crabs = [];
+for (let i = 0; i < CRAB_COUNT; i++) crabs.push(randomCrab());
+
+function updateCrabs(dt) {
+  for (const c of crabs) {
+    if (c.pauseTimer > 0) {
+      c.pauseTimer -= dt;
+      continue;
+    }
+    c.x += c.speed * c.dir * dt;
+    if (Math.abs(c.x - c.homeX) > c.range) {
+      c.dir *= -1;
+      c.pauseTimer = 0.4 + Math.random() * 1.2;
+    }
+  }
+}
+
+function renderCrabs(ctx, camera, canvasWidth) {
+  ctx.save();
+  for (const c of crabs) {
+    const screen = worldToScreen(c.x, SEABED_FLOOR_Y, camera);
+    const size = c.size * camera.zoom;
+    if (screen.x < -size * 3 || screen.x > canvasWidth + size * 3) continue;
+    const legSwing = c.pauseTimer > 0 ? 0 : Math.sin(elapsed * c.legPhaseFreq) * 0.4;
+    ctx.strokeStyle = `hsl(${c.hue}, 55%, 30%)`;
+    ctx.lineWidth = Math.max(1, camera.zoom);
+    for (let side = -1; side <= 1; side += 2) {
+      for (let i = 0; i < 3; i++) {
+        const legAngle = Math.PI * 0.22 * (i - 1) + legSwing * side;
+        const lx = screen.x + side * size * 0.9;
+        const ly = screen.y - size * 0.3;
+        ctx.beginPath();
+        ctx.moveTo(lx, ly);
+        ctx.lineTo(lx + side * Math.cos(legAngle) * size * 0.9, ly + Math.sin(legAngle) * size * 0.9 + size * 0.4);
+        ctx.stroke();
+      }
+    }
+    ctx.fillStyle = `hsl(${c.hue}, 60%, 42%)`;
+    ctx.beginPath();
+    ctx.ellipse(screen.x, screen.y - size * 0.3, size, size * 0.7, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = `hsl(${c.hue}, 60%, 46%)`;
+    ctx.beginPath();
+    ctx.arc(screen.x - size * 1.1, screen.y - size * 0.5, size * 0.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(screen.x + size * 1.1, screen.y - size * 0.5, size * 0.4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
+// ---- Sun Rays ----
+// Per direct request ("sun rays/light beams in the background that shift and
+// change throughout the game from the top right-ish down to the bottom
+// left-ish of the screen") — a handful of soft, fanning light shafts anchored
+// near the water's surface, biased toward the right side of the world and
+// tilted down-and-left, each slowly drifting its own tilt/opacity over time
+// via a sine wave on `elapsed` so the whole effect never looks static.
+// Additive blending (globalCompositeOperation 'lighter') so overlapping rays
+// brighten instead of muddying into an opaque wedge, same idea real
+// underwater "god rays" reference photos show.
+const SUN_RAY_COUNT = 5;
+function randomSunRay(i) {
+  return {
+    xFrac: 0.55 + (i / SUN_RAY_COUNT) * 0.45, // biased toward the right half of the world
+    xJitter: (Math.random() - 0.5) * 0.12,
+    width: 90 + Math.random() * 130,
+    tilt: -0.85 + Math.random() * 0.3, // negative = leans left going down, per "top right-ish to bottom left-ish"
+    driftFreq: 0.025 + Math.random() * 0.04,
+    driftPhase: Math.random() * Math.PI * 2,
+    driftAmp: 0.15 + Math.random() * 0.2,
+    opacityFreq: 0.05 + Math.random() * 0.07,
+    opacityPhase: Math.random() * Math.PI * 2,
+  };
+}
+const sunRays = [];
+for (let i = 0; i < SUN_RAY_COUNT; i++) sunRays.push(randomSunRay(i));
+
+function renderSunRays(ctx, camera, canvasWidth, canvasHeight) {
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  for (const ray of sunRays) {
+    const worldX = (ray.xFrac + ray.xJitter) * WORLD_W;
+    const topScreen = worldToScreen(worldX, 0, camera);
+    const tilt = ray.tilt + Math.sin(elapsed * ray.driftFreq + ray.driftPhase) * ray.driftAmp;
+    const length = canvasHeight * 1.6;
+    const topX = topScreen.x;
+    const topY = topScreen.y - 60;
+    const bottomX = topX + tilt * length;
+    const bottomY = topY + length;
+    const topWidth = ray.width * 0.25 * camera.zoom;
+    const bottomWidth = ray.width * 1.2 * camera.zoom;
+    if (Math.max(topX, bottomX) < -bottomWidth || Math.min(topX, bottomX) > canvasWidth + bottomWidth) continue;
+    if (topY > canvasHeight) continue;
+    const opacity = 0.05 + Math.max(0, Math.sin(elapsed * ray.opacityFreq + ray.opacityPhase)) * 0.05;
+    const grad = ctx.createLinearGradient(topX, topY, bottomX, bottomY);
+    grad.addColorStop(0, `rgba(255, 249, 214, ${opacity})`);
+    grad.addColorStop(1, 'rgba(255, 249, 214, 0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.moveTo(topX - topWidth, topY);
+    ctx.lineTo(topX + topWidth, topY);
+    ctx.lineTo(bottomX + bottomWidth, bottomY);
+    ctx.lineTo(bottomX - bottomWidth, bottomY);
+    ctx.closePath();
+    ctx.fill();
+  }
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.restore();
+}
+
+// ---- Cursor Bubbles ----
+// Per direct request ("moving the cursor creates bubbles -- size and amount
+// of bubbles based on speed. A high cursor speed should do multiple bubbles
+// a second") — a second, transient bubble population distinct from the
+// ambient `bubbles` pool above: spawned on demand by main.js's per-frame
+// mouse-move read (world-space speed, px/sec) instead of recycling forever,
+// aging out via a TTL instead of wrapping back to the seabed. Capped so a
+// long fast drag can't grow the array unboundedly.
+const CURSOR_BUBBLE_MAX = 40;
+const CURSOR_BUBBLE_MIN_SPEED = 60; // world px/sec floor below which nothing spawns — plain hovering shouldn't spam bubbles
+const CURSOR_BUBBLE_SPEED_FOR_MAX_RATE = 2200; // world px/sec at/above which spawn rate hits its cap
+const CURSOR_BUBBLE_MAX_RATE = 14; // bubbles/sec at top speed — several a second, per direct request
+const cursorBubbles = [];
+let cursorBubbleSpawnDebt = 0; // fractional-bubble accumulator so the spawn rate is smooth frame-to-frame instead of one-per-tick-if-any
+
+export function spawnCursorBubbles(worldX, worldY, speedPxPerSec, dtMs) {
+  const dt = dtMs / 1000;
+  if (speedPxPerSec < CURSOR_BUBBLE_MIN_SPEED) { cursorBubbleSpawnDebt = 0; return; }
+  const speedT = Math.min(1, (speedPxPerSec - CURSOR_BUBBLE_MIN_SPEED) / (CURSOR_BUBBLE_SPEED_FOR_MAX_RATE - CURSOR_BUBBLE_MIN_SPEED));
+  cursorBubbleSpawnDebt += speedT * CURSOR_BUBBLE_MAX_RATE * dt;
+  while (cursorBubbleSpawnDebt >= 1) {
+    cursorBubbleSpawnDebt -= 1;
+    if (cursorBubbles.length >= CURSOR_BUBBLE_MAX) cursorBubbles.shift(); // drop the oldest rather than refusing to spawn, so a sustained fast drag still reads as continuous
+    cursorBubbles.push({
+      x: worldX + (Math.random() - 0.5) * 10,
+      y: worldY + (Math.random() - 0.5) * 10,
+      radius: (2 + Math.random() * 3) * (0.6 + speedT * 0.8), // bigger bubbles at higher speed, per direct request
+      speed: 30 + Math.random() * 30,
+      wobbleFreq: 0.8 + Math.random() * 1.4,
+      wobblePhase: Math.random() * Math.PI * 2,
+      wobbleAmp: 3 + Math.random() * 6,
+      ageS: 0,
+      ttlS: 1.6 + Math.random() * 1.2,
+    });
+  }
+}
+
+function renderCursorBubbles(ctx, camera, canvasWidth, canvasHeight) {
+  ctx.save();
+  for (const b of cursorBubbles) {
+    const wobbleX = Math.sin(elapsed * b.wobbleFreq + b.wobblePhase) * b.wobbleAmp;
+    const screen = worldToScreen(b.x + wobbleX, b.y, camera);
+    if (screen.x < -20 || screen.x > canvasWidth + 20 || screen.y < -20 || screen.y > canvasHeight + 20) continue;
+    const lifeT = b.ageS / b.ttlS;
+    const fade = lifeT < 0.75 ? 1 : Math.max(0, 1 - (lifeT - 0.75) / 0.25); // holds full opacity, fades over the last quarter of its life
+    const r = Math.max(1, b.radius * camera.zoom);
+    ctx.globalAlpha = 0.4 * fade;
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
+    ctx.lineWidth = Math.max(1, camera.zoom);
+    ctx.beginPath();
+    ctx.arc(screen.x, screen.y, r, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 0.5 * fade;
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.beginPath();
+    ctx.arc(screen.x - r * 0.3, screen.y - r * 0.3, r * 0.28, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
+// Sun rays first (surface light, sits behind literally everything else),
+// then boulders/coral/urchins/crabs (static-ish seabed scenery at the
+// floor), then shadow fish (deep-background depth cue), then
+// seaweed/kelp (anchored at the same floor line), then bubbles/cursor
+// bubbles (drift the whole water column, so they sit in front of all of it)
+// — but, like everything else this draws, still behind the real fish/items
+// main.js renders after.
 export function renderAmbience(ctx, state, canvasWidth, canvasHeight) {
+  renderSunRays(ctx, state.camera, canvasWidth, canvasHeight);
   renderBoulders(ctx, state.camera, canvasWidth);
+  renderCoral(ctx, state.camera, canvasWidth);
   renderSeaUrchins(ctx, state.camera, canvasWidth);
+  renderCrabs(ctx, state.camera, canvasWidth);
   renderShadowFish(ctx, state.camera, canvasWidth, canvasHeight);
   renderSeaweed(ctx, state.camera, canvasWidth);
+  renderKelp(ctx, state.camera, canvasWidth);
   renderBubbles(ctx, state.camera, canvasWidth, canvasHeight);
+  renderCursorBubbles(ctx, state.camera, canvasWidth, canvasHeight);
 }

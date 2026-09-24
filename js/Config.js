@@ -34,7 +34,31 @@ export const WORLD_TILES_W = 60; // world width in tiles — was 160
 // anchored to SEABED_FLOOR_Y (the water/seabed boundary), not a fraction of
 // the water column, so they automatically stay exactly as tall as before;
 // they just now reach higher up the (now shorter) column in relative terms.
-export const WORLD_TILES_H = 40;
+//
+// ---- Tank Expansion (Tank Points upgrade progression) ----
+// Per direct request: a 5-tier Tank Upgrades panel purchase, each tier
+// permanently adding TANK_EXPANSION_ROWS_PER_TIER more buildable seabed rows
+// onto the bottom of the city. Rather than resizing state.level.grid at
+// runtime (WORLD_TILES_H/WORLD_TILES_W are read as hard array-bounds checks
+// in 40+ places across Grid.js alone — actually growing the array live would
+// mean re-auditing every one of them, the exact scope that got "narrow the
+// tank" skipped earlier), the grid is allocated at its FULLY-EXPANDED size up
+// front and a separate, additive gate — state.level.tankExpansionTier, see
+// Grid.js's getUnlockedSeabedRowEnd — controls how much of that
+// already-allocated space is actually reachable: canPlaceTile rejects
+// building beyond the unlocked line, and renderSeabedGrid fogs the
+// not-yet-unlocked rows. Every existing WORLD_TILES_H/WORLD_H bounds check
+// and camera/zoom/minimap/wall calculation stays completely untouched and
+// still correct, since the array really is this big now — tier 0 (a fresh
+// save) just can't reach most of it yet.
+export const TANK_EXPANSION_ROWS_PER_TIER = 2;
+export const TANK_EXPANSION_MAX_TIER = 5;
+export const TANK_EXPANSION_UPGRADE_COSTS = [15, 30, 50, 75, 100]; // Tank Points, cost of tiers 1..5 respectively — scaled above Fish Movement's top cost (35) since this is a bigger, permanent structural unlock
+export const WORLD_TILES_H = 40 + TANK_EXPANSION_ROWS_PER_TIER * TANK_EXPANSION_MAX_TIER; // 50 — fully-expanded size; see tank expansion comment above for how much of this is actually unlocked at any given tier
+// The last row unlocked at tier 0, i.e. the old (pre-expansion) WORLD_TILES_H
+// - 1 — Grid.js's getUnlockedSeabedRowEnd adds TANK_EXPANSION_ROWS_PER_TIER *
+// state.level.tankExpansionTier on top of this.
+export const TANK_EXPANSION_BASE_ROW_END = WORLD_TILES_H - 1 - TANK_EXPANSION_ROWS_PER_TIER * TANK_EXPANSION_MAX_TIER;
 export const WORLD_W = WORLD_TILES_W * TILE_SIZE; // 1920px
 export const WORLD_H = WORLD_TILES_H * TILE_SIZE; // 1280px
 

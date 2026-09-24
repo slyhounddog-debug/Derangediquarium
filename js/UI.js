@@ -40,6 +40,9 @@ import {
   SCIENCE_LAB_UPGRADE_LIST,
   ELECTRICITY_GRAPH_UNLOCK_COST,
   WAVE_COUNTDOWN_UNLOCK_COST,
+  TANK_EXPANSION_UPGRADE_COSTS,
+  TANK_EXPANSION_MAX_TIER,
+  TANK_EXPANSION_ROWS_PER_TIER,
   WORLD_W,
   WORLD_H,
   TILE_SIZE,
@@ -3370,7 +3373,7 @@ function createUpgradeCard(name, icon) {
   return { card, levelEl, descEl, buyBtn };
 }
 
-let tankCards = null; // { foodQuality, fishMovement, electricityGraph, waveCountdown } — each { card, levelEl, descEl, buyBtn }. Splicing itself was never a purchase here — see Config.js's SCIENCE_LAB_UPGRADES' 3 flat hybrid nodes. Food Capacity retired entirely — see Config.js's FOOD_STATIONARY_TO_WASTE_MS. Coin Capacity is gone entirely, per direct request ("remove the coin cap limit from the game completely, and the upgrades for it"). "Gold/min Stat" is gone too, per a later direct request ("give the player access to that info from the very beginning, so remove it from the tank upgrade as well") — Gold/min is now an unconditional line in the Base Stats panel (statsPanel below).
+let tankCards = null; // { foodQuality, fishMovement, electricityGraph, waveCountdown, tankExpansion } — each { card, levelEl, descEl, buyBtn }. Splicing itself was never a purchase here — see Config.js's SCIENCE_LAB_UPGRADES' 3 flat hybrid nodes. Food Capacity retired entirely — see Config.js's FOOD_STATIONARY_TO_WASTE_MS. Coin Capacity is gone entirely, per direct request ("remove the coin cap limit from the game completely, and the upgrades for it"). "Gold/min Stat" is gone too, per a later direct request ("give the player access to that info from the very beginning, so remove it from the tank upgrade as well") — Gold/min is now an unconditional line in the Base Stats panel (statsPanel below).
 
 function buildTankPanel(state) {
   els.tankUpgradeList.innerHTML = '';
@@ -3378,7 +3381,8 @@ function buildTankPanel(state) {
   const fishMovement = createUpgradeCard('Fish Movement', '🏊');
   const electricityGraph = createUpgradeCard('Electricity Graph', '📊');
   const waveCountdown = createUpgradeCard('Wave Countdown', '⏱️');
-  tankCards = { foodQuality, fishMovement, electricityGraph, waveCountdown };
+  const tankExpansion = createUpgradeCard('Expand Tank', '🏗️');
+  tankCards = { foodQuality, fishMovement, electricityGraph, waveCountdown, tankExpansion };
 
   foodQuality.buyBtn.addEventListener('click', () => {
     const level = state.level.upgrades.foodQuality;
@@ -3420,6 +3424,23 @@ function buildTankPanel(state) {
     playUpgrade();
     refreshTankPanel(state);
   });
+  // A 5-tier leveled ladder, same shape as Food Quality/Fish Movement above
+  // (not a one-time boolean like Electricity Graph/Wave Countdown) — per
+  // direct request, each purchase permanently unlocks
+  // TANK_EXPANSION_ROWS_PER_TIER more buildable seabed rows at the bottom of
+  // the city (see Grid.js's getUnlockedSeabedRowEnd/canPlaceTile and
+  // Config.js's "Tank Expansion" comment for how that's actually enforced —
+  // this button only ever touches the tier number itself).
+  tankExpansion.buyBtn.addEventListener('click', () => {
+    const level = state.level.upgrades.tankExpansionTier;
+    if (level >= TANK_EXPANSION_MAX_TIER) return;
+    const cost = TANK_EXPANSION_UPGRADE_COSTS[level];
+    if (state.level.tankPoints.available < cost) return;
+    state.level.tankPoints.available -= cost;
+    state.level.upgrades.tankExpansionTier += 1;
+    playUpgrade();
+    refreshTankPanel(state);
+  });
 
   // Fish Merging's own card is gone entirely — per direct request, merging
   // is always available now, no Tank Upgrade purchase needed (see
@@ -3427,7 +3448,7 @@ function buildTankPanel(state) {
   // per direct request, Food Quality takes its place as the panel's FIRST
   // card (also its own removed slot's old spot in the tutorial — see
   // foodQuality's buyBtn listener above).
-  els.tankUpgradeList.append(foodQuality.card, fishMovement.card, electricityGraph.card, waveCountdown.card);
+  els.tankUpgradeList.append(foodQuality.card, fishMovement.card, electricityGraph.card, waveCountdown.card, tankExpansion.card);
 
   refreshTankPanel(state);
 }
@@ -3437,7 +3458,7 @@ function buildTankPanel(state) {
 // state can all change while the player has it open.
 function refreshTankPanel(state) {
   if (!tankCards) return;
-  const { foodQuality, fishMovement, electricityGraph, waveCountdown } = tankCards;
+  const { foodQuality, fishMovement, electricityGraph, waveCountdown, tankExpansion } = tankCards;
   const available = state.level.tankPoints.available;
 
   const fqLevel = state.level.upgrades.foodQuality;
@@ -3487,6 +3508,21 @@ function refreshTankPanel(state) {
   } else {
     waveCountdown.buyBtn.textContent = `Unlock — ${WAVE_COUNTDOWN_UNLOCK_COST} 🏆`;
     waveCountdown.buyBtn.disabled = available < WAVE_COUNTDOWN_UNLOCK_COST;
+  }
+
+  const teLevel = state.level.upgrades.tankExpansionTier;
+  const rowsUnlocked = teLevel * TANK_EXPANSION_ROWS_PER_TIER;
+  tankExpansion.levelEl.textContent = `Tier ${teLevel} / ${TANK_EXPANSION_MAX_TIER}`;
+  if (teLevel >= TANK_EXPANSION_MAX_TIER) {
+    tankExpansion.descEl.textContent = `Fully expanded — +${rowsUnlocked} extra rows of city unlocked.`;
+    tankExpansion.buyBtn.textContent = 'Maxed out';
+    tankExpansion.buyBtn.disabled = true;
+  } else {
+    const cost = TANK_EXPANSION_UPGRADE_COSTS[teLevel];
+    tankExpansion.descEl.textContent =
+      `+${rowsUnlocked} extra rows of city unlocked so far. Next tier adds ${TANK_EXPANSION_ROWS_PER_TIER} more rows to build on.`;
+    tankExpansion.buyBtn.textContent = `${cost} 🏆`;
+    tankExpansion.buyBtn.disabled = available < cost;
   }
 
   els.tankPointsDisplay.textContent = `🏆 ${available}`;

@@ -115,7 +115,7 @@ import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop
 import { pushGameNotification } from './Notifications.js';
 import { loadLevel, LEVELS } from './Levels.js';
 import { updateStoryTriggers, updateAutosave } from './Systems.js';
-import { updateAmbience, renderAmbience } from './Ambience.js';
+import { updateAmbience, renderAmbience, spawnCursorBubbles } from './Ambience.js';
 import { resumeAudio, startGameMusic, playAlienHit, setBattleMusicActive, triggerBossMusic, playBuildPlace, playDemolish } from './Sound.js';
 import {
   updateEntities,
@@ -758,6 +758,12 @@ centerCameraOnMound(state.camera); // one-time — not inside resizeCanvas, so a
 
 // ---- Input wiring ----
 const input = createInput(canvas);
+// Previous tick's cursor world position, for the cursor-bubbles speed calc in
+// update() below — null whenever the cursor isn't over the canvas (or hasn't
+// moved yet this session) so the very first in-bounds tick after a re-entry
+// doesn't compute a huge bogus "speed" from wherever it last was.
+let lastCursorBubbleWorldX = null;
+let lastCursorBubbleWorldY = null;
 
 // Shift-click Replace — per direct request, buying/pasting a building on top
 // of an already-placed one while Shift is held refunds the old one and
@@ -2411,6 +2417,8 @@ function handleBuildPlacementFailure(reason) {
   if (reason === 'cannot afford') {
     flashMoneyInsufficient(state);
     showBuildError("Can't afford");
+  } else if (reason === 'tank locked') {
+    showBuildError('Tank locked — expand in Tank Upgrades');
   }
 }
 
@@ -3184,7 +3192,29 @@ function update(dtMs) {
   // Freezing ambience means the blurred backdrop is one static frame the
   // compositor only has to blur once, not forty times a second, while still
   // satisfying "the tank blurry behind it" — it's just not animating.
-  if (state.ui.gameStarted) updateAmbience(dtMs);
+  if (state.ui.gameStarted) {
+    updateAmbience(dtMs);
+    // Per direct request ("moving the cursor creates bubbles... based on
+    // speed") — a plain single-tick world-space delta (not the smoothed
+    // rolling-window velocity itemDragPositionHistory uses for launch
+    // momentum) is fine here: this only ever feeds a cosmetic spawn rate, so
+    // an occasional stray extra/missing bubble from a jittery tick is
+    // harmless, unlike a wrong-direction item launch would be.
+    if (input.mouse.inside) {
+      const cursorWorldNow = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
+      if (lastCursorBubbleWorldX != null && dtMs > 0) {
+        const dx = cursorWorldNow.x - lastCursorBubbleWorldX;
+        const dy = cursorWorldNow.y - lastCursorBubbleWorldY;
+        const speed = Math.hypot(dx, dy) / (dtMs / 1000);
+        spawnCursorBubbles(cursorWorldNow.x, cursorWorldNow.y, speed, dtMs);
+      }
+      lastCursorBubbleWorldX = cursorWorldNow.x;
+      lastCursorBubbleWorldY = cursorWorldNow.y;
+    } else {
+      lastCursorBubbleWorldX = null;
+      lastCursorBubbleWorldY = null;
+    }
+  }
   if (!state.ui.gameStarted) return; // frozen until the player clicks Start on the first-launch start screen — render() still runs (a static frame), same "frozen but visible" pattern the pause menu already uses
   // Per direct request ("auto-save while paused, the 5 minute timer should
   // keep counting during pause") — state.level.elapsed (what the autosave

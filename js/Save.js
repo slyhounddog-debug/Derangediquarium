@@ -7,6 +7,8 @@
 // deliberately NOT saved — they're session-local (camera pan position, which
 // tool is selected, debug overlay state), not campaign progress.
 
+import { WORLD_TILES_H, WORLD_TILES_W, TILE_EMPTY } from './Config.js';
+
 const SAVE_KEY = 'derangiquarium_save_v1';
 
 export function hasSaveGame() {
@@ -38,6 +40,7 @@ export function loadSaveGame() {
     if (!parsed || typeof parsed !== 'object' || !parsed.meta || !parsed.level) return null;
     migrateTurretAmmoFields(parsed.level);
     migrateChestCoinFields(parsed.level);
+    migrateGridSize(parsed.level);
     // A save written before Shift-click Replace won't have this array at
     // all — Grid.js's applyReplacementMutation pushes straight into it with
     // no existence check of its own (every other transient level array is
@@ -53,7 +56,16 @@ export function loadSaveGame() {
     // existing save's very next autosave takes a little longer than usual to
     // arrive, never a crash or a spam-save.
     if (typeof parsed.level.wallClockMs !== 'number') parsed.level.wallClockMs = 0;
-    return { meta: parsed.meta, level: parsed.level };
+    // A save written before the Tank Expansion Tank Upgrade won't have this
+    // field at all — Grid.js's getUnlockedSeabedRowEnd multiplies it by
+    // TANK_EXPANSION_ROWS_PER_TIER, and `undefined * n` is NaN, which would
+    // fail every row comparison against it and lock the player out of
+    // building anywhere at all. Defaults to 0 same as every other migration
+    // here — safe because TANK_EXPANSION_BASE_ROW_END (tier 0's unlocked
+    // line) was deliberately set to exactly the OLD WORLD_TILES_H - 1, so an
+    // old save's entire pre-existing city is already fully unlocked at tier
+    // 0; nothing the player already built becomes newly inaccessible.
+    if (typeof parsed.level.upgrades.tankExpansionTier !== 'number') parsed.level.upgrades.tankExpansionTier = 0;
   } catch (err) {
     console.error('Derangiquarium: load failed', err);
     return null;
@@ -104,6 +116,26 @@ function migrateChestCoinFields(level) {
       }
       delete data.coinValueSum;
     }
+  }
+}
+
+// One-off migration: state.level.grid is a dense WORLD_TILES_H x
+// WORLD_TILES_W array serialized whole into the save (see this file's own
+// header comment) — it is NOT regenerated on load the way a brand-new
+// level's grid is (Levels.js's createGrid). The Tank Expansion Tank Upgrade
+// grew WORLD_TILES_H (40 -> 50, see Config.js's "Tank Expansion" comment); a
+// save written before that change still has a real 40-row array, 10 rows
+// short of what render/physics code now expects to be able to index into
+// (e.g. Grid.js's renderSeabedGrid scrolling the camera down into the newly
+// fogged-but-still-real rows would hit `grid[row]` as `undefined` and throw).
+// Pads the array up to the CURRENT WORLD_TILES_H with fresh all-TILE_EMPTY
+// rows, same shape createGrid itself builds — those rows start locked behind
+// tier 0 regardless (see the tankExpansionTier migration above), so nothing
+// is newly buildable, this purely prevents an out-of-bounds crash.
+function migrateGridSize(level) {
+  if (!level || !Array.isArray(level.grid)) return;
+  while (level.grid.length < WORLD_TILES_H) {
+    level.grid.push(new Array(WORLD_TILES_W).fill(TILE_EMPTY));
   }
 }
 

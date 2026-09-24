@@ -9,6 +9,9 @@ import {
   WORLD_TILES_H,
   WORLD_H,
   SEABED_ROW_START,
+  TANK_EXPANSION_ROWS_PER_TIER,
+  TANK_EXPANSION_BASE_ROW_END,
+  TANK_EXPANSION_MAX_TIER,
   TILE_EMPTY,
   TILE_PLATFORM,
   TILE_PLATFORM_HALF_LEFT,
@@ -811,6 +814,14 @@ export function getBuildingCost(state, buildingId) {
   return Math.ceil(building.cost * Math.pow(buildingCostGrowthRate(building.cost), n));
 }
 
+// The last seabed row currently reachable/buildable at the player's purchased
+// Tank Expansion tier — see Config.js's "Tank Expansion" comment for why the
+// grid array itself is always allocated at the full WORLD_TILES_H-1 (every
+// row beyond this line physically exists, just isn't unlocked yet).
+export function getUnlockedSeabedRowEnd(state) {
+  return TANK_EXPANSION_BASE_ROW_END + state.level.upgrades.tankExpansionTier * TANK_EXPANSION_ROWS_PER_TIER;
+}
+
 // Returns { ok, reason } rather than a bare bool so the build-mode UI can
 // show *why* a placement is invalid (ghost preview tint, tooltip, etc).
 // `ignoreCost` skips the affordability check entirely — used by the
@@ -821,6 +832,7 @@ export function canPlaceTile(state, col, row, buildingId, ignoreCost = false) {
   if (row < SEABED_ROW_START || row >= WORLD_TILES_H || col < 0 || col >= WORLD_TILES_W) {
     return { ok: false, reason: 'out of bounds' };
   }
+  if (row > getUnlockedSeabedRowEnd(state)) return { ok: false, reason: 'tank locked' };
   if (state.level.grid[row][col] !== TILE_EMPTY) return { ok: false, reason: 'occupied' };
   const building = BUILDING_TYPES[buildingId];
   if (!building) return { ok: false, reason: 'unknown building' };
@@ -1174,6 +1186,7 @@ export function describeReplacement(state, col, row, buildingId, shiftHeld, igno
   if (row < SEABED_ROW_START || row >= WORLD_TILES_H || col < 0 || col >= WORLD_TILES_W) {
     return { ok: false, reason: 'out of bounds', replacing: false, netCost: 0 };
   }
+  if (row > getUnlockedSeabedRowEnd(state)) return { ok: false, reason: 'tank locked', replacing: false, netCost: 0 };
   const building = BUILDING_TYPES[buildingId];
   if (!building) return { ok: false, reason: 'unknown building', replacing: false, netCost: 0 };
   const existingType = state.level.grid[row][col];
@@ -3322,7 +3335,48 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
     }
   }
 
+  renderLockedZoneOverlay(ctx, state, canvasWidth, canvasHeight);
   renderFanIndicators(ctx, state, canvasWidth, canvasHeight);
+}
+
+// Fogs the seabed rows beyond the player's current Tank Expansion tier — per
+// direct request for a 5-tier Tank Points progression that grows the city by
+// TANK_EXPANSION_ROWS_PER_TIER rows each purchase. Those rows are real,
+// already-allocated grid space (see Config.js's "Tank Expansion" comment) —
+// canPlaceTile already refuses to build there — this is purely the visual
+// half: a dark overlay plus a boundary seam and a one-line hint, so scrolling
+// down reads as "there's more tank, but it's locked" instead of the rows
+// just silently not accepting anything.
+function renderLockedZoneOverlay(ctx, state, canvasWidth, canvasHeight) {
+  const tier = state.level.upgrades.tankExpansionTier;
+  if (tier >= TANK_EXPANSION_MAX_TIER) return; // fully expanded — nothing left to fog
+  const { camera } = state;
+  const lockedRowStart = getUnlockedSeabedRowEnd(state) + 1;
+  const topLeft = { x: camera.x, y: camera.y };
+  const bottomRight = { x: camera.x + canvasWidth / camera.zoom, y: camera.y + canvasHeight / camera.zoom };
+  const rowStart = Math.max(lockedRowStart, rowAt(topLeft.y) - 1);
+  const rowEnd = Math.min(WORLD_TILES_H - 1, rowAt(bottomRight.y) + 1);
+  if (rowStart > rowEnd) return; // locked zone entirely off-screen
+
+  const topScreenY = Math.max(0, worldToScreen(0, lockedRowStart * TILE_SIZE, camera).y);
+  const bottomScreenY = Math.min(canvasHeight, worldToScreen(0, WORLD_TILES_H * TILE_SIZE, camera).y);
+  if (bottomScreenY <= topScreenY) return;
+
+  ctx.save();
+  ctx.fillStyle = 'rgba(4, 6, 10, 0.5)';
+  ctx.fillRect(0, topScreenY, canvasWidth, bottomScreenY - topScreenY);
+  ctx.fillStyle = 'rgba(255, 204, 77, 0.5)';
+  ctx.fillRect(0, topScreenY, canvasWidth, Math.max(1, 2 * camera.zoom));
+
+  const centerY = (topScreenY + bottomScreenY) / 2;
+  if (centerY > -40 && centerY < canvasHeight + 40) {
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `${Math.max(14, Math.round(22 * camera.zoom))}px sans-serif`;
+    ctx.fillStyle = 'rgba(255, 227, 173, 0.85)';
+    ctx.fillText('🔒 Locked — expand the tank in Tank Upgrades', canvasWidth / 2, centerY);
+  }
+  ctx.restore();
 }
 
 // The camera can now scroll CAMERA_BOTTOM_BUFFER_PX past the world's real
