@@ -132,8 +132,15 @@ for (let i = 0; i < SEAWEED_COUNT; i++) {
 // between them — the SAME "soft halo behind a slightly less faint core"
 // double-pass drawOneShadowFish already used for the blur illusion, just
 // with two opaque colors standing in for the old two alpha levels.
-const SHADOW_FISH_DEEP = { r: 28, g: 48, b: 68 }; // most visible a fish ever gets — still a muted, desaturated blue-grey, never true black
-const SHADOW_FISH_FAINT = { r: 96, g: 142, b: 178 }; // blends almost into the open-water background color
+// Shifted closer to the water gradient itself per direct follow-up request
+// ("less visually obtrusive, make them closer to the color of the water") —
+// main.js's WATER_TOP_CLEAN/WATER_BOTTOM_CLEAN average out around
+// rgb(85, 145, 185); DEEP now lands much nearer that (previously a
+// noticeably darker, more saturated navy) and FAINT sits almost exactly on
+// it, so even the more-visible "core" pass reads as a muted water tone
+// rather than a distinct dark shape.
+const SHADOW_FISH_DEEP = { r: 58, g: 95, b: 125 };
+const SHADOW_FISH_FAINT = { r: 85, g: 140, b: 178 };
 function mixRGB(a, b, t) {
   const r = Math.round(a.r + (b.r - a.r) * t);
   const g = Math.round(a.g + (b.g - a.g) * t);
@@ -160,7 +167,10 @@ function randomShadowFish(big) {
   const dir = Math.random() < 0.5 ? 1 : -1;
   const minSize = big ? SHADOW_FISH_BIG_MIN_SIZE : SHADOW_FISH_MIN_SIZE;
   const maxSize = big ? SHADOW_FISH_BIG_MAX_SIZE : SHADOW_FISH_MAX_SIZE;
-  const blendT = big ? 0.55 + Math.random() * 0.3 : 0.15 + Math.random() * 0.35;
+  // Leans further toward the FAINT end than before (was 0.15-0.50 / 0.55-
+  // 0.85) — same direct request as the DEEP/FAINT color shift above, so
+  // even the least-faint fish in each pool blends more into the water.
+  const blendT = big ? 0.65 + Math.random() * 0.3 : 0.35 + Math.random() * 0.35;
   const colors = shadowFishColors(blendT);
   return {
     x: Math.random() * WORLD_W,
@@ -289,9 +299,17 @@ function drawOneShadowFish(ctx, camera, canvasWidth, canvasHeight, f) {
 // ~60fps -> ~11fps with just 16 filtered strokes a frame; Chromium
 // re-rasterizes a filtered draw call individually rather than batching a
 // whole filtered region, so it doesn't get cheaper by only setting the
-// filter once outside the loop). A wide, very transparent stroke underneath
-// a narrower, slightly more opaque one reads as "soft-edged" at the low
-// opacity/small scale this renders at, for a fraction of the cost.
+// filter once outside the loop). A wide, LIGHTER-colored stroke underneath a
+// narrower, richer-colored one reads as "soft-edged" without needing any
+// transparency — per direct request ("the seaweed isn't transparent
+// anymore... it looked like the shadow fish were swimming in front of the
+// seaweed instead of behind it"): this used to fake the same soft edge with
+// two alpha levels of the SAME color, which meant anything drawn earlier at
+// this screen position (shadow fish, both bands are behind seaweed in the
+// depth order — see this file's header comment) showed straight through.
+// Fully opaque now, same "lighter halo behind a richer core" two-pass
+// technique drawOneShadowFish itself already uses, so it genuinely occludes
+// whatever's behind it while keeping the same soft-edged look.
 function drawOneSeaweed(ctx, camera, canvasWidth, w) {
   const screen = worldToScreen(w.x, SEABED_FLOOR_Y, camera);
   if (screen.x < -100 || screen.x > canvasWidth + 100) return;
@@ -300,14 +318,13 @@ function drawOneSeaweed(ctx, camera, canvasWidth, w) {
   const sway = Math.sin(elapsed * w.freq + w.phase) * w.sway * camera.zoom;
   const h = w.height * camera.zoom;
   const baseWidth = Math.max(2, w.width * camera.zoom);
-  ctx.strokeStyle = `hsl(${w.hue}, 42%, 32%)`;
   ctx.beginPath();
   ctx.moveTo(screen.x, screen.y + 2);
   ctx.quadraticCurveTo(screen.x + sway, screen.y - h * 0.5, screen.x + sway * 0.4, screen.y - h);
-  ctx.globalAlpha = 0.1 * w.blurFactor;
+  ctx.strokeStyle = `hsl(${w.hue}, 30%, 46%)`;
   ctx.lineWidth = baseWidth * 2.2 * w.blurFactor;
   ctx.stroke();
-  ctx.globalAlpha = 0.24;
+  ctx.strokeStyle = `hsl(${w.hue}, 42%, 32%)`;
   ctx.lineWidth = baseWidth;
   ctx.stroke();
   ctx.restore();
@@ -491,7 +508,13 @@ function drawOneKelp(ctx, camera, canvasWidth, k) {
   const sway = Math.sin(elapsed * k.freq + k.phase) * k.sway * camera.zoom;
   const h = k.height * camera.zoom;
   const w = k.width * camera.zoom;
-  ctx.fillStyle = `hsla(${k.hue}, 45%, 30%, 0.55)`;
+  // Opaque now, same reasoning/fix as drawOneSeaweed's own comment (a
+  // shadow fish drawn earlier at this screen position — both are behind
+  // kelp in the depth order — used to show straight through the old
+  // alpha:0.55 fill). Lightness bumped 30% -> 38% to compensate for losing
+  // that alpha blend, so it doesn't read as a much heavier/darker blade
+  // than before.
+  ctx.fillStyle = `hsl(${k.hue}, 45%, 38%)`;
   ctx.beginPath();
   ctx.moveTo(screen.x - w / 2, screen.y);
   ctx.quadraticCurveTo(screen.x + sway - w * 0.3, screen.y - h * 0.5, screen.x + sway * 0.4, screen.y - h);
@@ -591,22 +614,23 @@ function drawOneCrab(ctx, camera, canvasWidth, c) {
 // brighten instead of muddying into an opaque wedge, same idea real
 // underwater "god rays" reference photos show.
 //
-// Spread wider and sized up per direct follow-up request: count bumped
-// 5 -> 7 and the world-fraction spread widened (0.35-1.10 vs. the old
-// 0.55-1.0) so they read as scattered across most of the width rather than
-// clustered tight to the right edge, while the per-ray xFrac values are
-// still weighted toward the right half on average — keeping the original
-// "top right-ish" bias. Width bumped ~30% (top/bottom multipliers too) for
-// "make each one a little bigger." Depth (20-60) straddles both the
-// boulders/seaweed band (15-35) and the coral/urchin band (45-65), so
-// individual rays land in front of some of each and behind others — see
-// this file's header comment.
-const SUN_RAY_COUNT = 7;
+// Count/spread/size tuned over two follow-up requests: an earlier pass tried
+// 7 rays across a 0.35-1.10 spread, then per direct report ("reduce back to
+// 5... slightly bigger... spread a little more") — back down to 5 but
+// spread SLIGHTLY wider than even that 7-ray pass (0.30-1.15) since fewer
+// rays across the same-or-wider range reads as more spaced out, not more
+// cramped. The per-ray xFrac values are still weighted toward the right
+// half on average — keeping the original "top right-ish" bias. Width bumped
+// again too (was 120-280, now 135-305) for "slightly bigger." Depth (20-60)
+// straddles both the boulders/seaweed band (15-35) and the coral/urchin
+// band (45-65), so individual rays land in front of some of each and behind
+// others — see this file's header comment.
+const SUN_RAY_COUNT = 5;
 function randomSunRay(i) {
   return {
-    xFrac: 0.35 + (i / SUN_RAY_COUNT) * 0.75, // spread across most of the world's width, still right-of-center on average
+    xFrac: 0.3 + (i / SUN_RAY_COUNT) * 0.85, // spread across most of the world's width, still right-of-center on average
     xJitter: (Math.random() - 0.5) * 0.14,
-    width: 120 + Math.random() * 160,
+    width: 135 + Math.random() * 170,
     tilt: -0.85 + Math.random() * 0.3, // negative = leans left going down, per "top right-ish to bottom left-ish"
     driftFreq: 0.025 + Math.random() * 0.04,
     driftPhase: Math.random() * Math.PI * 2,
