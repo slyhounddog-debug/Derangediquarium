@@ -1059,13 +1059,19 @@ function drawOneSunRay(ctx, camera, canvasWidth, canvasHeight, ray) {
 // Bumped 40 -> 60 (matching the 50% MAX_RATE bump below) so the higher spawn
 // rate doesn't just churn through the pool faster via `.shift()`.
 const CURSOR_BUBBLE_MAX = 60;
-const CURSOR_BUBBLE_MIN_SPEED = 60; // world px/sec floor below which nothing spawns — plain hovering shouldn't spam bubbles
+// Per direct follow-up request ("reduce the threshold for the cursor
+// velocity needed to spawn bubbles... it should spawn bubbles when even
+// moving really slowly") — 60 -> 10, so only near-zero/jitter movement fails
+// to spawn anything, not just slow deliberate movement.
+const CURSOR_BUBBLE_MIN_SPEED = 10; // world px/sec floor below which nothing spawns — plain hovering shouldn't spam bubbles
 const CURSOR_BUBBLE_SPEED_FOR_MAX_RATE = 2200; // world px/sec at/above which spawn rate hits its cap
 // Per direct follow-up request ("increase the amount of bubbles that spawn
 // at the cursor by 50%") — 14 -> 21.
 // Per a further direct follow-up request ("bump the amount of bubbles made
 // with the cursor by 10% more") — 21 -> 23 (21 * 1.1 = 23.1, rounded).
-const CURSOR_BUBBLE_MAX_RATE = 23; // bubbles/sec at top speed — several a second, per direct request
+// Per a further direct follow-up request ("increase the max extreme bubble
+// spawn count by 20%") — 23 -> 28 (23 * 1.2 = 27.6, rounded).
+const CURSOR_BUBBLE_MAX_RATE = 28; // bubbles/sec at top speed — several a second, per direct request
 // Per direct request ("make the bubbles that spawn from the cursor have way
 // more initial velocity, actually matching the cursor to start before
 // slowing and going up, and have the bubbles spawn slightly in front of the

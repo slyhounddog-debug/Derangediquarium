@@ -1159,16 +1159,21 @@ export const FOOD_QUALITY_UPGRADE_MAX_LEVEL = FOOD_QUALITY_UPGRADE_COSTS.length;
 // slower per level (per direct request, replaced by the coin-timer bonus
 // scaling instead).
 
-// Fish Movement and Food Capacity share a separate, much longer and cheaper
-// 9-level ladder — per direct request, several more levels than Food
+// Fish Movement and Food Capacity used to share a separate, much longer and
+// cheaper 9-level ladder — per direct request, several more levels than Food
 // Quality's 5 but far cheaper per level, so these two read as a steady
-// trickle of small wins rather than Food Quality's steeper climb. Index 0 =
-// cost of level 1 (must already be at level N-1 to buy level N — UI.js
-// enforces this, not Config.js). Placeholder balance, same as every other
-// economy constant here — tune once real playtesting exists. (Used to be
-// shared with Food Capacity's own cost table, back when that upgrade
-// existed — see the retired-mechanic note further down.)
-export const FISH_MOVEMENT_UPGRADE_COSTS = [1, 3, 6, 10, 15, 20, 25, 30, 35]; // Tank Points
+// trickle of small wins rather than Food Quality's steeper climb. Per a later
+// direct request ("Make fish speed only have 5 upgrades instead of 9,
+// keeping the cost the same for the first 5 upgrades... around 350 total
+// tank points to get all the tank upgrades") the ladder was trimmed down to
+// just its first 5 entries (20/25/30/35 dropped) — every remaining level's
+// own cost is untouched. Index 0 = cost of level 1 (must already be at level
+// N-1 to buy level N — UI.js enforces this, not Config.js). Placeholder
+// balance, same as every other economy constant here — tune once real
+// playtesting exists. (Used to be shared with Food Capacity's own cost
+// table, back when that upgrade existed — see the retired-mechanic note
+// further down.)
+export const FISH_MOVEMENT_UPGRADE_COSTS = [1, 3, 6, 10, 15]; // Tank Points
 export const FISH_MOVEMENT_UPGRADE_MAX_LEVEL = FISH_MOVEMENT_UPGRADE_COSTS.length;
 // Every SPECIES row's swimSpeed below is already reduced by exactly this
 // much from its originally-tuned value — buying Level 1 restores the

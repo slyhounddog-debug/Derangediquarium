@@ -3515,9 +3515,10 @@ function buildTankPanel(state) {
   // Entities.js's isCombinableFish). Coin Capacity is gone entirely too —
   // per direct request, Food Quality takes its place as the panel's FIRST
   // card (also its own removed slot's old spot in the tutorial — see
-  // foodQuality's buyBtn listener above). Fish Health is last, per direct
-  // request ("at the bottom of the list").
-  els.tankUpgradeList.append(foodQuality.card, fishMovement.card, tankExpansion.card, fishHealth.card);
+  // foodQuality's buyBtn listener above). Fish Health was originally last
+  // ("at the bottom of the list"), moved up to SECOND per a later direct
+  // request ("make fish health the second option").
+  els.tankUpgradeList.append(foodQuality.card, fishHealth.card, fishMovement.card, tankExpansion.card);
 
   refreshTankPanel(state);
 }
