@@ -219,6 +219,7 @@ export function updateAmbience(dtMs) {
     else if (f.dir < 0 && f.x < -80) f.x = WORLD_W + 80;
   }
   updateCrabs(dt);
+  updateTreasureChest(dt);
   for (let i = cursorBubbles.length - 1; i >= 0; i--) {
     const b = cursorBubbles[i];
     b.ageS += dt;
@@ -347,7 +348,9 @@ function drawOneSeaweed(ctx, camera, canvasWidth, w) {
 // (no per-frame animation, unlike swaying seaweed) since a rock has no
 // reason to move — computed once at load and just redrawn every frame at
 // its own fixed spot. Always behind the Science Lab, same as seaweed.
-const BOULDER_COUNT = 7;
+// Bumped 7 -> 9 (25% more, rounded up) per direct request ("increase the
+// amount of... boulders by 25%").
+const BOULDER_COUNT = 9;
 function randomBoulder() {
   const size = 26 + Math.random() * 30;
   return {
@@ -389,12 +392,100 @@ function drawOneBoulder(ctx, camera, canvasWidth, b) {
   ctx.restore();
 }
 
+// ---- Sand Castles ----
+// Per direct request ("add in a sand castle or two of varying sizes to the
+// background that's about from the size of the mound to a boulder and can
+// go behind coral, urchins and boulders") — a couple of static sand
+// structures, sized between a Boulder's own footprint (BOULDER_COUNT above,
+// diameter roughly 45-110px) and the Mound's (Mound.js's
+// MOUND_WIDTH_TILES(4.4) * TILE_SIZE(32) ≈ 141px). Depth is kept below every
+// Boulder's own 15-35 range so it always draws behind boulders (and, being
+// in the same behind-Lab band as boulders/seaweed, also always behind coral/
+// urchins/the Science Lab too) — same static "no per-frame animation, no
+// gameplay effect" rule as Boulders.
+const SAND_CASTLE_COUNT = 2;
+const SAND_CASTLE_MIN_WIDTH = 55; // a bit above a Boulder's own biggest footprint
+const SAND_CASTLE_MAX_WIDTH = 140; // ~ Mound.js's own MOUND_WIDTH_TILES * TILE_SIZE
+function randomSandCastle() {
+  const width = SAND_CASTLE_MIN_WIDTH + Math.random() * (SAND_CASTLE_MAX_WIDTH - SAND_CASTLE_MIN_WIDTH);
+  return {
+    x: Math.random() * WORLD_W,
+    width,
+    height: width * (0.55 + Math.random() * 0.15),
+    towerCount: 2 + Math.floor(Math.random() * 2), // 2 or 3 side/center towers
+    shade: 0.9 + Math.random() * 0.25, // per-castle brightness variance, same idea as Boulder's own `shade`
+    depth: 5 + Math.random() * 8, // always < every Boulder's own 15-35 range
+  };
+}
+const sandCastles = [];
+for (let i = 0; i < SAND_CASTLE_COUNT; i++) sandCastles.push(randomSandCastle());
+
+function drawOneSandCastle(ctx, camera, canvasWidth, sc) {
+  const screen = worldToScreen(sc.x, SEABED_FLOOR_Y, camera);
+  const w = sc.width * camera.zoom;
+  const h = sc.height * camera.zoom;
+  if (screen.x < -w || screen.x > canvasWidth + w) return;
+  ctx.save();
+  const base = Math.round(200 * sc.shade);
+  const sandColor = `rgb(${base}, ${Math.round(base * 0.86)}, ${Math.round(base * 0.6)})`;
+  const sandDark = `rgb(${Math.round(base * 0.8)}, ${Math.round(base * 0.68)}, ${Math.round(base * 0.46)})`;
+  const baseY = screen.y;
+  const topY = baseY - h;
+
+  // Central keep — a trapezoid block, wider at the base than the top.
+  ctx.fillStyle = sandColor;
+  ctx.beginPath();
+  ctx.moveTo(screen.x - w * 0.28, baseY);
+  ctx.lineTo(screen.x - w * 0.22, topY);
+  ctx.lineTo(screen.x + w * 0.22, topY);
+  ctx.lineTo(screen.x + w * 0.28, baseY);
+  ctx.closePath();
+  ctx.fill();
+
+  // Crenellations along the keep's own top edge.
+  ctx.fillStyle = sandDark;
+  const teeth = 4;
+  const toothW = (w * 0.44) / (teeth * 2 - 1);
+  for (let i = 0; i < teeth; i++) {
+    const tx = screen.x - w * 0.22 + i * toothW * 2;
+    ctx.fillRect(tx, topY - h * 0.1, toothW, h * 0.12);
+  }
+
+  // Side (and sometimes center) towers flanking the keep — a cylindrical
+  // base topped with a pointed cone roof.
+  const towerXs = sc.towerCount === 3 ? [-0.42, 0, 0.42] : [-0.42, 0.42];
+  for (const tf of towerXs) {
+    const tx = screen.x + tf * w;
+    const towerW = w * 0.16;
+    const towerH = h * (tf === 0 ? 0.55 : 0.7);
+    const towerTopY = baseY - towerH;
+    ctx.fillStyle = sandColor;
+    ctx.fillRect(tx - towerW / 2, towerTopY, towerW, towerH);
+    ctx.beginPath();
+    ctx.moveTo(tx - towerW * 0.65, towerTopY);
+    ctx.lineTo(tx + towerW * 0.65, towerTopY);
+    ctx.lineTo(tx, towerTopY - towerW * 0.9);
+    ctx.closePath();
+    ctx.fillStyle = sandDark;
+    ctx.fill();
+  }
+
+  // Soft contact shadow where it meets the floor, same trick Boulder uses.
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+  ctx.beginPath();
+  ctx.ellipse(screen.x, baseY, w * 0.55, h * 0.12, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
 // ---- Sea Urchins ----
 // Small spiky dark orbs dotted along the floor — per direct request ("major
 // background additions... sea urchins"). Static like boulders, just a
 // center dot plus a ring of thin radiating spike lines. Always in front of
 // the Science Lab, per direct request.
-const SEA_URCHIN_COUNT = 10;
+// Bumped 10 -> 13 (25% more, rounded) per direct request ("increase the
+// amount of sea urchins... by 25%").
+const SEA_URCHIN_COUNT = 13;
 function randomSeaUrchin() {
   return {
     x: Math.random() * WORLD_W,
@@ -439,7 +530,9 @@ function drawOneSeaUrchin(ctx, camera, canvasWidth, u) {
 // the boulders/urchins pass with some actual color against all the muted
 // browns/greys. Same "no gameplay effect" rule, static like boulders/urchins.
 // Always in front of the Science Lab, per direct request.
-const CORAL_COUNT = 9;
+// Bumped 9 -> 14 (50% more, rounded) per direct request ("increase the
+// amount of coral by 50%").
+const CORAL_COUNT = 14;
 const CORAL_HUES = [340, 20, 280, 45]; // pink, orange, purple, golden-yellow
 function randomCoral() {
   const size = 22 + Math.random() * 26;
@@ -545,7 +638,9 @@ function drawOneKelp(ctx, camera, canvasWidth, k) {
 // the whole coral/urchin depth range (always in front of them), the last
 // quarter sits down near the BOTTOM of that same range so it ends up behind
 // whichever coral/urchins happen to roll a higher depth than it did.
-const CRAB_COUNT = 4;
+// Bumped 4 -> 5 (25% more) per direct request ("increase the amount of...
+// crabs... by 25%").
+const CRAB_COUNT = 5;
 function randomCrab() {
   const homeX = Math.random() * WORLD_W;
   const depth = Math.random() < 0.75 ? 55 + Math.random() * 20 : 44 + Math.random() * 10;
@@ -609,6 +704,179 @@ function drawOneCrab(ctx, camera, canvasWidth, c) {
   ctx.beginPath();
   ctx.arc(screen.x + size * 1.1, screen.y - size * 0.5, size * 0.4, 0, Math.PI * 2);
   ctx.fill();
+  ctx.restore();
+}
+
+// ---- Treasure Chest ----
+// Per direct request ("Add in a treasure chest in the background nestled in
+// a sand pile. Have the treasure chest animate to open every 5-15 seconds to
+// reveal a chest full of treasure and let out 5-10 bubbles while opening
+// before waiting 1 second and closing again to reset the 5-15 seconds") — a
+// single static-position decorative chest cycling through its own
+// closed -> opening -> open -> closing state machine, ticked in
+// updateAmbience the same as crabs. Purely cosmetic, same "no gameplay
+// effect, nothing outside this file ever reads it" rule as everything else
+// here — never a real Storage Chest, not clickable/lootable. Kept in the
+// front-of-Lab band (depth >= LAB_DEPTH_THRESHOLD, same band as coral/
+// urchins) rather than the boulders/seaweed band, so its open/close
+// animation always stays visible rather than risking getting tucked behind
+// the Science Lab.
+const CHEST_WAIT_MIN_S = 5;
+const CHEST_WAIT_MAX_S = 15;
+const CHEST_OPEN_DURATION_S = 0.6;
+const CHEST_HOLD_OPEN_DURATION_S = 1; // "waiting 1 second" before closing again, per direct request
+const CHEST_CLOSE_DURATION_S = 0.5;
+function randomChestWaitS() {
+  return CHEST_WAIT_MIN_S + Math.random() * (CHEST_WAIT_MAX_S - CHEST_WAIT_MIN_S);
+}
+const treasureChest = {
+  x: Math.random() * WORLD_W,
+  size: 34,
+  phase: 'closed', // 'closed' -> 'opening' -> 'open' -> 'closing' -> 'closed'...
+  timer: randomChestWaitS(),
+  lidT: 0, // 0 = fully closed, 1 = fully open — drives the lid's rotation and the treasure reveal
+  bubbleBudget: 0,
+  bubblesSpawned: 0,
+  depth: 50 + Math.random() * 10, // always >= LAB_DEPTH_THRESHOLD — same front-of-Lab band as coral/urchins
+};
+
+// Spawns one bubble at the chest's own position, directly into the shared
+// cursorBubbles pool (same shape spawnCursorBubbles itself builds) so it
+// rides the exact same rise/wobble/fade update+render code already ticked
+// every frame — no separate bubble system needed just for this.
+function spawnChestBubble(c) {
+  if (cursorBubbles.length >= CURSOR_BUBBLE_MAX) cursorBubbles.shift();
+  cursorBubbles.push({
+    x: c.x + (Math.random() - 0.5) * c.size * 0.6,
+    y: SEABED_FLOOR_Y - c.size * 0.3 + (Math.random() - 0.5) * 6,
+    radius: 2 + Math.random() * 3,
+    speed: 25 + Math.random() * 25,
+    wobbleFreq: 0.8 + Math.random() * 1.4,
+    wobblePhase: Math.random() * Math.PI * 2,
+    wobbleAmp: 3 + Math.random() * 6,
+    ageS: 0,
+    ttlS: 1.6 + Math.random() * 1.2,
+  });
+}
+
+function updateTreasureChest(dt) {
+  const c = treasureChest;
+  if (c.phase === 'closed') {
+    c.timer -= dt;
+    if (c.timer <= 0) {
+      c.phase = 'opening';
+      c.timer = 0;
+      c.bubbleBudget = 5 + Math.floor(Math.random() * 6); // 5-10, per direct request
+      c.bubblesSpawned = 0;
+    }
+  } else if (c.phase === 'opening') {
+    c.timer += dt;
+    c.lidT = Math.min(1, c.timer / CHEST_OPEN_DURATION_S);
+    // Spreads the bubble budget out across the whole opening animation
+    // instead of dumping them all in one frame.
+    const targetSpawned = Math.floor(c.lidT * c.bubbleBudget);
+    while (c.bubblesSpawned < targetSpawned) {
+      spawnChestBubble(c);
+      c.bubblesSpawned++;
+    }
+    if (c.lidT >= 1) { c.phase = 'open'; c.timer = 0; }
+  } else if (c.phase === 'open') {
+    c.timer += dt;
+    if (c.timer >= CHEST_HOLD_OPEN_DURATION_S) { c.phase = 'closing'; c.timer = 0; }
+  } else if (c.phase === 'closing') {
+    c.timer += dt;
+    c.lidT = Math.max(0, 1 - c.timer / CHEST_CLOSE_DURATION_S);
+    if (c.lidT <= 0) { c.phase = 'closed'; c.timer = randomChestWaitS(); }
+  }
+}
+
+function drawOneTreasureChest(ctx, camera, canvasWidth, c) {
+  const screen = worldToScreen(c.x, SEABED_FLOOR_Y, camera);
+  const size = c.size * camera.zoom;
+  if (screen.x < -size * 3 || screen.x > canvasWidth + size * 3) return;
+  ctx.save();
+
+  // The sand pile it's nestled in — a soft mound behind/around its base.
+  const pileW = size * 2.4;
+  const pileH = size * 0.9;
+  ctx.fillStyle = '#d8c08a';
+  ctx.beginPath();
+  ctx.ellipse(screen.x, screen.y - pileH * 0.15, pileW / 2, pileH / 2, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = '#c9ae74';
+  ctx.beginPath();
+  ctx.ellipse(screen.x, screen.y - pileH * 0.05, pileW * 0.31, pileH * 0.28, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  const bodyW = size * 1.6;
+  const bodyH = size * 0.9;
+  const baseY = screen.y - pileH * 0.35; // nestled up out of the sand pile a bit
+  const bodyTop = baseY - bodyH;
+
+  // Chest body — wood box with gold corner/mid bands and a lock.
+  ctx.fillStyle = '#6b4423';
+  ctx.fillRect(screen.x - bodyW / 2, bodyTop, bodyW, bodyH);
+  ctx.fillStyle = '#d4af37';
+  ctx.fillRect(screen.x - bodyW / 2, bodyTop + bodyH * 0.35, bodyW, bodyH * 0.12);
+  ctx.fillRect(screen.x - bodyW / 2, bodyTop, bodyW * 0.14, bodyH);
+  ctx.fillRect(screen.x + bodyW / 2 - bodyW * 0.14, bodyTop, bodyW * 0.14, bodyH);
+  ctx.fillStyle = '#f0d060';
+  ctx.beginPath();
+  ctx.arc(screen.x, bodyTop + bodyH * 0.42, size * 0.09, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Treasure glow + coin/gem pile, only visible once the lid's open enough
+  // to see inside — drawn before the lid so the lid still occludes it while
+  // mostly closed.
+  if (c.lidT > 0.3) {
+    const revealT = Math.min(1, (c.lidT - 0.3) / 0.7);
+    ctx.save();
+    ctx.globalAlpha = revealT;
+    const glowR = size * 0.9;
+    const grad = ctx.createRadialGradient(screen.x, bodyTop, 0, screen.x, bodyTop, glowR);
+    grad.addColorStop(0, 'rgba(255, 229, 130, 0.55)');
+    grad.addColorStop(1, 'rgba(255, 229, 130, 0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(screen.x, bodyTop, glowR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#f4cf4e';
+    ctx.beginPath();
+    ctx.ellipse(screen.x, bodyTop + bodyH * 0.06, bodyW * 0.42, bodyH * 0.22, 0, 0, Math.PI * 2);
+    ctx.fill();
+    const gemColors = ['#ff6b6b', '#5ac8fa', '#7bd88f', '#f4cf4e', '#ff6b6b'];
+    for (let i = 0; i < gemColors.length; i++) {
+      const gx = screen.x + (i - 2) * bodyW * 0.13;
+      const gy = bodyTop + bodyH * 0.02 - Math.abs(i - 2) * bodyH * 0.05;
+      ctx.fillStyle = gemColors[i];
+      ctx.beginPath();
+      ctx.arc(gx, gy, size * 0.09, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // Lid — pivots open around the back-top hinge line; lidT 0 = closed flat
+  // against the body, 1 = fully open (~112 degrees back).
+  const lidAngle = -c.lidT * (Math.PI * 0.62);
+  const lidW = bodyW * 1.02;
+  const lidH = bodyH * 0.55;
+  ctx.save();
+  ctx.translate(screen.x, bodyTop);
+  ctx.rotate(lidAngle);
+  ctx.fillStyle = '#7a4f29';
+  ctx.beginPath();
+  ctx.moveTo(-lidW / 2, 0);
+  ctx.lineTo(-lidW / 2, -lidH * 0.15);
+  ctx.quadraticCurveTo(-lidW / 2, -lidH, 0, -lidH);
+  ctx.quadraticCurveTo(lidW / 2, -lidH, lidW / 2, -lidH * 0.15);
+  ctx.lineTo(lidW / 2, 0);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#d4af37';
+  ctx.fillRect(-lidW / 2, -lidH * 0.42, lidW, lidH * 0.12);
+  ctx.restore();
+
   ctx.restore();
 }
 
@@ -762,9 +1030,11 @@ for (const f of shadowFish) addAmbienceJob(f.depth, (ctx, camera, cw, ch) => dra
 for (const b of boulders) addAmbienceJob(b.depth, (ctx, camera, cw) => drawOneBoulder(ctx, camera, cw, b));
 for (const w of seaweeds) addAmbienceJob(w.depth, (ctx, camera, cw) => drawOneSeaweed(ctx, camera, cw, w));
 for (const k of kelps) addAmbienceJob(k.depth, (ctx, camera, cw) => drawOneKelp(ctx, camera, cw, k));
+for (const sc of sandCastles) addAmbienceJob(sc.depth, (ctx, camera, cw) => drawOneSandCastle(ctx, camera, cw, sc));
 for (const c of corals) addAmbienceJob(c.depth, (ctx, camera, cw) => drawOneCoral(ctx, camera, cw, c));
 for (const u of seaUrchins) addAmbienceJob(u.depth, (ctx, camera, cw) => drawOneSeaUrchin(ctx, camera, cw, u));
 for (const c of crabs) addAmbienceJob(c.depth, (ctx, camera, cw) => drawOneCrab(ctx, camera, cw, c));
+addAmbienceJob(treasureChest.depth, (ctx, camera, cw) => drawOneTreasureChest(ctx, camera, cw, treasureChest));
 for (const ray of sunRays) addAmbienceJob(ray.depth, (ctx, camera, cw, ch) => drawOneSunRay(ctx, camera, cw, ch, ray));
 behindLabJobs.sort((a, b) => a.depth - b.depth);
 frontLabJobs.sort((a, b) => a.depth - b.depth);
