@@ -508,15 +508,18 @@ function drawCoinDollarMark(ctx, x, y, radius, coinColorHex) {
 // flat coin that spins and the rest of the objects looking like spheres").
 // A genuine two-tone coin build instead of one flat fill plus a round
 // specular blob (which is exactly what reads as "sphere," per that same
-// request): a darker outer rim, a ring of short milled-edge tick marks (the
-// classic reeded-edge coin detail), a lighter inner face, a bright bevel
-// ring right where face meets rim (the "embossed border" — a raised edge
+// request): a darker outer rim, a lighter inner face, a bright bevel ring
+// right where face meets rim (the "embossed border" — a raised edge
 // catching light), and a short diagonal sheen ARC across the face instead
 // of a round highlight blob (an arc reads as light glancing off a flat
-// disc; a round blob reads as a glint on a curved surface). The diamond
-// tier keeps its own distinct gem-cut render above this — per that
-// branch's own long-standing precedent ("look more like a circular gem
-// than a coin"), deliberately NOT a coin look at all, so it's untouched.
+// disc; a round blob reads as a glint on a curved surface). Used to also
+// have a ring of short milled-edge tick marks around the outer rim (the
+// classic reeded-edge coin detail) — removed per a direct follow-up report
+// ("it just looks pixelated with the milled marks"), leaving just the
+// plain outer rim fill. The diamond tier keeps its own distinct gem-cut
+// render above this — per that branch's own long-standing precedent ("look
+// more like a circular gem than a coin"), deliberately NOT a coin look at
+// all, so it's untouched.
 function drawFlatCoin(ctx, cx, cy, r, value) {
   const baseColor = getCoinColor(value);
   const baseRgb = hexToRgb(baseColor);
@@ -527,18 +530,6 @@ function drawFlatCoin(ctx, cx, cy, r, value) {
   ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.fillStyle = rimColor;
   ctx.fill();
-
-  // Milled edge — short radial ticks just inside the outer rim.
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.28)';
-  ctx.lineWidth = Math.max(0.6, r * 0.05);
-  const tickCount = 18;
-  for (let i = 0; i < tickCount; i++) {
-    const a = (i / tickCount) * Math.PI * 2;
-    ctx.beginPath();
-    ctx.moveTo(cx + Math.cos(a) * r * 0.91, cy + Math.sin(a) * r * 0.91);
-    ctx.lineTo(cx + Math.cos(a) * r * 0.99, cy + Math.sin(a) * r * 0.99);
-    ctx.stroke();
-  }
 
   // Inner face.
   ctx.beginPath();
@@ -626,14 +617,14 @@ const WASTE_VISUAL_SCALE = 1.22;
 // Per a direct follow-up ("the main issue is it looks like it's floating on
 // the floor, buildings, or other objects... moving the center of the visual
 // graphic down a tiny bit should fix this, like 10% of the height of the
-// waste"), then dialed back to 8% as the final tweak — the poop shape's own
-// drawn center is nudged DOWN by this fraction of its (already-scaled)
-// radius, purely visual same as the scale above: 0.16 * r is 8% of the
-// shape's full height (its own diameter, 2r), so it reads as sitting
-// slightly lower/resting against whatever's beneath it, without moving the
-// real collision circle (still centered on the item's own unmodified x/y)
-// at all.
-const WASTE_VISUAL_Y_OFFSET_FRACTION = 0.16;
+// waste"), dialed to 8%, then settled at 5% as the final tweak — the poop
+// shape's own drawn center is nudged DOWN by this fraction of its
+// (already-scaled) radius, purely visual same as the scale above: 0.1 * r
+// is 5% of the shape's full height (its own diameter, 2r), so it reads as
+// sitting slightly lower/resting against whatever's beneath it, without
+// moving the real collision circle (still centered on the item's own
+// unmodified x/y) at all.
+const WASTE_VISUAL_Y_OFFSET_FRACTION = 0.1;
 
 // Fills/strokes/textures tracePoopBlobPath's outline into a full waste item
 // — the actual reusable "draw one poop" call every render site below uses.

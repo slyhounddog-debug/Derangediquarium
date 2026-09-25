@@ -763,7 +763,7 @@ export const COIN_SPIN_COOLDOWN_MIN_MS = 4000;
 export const COIN_SPIN_COOLDOWN_MAX_MS = 8000; // real ms between spins once a coin has already done its first one, for as long as it keeps sitting still
 export const COIN_SPIN_ROTATIONS_MIN = 1;
 export const COIN_SPIN_ROTATIONS_MAX = 2; // random 1-2 full rotations per spin
-export const COIN_SPIN_MS_PER_ROTATION = 500; // how long one full 360° rotation takes — a 2-rotation spin takes twice as long as a 1-rotation one
+export const COIN_SPIN_MS_PER_ROTATION = 746; // how long one full 360° rotation takes — a 2-rotation spin takes twice as long as a 1-rotation one. Was 500 (a 500/0.67 ≈ 746 bump), per direct request ("slow the coin spin animation by 33%") — a 33% slower rotation SPEED means each rotation takes 1/0.67 as long, not just +33% longer.
 
 // ---- Waste (Phase 3 — two sources) ----
 // A third item type alongside food/coin. Spawned two ways: (1) a basic
