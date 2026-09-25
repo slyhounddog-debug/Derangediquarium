@@ -1073,6 +1073,27 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
 .flash-pickup { animation: flash-pickup 0.33s ease; }
 .flash-spend { animation: flash-spend 0.33s ease; }
 
+/* Small DOM confetti burst for an achievement claim (UI.js's
+   celebrateAchievementClaim) — per direct request ("a small confetti burst
+   or flash on the card would make it feel more rewarding"). Each piece is a
+   plain colored square, absolutely positioned at the card's own claim point
+   and animated outward+up to its own random --dx/--dy/--rot custom
+   properties (set inline per piece in JS, since CSS keyframes can't
+   randomize per-element), fading out as it goes; removed from the DOM on
+   its own animationend. */
+.confetti-piece {
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  pointer-events: none;
+  animation: confetti-burst 0.7s ease-out forwards;
+}
+@keyframes confetti-burst {
+  0% { transform: translate(-50%, -50%) rotate(0deg); opacity: 1; }
+  100% { transform: translate(calc(-50% + var(--dx)), calc(-50% + var(--dy))) rotate(var(--rot)); opacity: 0; }
+}
+
 /* Coin/Science Cap warning — toggled by UI.js's updateHUD once the live
    count reaches CAP_WARNING_THRESHOLD_FRACTION (80%) of the active cap, on
    whichever of the HUD/Shop/Tank copies is currently visible. A continuous

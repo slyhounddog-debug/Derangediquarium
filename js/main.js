@@ -81,6 +81,10 @@ import {
   ALIEN_CLICK_RADIUS_MULTIPLIER,
   TURRET_PROJECTILE_RADIUS,
   TURRET_PROJECTILE_COLOR,
+  TURRET_MUZZLE_FLASH_DURATION_MS,
+  TURRET_IMPACT_EFFECT_DURATION_MS,
+  COIN_SPARKLE_EFFECT_DURATION_MS,
+  COIN_SPARKLE_COLOR,
   COIN_RADIUS,
   PRODUCTION_BLOCKED_EFFECT_DURATION_MS,
   FISH_BUBBLE_LIFETIME_MS,
@@ -114,7 +118,7 @@ import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop
 import { pushGameNotification } from './Notifications.js';
 import { loadLevel, LEVELS } from './Levels.js';
 import { updateStoryTriggers, updateAutosave } from './Systems.js';
-import { updateAmbience, renderAmbienceBehindLab, renderAmbienceFrontLab, spawnCursorBubbles } from './Ambience.js';
+import { updateAmbience, renderAmbienceBehindLab, renderAmbienceFrontLab, spawnCursorBubbles, renderWaterSurface } from './Ambience.js';
 import { resumeAudio, startGameMusic, playAlienHit, setBattleMusicActive, triggerBossMusic, playBuildPlace, playDemolish } from './Sound.js';
 import {
   updateEntities,
@@ -4008,6 +4012,11 @@ function render() {
   ctx.fillStyle = waterBackgroundGradient(ctx, canvas.height);
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
+  // The water's true top edge (world y=0) — a subtle wavy shimmer, per
+  // direct request. Drawn before any ambience/scenery so tall kelp/seaweed
+  // still layer over it, same as real plants breaking a water surface would.
+  renderWaterSurface(ctx, state, canvas.width, canvas.height);
+
   // Ambience (bubbles/seaweed/boulders/etc.) renders immediately after the
   // plain background fill and before anything else — per direct request, it
   // needs to sit behind the seabed/city and every building/item/fish drawn
@@ -4955,6 +4964,29 @@ function render() {
     }
   }
 
+  // Turret muzzle flash — a brief bright glow at the tile that fired, per
+  // direct request ("a brief flash at the firing tile"). Drawn before the
+  // projectile loop below so a shot's own bolt reads on top of it at the
+  // instant they coincide. Purely decorative — see Entities.js's
+  // updateEntities (pushes) / updateTurretMuzzleFlashes (culls).
+  for (const flash of state.level.turretMuzzleFlashes) {
+    const pos = worldToScreen(flash.x, flash.y, state.camera);
+    if (pos.x < -30 || pos.x > canvas.width + 30 || pos.y < -30 || pos.y > canvas.height + 30) continue;
+    const t = flash.age / TURRET_MUZZLE_FLASH_DURATION_MS; // 0 -> 1
+    const alpha = 1 - t;
+    const r = (6 + t * 10) * state.camera.zoom;
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const grad = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, r);
+    grad.addColorStop(0, `rgba(255, 245, 200, ${alpha * 0.9})`);
+    grad.addColorStop(1, 'rgba(255, 245, 200, 0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
   // Turret projectiles — a small bright bolt plus a short motion trail
   // (a fading line back toward where it came from, cheap to compute since
   // the trail is just the bolt's own current heading, no extra state kept
@@ -5017,6 +5049,80 @@ function render() {
       ctx.arc(px, py, Math.max(1, 3 * state.camera.zoom * (1 - t)), 0, Math.PI * 2);
       ctx.fill();
     }
+    ctx.restore();
+  }
+
+  // Turret impact spark — a small quick burst of radiating lines where a
+  // shot actually lands, per direct request ("a small spark at the alien
+  // hit point"). Purely decorative — see Entities.js's
+  // updateTurretProjectiles (pushes on hit) / updateTurretImpactEffects
+  // (culls).
+  for (const spark of state.level.turretImpactEffects) {
+    const pos = worldToScreen(spark.x, spark.y, state.camera);
+    if (pos.x < -30 || pos.x > canvas.width + 30 || pos.y < -30 || pos.y > canvas.height + 30) continue;
+    const t = spark.age / TURRET_IMPACT_EFFECT_DURATION_MS; // 0 -> 1
+    const alpha = 1 - t;
+    const dist = (3 + t * 10) * state.camera.zoom;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.strokeStyle = TURRET_PROJECTILE_COLOR;
+    ctx.lineWidth = Math.max(1, 2 * state.camera.zoom * (1 - t * 0.5));
+    for (let i = 0; i < 5; i++) {
+      const angle = (i / 5) * Math.PI * 2 + Math.PI / 5;
+      ctx.beginPath();
+      ctx.moveTo(pos.x, pos.y);
+      ctx.lineTo(pos.x + Math.cos(angle) * dist, pos.y + Math.sin(angle) * dist);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // Coin pickup sparkle — a quick radiating gold glint the instant a coin is
+  // banked, per direct request ("make it so the picking up coins does a
+  // sparkle"). Small 4-point star/diamond glints rather than the
+  // alien-burst's plain dots, so it reads distinctly as a "sparkle" instead
+  // of a recolor of the alien-death effect, plus a brief bright core flash
+  // at the pickup point itself. Purely decorative — see Entities.js's
+  // updateCoin (pushes) / updateCoinSparkleEffects (culls). The "1-3
+  // bubbles" half of the same request is a separate effect — see
+  // Ambience.js's spawnCoinPickupBubbles, called from the same spot in
+  // Entities.js.
+  for (const effect of state.level.coinSparkleEffects) {
+    const pos = worldToScreen(effect.x, effect.y, state.camera);
+    if (pos.x < -30 || pos.x > canvas.width + 30 || pos.y < -30 || pos.y > canvas.height + 30) continue;
+    const t = effect.age / COIN_SPARKLE_EFFECT_DURATION_MS; // 0 -> 1
+    const alpha = 1 - t;
+    const dist = (4 + t * 16) * state.camera.zoom;
+    const sc = COIN_SPARKLE_COLOR;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = `rgb(${sc.r}, ${sc.g}, ${sc.b})`;
+    for (let i = 0; i < 5; i++) {
+      const angle = (i / 5) * Math.PI * 2 + t * 1.5;
+      const px = pos.x + Math.cos(angle) * dist;
+      const py = pos.y + Math.sin(angle) * dist;
+      const s = Math.max(1, 3.5 * state.camera.zoom * (1 - t));
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(angle);
+      ctx.beginPath();
+      ctx.moveTo(0, -s * 1.6);
+      ctx.lineTo(s * 0.5, 0);
+      ctx.lineTo(0, s * 1.6);
+      ctx.lineTo(-s * 0.5, 0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.globalCompositeOperation = 'lighter';
+    const coreR = 14 * state.camera.zoom * (1 - t * 0.6);
+    const grad = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, coreR);
+    grad.addColorStop(0, `rgba(255, 255, 255, ${alpha * 0.8})`);
+    grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, coreR, 0, Math.PI * 2);
+    ctx.fill();
     ctx.restore();
   }
 

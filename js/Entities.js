@@ -115,6 +115,9 @@ import {
   ALIEN_PORTAL_CLOSE_MS,
   FISH_BLOCKED_TINT_MS,
   ALIEN_DEATH_EFFECT_DURATION_MS,
+  TURRET_MUZZLE_FLASH_DURATION_MS,
+  TURRET_IMPACT_EFFECT_DURATION_MS,
+  COIN_SPARKLE_EFFECT_DURATION_MS,
   ALIEN_HIT_FLASH_MS,
   TURRET_PROJECTILE_SPEED,
   TURRET_PROJECTILE_HIT_RADIUS,
@@ -175,6 +178,7 @@ import {
   BOSS_DEATH_SCIENCE_GREEN_COUNT,
 } from './Config.js';
 import { stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemForces, updateBuildings } from './Grid.js';
+import { spawnCoinPickupBubbles } from './Ambience.js';
 import { pushGameNotification } from './Notifications.js';
 // Sound is a fire-and-forget side effect at the moment something already
 // happened — the same pattern this file already uses for floatingTexts/
@@ -2051,6 +2055,13 @@ function updateCoin(item, state, dtMs) {
     bankMoney(state, item.value);
     playCoinBank();
     state.level.floatingTexts.push(createPickupText(item.x, item.y, `+$${item.value}`, getCoinColor(item.value)));
+    // Per direct request ("make it so the picking up coins does a sparkle
+    // and makes 1-3 bubbles") — a quick radiating sparkle (main.js renders
+    // state.level.coinSparkleEffects) plus 1-3 bubbles rising from the same
+    // spot, reusing Ambience.js's own shared cursorBubbles pool/rise-to-top
+    // behavior rather than a bespoke bubble system just for this.
+    state.level.coinSparkleEffects.push({ x: item.x, y: item.y, age: 0 });
+    spawnCoinPickupBubbles(item.x, item.y);
     state.level.gridStats.itemsRoutedTotal += 1;
     // The Collector no longer produces any Waste byproduct at all, on any
     // tier — per direct request, banking a coin here is now completely
@@ -3246,6 +3257,7 @@ function updateTurretProjectiles(state, dtMs) {
       target.lastDamageSource = 'turret'; // turret_kills_25 achievement — see updateAlien's own death branch, checked ONLY at the moment of an actual kill
       target.reservedDamage = Math.max(0, (target.reservedDamage || 0) - shot.damage); // the damage is now real (applied to hp above), not just reserved/in-flight any more
       target.hitFlashMs = ALIEN_HIT_FLASH_MS; // per direct request — a hit flashes red and "bounces," read back by main.js's render
+      state.level.turretImpactEffects.push({ x: shot.x, y: shot.y, age: 0 }); // per direct request — "a small spark at the alien hit point"
       // Only the "still alive" hit sound here — a killing blow instead gets
       // playAlienDeath from updateAlien's own death branch next tick, so a
       // fatal hit doesn't fire both sounds on top of each other.
@@ -3266,6 +3278,29 @@ function updateAlienDeathEffects(state, dtMs) {
   state.level.alienDeathEffects = state.level.alienDeathEffects.filter((effect) => {
     effect.age += dtMs;
     return effect.age < ALIEN_DEATH_EFFECT_DURATION_MS;
+  });
+}
+
+// Same age-and-cull shape as updateAlienDeathEffects, one each for the
+// turret muzzle flash (pushed alongside a real projectile in updateEntities),
+// the turret impact spark (pushed by updateTurretProjectiles on a hit), and
+// the coin pickup sparkle (pushed by updateCoin when a coin is banked).
+function updateTurretMuzzleFlashes(state, dtMs) {
+  state.level.turretMuzzleFlashes = state.level.turretMuzzleFlashes.filter((effect) => {
+    effect.age += dtMs;
+    return effect.age < TURRET_MUZZLE_FLASH_DURATION_MS;
+  });
+}
+function updateTurretImpactEffects(state, dtMs) {
+  state.level.turretImpactEffects = state.level.turretImpactEffects.filter((effect) => {
+    effect.age += dtMs;
+    return effect.age < TURRET_IMPACT_EFFECT_DURATION_MS;
+  });
+}
+function updateCoinSparkleEffects(state, dtMs) {
+  state.level.coinSparkleEffects = state.level.coinSparkleEffects.filter((effect) => {
+    effect.age += dtMs;
+    return effect.age < COIN_SPARKLE_EFFECT_DURATION_MS;
   });
 }
 
@@ -3438,6 +3473,9 @@ export function updateEntities(state, dtMs) {
   maybeWarnBioSludgePile(state);
   updateAlienPortals(state);
   updateAlienDeathEffects(state, dtMs);
+  updateTurretMuzzleFlashes(state, dtMs);
+  updateTurretImpactEffects(state, dtMs);
+  updateCoinSparkleEffects(state, dtMs);
   updateProductionBlockedEffects(state, dtMs);
   updateFishBubbleEffects(state, dtMs);
   pendingFoodToWasteSpawns.length = 0; // updateFood (below) fills this — see its own comment for why it can't push into state.level.items directly
@@ -3528,7 +3566,10 @@ export function updateEntities(state, dtMs) {
   const replaceEjectPoints = state.level.pendingChestEjectSpawnPoints;
   state.level.pendingChestEjectSpawnPoints = [];
   materializeChestSpawnPoints(state, [...chestSpawnPoints, ...replaceEjectPoints]);
-  for (const shot of turretShots) state.level.turretProjectiles.push(createTurretProjectile(shot));
+  for (const shot of turretShots) {
+    state.level.turretProjectiles.push(createTurretProjectile(shot));
+    state.level.turretMuzzleFlashes.push({ x: shot.x, y: shot.y, age: 0 }); // per direct request — "a brief flash at the firing tile"
+  }
   // Runs before the entities filter loop below, same as the old direct-
   // mutation turret code did, so a lethal hit lands and gets cleaned up in
   // the same tick rather than lingering a frame at 0 hp.

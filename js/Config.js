@@ -1958,6 +1958,15 @@ export const TURRET_PROJECTILE_HIT_RADIUS = 14; // px — "arrived" tolerance, a
 export const TURRET_PROJECTILE_RADIUS = 4; // px, visual size of the bolt itself
 export const TURRET_PROJECTILE_COLOR = '#ffe066'; // a bright, easy-to-track yellow — distinct from every alien/fish/item color already in use
 
+// Two small purely-decorative bursts flanking a turret shot's lifetime — a
+// brief flash at the tile that fired it, and a small spark where it actually
+// lands — per direct request ("a brief flash at the firing tile and a small
+// spark at the alien hit point would read more satisfying"). Same
+// "push at the moment it happens, age, cull, render in main.js" shape as
+// every other one-shot effect array here (see alienDeathEffects).
+export const TURRET_MUZZLE_FLASH_DURATION_MS = 150;
+export const TURRET_IMPACT_EFFECT_DURATION_MS = 220;
+
 // ---- Refinery family (replaces the Auto-Feeder) ----
 // foodProcessMs is how long the Waste->Food recipe takes on that tier, per
 // direct spec (20 -> 14 -> 9 -> 5 seconds across the 4 tiers); the Alien
@@ -3326,6 +3335,15 @@ export const ALIEN_HIT_BOUNCE_SCALE = 0.35; // peak extra scale (1 + this, at th
 // state.level.entities immediately, same "independent particle" pattern
 // state.level.floatingTexts already uses for pickup text.
 export const ALIEN_DEATH_EFFECT_DURATION_MS = 500;
+
+// A quick radiating sparkle burst the instant a coin gets banked by a
+// Collector — per direct request ("make it so the picking up coins does a
+// sparkle and makes 1-3 bubbles"), on top of the existing floating "+$N"
+// text. Same push/age/cull/render shape as alienDeathEffects; the "1-3
+// bubbles" half is handled separately by Ambience.js's own shared
+// cursorBubbles pool (see its spawnCoinPickupBubbles).
+export const COIN_SPARKLE_EFFECT_DURATION_MS = 450;
+export const COIN_SPARKLE_COLOR = { r: 255, g: 214, b: 92 }; // warm gold, distinct from the alien-death burst's red/tier colors
 
 // A fish tints gray under two conditions — per direct request ("make fish
 // visually turn a gray color when they aren't producing coins, and make

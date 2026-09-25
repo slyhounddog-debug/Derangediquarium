@@ -3743,7 +3743,42 @@ function claimAchievement(state, id) {
   state.meta.achievementsClaimed.push(id);
   state.meta.fishyGems += ACHIEVEMENT_GEM_REWARD_BY_TIER[achievement.tier];
   playUpgrade();
+  // Per direct request ("claiming currently just updates the panel
+  // silently... a small confetti burst or flash on the card would make it
+  // feel more rewarding") — see celebrateAchievementClaim below.
+  const cardEntry = achievementCards && achievementCards[id];
+  if (cardEntry) celebrateAchievementClaim(cardEntry.card);
   refreshAchievementPanel(state);
+}
+
+// A springy bounce-pop (the same .bounce-play class the pause menu/
+// notification pill already use), a forced one-off sheen sweep (the same
+// shimmer .sheen-target elements already get on their own ambient cycle via
+// scheduleSheen — just retriggered immediately here instead of waiting for
+// its next random tick), and a real DOM confetti burst. Small burst radius
+// (20-50px) deliberately kept inside the card's own bounds rather than
+// risking clipping by a scrollable ancestor panel.
+const ACHIEVEMENT_CONFETTI_COLORS = ['#ffd93d', '#ff6b9d', '#5ac8fa', '#7bd88f', '#ff8a65'];
+const ACHIEVEMENT_CONFETTI_COUNT = 14;
+function celebrateAchievementClaim(card) {
+  card.classList.remove('bounce-play', 'sheen-play');
+  void card.offsetWidth; // forced reflow — restarts both CSS animations even if somehow still attached
+  card.classList.add('bounce-play', 'sheen-play');
+  for (let i = 0; i < ACHIEVEMENT_CONFETTI_COUNT; i++) {
+    const piece = document.createElement('div');
+    piece.className = 'confetti-piece';
+    const angle = Math.random() * Math.PI * 2;
+    const dist = 20 + Math.random() * 30;
+    piece.style.left = '50%';
+    piece.style.top = '30%';
+    piece.style.setProperty('--dx', `${Math.cos(angle) * dist}px`);
+    piece.style.setProperty('--dy', `${Math.sin(angle) * dist - 15}px`); // biased upward, reads more like a "pop" than a plain radial scatter
+    piece.style.setProperty('--rot', `${(Math.random() - 0.5) * 540}deg`);
+    piece.style.background = ACHIEVEMENT_CONFETTI_COLORS[i % ACHIEVEMENT_CONFETTI_COLORS.length];
+    piece.style.animationDelay = `${Math.random() * 0.06}s`;
+    card.appendChild(piece);
+    piece.addEventListener('animationend', () => piece.remove(), { once: true });
+  }
 }
 
 // Re-checked every frame this view is open — an achievement can go from

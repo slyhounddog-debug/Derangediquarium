@@ -717,6 +717,36 @@ function spawnCrabBubble(c) {
   });
 }
 
+// Per direct request ("make it so the picking up coins does a sparkle and
+// makes 1-3 bubbles") — same shared-pool/rise-to-top pattern as
+// spawnCrabBubble/spawnChestBubble above, just 1-3 at once from wherever the
+// coin was actually banked (could be deep in the city, not just the seabed
+// floor band — ttlS = y/speed still works from any starting depth). The
+// sparkle half of "sparkle and bubbles" is a separate, non-Ambience effect —
+// see Entities.js's updateCoin (pushes state.level.coinSparkleEffects) and
+// main.js (renders it).
+export function spawnCoinPickupBubbles(x, y) {
+  const count = 1 + Math.floor(Math.random() * 3); // 1-3
+  for (let i = 0; i < count; i++) {
+    if (cursorBubbles.length >= CURSOR_BUBBLE_MAX) cursorBubbles.shift();
+    const speed = 25 + Math.random() * 25;
+    const by = Math.max(1, y - Math.random() * 6);
+    cursorBubbles.push({
+      x: x + (Math.random() - 0.5) * 10,
+      y: by,
+      vx: 0,
+      vy: 0,
+      radius: 1.5 + Math.random() * 2,
+      speed,
+      wobbleFreq: 0.8 + Math.random() * 1.4,
+      wobblePhase: Math.random() * Math.PI * 2,
+      wobbleAmp: 2 + Math.random() * 4,
+      ageS: 0,
+      ttlS: by / speed,
+    });
+  }
+}
+
 function updateCrabs(dt) {
   for (const c of crabs) {
     if (c.pauseTimer > 0) {
@@ -1048,6 +1078,117 @@ function drawOneSunRay(ctx, camera, canvasWidth, canvasHeight, ray) {
   ctx.restore();
 }
 
+// ---- Caustic Light Ripples ----
+// Soft, slowly-drifting patches of light on the seabed floor, like sunlight
+// refracting through the water surface — per direct request ("soft moving
+// light patterns on the seabed floor... layered under the sun rays you
+// already have"). A much lower depth than sun rays (3-9, vs. boulders'
+// 15-35), so solid seabed scenery (boulders, coral, sand castles, buildings)
+// always draws on top of/occludes it, the same "sits ON the sand, not above
+// it" reasoning that keeps this from ever looking like it's floating in
+// front of something solid. Each one is a single soft radial glow that
+// drifts side to side and pulses in brightness, additive-blended ('lighter',
+// same trick drawOneSunRay uses) so overlapping patches brighten instead of
+// muddying into a flat color.
+const CAUSTIC_COUNT = 9;
+function randomCaustic(i) {
+  return {
+    xFrac: (i + Math.random() * 0.7) / CAUSTIC_COUNT,
+    width: 70 + Math.random() * 90,
+    height: 16 + Math.random() * 12,
+    driftFreq: 0.04 + Math.random() * 0.06,
+    driftPhase: Math.random() * Math.PI * 2,
+    driftAmp: 18 + Math.random() * 26,
+    pulseFreq: 0.12 + Math.random() * 0.18,
+    pulsePhase: Math.random() * Math.PI * 2,
+    depth: 3 + Math.random() * 6,
+  };
+}
+const caustics = [];
+for (let i = 0; i < CAUSTIC_COUNT; i++) caustics.push(randomCaustic(i));
+
+function drawOneCaustic(ctx, camera, canvasWidth, canvasHeight, c) {
+  const worldX = c.xFrac * WORLD_W + Math.sin(elapsed * c.driftFreq + c.driftPhase) * c.driftAmp;
+  const screen = worldToScreen(worldX, SEABED_FLOOR_Y, camera);
+  const w = c.width * camera.zoom;
+  const h = c.height * camera.zoom;
+  if (screen.x < -w || screen.x > canvasWidth + w) return;
+  if (screen.y < -h || screen.y > canvasHeight + h) return;
+  const pulse = 0.5 + 0.5 * Math.sin(elapsed * c.pulseFreq + c.pulsePhase);
+  const opacity = 0.05 + pulse * 0.08;
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  const cy = screen.y - h * 0.35;
+  const grad = ctx.createRadialGradient(screen.x, cy, 0, screen.x, cy, w * 0.55);
+  grad.addColorStop(0, `rgba(255, 249, 214, ${opacity})`);
+  grad.addColorStop(1, 'rgba(255, 249, 214, 0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.ellipse(screen.x, cy, w * 0.55, h * 0.6, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+// ---- Water Surface Line ----
+// A subtle wavy shimmer right at the water's true top edge (world y=0,
+// which is also camera.y's hard minimum — Engine.js's updateCamera clamps
+// camera.y >= 0, so this line sits at the literal top of the tank, never
+// scrollable past) — per direct request ("a subtle wavy 'waterline' with a
+// slight shimmer where the water meets open air would sell the 'looking
+// into a tank' framing"). Drawn directly (not part of the depth-sorted job
+// system above) since it's one fixed-position global element, not a pool of
+// scattered instances — main.js calls this once, right after the background
+// fill and before any ambience/scenery, so kelp/seaweed tall enough to reach
+// the top still draw over it, same as real plants breaking a water surface
+// would. Safe to work entirely in SCREEN x (not world x) since the camera
+// never pans horizontally — see Engine.js's own comment on that.
+const WATER_SURFACE_WAVE_FREQ = 0.018;
+const WATER_SURFACE_WAVE_SPEED = 0.5;
+const WATER_SURFACE_WAVE_AMPLITUDE_PX = 3;
+const WATER_SURFACE_SHIMMER_BAND_PX = 20; // world px of soft highlight below the line
+const WATER_SURFACE_SPARKLE_COUNT = 10;
+const waterSurfaceSparkles = [];
+for (let i = 0; i < WATER_SURFACE_SPARKLE_COUNT; i++) {
+  waterSurfaceSparkles.push({ xFrac: Math.random(), freq: 0.5 + Math.random() * 0.9, phase: Math.random() * Math.PI * 2 });
+}
+
+export function renderWaterSurface(ctx, state, canvasWidth, canvasHeight) {
+  const camera = state.camera;
+  const screenY = worldToScreen(0, 0, camera).y;
+  if (screenY < -40 || screenY > canvasHeight + 40) return; // the true top edge is scrolled well out of view — nothing to draw
+  const zoom = camera.zoom;
+  const amp = WATER_SURFACE_WAVE_AMPLITUDE_PX * zoom;
+  const shimmerH = WATER_SURFACE_SHIMMER_BAND_PX * zoom;
+  const waveY = (x) => screenY + Math.sin(x * WATER_SURFACE_WAVE_FREQ + elapsed * WATER_SURFACE_WAVE_SPEED) * amp;
+  ctx.save();
+  const grad = ctx.createLinearGradient(0, screenY, 0, screenY + shimmerH);
+  grad.addColorStop(0, 'rgba(255, 255, 255, 0.3)');
+  grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, screenY - 2, canvasWidth, shimmerH + 2);
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+  ctx.lineWidth = Math.max(1.2, 2 * zoom);
+  ctx.beginPath();
+  const step = 14;
+  for (let x = -step; x <= canvasWidth + step; x += step) {
+    const y = waveY(x);
+    if (x === -step) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+  for (const s of waterSurfaceSparkles) {
+    const x = s.xFrac * canvasWidth;
+    const twinkle = 0.5 + 0.5 * Math.sin(elapsed * s.freq + s.phase);
+    if (twinkle < 0.65) continue;
+    ctx.globalAlpha = (twinkle - 0.65) / 0.35;
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath();
+    ctx.arc(x, waveY(x) - 2, 1.4 * zoom, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
 // ---- Cursor Bubbles ----
 // Per direct request ("moving the cursor creates bubbles -- size and amount
 // of bubbles based on speed. A high cursor speed should do multiple bubbles
@@ -1181,6 +1322,7 @@ const frontLabJobs = [];
 function addAmbienceJob(depth, draw) {
   (depth < LAB_DEPTH_THRESHOLD ? behindLabJobs : frontLabJobs).push({ depth, draw });
 }
+for (const c of caustics) addAmbienceJob(c.depth, (ctx, camera, cw, ch) => drawOneCaustic(ctx, camera, cw, ch, c));
 for (const f of shadowFish) addAmbienceJob(f.depth, (ctx, camera, cw, ch) => drawOneShadowFish(ctx, camera, cw, ch, f));
 for (const b of boulders) addAmbienceJob(b.depth, (ctx, camera, cw) => drawOneBoulder(ctx, camera, cw, b));
 for (const w of seaweeds) addAmbienceJob(w.depth, (ctx, camera, cw) => drawOneSeaweed(ctx, camera, cw, w));
