@@ -2117,7 +2117,7 @@ function openLabPurchaseModal(state, id) {
     const s = SPECIES[sid];
     if (!s) continue;
     descLines.push(s.description);
-    statChips.push(speciesStatsHtml(sid));
+    statChips.push(speciesStatsHtml(state, sid));
   }
   for (const bid of node.grants.buildings || []) {
     const b = BUILDING_TYPES[bid];
@@ -2223,8 +2223,8 @@ function refreshLabPurchaseButton(state) {
 // the live price already shows next to the fish's name (refreshPreviewInfo/
 // getFishPurchaseCost), so repeating it here was redundant, and Role wasn't
 // named as useful anywhere else this panel is shown.
-function speciesStatsHtml(speciesId) {
-  return fishEconomyStatsHtml(speciesId);
+function speciesStatsHtml(state, speciesId) {
+  return fishEconomyStatsHtml(state, speciesId);
 }
 
 // Hunger (as food/min, not a raw hunger-points/sec rate — per direct
@@ -2234,11 +2234,15 @@ function speciesStatsHtml(speciesId) {
 // and waste are BOTH per-minute (were per-second) — a per-second rate for
 // either reads as an oddly tiny/precise number (a fraction of a cent, a
 // hundredth of a waste item) next to hunger's own per-minute framing, so all
-// three share the same time unit. Hunger uses the UNUPGRADED Food Quality
-// relief amount (FOOD_HUNGER_RELIEF_BY_LEVEL[0]) as its baseline on purpose —
-// like every other stat shown here (base cost, base speed), this is meant to
-// be a fixed per-species comparison figure, not one that silently shifts as
-// the player buys Food Quality/Fish Movement upgrades.
+// three share the same time unit. Hunger uses the player's CURRENT Food
+// Quality upgrade level (FOOD_HUNGER_RELIEF_BY_LEVEL[state.level.upgrades.
+// foodQuality]) per direct request ("make it so the hunger stat line in the
+// shop updates dynamically based on the food quality") — was pinned to the
+// unupgraded level 0 before that as a fixed comparison figure, but the
+// player wants it to reflect what a fish actually needs right now. See
+// refreshPreviewInfo, which re-renders this every frame the shop preview is
+// open so buying a Food Quality upgrade updates it live, same as the price
+// tags already do.
 //
 // Money/min applies to any species whose passive drop timer actually
 // produces a coin — checked via `behavior.includes('FEEDER')`, NOT
@@ -2255,12 +2259,12 @@ function speciesStatsHtml(speciesId) {
 // check (not the narrower isPureScavenger used elsewhere for eating/coin-drop
 // purposes), so this mirrors it exactly rather than guessing at a different
 // rule.
-function fishEconomyStatsHtml(speciesId) {
+function fishEconomyStatsHtml(state, speciesId) {
   const s = SPECIES[speciesId];
   if (!s) return '';
   const baby = s.growthStages[0];
   const adult = s.growthStages[s.growthStages.length - 1];
-  const foodPerMin = (s.hungerRate * 60) / FOOD_HUNGER_RELIEF_BY_LEVEL[0];
+  const foodPerMin = (s.hungerRate * 60) / FOOD_HUNGER_RELIEF_BY_LEVEL[state.level.upgrades.foodQuality];
   let html = `<div class="building-stat">🍽️ Hunger: <b>${foodPerMin.toFixed(1)} ${itemIconImgHtml('food')}/min</b></div>`;
   if (s.behavior.includes('FEEDER') && adult.dropValue) {
     // Shown as a baby -> adult range, not just the adult figure — per direct
@@ -3134,10 +3138,71 @@ function drawItemIconCanvas(canvas, itemType) {
     ctx.fill();
     return;
   }
-  // Generic flat-fill-plus-rim-and-highlight path — covers Coins, Food, and
-  // Mutagen Paste (see FLAT_ICON_COLOR_BY_TYPE above) plus a plain gray
-  // fallback for anything unrecognized. Waste gets its own poop-shaped path
-  // above instead.
+  if (itemType === 'coin') {
+    // Matches main.js's own drawFlatCoin, per direct request ("update the
+    // icons of coins in the filter modals to match the new coin look") —
+    // a darker outer rim, a lighter inner face, a bright embossed bevel
+    // ring, an embossed "$", and a short diagonal sheen arc, same as the
+    // real in-tank coin render (see that function's own comment for the
+    // full "flat coin, not a sphere" rationale). No milled edge ticks —
+    // main.js's own coin render dropped those too, per a direct report
+    // ("it just looks pixelated with the milled marks"). No specific coin
+    // instance/value here (this is a generic type icon, not a real item),
+    // so FLAT_ICON_COLOR_BY_TYPE.coin (gold) stands in as the
+    // representative color, same as it already did before this request.
+    const baseRgb = hexToRgb(FLAT_ICON_COLOR_BY_TYPE.coin);
+    const darken = (t) => `rgb(${Math.round(baseRgb.r * (1 - t))}, ${Math.round(baseRgb.g * (1 - t))}, ${Math.round(baseRgb.b * (1 - t))})`;
+    const lighten = (t) => `rgb(${Math.round(baseRgb.r + (255 - baseRgb.r) * t)}, ${Math.round(baseRgb.g + (255 - baseRgb.g) * t)}, ${Math.round(baseRgb.b + (255 - baseRgb.b) * t)})`;
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = darken(0.32);
+    ctx.fill();
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * 0.8, 0, Math.PI * 2);
+    ctx.fillStyle = lighten(0.12);
+    ctx.fill();
+
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.25)';
+    ctx.lineWidth = Math.max(0.6, r * 0.05);
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * 0.84, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+    ctx.lineWidth = Math.max(0.6, r * 0.06);
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * 0.78, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.font = `bold ${Math.max(7, r * 1.05)}px sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const textY = cy + r * 0.04;
+    const emboss = Math.max(0.6, r * 0.07);
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    ctx.fillText('$', cx + emboss, textY + emboss);
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
+    ctx.fillText('$', cx - emboss * 0.7, textY - emboss * 0.7);
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
+    ctx.lineWidth = Math.max(0.8, r * 0.09);
+    ctx.lineJoin = 'round';
+    ctx.strokeText('$', cx, textY);
+    ctx.fillStyle = darken(0.2);
+    ctx.fillText('$', cx, textY);
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.lineWidth = Math.max(1, r * 0.14);
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * 0.52, Math.PI * 1.12, Math.PI * 1.42);
+    ctx.stroke();
+    return;
+  }
+  // Generic flat-fill-plus-rim-and-highlight path — covers Food and Mutagen
+  // Paste (see FLAT_ICON_COLOR_BY_TYPE above) plus a plain gray fallback
+  // for anything unrecognized. Waste and Coin get their own dedicated
+  // shapes above instead.
   const flatColor = FLAT_ICON_COLOR_BY_TYPE[itemType] || '#cccccc';
   ctx.beginPath();
   ctx.fillStyle = flatColor;
@@ -4022,7 +4087,7 @@ function selectSpeciesForPreview(state, species) {
   els.previewDesc.textContent = species.description;
   // Per direct request, fish get the same stats chip row buildings already
   // show — see fishEconomyStatsHtml.
-  const statsHtml = speciesStatsHtml(species.id);
+  const statsHtml = speciesStatsHtml(state, species.id);
   els.previewStats.innerHTML = statsHtml;
   els.previewStats.classList.toggle('hidden', !statsHtml);
   // Name/price text is set live in refreshPreviewInfo (called both here and
@@ -4314,6 +4379,13 @@ function renderPreviewCanvas() {
 function refreshPreviewInfo(state) {
   if (currentPreviewSpecies) {
     els.previewName.textContent = currentPreviewSpecies.name;
+    // Re-rendered every frame (this runs each tick from updateHUD, same as
+    // the price tags) so the Hunger line updates live if the player buys a
+    // Food Quality upgrade while a fish preview is open — see
+    // fishEconomyStatsHtml.
+    const statsHtml = speciesStatsHtml(state, currentPreviewSpecies.id);
+    els.previewStats.innerHTML = statsHtml;
+    els.previewStats.classList.toggle('hidden', !statsHtml);
   } else if (currentPreviewBuilding) {
     els.previewName.textContent = currentPreviewBuilding.name;
   }
