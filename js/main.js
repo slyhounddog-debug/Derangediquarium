@@ -131,14 +131,15 @@ import {
   SEA_TURTLE_BABY_SPACING_PX,
   SEA_TURTLE_BABY_MAX_SCALE,
   SEA_TURTLE_BABY_MIN_SCALE,
-  SEA_TURTLE_BUBBLE_REFERENCE_INTERVAL_MS,
-  SEA_TURTLE_BUBBLE_LEADER_RATE_FRACTION,
-  SEA_TURTLE_BUBBLE_RISE_HEIGHT_PX,
-  SEA_TURTLE_BUBBLE_DURATION_MS,
-  SEA_TURTLE_BUBBLE_RADIUS_PX,
+  SEA_TURTLE_BUBBLE_INTERVAL_MS,
   SEA_TURTLE_COLOR_SHELL,
   SEA_TURTLE_COLOR_SHELL_PATTERN,
   SEA_TURTLE_COLOR_SKIN,
+  SEA_TURTLE_WAKE_SEGMENT_COUNT,
+  SEA_TURTLE_WAKE_MAX_ALPHA,
+  SEA_TURTLE_WAKE_LENGTH_MULTIPLIER,
+  SEA_TURTLE_WAKE_HEIGHT_FACTOR,
+  SEA_TURTLE_WAKE_WOBBLE_PX,
   SEA_TURTLE_COIN_BASE_VALUE,
   SEA_TURTLE_COIN_VALUE_PER_COLLECT,
 } from './Config.js';
@@ -146,7 +147,7 @@ import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop
 import { pushGameNotification } from './Notifications.js';
 import { loadLevel, LEVELS } from './Levels.js';
 import { updateStoryTriggers, updateAutosave } from './Systems.js';
-import { updateAmbience, renderAmbienceBehindLab, renderAmbienceFrontLab, spawnCursorBubbles, renderWaterSurface } from './Ambience.js';
+import { updateAmbience, renderAmbienceBehindLab, renderAmbienceFrontLab, spawnCursorBubbles, renderWaterSurface, spawnSeaTurtleBubble } from './Ambience.js';
 import { resumeAudio, startGameMusic, playAlienHit, setBattleMusicActive, triggerBossMusic, playBuildPlace, playDemolish } from './Sound.js';
 import {
   updateEntities,
@@ -4093,33 +4094,12 @@ function seaTurtleMemberScale(index, babyCount) {
   return SEA_TURTLE_BABY_MAX_SCALE - t * (SEA_TURTLE_BABY_MAX_SCALE - SEA_TURTLE_BABY_MIN_SCALE);
 }
 
-// How often member `index` (0 = leader) spawns its own trailing bubble —
-// proportional to that member's own size (seaTurtleMemberScale), per direct
-// request ("the amount of bubbles made by the turtle is determined by the
-// turtles size"). SEA_TURTLE_BUBBLE_LEADER_RATE_FRACTION pins the leader's
-// own rate at exactly 80% of SEA_TURTLE_BUBBLE_REFERENCE_INTERVAL_MS (the
-// flat rate every member used to share, back when only the last/smallest
-// one emitted at all) — every other member's rate falls out of the same
-// size-proportional formula, so the smallest baby now emits noticeably less
-// often than it used to (it was the sole, full-rate emitter before), while
-// bigger members pick up the slack.
-function seaTurtleBubbleIntervalForMember(index, babyCount) {
-  const scale = seaTurtleMemberScale(index, babyCount);
-  const rateFraction = SEA_TURTLE_BUBBLE_LEADER_RATE_FRACTION * scale;
-  return SEA_TURTLE_BUBBLE_REFERENCE_INTERVAL_MS / Math.max(0.05, rateFraction);
-}
-
 function spawnSeaTurtle(state) {
   const babyCount = SEA_TURTLE_BABY_MIN_COUNT + Math.floor(Math.random() * (SEA_TURTLE_BABY_MAX_COUNT - SEA_TURTLE_BABY_MIN_COUNT + 1));
   // Far enough left that the ENTIRE convoy (leader plus every trailing baby)
   // starts fully off the left edge, not just the leader.
   const startScreenX = -(SEA_TURTLE_RADIUS_PX * 2 + babyCount * SEA_TURTLE_BABY_SPACING_PX + 40);
-  // One bubble timer per member (index 0 = leader, 1..babyCount = kids) —
-  // randomized starting phase so a freshly-spawned convoy doesn't have every
-  // member pop its first bubble in lockstep.
-  const bubbleTimers = [];
-  for (let i = 0; i <= babyCount; i++) bubbleTimers.push(seaTurtleBubbleIntervalForMember(i, babyCount) * Math.random());
-  const turtle = { startScreenX, elapsedMs: 0, babyCount, coinItemId: null, bubbleTimers, bubbles: [] };
+  const turtle = { startScreenX, elapsedMs: 0, babyCount, coinItemId: null, bubbleTimerMs: 0 };
   // Per direct request — $50 base, plus $50 for every sea-turtle coin ever
   // collected THIS level so far (Config.js's own comment has the full
   // worked example). Every other coin in the game is untouched by this.
@@ -4179,36 +4159,18 @@ function updateSeaTurtle(state, nowMs) {
     }
   }
 
-  // Every convoy member trails its own bubble stream now, per direct
-  // request ("right now only the last turtle lets out bubbles — make it so
-  // every turtle lets out bubbles"), each on its own size-scaled timer (see
-  // seaTurtleBubbleIntervalForMember). A fresh bubble is a small screen-space
-  // particle stored right on the turtle object — rises a flat
-  // SEA_TURTLE_BUBBLE_RISE_HEIGHT_PX over SEA_TURTLE_BUBBLE_DURATION_MS, then
-  // culled, all off this same real clock so the whole stream stays exactly
-  // as pause/speed-immune (and tutorial-freezable, via the early return
-  // above) as the turtle itself.
-  for (let i = 0; i <= turtle.babyCount; i++) {
-    turtle.bubbleTimers[i] -= realDtMs;
-    if (turtle.bubbleTimers[i] <= 0) {
-      turtle.bubbleTimers[i] += seaTurtleBubbleIntervalForMember(i, turtle.babyCount);
-      const pos = seaTurtleMemberPosition(turtle, i);
-      const scale = seaTurtleMemberScale(i, turtle.babyCount);
-      turtle.bubbles.push({
-        x: pos.x,
-        y: pos.y,
-        ageMs: 0,
-        radius: SEA_TURTLE_BUBBLE_RADIUS_PX * (0.55 + scale * 0.55),
-        wobbleSeed: Math.random() * Math.PI * 2,
-      });
-    }
+  // A trailing bubble off the very back of the convoy — per direct request
+  // ("I like the bubbles the way they were before"), reverted back to the
+  // original single-emitter shape (only the last/smallest member), off the
+  // shared Ambience.js cursorBubbles pool, timed off this same real clock so
+  // the trail's own rate is just as pause/speed-immune as the turtle itself.
+  turtle.bubbleTimerMs -= realDtMs;
+  if (turtle.bubbleTimerMs <= 0) {
+    turtle.bubbleTimerMs += SEA_TURTLE_BUBBLE_INTERVAL_MS;
+    const tailPos = seaTurtleMemberPosition(turtle, turtle.babyCount);
+    const tailWorld = screenToWorld(tailPos.x, tailPos.y, state.camera);
+    spawnSeaTurtleBubble(tailWorld.x, tailWorld.y);
   }
-  const bubbleRiseSpeedPxPerS = SEA_TURTLE_BUBBLE_RISE_HEIGHT_PX / (SEA_TURTLE_BUBBLE_DURATION_MS / 1000);
-  turtle.bubbles = turtle.bubbles.filter((b) => {
-    b.ageMs += realDtMs;
-    b.y -= bubbleRiseSpeedPxPerS * (realDtMs / 1000);
-    return b.ageMs < SEA_TURTLE_BUBBLE_DURATION_MS;
-  });
 
   // Done once the LAST (furthest-back) member has cleared the right edge —
   // per direct spec, the next cooldown doesn't start until the whole convoy
@@ -4226,26 +4188,44 @@ function updateSeaTurtle(state, nowMs) {
   }
 }
 
+// The soft trailing "current" wake behind one convoy member — deliberately
+// its OWN function, drawn in its OWN full pass across every member BEFORE
+// any shell (see renderSeaTurtle below), not nested inside
+// drawOneSeaTurtleMember's own save/translate block the way it used to be.
+// A member's wake trails backward into the space the NEXT (smaller, further
+// back) member occupies — drawing it as part of that same member's own
+// paint call meant a later-drawn member (the leader, drawn last so it
+// overlaps its own kids) had its wake painted OVER an earlier-drawn member's
+// shell, per direct report ("the first turtle's stream animation is in
+// front of the second turtle"). Segment count/length/height are all bigger
+// than the original per a direct follow-up ("too skinny, looks like the
+// turtles are pooping the streams out... make the streams taller").
+function drawSeaTurtleWake(ctx, x, y, scale, waterCurrentPhase) {
+  const r = SEA_TURTLE_RADIUS_PX * scale;
+  ctx.save();
+  ctx.translate(x, y);
+  for (let i = 1; i <= SEA_TURTLE_WAKE_SEGMENT_COUNT; i++) {
+    const t = i / SEA_TURTLE_WAKE_SEGMENT_COUNT;
+    const alpha = SEA_TURTLE_WAKE_MAX_ALPHA * (1 - t);
+    if (alpha <= 0) continue;
+    const dist = r * (1.05 + t * SEA_TURTLE_WAKE_LENGTH_MULTIPLIER);
+    const wobbleY = Math.sin(waterCurrentPhase + i * 0.8) * SEA_TURTLE_WAKE_WOBBLE_PX;
+    ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+    ctx.beginPath();
+    ctx.ellipse(-dist, wobbleY, r * (0.55 - t * 0.15), r * SEA_TURTLE_WAKE_HEIGHT_FACTOR * (1 - t * 0.25), 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+}
+
 // One turtle-shaped shell+head+flippers, drawn directly in screen space
 // (no worldToScreen — see this section's own header comment). facingRight is
 // always true (the whole convoy only ever swims left to right, per spec).
-function drawOneSeaTurtleMember(ctx, x, y, scale, bobAngle, waterCurrentPhase) {
+function drawOneSeaTurtleMember(ctx, x, y, scale, bobAngle) {
   const r = SEA_TURTLE_RADIUS_PX * scale;
   const flipperSwing = Math.sin(bobAngle * 1.6) * 0.5;
   ctx.save();
   ctx.translate(x, y);
-
-  // A soft trailing "current" wake — a few fading, elongated ellipses
-  // streaming out behind the member, per direct request ("a slight water
-  // current animation as it goes").
-  for (let i = 1; i <= 3; i++) {
-    const wakeAlpha = 0.10 - i * 0.026;
-    if (wakeAlpha <= 0) continue;
-    ctx.fillStyle = `rgba(255, 255, 255, ${wakeAlpha})`;
-    ctx.beginPath();
-    ctx.ellipse(-r * (1.1 + i * 0.55), Math.sin(waterCurrentPhase + i) * 2, r * 0.55, r * 0.18, 0, 0, Math.PI * 2);
-    ctx.fill();
-  }
 
   // Rear flippers
   ctx.fillStyle = SEA_TURTLE_COLOR_SKIN;
@@ -4302,40 +4282,23 @@ function drawOneSeaTurtleMember(ctx, x, y, scale, bobAngle, waterCurrentPhase) {
   ctx.restore();
 }
 
-// Drawn separately from (and always called BEFORE) renderSeaTurtle, per
-// direct request ("make it so the trailing bubble streams render behind the
-// sea turtles") — a guaranteed z-order, not something left to depth-sorting
-// or draw-order coincidence.
-function renderSeaTurtleBubbles(ctx, state) {
-  const turtle = state.level.seaTurtle;
-  if (!turtle) return;
-  for (const b of turtle.bubbles) {
-    const lifeFraction = b.ageMs / SEA_TURTLE_BUBBLE_DURATION_MS;
-    const alpha = 0.5 * (1 - lifeFraction);
-    if (alpha <= 0) continue;
-    const wobbleX = Math.sin(b.ageMs / 260 + b.wobbleSeed) * 3;
-    ctx.beginPath();
-    ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
-    ctx.arc(b.x + wobbleX, b.y, b.radius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.6})`;
-    ctx.lineWidth = 1;
-    ctx.stroke();
-  }
-}
-
 function renderSeaTurtle(ctx, state, canvasWidth, canvasHeight) {
   const turtle = state.level.seaTurtle;
   if (!turtle) return;
   const waterCurrentPhase = turtle.elapsedMs / 260;
+  const visibleMembers = [];
   for (let i = turtle.babyCount; i >= 0; i--) {
-    // Drawn tail-first so the leader always overlaps its own trailing kids,
-    // same front-to-back layering a real convoy swimming in a line would have.
+    // Tail-first order, same front-to-back layering a real convoy swimming
+    // in a line would have — kept for the shell pass below (so the leader
+    // still overlaps its own trailing kids); the wake pass ahead of it
+    // doesn't actually depend on this order (see drawSeaTurtleWake's own
+    // comment on why it's a fully separate pass now).
     const pos = seaTurtleMemberPosition(turtle, i);
     if (pos.x < -SEA_TURTLE_RADIUS_PX * 3 || pos.x > canvasWidth + SEA_TURTLE_RADIUS_PX * 3) continue;
-    const scale = seaTurtleMemberScale(i, turtle.babyCount);
-    drawOneSeaTurtleMember(ctx, pos.x, pos.y, scale, pos.bobAngle, waterCurrentPhase + i * 0.7);
+    visibleMembers.push({ pos, scale: seaTurtleMemberScale(i, turtle.babyCount), i });
   }
+  for (const m of visibleMembers) drawSeaTurtleWake(ctx, m.pos.x, m.pos.y, m.scale, waterCurrentPhase + m.i * 0.7);
+  for (const m of visibleMembers) drawOneSeaTurtleMember(ctx, m.pos.x, m.pos.y, m.scale, m.pos.bobAngle);
 }
 
 function render() {
@@ -4608,8 +4571,10 @@ function render() {
   // Drawn just before the items loop below (not any earlier, ambience-style
   // layer) so the coin riding its back — a completely normal state.level.items
   // entry — draws on TOP of it in that very next loop, reading as sitting on
-  // the shell rather than floating in front of/behind the turtle.
-  renderSeaTurtleBubbles(ctx, state);
+  // the shell rather than floating in front of/behind the turtle. Its own
+  // trailing bubbles render earlier still, as part of the shared Ambience.js
+  // pool (renderAmbienceFrontLab, called well before this point) — see
+  // Ambience.js's spawnSeaTurtleBubble.
   renderSeaTurtle(ctx, state, canvas.width, canvas.height);
 
   for (const item of state.level.items) {

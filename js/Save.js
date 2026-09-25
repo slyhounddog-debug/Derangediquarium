@@ -96,20 +96,21 @@ export function loadSaveGame() {
     // and the cooldown gets a fresh random 30-90s roll, same as a brand-new
     // level would.
     if (typeof parsed.level.seaTurtle === 'undefined') parsed.level.seaTurtle = null;
-    // A save written between the Sea Turtle feature's own first version and
-    // the follow-up that gave every convoy member its own bubble stream can
-    // have a real, in-flight seaTurtle object in the OLD shape (a single
-    // bubbleTimerMs, no bubbleTimers array/bubbles list) — main.js's
-    // updateSeaTurtle now unconditionally indexes turtle.bubbleTimers[i],
-    // which throws immediately on `undefined`. Same "nothing mid-flight
-    // survives a save/load anyway, purely decorative" precedent as the
-    // effect arrays above: treat it as "no turtle currently in flight" and
-    // let a fresh one spawn on its own timer, rather than trying to
-    // reconstruct per-member timers for a convoy shape that no longer
-    // exists. Its coin (if any) is cleaned up the exact same way the normal
-    // off-screen-exit path already does, so it doesn't linger as a
-    // permanently-ungrabbable, gravity-exempt orphan.
-    if (parsed.level.seaTurtle && !Array.isArray(parsed.level.seaTurtle.bubbleTimers)) {
+    // A save written during the brief window where every convoy member had
+    // its own bubbleTimers array/bubbles list (since reverted — see
+    // Config.js's Sea Turtle section) can have a real, in-flight seaTurtle
+    // object in THAT shape instead of the current single bubbleTimerMs.
+    // main.js's updateSeaTurtle now unconditionally does
+    // `turtle.bubbleTimerMs -= realDtMs`, which just goes NaN forever
+    // against an object that never had that field (rather than throwing,
+    // but just as dead — NaN <= 0 is always false, so the bubble timer would
+    // never fire again for that save). Same "nothing mid-flight survives a
+    // save/load anyway, purely decorative" precedent as the effect arrays
+    // above: treat it as "no turtle currently in flight" and let a fresh one
+    // spawn on its own timer. Its coin (if any) is cleaned up the exact same
+    // way the normal off-screen-exit path already does, so it doesn't linger
+    // as a permanently-ungrabbable, gravity-exempt orphan.
+    if (parsed.level.seaTurtle && typeof parsed.level.seaTurtle.bubbleTimerMs !== 'number') {
       if (parsed.level.seaTurtle.coinItemId != null && Array.isArray(parsed.level.items)) {
         parsed.level.items = parsed.level.items.filter((it) => it.id !== parsed.level.seaTurtle.coinItemId);
       }

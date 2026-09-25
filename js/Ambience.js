@@ -717,6 +717,38 @@ function spawnCrabBubble(c) {
   });
 }
 
+// One small bubble at a Sea Turtle convoy member's own (world-space) tail
+// position — same shared-pool/rise-to-top pattern as spawnCrabBubble/
+// spawnCoinPickupBubbles above. Called from main.js's updateSeaTurtle, which
+// times it off REAL elapsed ms (not dt) so the trail's own spawn rate is
+// just as immune to Pause Time/2x Speed as the turtle itself — once a bubble
+// exists here, though, it's a completely normal member of cursorBubbles and
+// rises/fades on the same dt-driven schedule every other bubble in the pool
+// does (purely decorative, not worth a second real-time-only animation
+// path). A brief per-member/size-scaled/fixed-height variant of this lived
+// directly in main.js instead for one revision — reverted per direct
+// request ("I like the bubbles the way they were before"); the separate
+// "trailing streams" report that prompted that whole detour turned out to
+// be about the water-current wake (drawSeaTurtleWake in main.js), not these
+// bubbles at all.
+export function spawnSeaTurtleBubble(x, y) {
+  if (cursorBubbles.length >= CURSOR_BUBBLE_MAX) cursorBubbles.shift();
+  const speed = 16 + Math.random() * 14;
+  cursorBubbles.push({
+    x: x + (Math.random() - 0.5) * 6,
+    y,
+    vx: 0,
+    vy: 0,
+    radius: 1.5 + Math.random() * 2,
+    speed,
+    wobbleFreq: 0.8 + Math.random() * 1.4,
+    wobblePhase: Math.random() * Math.PI * 2,
+    wobbleAmp: 2 + Math.random() * 4,
+    ageS: 0,
+    ttlS: Math.max(0.1, y / speed),
+  });
+}
+
 // Per direct request ("make it so the picking up coins does a sparkle and
 // makes 1-3 bubbles") — same shared-pool/rise-to-top pattern as
 // spawnCrabBubble/spawnChestBubble above, just 1-3 at once from wherever the
@@ -725,18 +757,6 @@ function spawnCrabBubble(c) {
 // sparkle half of "sparkle and bubbles" is a separate, non-Ambience effect —
 // see Entities.js's updateCoin (pushes state.level.coinSparkleEffects) and
 // main.js (renders it).
-//
-// The Sea Turtle convoy's own trailing bubbles used to reuse this shared
-// pool via a spawnSeaTurtleBubble helper that lived here — per a direct
-// follow-up request ("every turtle lets out bubbles... determined by the
-// turtle's size... 3 times as tall... render behind the turtles"), that grew
-// into a small per-member particle system with its own size-scaled spawn
-// rate and a fixed screen-space rise height, which needs the render call
-// guaranteed to run immediately before the turtles' own draw call for a
-// reliable "behind" z-order — both are a poor fit for this shared, purely
-// dt-driven, physics-rise-to-world-y=0 pool. That system now lives entirely
-// in main.js instead (state.level.seaTurtle.bubbles, updateSeaTurtle/
-// renderSeaTurtleBubbles), with nothing here any more.
 export function spawnCoinPickupBubbles(x, y) {
   const count = 1 + Math.floor(Math.random() * 3); // 1-3
   for (let i = 0; i < count; i++) {

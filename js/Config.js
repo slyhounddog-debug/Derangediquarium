@@ -2028,34 +2028,26 @@ export const SEA_TURTLE_BABY_MAX_COUNT = 4;
 export const SEA_TURTLE_BABY_SPACING_PX = 58; // screen-space gap between each successive member of the convoy
 export const SEA_TURTLE_BABY_MAX_SCALE = 0.62; // closest (1st) baby, relative to the lead turtle's own size
 export const SEA_TURTLE_BABY_MIN_SCALE = 0.32; // furthest-back baby
-// Per a direct follow-up request, every convoy member trails its own bubble
-// stream now (not just the last/smallest one), rendered explicitly BEFORE
-// the turtle bodies (see main.js's render() call order) so the stream is
-// always behind the shells — and each is its own small screen-space
-// particle list on the turtle object itself (main.js's updateSeaTurtle/
-// renderSeaTurtleBubbles), not the shared Ambience.js cursorBubbles pool any
-// more: that pool's "rise until world y reaches 0" physics gave a trail
-// whose visible height swung wildly with camera scroll/zoom, which doesn't
-// suit a convoy that always sits at a fixed screen height near the very top
-// of the tank. SEA_TURTLE_BUBBLE_REFERENCE_INTERVAL_MS is literally the OLD
-// flat interval (every member's own real ms-between-bubbles is now derived
-// from it, proportional to that member's own size via seaTurtleMemberScale)
-// — SEA_TURTLE_BUBBLE_LEADER_RATE_FRACTION fixes the LEAD turtle's own rate
-// at exactly 80% of this reference, per direct spec ("the biggest turtle
-// making 80% as many bubbles as the last turtle makes now"); every other
-// member's rate falls out of the same size-proportional formula (see
-// main.js's seaTurtleBubbleIntervalForMember).
-export const SEA_TURTLE_BUBBLE_REFERENCE_INTERVAL_MS = 260;
-export const SEA_TURTLE_BUBBLE_LEADER_RATE_FRACTION = 0.8;
-// Rise height tripled per direct request ("3 times as tall") — a flat
-// screen-space distance a bubble drifts upward over its life before fully
-// fading, replacing the old scroll/zoom-dependent physics height.
-export const SEA_TURTLE_BUBBLE_RISE_HEIGHT_PX = 240;
-export const SEA_TURTLE_BUBBLE_DURATION_MS = 9000; // real ms a single bubble lives — its own rise speed is SEA_TURTLE_BUBBLE_RISE_HEIGHT_PX / this
-export const SEA_TURTLE_BUBBLE_RADIUS_PX = 2.6; // base bubble radius — scaled down per-member by that member's own seaTurtleMemberScale
+export const SEA_TURTLE_BUBBLE_INTERVAL_MS = 260; // real ms between trailing bubbles — only the LAST (furthest-back, smallest) convoy member emits, per direct request to revert the brief per-member/size-scaled experiment back to how this looked originally
 export const SEA_TURTLE_COLOR_SHELL = '#3f7a3a';
 export const SEA_TURTLE_COLOR_SHELL_PATTERN = '#2c5a29';
 export const SEA_TURTLE_COLOR_SKIN = '#5fa855';
+// The soft trailing "current" wake behind each convoy member — separate
+// from the bubbles above, this is what a direct follow-up report was
+// actually about ("the streams animation is too skinny, looks like the
+// turtles are pooping... the first turtle's stream is in front of the
+// second turtle"). Drawn as its own pass, for every member, BEFORE any
+// shell (see main.js's renderSeaTurtle) — a member's own wake trails
+// backward into the space the NEXT member occupies, so drawing it inside
+// that same member's own (tail-first-then-leader-last) paint call let a
+// later-drawn member's wake paint over an earlier-drawn member's shell.
+// Segment count/length/height all bumped up from the original thin "poop
+// trail" look into an actual visible stream.
+export const SEA_TURTLE_WAKE_SEGMENT_COUNT = 6;
+export const SEA_TURTLE_WAKE_MAX_ALPHA = 0.16;
+export const SEA_TURTLE_WAKE_LENGTH_MULTIPLIER = 2.6; // how many extra shell-radii the wake stretches behind the member, on top of its own radius
+export const SEA_TURTLE_WAKE_HEIGHT_FACTOR = 0.42; // wake ellipse half-height as a fraction of the member's own radius — was 0.18 (the "skinny" complaint)
+export const SEA_TURTLE_WAKE_WOBBLE_PX = 3.5;
 // The coin riding the lead turtle's back — per direct request, $50 base,
 // plus another $50 for every time a sea-turtle coin has EVER been collected
 // this level (state.level.seaTurtleCoinCollectCount), so the 5th one banked
