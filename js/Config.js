@@ -2028,7 +2028,31 @@ export const SEA_TURTLE_BABY_MAX_COUNT = 4;
 export const SEA_TURTLE_BABY_SPACING_PX = 58; // screen-space gap between each successive member of the convoy
 export const SEA_TURTLE_BABY_MAX_SCALE = 0.62; // closest (1st) baby, relative to the lead turtle's own size
 export const SEA_TURTLE_BABY_MIN_SCALE = 0.32; // furthest-back baby
-export const SEA_TURTLE_BUBBLE_INTERVAL_MS = 260; // real ms between trailing bubbles, per member currently on screen
+// Per a direct follow-up request, every convoy member trails its own bubble
+// stream now (not just the last/smallest one), rendered explicitly BEFORE
+// the turtle bodies (see main.js's render() call order) so the stream is
+// always behind the shells — and each is its own small screen-space
+// particle list on the turtle object itself (main.js's updateSeaTurtle/
+// renderSeaTurtleBubbles), not the shared Ambience.js cursorBubbles pool any
+// more: that pool's "rise until world y reaches 0" physics gave a trail
+// whose visible height swung wildly with camera scroll/zoom, which doesn't
+// suit a convoy that always sits at a fixed screen height near the very top
+// of the tank. SEA_TURTLE_BUBBLE_REFERENCE_INTERVAL_MS is literally the OLD
+// flat interval (every member's own real ms-between-bubbles is now derived
+// from it, proportional to that member's own size via seaTurtleMemberScale)
+// — SEA_TURTLE_BUBBLE_LEADER_RATE_FRACTION fixes the LEAD turtle's own rate
+// at exactly 80% of this reference, per direct spec ("the biggest turtle
+// making 80% as many bubbles as the last turtle makes now"); every other
+// member's rate falls out of the same size-proportional formula (see
+// main.js's seaTurtleBubbleIntervalForMember).
+export const SEA_TURTLE_BUBBLE_REFERENCE_INTERVAL_MS = 260;
+export const SEA_TURTLE_BUBBLE_LEADER_RATE_FRACTION = 0.8;
+// Rise height tripled per direct request ("3 times as tall") — a flat
+// screen-space distance a bubble drifts upward over its life before fully
+// fading, replacing the old scroll/zoom-dependent physics height.
+export const SEA_TURTLE_BUBBLE_RISE_HEIGHT_PX = 240;
+export const SEA_TURTLE_BUBBLE_DURATION_MS = 9000; // real ms a single bubble lives — its own rise speed is SEA_TURTLE_BUBBLE_RISE_HEIGHT_PX / this
+export const SEA_TURTLE_BUBBLE_RADIUS_PX = 2.6; // base bubble radius — scaled down per-member by that member's own seaTurtleMemberScale
 export const SEA_TURTLE_COLOR_SHELL = '#3f7a3a';
 export const SEA_TURTLE_COLOR_SHELL_PATTERN = '#2c5a29';
 export const SEA_TURTLE_COLOR_SKIN = '#5fa855';

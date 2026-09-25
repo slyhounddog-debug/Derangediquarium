@@ -131,7 +131,11 @@ import {
   SEA_TURTLE_BABY_SPACING_PX,
   SEA_TURTLE_BABY_MAX_SCALE,
   SEA_TURTLE_BABY_MIN_SCALE,
-  SEA_TURTLE_BUBBLE_INTERVAL_MS,
+  SEA_TURTLE_BUBBLE_REFERENCE_INTERVAL_MS,
+  SEA_TURTLE_BUBBLE_LEADER_RATE_FRACTION,
+  SEA_TURTLE_BUBBLE_RISE_HEIGHT_PX,
+  SEA_TURTLE_BUBBLE_DURATION_MS,
+  SEA_TURTLE_BUBBLE_RADIUS_PX,
   SEA_TURTLE_COLOR_SHELL,
   SEA_TURTLE_COLOR_SHELL_PATTERN,
   SEA_TURTLE_COLOR_SKIN,
@@ -142,7 +146,7 @@ import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop
 import { pushGameNotification } from './Notifications.js';
 import { loadLevel, LEVELS } from './Levels.js';
 import { updateStoryTriggers, updateAutosave } from './Systems.js';
-import { updateAmbience, renderAmbienceBehindLab, renderAmbienceFrontLab, spawnCursorBubbles, renderWaterSurface, spawnSeaTurtleBubble } from './Ambience.js';
+import { updateAmbience, renderAmbienceBehindLab, renderAmbienceFrontLab, spawnCursorBubbles, renderWaterSurface } from './Ambience.js';
 import { resumeAudio, startGameMusic, playAlienHit, setBattleMusicActive, triggerBossMusic, playBuildPlace, playDemolish } from './Sound.js';
 import {
   updateEntities,
@@ -4089,12 +4093,33 @@ function seaTurtleMemberScale(index, babyCount) {
   return SEA_TURTLE_BABY_MAX_SCALE - t * (SEA_TURTLE_BABY_MAX_SCALE - SEA_TURTLE_BABY_MIN_SCALE);
 }
 
+// How often member `index` (0 = leader) spawns its own trailing bubble —
+// proportional to that member's own size (seaTurtleMemberScale), per direct
+// request ("the amount of bubbles made by the turtle is determined by the
+// turtles size"). SEA_TURTLE_BUBBLE_LEADER_RATE_FRACTION pins the leader's
+// own rate at exactly 80% of SEA_TURTLE_BUBBLE_REFERENCE_INTERVAL_MS (the
+// flat rate every member used to share, back when only the last/smallest
+// one emitted at all) — every other member's rate falls out of the same
+// size-proportional formula, so the smallest baby now emits noticeably less
+// often than it used to (it was the sole, full-rate emitter before), while
+// bigger members pick up the slack.
+function seaTurtleBubbleIntervalForMember(index, babyCount) {
+  const scale = seaTurtleMemberScale(index, babyCount);
+  const rateFraction = SEA_TURTLE_BUBBLE_LEADER_RATE_FRACTION * scale;
+  return SEA_TURTLE_BUBBLE_REFERENCE_INTERVAL_MS / Math.max(0.05, rateFraction);
+}
+
 function spawnSeaTurtle(state) {
   const babyCount = SEA_TURTLE_BABY_MIN_COUNT + Math.floor(Math.random() * (SEA_TURTLE_BABY_MAX_COUNT - SEA_TURTLE_BABY_MIN_COUNT + 1));
   // Far enough left that the ENTIRE convoy (leader plus every trailing baby)
   // starts fully off the left edge, not just the leader.
   const startScreenX = -(SEA_TURTLE_RADIUS_PX * 2 + babyCount * SEA_TURTLE_BABY_SPACING_PX + 40);
-  const turtle = { startScreenX, elapsedMs: 0, babyCount, coinItemId: null, bubbleTimerMs: 0 };
+  // One bubble timer per member (index 0 = leader, 1..babyCount = kids) —
+  // randomized starting phase so a freshly-spawned convoy doesn't have every
+  // member pop its first bubble in lockstep.
+  const bubbleTimers = [];
+  for (let i = 0; i <= babyCount; i++) bubbleTimers.push(seaTurtleBubbleIntervalForMember(i, babyCount) * Math.random());
+  const turtle = { startScreenX, elapsedMs: 0, babyCount, coinItemId: null, bubbleTimers, bubbles: [] };
   // Per direct request — $50 base, plus $50 for every sea-turtle coin ever
   // collected THIS level so far (Config.js's own comment has the full
   // worked example). Every other coin in the game is untouched by this.
@@ -4116,6 +4141,18 @@ function updateSeaTurtle(state, nowMs) {
   lastSeaTurtleRealMs = nowMs;
   if (realDtMs < 0) realDtMs = 0;
   if (realDtMs > SEA_TURTLE_STALL_CLAMP_MS) realDtMs = SEA_TURTLE_STALL_CLAMP_MS;
+
+  // A guided tutorial flow freezes almost everything else in the game too
+  // (see update()'s own big comment block on state.level.tutorialFlow) — per
+  // direct follow-up request, the turtle (and its cooldown/bubble timers)
+  // now freezes right along with it, while still staying completely immune
+  // to Pause Time/2x Speed/the debug time-scale cheat, which is a SEPARATE,
+  // player-driven kind of "pause" this was always meant to ignore. Simply
+  // not advancing lastSeaTurtleRealMs any further than it already was above
+  // would double-count the frozen span as real elapsed time the moment the
+  // tutorial ends — updating it every call (already done above) and just
+  // bailing out here avoids that.
+  if (state.level.tutorialFlow) return;
 
   const turtle = state.level.seaTurtle;
   if (!turtle) {
@@ -4142,16 +4179,36 @@ function updateSeaTurtle(state, nowMs) {
     }
   }
 
-  // A trailing bubble off the very back of the convoy, per direct request
-  // ("leaving a trail of bubbles") — timed off this same real clock so the
-  // trail's own rate is just as pause/speed-immune as the turtle itself.
-  turtle.bubbleTimerMs -= realDtMs;
-  if (turtle.bubbleTimerMs <= 0) {
-    turtle.bubbleTimerMs += SEA_TURTLE_BUBBLE_INTERVAL_MS;
-    const tailPos = seaTurtleMemberPosition(turtle, turtle.babyCount);
-    const tailWorld = screenToWorld(tailPos.x, tailPos.y, state.camera);
-    spawnSeaTurtleBubble(tailWorld.x, tailWorld.y);
+  // Every convoy member trails its own bubble stream now, per direct
+  // request ("right now only the last turtle lets out bubbles — make it so
+  // every turtle lets out bubbles"), each on its own size-scaled timer (see
+  // seaTurtleBubbleIntervalForMember). A fresh bubble is a small screen-space
+  // particle stored right on the turtle object — rises a flat
+  // SEA_TURTLE_BUBBLE_RISE_HEIGHT_PX over SEA_TURTLE_BUBBLE_DURATION_MS, then
+  // culled, all off this same real clock so the whole stream stays exactly
+  // as pause/speed-immune (and tutorial-freezable, via the early return
+  // above) as the turtle itself.
+  for (let i = 0; i <= turtle.babyCount; i++) {
+    turtle.bubbleTimers[i] -= realDtMs;
+    if (turtle.bubbleTimers[i] <= 0) {
+      turtle.bubbleTimers[i] += seaTurtleBubbleIntervalForMember(i, turtle.babyCount);
+      const pos = seaTurtleMemberPosition(turtle, i);
+      const scale = seaTurtleMemberScale(i, turtle.babyCount);
+      turtle.bubbles.push({
+        x: pos.x,
+        y: pos.y,
+        ageMs: 0,
+        radius: SEA_TURTLE_BUBBLE_RADIUS_PX * (0.55 + scale * 0.55),
+        wobbleSeed: Math.random() * Math.PI * 2,
+      });
+    }
   }
+  const bubbleRiseSpeedPxPerS = SEA_TURTLE_BUBBLE_RISE_HEIGHT_PX / (SEA_TURTLE_BUBBLE_DURATION_MS / 1000);
+  turtle.bubbles = turtle.bubbles.filter((b) => {
+    b.ageMs += realDtMs;
+    b.y -= bubbleRiseSpeedPxPerS * (realDtMs / 1000);
+    return b.ageMs < SEA_TURTLE_BUBBLE_DURATION_MS;
+  });
 
   // Done once the LAST (furthest-back) member has cleared the right edge —
   // per direct spec, the next cooldown doesn't start until the whole convoy
@@ -4243,6 +4300,28 @@ function drawOneSeaTurtleMember(ctx, x, y, scale, bobAngle, waterCurrentPhase) {
   }
 
   ctx.restore();
+}
+
+// Drawn separately from (and always called BEFORE) renderSeaTurtle, per
+// direct request ("make it so the trailing bubble streams render behind the
+// sea turtles") — a guaranteed z-order, not something left to depth-sorting
+// or draw-order coincidence.
+function renderSeaTurtleBubbles(ctx, state) {
+  const turtle = state.level.seaTurtle;
+  if (!turtle) return;
+  for (const b of turtle.bubbles) {
+    const lifeFraction = b.ageMs / SEA_TURTLE_BUBBLE_DURATION_MS;
+    const alpha = 0.5 * (1 - lifeFraction);
+    if (alpha <= 0) continue;
+    const wobbleX = Math.sin(b.ageMs / 260 + b.wobbleSeed) * 3;
+    ctx.beginPath();
+    ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
+    ctx.arc(b.x + wobbleX, b.y, b.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.6})`;
+    ctx.lineWidth = 1;
+    ctx.stroke();
+  }
 }
 
 function renderSeaTurtle(ctx, state, canvasWidth, canvasHeight) {
@@ -4530,6 +4609,7 @@ function render() {
   // layer) so the coin riding its back — a completely normal state.level.items
   // entry — draws on TOP of it in that very next loop, reading as sitting on
   // the shell rather than floating in front of/behind the turtle.
+  renderSeaTurtleBubbles(ctx, state);
   renderSeaTurtle(ctx, state, canvas.width, canvas.height);
 
   for (const item of state.level.items) {

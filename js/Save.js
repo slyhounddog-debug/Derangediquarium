@@ -96,6 +96,25 @@ export function loadSaveGame() {
     // and the cooldown gets a fresh random 30-90s roll, same as a brand-new
     // level would.
     if (typeof parsed.level.seaTurtle === 'undefined') parsed.level.seaTurtle = null;
+    // A save written between the Sea Turtle feature's own first version and
+    // the follow-up that gave every convoy member its own bubble stream can
+    // have a real, in-flight seaTurtle object in the OLD shape (a single
+    // bubbleTimerMs, no bubbleTimers array/bubbles list) — main.js's
+    // updateSeaTurtle now unconditionally indexes turtle.bubbleTimers[i],
+    // which throws immediately on `undefined`. Same "nothing mid-flight
+    // survives a save/load anyway, purely decorative" precedent as the
+    // effect arrays above: treat it as "no turtle currently in flight" and
+    // let a fresh one spawn on its own timer, rather than trying to
+    // reconstruct per-member timers for a convoy shape that no longer
+    // exists. Its coin (if any) is cleaned up the exact same way the normal
+    // off-screen-exit path already does, so it doesn't linger as a
+    // permanently-ungrabbable, gravity-exempt orphan.
+    if (parsed.level.seaTurtle && !Array.isArray(parsed.level.seaTurtle.bubbleTimers)) {
+      if (parsed.level.seaTurtle.coinItemId != null && Array.isArray(parsed.level.items)) {
+        parsed.level.items = parsed.level.items.filter((it) => it.id !== parsed.level.seaTurtle.coinItemId);
+      }
+      parsed.level.seaTurtle = null;
+    }
     if (typeof parsed.level.seaTurtleCooldownMs !== 'number') {
       parsed.level.seaTurtleCooldownMs = SEA_TURTLE_SPAWN_MIN_MS + Math.random() * (SEA_TURTLE_SPAWN_MAX_MS - SEA_TURTLE_SPAWN_MIN_MS);
     }
