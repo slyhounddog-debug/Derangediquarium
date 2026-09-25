@@ -454,19 +454,23 @@ function disintegrateItemColor(item) {
 }
 
 // A "$" glyph centered on a coin, per direct request ("add in dollar '$'
-// symbols on coins so it's more obvious they are coins") — a dark, mostly-
-// opaque fill reads clearly against every tier's own color, bronze/silver/
-// gold's flat fill AND the diamond tier's much lighter gem gradient alike.
-// Called from both of the item-render loop's own coin branches (the
-// diamond-gem special case and the flat-fill fallback every other tier
-// still uses), right after each one's own highlight, so it always ends up
-// the topmost detail. Saves/restores ctx state since textAlign/textBaseline
-// aren't touched anywhere else in this render pass and shouldn't leak into
-// the floatingTexts loop right after this one (which fillText's assuming
-// the canvas default left/alphabetic alignment).
-function drawCoinDollarMark(ctx, x, y, radius) {
+// symbols on coins so it's more obvious they are coins"). Per a direct
+// follow-up ("make the '$' on coins darker versions of the color of the
+// coins they are on"), tinted per-tier now — a straight lerp of that coin's
+// own getCoinColor toward black (lerpRgbToString/hexToRgb, defined further
+// down this file but hoisted same as any function declaration) — rather
+// than the original flat semi-transparent black, so it reads as "this
+// coin's own color, just darker" instead of a generic overlay. Called from
+// both of the item-render loop's own coin branches (the diamond-gem special
+// case and the flat-fill fallback every other tier still uses), right after
+// each one's own highlight, so it always ends up the topmost detail.
+// Saves/restores ctx state since textAlign/textBaseline aren't touched
+// anywhere else in this render pass and shouldn't leak into the
+// floatingTexts loop right after this one (which fillText's assuming the
+// canvas default left/alphabetic alignment).
+function drawCoinDollarMark(ctx, x, y, radius, coinColorHex) {
   ctx.save();
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+  ctx.fillStyle = lerpRgbToString(hexToRgb(coinColorHex), { r: 0, g: 0, b: 0 }, 0.55);
   ctx.font = `bold ${Math.max(7, radius * 1.05)}px sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -508,9 +512,21 @@ function tracePoopBlobPath(ctx, cx, cy, r) {
   ctx.closePath();
 }
 
+// Per direct request ("keep the collision box and physics the same for
+// waste, but visually make them 10% bigger, so part of the visuals go
+// outside the collision circle... right now it looks like they're floating
+// against other objects because you fit the whole poop within the circle
+// instead of having part of it spill out") — a purely visual inflation
+// applied only here (and to the tutorial ghost-Waste animation below, so it
+// still looks like a real Waste item), never to the real physics radius
+// (item.radius, WASTE_RADIUS) two adjacent items' collision circles are
+// actually resolved against — see Grid.js's resolveItemCollisions.
+const WASTE_VISUAL_SCALE = 1.1;
+
 // Fills/strokes/textures tracePoopBlobPath's outline into a full waste item
 // — the actual reusable "draw one poop" call every render site below uses.
 function drawWastePoop(ctx, cx, cy, r) {
+  r *= WASTE_VISUAL_SCALE;
   tracePoopBlobPath(ctx, cx, cy, r);
   ctx.fillStyle = WASTE_COLOR;
   ctx.fill();
@@ -4837,7 +4853,7 @@ function render() {
       ctx.beginPath();
       ctx.arc(pos.x - item.radius * 0.32, pos.y - item.radius * 0.32, item.radius * 0.24, 0, Math.PI * 2);
       ctx.fill();
-      drawCoinDollarMark(ctx, pos.x, pos.y, item.radius);
+      drawCoinDollarMark(ctx, pos.x, pos.y, item.radius, getCoinColor(item.value));
       continue;
     }
 
@@ -4895,7 +4911,7 @@ function render() {
     ctx.beginPath();
     ctx.arc(pos.x - item.radius * 0.32, pos.y - item.radius * 0.32, item.radius * 0.32, 0, Math.PI * 2);
     ctx.fill();
-    if (item.type === 'coin') drawCoinDollarMark(ctx, pos.x, pos.y, item.radius);
+    if (item.type === 'coin') drawCoinDollarMark(ctx, pos.x, pos.y, item.radius, itemColor);
   }
 
   for (const ft of state.level.floatingTexts) {
@@ -5913,7 +5929,7 @@ function render() {
       ctx.save();
       ctx.globalAlpha = 0.55;
       ctx.fillStyle = WASTE_COLOR;
-      tracePoopBlobPath(ctx, screen.x, screen.y, WASTE_RADIUS * state.camera.zoom);
+      tracePoopBlobPath(ctx, screen.x, screen.y, WASTE_RADIUS * state.camera.zoom * WASTE_VISUAL_SCALE);
       ctx.fill();
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
       ctx.lineWidth = 1.5;
