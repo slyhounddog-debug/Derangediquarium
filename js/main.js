@@ -460,29 +460,44 @@ function disintegrateItemColor(item) {
 // same as any function declaration) — per a direct follow-up ("darker
 // versions of the color of the coins they are on"), lightened again per a
 // second follow-up ("just a little darker than the coin itself") — was a
-// 0.55 lerp (read as near-black on every tier), now a much subtler 0.2.
-// Called from both of the item-render loop's own coin branches (the
-// diamond-gem special case and the flat-fill fallback every other tier
-// still uses) — per a further direct request ("make it so the '$' is also
-// affected by the shine effect... so the '$' looks like it's part of the
-// coin rather than text on top of it"), BOTH call sites now draw this
-// BEFORE their own highlight/sparkle fill, not after, so that highlight's
-// existing semi-transparent white glazes back over the top portion of the
-// glyph exactly the same way it glazes the coin's own base fill — no
-// separate "shine reworked to layer over text" mechanism needed, just the
-// existing highlight now painting in the right order relative to this.
-// Saves/restores ctx state since textAlign/textBaseline aren't touched
-// anywhere else in this render pass and shouldn't leak into whatever draws
-// next (the highlight fill right after this, or the floatingTexts loop
-// later, which fillText's assuming the canvas default left/alphabetic
-// alignment).
+// 0.55 lerp (read as near-black on every tier), settled at a subtler 0.2.
+// Per a further direct follow-up ("too hard to see the '$'... a stylized
+// border or drop shadow... make it look like the '$' is embossed or
+// embedded on the coin") — now drawn as a real 2-light-source emboss: a dark
+// "shadow" copy offset down-right (a recessed groove) plus a light
+// "highlight" copy offset up-left (a catch-light on the raised edge), same
+// trick a real stamped coin's engraving reads by, THEN the real per-tier
+// fill on top with its own dark outline stroke for definition against every
+// tier's own background color. Called from both of the item-render loop's
+// own coin branches (the diamond-gem special case and the flat-fill
+// fallback every other tier still uses) — per a still-earlier direct
+// request ("make it so the '$' is also affected by the shine effect... so
+// it looks like it's part of the coin rather than text on top of it"), BOTH
+// call sites draw this BEFORE their own highlight/sparkle fill, not after,
+// so that highlight's existing semi-transparent white glazes back over the
+// top portion of the WHOLE emboss (shadow, highlight copy, and stroke
+// alike) exactly the same way it glazes the coin's own base fill. Saves/
+// restores ctx state since textAlign/textBaseline aren't touched anywhere
+// else in this render pass and shouldn't leak into whatever draws next (the
+// highlight fill right after this, or the floatingTexts loop later, which
+// fillText's assuming the canvas default left/alphabetic alignment).
 function drawCoinDollarMark(ctx, x, y, radius, coinColorHex) {
   ctx.save();
-  ctx.fillStyle = lerpRgbToString(hexToRgb(coinColorHex), { r: 0, g: 0, b: 0 }, 0.2);
   ctx.font = `bold ${Math.max(7, radius * 1.05)}px sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-  ctx.fillText('$', x, y + radius * 0.04);
+  const textY = y + radius * 0.04;
+  const emboss = Math.max(0.6, radius * 0.07);
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+  ctx.fillText('$', x + emboss, textY + emboss);
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
+  ctx.fillText('$', x - emboss * 0.7, textY - emboss * 0.7);
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)';
+  ctx.lineWidth = Math.max(0.8, radius * 0.09);
+  ctx.lineJoin = 'round';
+  ctx.strokeText('$', x, textY);
+  ctx.fillStyle = lerpRgbToString(hexToRgb(coinColorHex), { r: 0, g: 0, b: 0 }, 0.2);
+  ctx.fillText('$', x, textY);
   ctx.restore();
 }
 
