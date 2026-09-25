@@ -454,23 +454,31 @@ function disintegrateItemColor(item) {
 }
 
 // A "$" glyph centered on a coin, per direct request ("add in dollar '$'
-// symbols on coins so it's more obvious they are coins"). Per a direct
-// follow-up ("make the '$' on coins darker versions of the color of the
-// coins they are on"), tinted per-tier now — a straight lerp of that coin's
-// own getCoinColor toward black (lerpRgbToString/hexToRgb, defined further
-// down this file but hoisted same as any function declaration) — rather
-// than the original flat semi-transparent black, so it reads as "this
-// coin's own color, just darker" instead of a generic overlay. Called from
-// both of the item-render loop's own coin branches (the diamond-gem special
-// case and the flat-fill fallback every other tier still uses), right after
-// each one's own highlight, so it always ends up the topmost detail.
+// symbols on coins so it's more obvious they are coins"). Tinted per-tier —
+// a straight lerp of that coin's own getCoinColor toward black
+// (lerpRgbToString/hexToRgb, defined further down this file but hoisted
+// same as any function declaration) — per a direct follow-up ("darker
+// versions of the color of the coins they are on"), lightened again per a
+// second follow-up ("just a little darker than the coin itself") — was a
+// 0.55 lerp (read as near-black on every tier), now a much subtler 0.2.
+// Called from both of the item-render loop's own coin branches (the
+// diamond-gem special case and the flat-fill fallback every other tier
+// still uses) — per a further direct request ("make it so the '$' is also
+// affected by the shine effect... so the '$' looks like it's part of the
+// coin rather than text on top of it"), BOTH call sites now draw this
+// BEFORE their own highlight/sparkle fill, not after, so that highlight's
+// existing semi-transparent white glazes back over the top portion of the
+// glyph exactly the same way it glazes the coin's own base fill — no
+// separate "shine reworked to layer over text" mechanism needed, just the
+// existing highlight now painting in the right order relative to this.
 // Saves/restores ctx state since textAlign/textBaseline aren't touched
-// anywhere else in this render pass and shouldn't leak into the
-// floatingTexts loop right after this one (which fillText's assuming the
-// canvas default left/alphabetic alignment).
+// anywhere else in this render pass and shouldn't leak into whatever draws
+// next (the highlight fill right after this, or the floatingTexts loop
+// later, which fillText's assuming the canvas default left/alphabetic
+// alignment).
 function drawCoinDollarMark(ctx, x, y, radius, coinColorHex) {
   ctx.save();
-  ctx.fillStyle = lerpRgbToString(hexToRgb(coinColorHex), { r: 0, g: 0, b: 0 }, 0.55);
+  ctx.fillStyle = lerpRgbToString(hexToRgb(coinColorHex), { r: 0, g: 0, b: 0 }, 0.2);
   ctx.font = `bold ${Math.max(7, radius * 1.05)}px sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
@@ -4849,11 +4857,15 @@ function render() {
       ctx.beginPath();
       ctx.arc(pos.x, pos.y, item.radius, 0, Math.PI * 2);
       ctx.stroke();
+      // The "$" is drawn here, BEFORE the sparkle highlight right below —
+      // see drawCoinDollarMark's own comment — so that highlight's own
+      // opacity glazes back over the glyph the same way it glazes the gem
+      // itself, instead of sitting as a flat sticker on top of it.
+      drawCoinDollarMark(ctx, pos.x, pos.y, item.radius, getCoinColor(item.value));
       ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
       ctx.beginPath();
       ctx.arc(pos.x - item.radius * 0.32, pos.y - item.radius * 0.32, item.radius * 0.24, 0, Math.PI * 2);
       ctx.fill();
-      drawCoinDollarMark(ctx, pos.x, pos.y, item.radius, getCoinColor(item.value));
       continue;
     }
 
@@ -4907,11 +4919,15 @@ function render() {
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.22)';
     ctx.lineWidth = 1;
     ctx.stroke();
+    // A coin's "$" is drawn here, BEFORE the glossy highlight right below —
+    // see drawCoinDollarMark's own comment — so that highlight's own
+    // opacity glazes back over the glyph the same way it glazes the coin's
+    // own base fill, instead of sitting as a flat sticker on top of it.
+    if (item.type === 'coin') drawCoinDollarMark(ctx, pos.x, pos.y, item.radius, itemColor);
     ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
     ctx.beginPath();
     ctx.arc(pos.x - item.radius * 0.32, pos.y - item.radius * 0.32, item.radius * 0.32, 0, Math.PI * 2);
     ctx.fill();
-    if (item.type === 'coin') drawCoinDollarMark(ctx, pos.x, pos.y, item.radius, itemColor);
   }
 
   for (const ft of state.level.floatingTexts) {
