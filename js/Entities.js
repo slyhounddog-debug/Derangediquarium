@@ -12,6 +12,13 @@ import {
   FOOD_STATIONARY_MOVE_TOLERANCE_PX,
   COIN_RADIUS,
   COIN_CLICK_RADIUS_MULTIPLIER,
+  COIN_SPIN_IDLE_MS,
+  COIN_SPIN_STATIONARY_TOLERANCE_PX,
+  COIN_SPIN_COOLDOWN_MIN_MS,
+  COIN_SPIN_COOLDOWN_MAX_MS,
+  COIN_SPIN_ROTATIONS_MIN,
+  COIN_SPIN_ROTATIONS_MAX,
+  COIN_SPIN_MS_PER_ROTATION,
   FISH_EAT_RADIUS,
   HUNGER_MAX,
   HUNGER_SEEK_THRESHOLD,
@@ -546,7 +553,17 @@ export function createCoin(x, y, value) {
   const tier = getCoinTier(value);
   const radius = COIN_RADIUS * tier.sizeMultiplier;
   const mass = ITEM_MASS_BY_TYPE.coin * tier.sizeMultiplier; // a gold/diamond coin is a little heavier than a bronze one, same scale as its size
-  return { id: nextId(), type: 'coin', x, y, vx: 0, vy: 0, radius, mass, value, resting: false };
+  return {
+    id: nextId(), type: 'coin', x, y, vx: 0, vy: 0, radius, mass, value, resting: false,
+    // Idle spin animation bookkeeping — see updateCoinSpin's own comment.
+    // Purely visual; never read by anything physics/collision-related.
+    spinStationaryOriginX: x,
+    spinStationaryOriginY: y,
+    spinIdleTimerMs: 0,
+    spinCooldownMs: 0,
+    spinAngleRad: 0, // current in-progress rotation angle this burst, 0 while not spinning — main.js's renderer reads this directly
+    spinTargetRad: 0, // how far (in radians) the CURRENT spin burst goes before it ends, 0 while not spinning
+  };
 }
 
 // Byproduct of a basic (unpowered) Collector consuming an item — see
@@ -2075,6 +2092,53 @@ function updateFood(item, state, dtMs) {
   return true;
 }
 
+// Idle spin animation bookkeeping — per direct request ("add a coin
+// spinning animation if a coin hasn't moved for more than 3 seconds. spin
+// periodically 1-2 rotations. this shouldn't change any physics or the
+// collision box"). Purely visual: only ever writes item.spinAngleRad
+// (main.js's item render loop reads it to squash-scale the drawn coin
+// horizontally) — never item.radius/mass/velocity/position, so the real
+// physics/collision circle are completely untouched. Position-based
+// stationary detection, same precedent as updateFood's own
+// stationary-to-Waste tracking above (see its own comment for why position,
+// not velocity, is what "hasn't moved" should mean) — dragging, Fan sway,
+// or resting normally on a tile all naturally reset/hold this correctly
+// with no special-casing needed. Once the idle threshold is crossed and the
+// first spin plays out, spinIdleTimerMs is deliberately left at/above that
+// threshold rather than reset — spinCooldownMs alone gates every
+// subsequent spin from then on, which is what makes it repeat
+// periodically for as long as the coin keeps sitting still.
+function updateCoinSpin(item, dtMs) {
+  const movedPx = Math.hypot(item.x - item.spinStationaryOriginX, item.y - item.spinStationaryOriginY);
+  if (movedPx > COIN_SPIN_STATIONARY_TOLERANCE_PX) {
+    item.spinStationaryOriginX = item.x;
+    item.spinStationaryOriginY = item.y;
+    item.spinIdleTimerMs = 0;
+    item.spinCooldownMs = 0;
+    item.spinAngleRad = 0;
+    item.spinTargetRad = 0;
+    return;
+  }
+  if (item.spinTargetRad > 0) {
+    item.spinAngleRad += ((Math.PI * 2) / COIN_SPIN_MS_PER_ROTATION) * dtMs;
+    if (item.spinAngleRad >= item.spinTargetRad) {
+      item.spinAngleRad = 0;
+      item.spinTargetRad = 0;
+      item.spinCooldownMs = COIN_SPIN_COOLDOWN_MIN_MS + Math.random() * (COIN_SPIN_COOLDOWN_MAX_MS - COIN_SPIN_COOLDOWN_MIN_MS);
+    }
+    return;
+  }
+  if (item.spinCooldownMs > 0) {
+    item.spinCooldownMs -= dtMs;
+    return;
+  }
+  item.spinIdleTimerMs += dtMs;
+  if (item.spinIdleTimerMs >= COIN_SPIN_IDLE_MS) {
+    item.spinTargetRad = (COIN_SPIN_ROTATIONS_MIN + Math.random() * (COIN_SPIN_ROTATIONS_MAX - COIN_SPIN_ROTATIONS_MIN)) * Math.PI * 2;
+    item.spinAngleRad = 0;
+  }
+}
+
 function updateCoin(item, state, dtMs) {
   // A coin currently riding a Sea Turtle's back (item.seaTurtleAttached) is
   // entirely exempt from gravity/physics — per direct request, "isn't
@@ -2082,7 +2146,10 @@ function updateCoin(item, state, dtMs) {
   // every REAL frame instead (so it stays glued to the turtle regardless of
   // Pause Time/2x Speed). It's still a completely normal item otherwise: it
   // still renders through the loop below and is still click-bankable via
-  // tryBankCoinAt, which is what actually clears this flag.
+  // tryBankCoinAt, which is what actually clears this flag. Its position
+  // changes every frame it's attached, so updateCoinSpin below would never
+  // consider it "stationary" anyway — no special-casing needed to keep it
+  // from spinning while riding the turtle.
   if (item.seaTurtleAttached) return true;
   const dt = dtMs / 1000;
   const physics = { gravity: GRAVITY, maxFallSpeed: MAX_FALL_SPEED };
@@ -2095,6 +2162,7 @@ function updateCoin(item, state, dtMs) {
     item.y += item.vy * dt;
     item.x += item.vx * dt;
     clampItemToWorldWalls(item);
+    updateCoinSpin(item, dtMs);
     return true;
   }
   const status = stepItemOnGrid(item, state, dt, physics);
@@ -2116,6 +2184,7 @@ function updateCoin(item, state, dtMs) {
     return false;
   }
   item.resting = status === 'resting'; // informational only — re-evaluated fresh every tick, doesn't stop future physics
+  updateCoinSpin(item, dtMs);
   return true;
 }
 

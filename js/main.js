@@ -501,6 +501,81 @@ function drawCoinDollarMark(ctx, x, y, radius, coinColorHex) {
   ctx.restore();
 }
 
+// Every non-diamond coin tier's real render — per direct request ("rework
+// the visuals of the coin slightly so it looks more like a flat coin with
+// an embossed border and '$'... still highly finished/polished/detailed...
+// not crazy complex... adds visual distinction from it looking more like a
+// flat coin that spins and the rest of the objects looking like spheres").
+// A genuine two-tone coin build instead of one flat fill plus a round
+// specular blob (which is exactly what reads as "sphere," per that same
+// request): a darker outer rim, a ring of short milled-edge tick marks (the
+// classic reeded-edge coin detail), a lighter inner face, a bright bevel
+// ring right where face meets rim (the "embossed border" — a raised edge
+// catching light), and a short diagonal sheen ARC across the face instead
+// of a round highlight blob (an arc reads as light glancing off a flat
+// disc; a round blob reads as a glint on a curved surface). The diamond
+// tier keeps its own distinct gem-cut render above this — per that
+// branch's own long-standing precedent ("look more like a circular gem
+// than a coin"), deliberately NOT a coin look at all, so it's untouched.
+function drawFlatCoin(ctx, cx, cy, r, value) {
+  const baseColor = getCoinColor(value);
+  const baseRgb = hexToRgb(baseColor);
+  const rimColor = lerpRgbToString(baseRgb, { r: 0, g: 0, b: 0 }, 0.32);
+  const faceColor = lerpRgbToString(baseRgb, { r: 255, g: 255, b: 255 }, 0.12);
+
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fillStyle = rimColor;
+  ctx.fill();
+
+  // Milled edge — short radial ticks just inside the outer rim.
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.28)';
+  ctx.lineWidth = Math.max(0.6, r * 0.05);
+  const tickCount = 18;
+  for (let i = 0; i < tickCount; i++) {
+    const a = (i / tickCount) * Math.PI * 2;
+    ctx.beginPath();
+    ctx.moveTo(cx + Math.cos(a) * r * 0.91, cy + Math.sin(a) * r * 0.91);
+    ctx.lineTo(cx + Math.cos(a) * r * 0.99, cy + Math.sin(a) * r * 0.99);
+    ctx.stroke();
+  }
+
+  // Inner face.
+  ctx.beginPath();
+  ctx.arc(cx, cy, r * 0.8, 0, Math.PI * 2);
+  ctx.fillStyle = faceColor;
+  ctx.fill();
+
+  // Embossed border — a bright bevel ring right at the face/rim seam (the
+  // raised edge), plus a thin dark seam line just outside it for definition.
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.25)';
+  ctx.lineWidth = Math.max(0.6, r * 0.05);
+  ctx.beginPath();
+  ctx.arc(cx, cy, r * 0.84, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+  ctx.lineWidth = Math.max(0.6, r * 0.06);
+  ctx.beginPath();
+  ctx.arc(cx, cy, r * 0.78, 0, Math.PI * 2);
+  ctx.stroke();
+
+  // "$" drawn before the sheen arc right below, so that sheen's own opacity
+  // glazes back over the glyph — same layering precedent drawCoinDollarMark
+  // itself already documents.
+  drawCoinDollarMark(ctx, cx, cy, r, baseColor);
+
+  // A short diagonal sheen ARC (not a round blob) — reads as light glancing
+  // off a flat face rather than a glint on a curved sphere.
+  ctx.save();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+  ctx.lineWidth = Math.max(1, r * 0.14);
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.arc(cx, cy, r * 0.52, Math.PI * 1.12, Math.PI * 1.42);
+  ctx.stroke();
+  ctx.restore();
+}
+
 // Traces (does NOT fill/stroke) a closed, gently 3-lobed blobby outline
 // centered on (cx, cy) — per direct request ("change waste so it looks more
 // like poop... keep it mostly sphere shaped, not completely, but make it
@@ -4326,14 +4401,17 @@ function updateSeaTurtle(state, nowMs) {
   // A guided tutorial flow freezes almost everything else in the game too
   // (see update()'s own big comment block on state.level.tutorialFlow) — per
   // direct follow-up request, the turtle (and its cooldown/bubble timers)
-  // now freezes right along with it, while still staying completely immune
-  // to Pause Time/2x Speed/the debug time-scale cheat, which is a SEPARATE,
-  // player-driven kind of "pause" this was always meant to ignore. Simply
-  // not advancing lastSeaTurtleRealMs any further than it already was above
-  // would double-count the frozen span as real elapsed time the moment the
-  // tutorial ends — updating it every call (already done above) and just
-  // bailing out here avoids that.
-  if (state.level.tutorialFlow) return;
+  // now freezes right along with it. The Escape pause MENU (state.ui.paused)
+  // does the same, per a later direct request ("if the pause menu is open,
+  // pause the sea turtles and the sea turtle timer") — both are still
+  // staying completely immune to Pause Time/2x Speed/the debug time-scale
+  // cheat, which are a SEPARATE, player-driven kind of "pause" this was
+  // always meant to ignore (see this function's own header comment).
+  // Simply not advancing lastSeaTurtleRealMs any further than it already
+  // was above would double-count the frozen span as real elapsed time the
+  // moment either one ends — updating it every call (already done above)
+  // and just bailing out here avoids that.
+  if (state.level.tutorialFlow || state.ui.paused) return;
 
   const turtle = state.level.seaTurtle;
   if (!turtle) {
@@ -4883,6 +4961,21 @@ function render() {
       // diamond colored coins... look more like a circular gem than a
       // coin") instead of the flat single-color fill every other coin tier
       // gets below.
+      // Idle spin — per direct request ("add a coin spinning animation if a
+      // coin hasn't moved for more than 3 seconds"). Entities.js's
+      // updateCoinSpin owns all the timing/state (item.spinAngleRad); this
+      // just squashes the WHOLE gem drawing horizontally around its own
+      // center, Math.abs so the "back half" of a rotation thins down to an
+      // edge-on sliver rather than mirroring anything (a plain circular gem
+      // is symmetric either way, and abs keeps the "$" glyph below from ever
+      // rendering as backwards/mirrored text). A no-op transform (scale 1)
+      // whenever spinAngleRad is 0 (not currently spinning, the common
+      // case), so this is free the rest of the time.
+      const spinScaleX = Math.abs(Math.cos(item.spinAngleRad || 0));
+      ctx.save();
+      ctx.translate(pos.x, pos.y);
+      ctx.scale(spinScaleX, 1);
+      ctx.translate(-pos.x, -pos.y);
       const gemGradient = ctx.createRadialGradient(
         pos.x - item.radius * 0.3, pos.y - item.radius * 0.3, item.radius * 0.1,
         pos.x, pos.y, item.radius
@@ -4916,6 +5009,26 @@ function render() {
       ctx.beginPath();
       ctx.arc(pos.x - item.radius * 0.32, pos.y - item.radius * 0.32, item.radius * 0.24, 0, Math.PI * 2);
       ctx.fill();
+      ctx.restore();
+      continue;
+    }
+
+    if (item.type === 'coin') {
+      // Idle spin — per direct request ("add a coin spinning animation if a
+      // coin hasn't moved for more than 3 seconds"). Entities.js's
+      // updateCoinSpin owns all the timing/state (item.spinAngleRad); this
+      // squashes the WHOLE flat-coin drawing horizontally around its own
+      // center, Math.abs so the "back half" of a rotation thins to an
+      // edge-on sliver rather than mirroring the "$" into backwards text. A
+      // no-op transform (scale 1) whenever spinAngleRad is 0 (the common,
+      // not-currently-spinning case), so this is free the rest of the time.
+      const spinScaleX = Math.abs(Math.cos(item.spinAngleRad || 0));
+      ctx.save();
+      ctx.translate(pos.x, pos.y);
+      ctx.scale(spinScaleX, 1);
+      ctx.translate(-pos.x, -pos.y);
+      drawFlatCoin(ctx, pos.x, pos.y, item.radius, item.value);
+      ctx.restore();
       continue;
     }
 
@@ -4947,7 +5060,10 @@ function render() {
       continue;
     }
 
-    let itemColor = ITEM_FLAT_COLOR_BY_TYPE[item.type] || getCoinColor(item.value);
+    // Coins have their own dedicated flat-coin branch above now (and the
+    // diamond tier its own gem branch above that) — this shared fallback is
+    // Food/Bio-Sludge/Mutagen Paste only these days, never a coin of any tier.
+    let itemColor = ITEM_FLAT_COLOR_BY_TYPE[item.type];
     // A "stale" gray phase, per direct spec — once a Food pellet's own
     // stationary timer crosses FOOD_STALE_FRACTION (75%) of the way to
     // turning into Waste, tint it toward FOOD_STALE_COLOR. Reading straight
@@ -4969,11 +5085,6 @@ function render() {
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.22)';
     ctx.lineWidth = 1;
     ctx.stroke();
-    // A coin's "$" is drawn here, BEFORE the glossy highlight right below —
-    // see drawCoinDollarMark's own comment — so that highlight's own
-    // opacity glazes back over the glyph the same way it glazes the coin's
-    // own base fill, instead of sitting as a flat sticker on top of it.
-    if (item.type === 'coin') drawCoinDollarMark(ctx, pos.x, pos.y, item.radius, itemColor);
     ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
     ctx.beginPath();
     ctx.arc(pos.x - item.radius * 0.32, pos.y - item.radius * 0.32, item.radius * 0.32, 0, Math.PI * 2);

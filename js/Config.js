@@ -747,6 +747,24 @@ export const COIN_TIERS = [
 export const DIAMOND_GEM_COLOR_CORE = '#eafcff';
 export const DIAMOND_GEM_COLOR_EDGE = '#7fd0e8';
 
+// ---- Coin idle spin animation ----
+// Per direct request ("add a coin spinning animation if a coin hasn't moved
+// for more than 3 seconds. spin periodically 1-2 rotations... shouldn't
+// change any physics or the collision box") — purely visual: Entities.js's
+// updateCoinSpin only ever writes item.spinAngleRad, which main.js's item
+// render loop reads to squash-scale the drawn coin horizontally
+// (Math.abs(Math.cos(spinAngleRad)), simulating a coin rotating edge-on
+// around its vertical axis) — item.radius/mass/x/y and the real collision
+// circle two items are resolved against (Grid.js's resolveItemCollisions)
+// are never touched by any of this.
+export const COIN_SPIN_IDLE_MS = 3000; // how long a coin must sit within COIN_SPIN_STATIONARY_TOLERANCE_PX of its own last-moved spot before its first idle spin
+export const COIN_SPIN_STATIONARY_TOLERANCE_PX = 2; // tighter than Food's own FOOD_STATIONARY_MOVE_TOLERANCE_PX — a coin doesn't sway once truly at rest, so this only needs to absorb float rounding, not real drift
+export const COIN_SPIN_COOLDOWN_MIN_MS = 4000;
+export const COIN_SPIN_COOLDOWN_MAX_MS = 8000; // real ms between spins once a coin has already done its first one, for as long as it keeps sitting still
+export const COIN_SPIN_ROTATIONS_MIN = 1;
+export const COIN_SPIN_ROTATIONS_MAX = 2; // random 1-2 full rotations per spin
+export const COIN_SPIN_MS_PER_ROTATION = 500; // how long one full 360° rotation takes — a 2-rotation spin takes twice as long as a 1-rotation one
+
 // ---- Waste (Phase 3 — two sources) ----
 // A third item type alongside food/coin. Spawned two ways: (1) a basic
 // (unpowered) Collector consuming an item — "a basic collector poops out
@@ -2012,9 +2030,10 @@ export const TURRET_IMPACT_EFFECT_DURATION_MS = 220;
 // Carries a real, click-bankable coin on the lead turtle's back.
 // Deliberately driven by REAL wall-clock ms, never dtMs — per direct spec,
 // Pause Time / 2x Speed / the debug time-scale cheat must never touch its
-// timer, its travel speed, or its bob/leg animation (a guided tutorial DOES
-// still freeze it, per a later direct follow-up — see updateSeaTurtle's own
-// comment on why that's a different, non-player-driven kind of pause).
+// timer, its travel speed, or its bob/leg animation (a guided tutorial, or
+// the Escape pause menu, DOES still freeze it, per later direct follow-ups
+// — see updateSeaTurtle's own comment on why those are a different,
+// non-player-driven kind of pause).
 // Positioned and animated in plain WORLD space, exactly like a fish or any
 // other creature — per direct follow-up request ("they should have a fixed
 // position in the world, they should not scroll down with me if I scroll

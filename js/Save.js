@@ -125,6 +125,30 @@ export function loadSaveGame() {
       parsed.level.seaTurtleCooldownMs = SEA_TURTLE_SPAWN_MIN_MS + Math.random() * (SEA_TURTLE_SPAWN_MAX_MS - SEA_TURTLE_SPAWN_MIN_MS);
     }
     if (typeof parsed.level.seaTurtleCoinCollectCount !== 'number') parsed.level.seaTurtleCoinCollectCount = 0;
+    // A save written before the coin idle-spin animation won't have any of
+    // these fields on its coin items — Entities.js's updateCoinSpin
+    // unconditionally does `item.x - item.spinStationaryOriginX`, and
+    // `undefined` there makes every comparison against the NaN result come
+    // back false, which permanently wedges that ONE coin instance (it can
+    // never re-enter the "just moved, reset the origin" branch either, since
+    // that same NaN check also always reads false) — not a crash, just a
+    // coin that can silently never spin for the rest of that save's life.
+    // Backfilling a fresh origin at its current position (matching what
+    // createCoin itself hands a brand-new coin) fixes it going forward with
+    // no visible side effect — a coin that was already moving resets its own
+    // origin again on its very next real tick anyway.
+    if (Array.isArray(parsed.level.items)) {
+      for (const item of parsed.level.items) {
+        if (item.type !== 'coin') continue;
+        if (typeof item.spinStationaryOriginX === 'number') continue;
+        item.spinStationaryOriginX = item.x;
+        item.spinStationaryOriginY = item.y;
+        item.spinIdleTimerMs = 0;
+        item.spinCooldownMs = 0;
+        item.spinAngleRad = 0;
+        item.spinTargetRad = 0;
+      }
+    }
     return { meta: parsed.meta, level: parsed.level };
   } catch (err) {
     console.error('Derangiquarium: load failed', err);
