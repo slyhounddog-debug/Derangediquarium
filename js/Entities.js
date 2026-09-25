@@ -1437,6 +1437,14 @@ export function tryBankCoinAt(state, worldX, worldY) {
       playCoinBank();
       const color = getCoinColor(item.value);
       state.level.floatingTexts.push(createPickupText(item.x, item.y, `+$${item.value}`, color));
+      // Per direct request ("make it so the picking up coins does a sparkle
+      // and makes 1-3 bubbles") — updateCoin's own Collector-consumption
+      // branch already did this, but this click-to-bank path (the far more
+      // common way a coin actually gets collected) never did, per direct
+      // follow-up report. Same sparkle+bubble pair as that branch, reusing
+      // the exact same effect array/helper so both paths look identical.
+      state.level.coinSparkleEffects.push({ x: item.x, y: item.y, age: 0 });
+      spawnCoinPickupBubbles(item.x, item.y);
       // Per direct request — each Sea Turtle coin banked prices every FUTURE
       // one $50 higher (Config.js's SEA_TURTLE_COIN_VALUE_PER_COLLECT), read
       // by main.js's spawnSeaTurtle the next time a turtle appears. Detaching

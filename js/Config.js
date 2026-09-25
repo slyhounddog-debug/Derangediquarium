@@ -2002,22 +2002,25 @@ export const TURRET_MUZZLE_FLASH_DURATION_MS = 150;
 export const TURRET_IMPACT_EFFECT_DURATION_MS = 220;
 
 // ---- Sea Turtle (ambience convoy) ----
-// Per direct request: every 30-90s (real time), a big sea turtle swims in
-// from the top-left of the SCREEN (under the notification/"chat" pill),
-// trailed by 2-4 progressively smaller "kid" turtles, until the whole convoy
-// clears the right edge — only THEN does the next 30-90s cooldown start
-// (see main.js's updateSeaTurtle). Carries a real, click-bankable coin on the
-// lead turtle's back. Deliberately driven by REAL wall-clock ms, never
-// dtMs — per direct spec, Pause Time / 2x Speed / the debug time-scale cheat
-// must never touch its timer, its travel speed, or its bob/leg animation.
-// Positioned and animated in plain SCREEN space (not worldToScreen'd), same
-// "fixed relative to the viewport, not the scrolling/zoomable world" idea as
-// Ambience.js's renderWaterSurface — it should always pass under the pill
-// regardless of camera scroll or zoom. Only the coin it carries is a real
-// world-space item (state.level.items), so it renders/click-banks through
-// every existing coin code path with zero special-casing there.
-export const SEA_TURTLE_SPAWN_MIN_MS = 30000;
-export const SEA_TURTLE_SPAWN_MAX_MS = 90000;
+// Per direct request: every 40-50s (real time — narrowed from an original
+// 30-90s per a direct follow-up, "just random enough that they can't time
+// it, but not so random they are penalized by luck"), a big sea turtle
+// swims in from the top-left of the SCREEN (under the notification/"chat"
+// pill), trailed by 2-4 progressively smaller "kid" turtles, until the
+// whole convoy clears the right edge — only THEN does the next 40-50s
+// cooldown start (see main.js's updateSeaTurtle). Carries a real,
+// click-bankable coin on the lead turtle's back. Deliberately driven by
+// REAL wall-clock ms, never dtMs — per direct spec, Pause Time / 2x Speed /
+// the debug time-scale cheat must never touch its timer, its travel speed,
+// or its bob/leg animation. Positioned and animated in plain SCREEN space
+// (not worldToScreen'd), same "fixed relative to the viewport, not the
+// scrolling/zoomable world" idea as Ambience.js's renderWaterSurface — it
+// should always pass under the pill regardless of camera scroll or zoom.
+// Only the coin it carries is a real world-space item (state.level.items),
+// so it renders/click-banks through every existing coin code path with zero
+// special-casing there.
+export const SEA_TURTLE_SPAWN_MIN_MS = 40000;
+export const SEA_TURTLE_SPAWN_MAX_MS = 50000;
 export const SEA_TURTLE_SPEED_PX_PER_S = 36; // roughly a Guppy's own cruising swimSpeed (35, see SPECIES.guppy)
 export const SEA_TURTLE_SCREEN_Y = 92; // just under #notification-ticker's own ~14px top + ~45px pill height
 export const SEA_TURTLE_BOB_AMPLITUDE_PX = 8;
@@ -2045,7 +2048,16 @@ export const SEA_TURTLE_COLOR_SKIN = '#5fa855';
 // trail" look into an actual visible stream.
 export const SEA_TURTLE_WAKE_SEGMENT_COUNT = 6;
 export const SEA_TURTLE_WAKE_MAX_ALPHA = 0.16;
-export const SEA_TURTLE_WAKE_LENGTH_MULTIPLIER = 2.6; // how many extra shell-radii the wake stretches behind the member, on top of its own radius
+// Per a direct follow-up request ("the start of the stream should be
+// slightly more towards the middle of the turtle, so the first oval is half
+// way hidden under the turtle") — 1.0 shell-radii puts the FIRST wake
+// segment's own center exactly on the shell's own trailing edge (the main
+// shell ellipse's x-radius is exactly SEA_TURTLE_RADIUS_PX * scale, i.e. 1.0
+// of it), so the shell (painted in the pass right after this one) covers
+// almost exactly the near half of that first oval, with the far half
+// peeking out from underneath it.
+export const SEA_TURTLE_WAKE_START_FRACTION = 1.0;
+export const SEA_TURTLE_WAKE_LENGTH_MULTIPLIER = 2.6; // how many extra shell-radii the wake stretches beyond SEA_TURTLE_WAKE_START_FRACTION
 export const SEA_TURTLE_WAKE_HEIGHT_FACTOR = 0.42; // wake ellipse half-height as a fraction of the member's own radius — was 0.18 (the "skinny" complaint)
 export const SEA_TURTLE_WAKE_WOBBLE_PX = 3.5;
 // The coin riding the lead turtle's back — per direct request, $50 base,

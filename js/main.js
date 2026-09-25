@@ -137,6 +137,7 @@ import {
   SEA_TURTLE_COLOR_SKIN,
   SEA_TURTLE_WAKE_SEGMENT_COUNT,
   SEA_TURTLE_WAKE_MAX_ALPHA,
+  SEA_TURTLE_WAKE_START_FRACTION,
   SEA_TURTLE_WAKE_LENGTH_MULTIPLIER,
   SEA_TURTLE_WAKE_HEIGHT_FACTOR,
   SEA_TURTLE_WAKE_WOBBLE_PX,
@@ -4199,16 +4200,21 @@ function updateSeaTurtle(state, nowMs) {
 // shell, per direct report ("the first turtle's stream animation is in
 // front of the second turtle"). Segment count/length/height are all bigger
 // than the original per a direct follow-up ("too skinny, looks like the
-// turtles are pooping the streams out... make the streams taller").
+// turtles are pooping the streams out... make the streams taller"). The
+// first segment (i=0, t=0) starts at SEA_TURTLE_WAKE_START_FRACTION shell-
+// radii out — per a further follow-up, that's tuned so the shell (painted
+// right after this whole pass) covers almost exactly the near half of it,
+// so it reads as "emerging from under the shell" rather than starting
+// clear of it.
 function drawSeaTurtleWake(ctx, x, y, scale, waterCurrentPhase) {
   const r = SEA_TURTLE_RADIUS_PX * scale;
   ctx.save();
   ctx.translate(x, y);
-  for (let i = 1; i <= SEA_TURTLE_WAKE_SEGMENT_COUNT; i++) {
-    const t = i / SEA_TURTLE_WAKE_SEGMENT_COUNT;
+  for (let i = 0; i < SEA_TURTLE_WAKE_SEGMENT_COUNT; i++) {
+    const t = i / (SEA_TURTLE_WAKE_SEGMENT_COUNT - 1);
     const alpha = SEA_TURTLE_WAKE_MAX_ALPHA * (1 - t);
     if (alpha <= 0) continue;
-    const dist = r * (1.05 + t * SEA_TURTLE_WAKE_LENGTH_MULTIPLIER);
+    const dist = r * (SEA_TURTLE_WAKE_START_FRACTION + t * SEA_TURTLE_WAKE_LENGTH_MULTIPLIER);
     const wobbleY = Math.sin(waterCurrentPhase + i * 0.8) * SEA_TURTLE_WAKE_WOBBLE_PX;
     ctx.fillStyle = `rgba(255, 255, 255, ${alpha})`;
     ctx.beginPath();

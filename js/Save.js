@@ -93,7 +93,7 @@ export function loadSaveGame() {
     // time any sea-turtle coin is ever banked post-load. seaTurtle itself
     // defaults to null (no turtle was ever "in flight" across a save/load
     // boundary before this feature existed, so there's nothing to restore),
-    // and the cooldown gets a fresh random 30-90s roll, same as a brand-new
+    // and the cooldown gets a fresh random 40-50s roll, same as a brand-new
     // level would.
     if (typeof parsed.level.seaTurtle === 'undefined') parsed.level.seaTurtle = null;
     // A save written during the brief window where every convoy member had
