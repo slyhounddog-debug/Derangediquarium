@@ -119,12 +119,30 @@ import {
   STORAGE_CHEST_MIN_TRICKLE_DISTANCE_TILES,
   STORAGE_CHEST_MAX_TRICKLE_DISTANCE_TILES,
   CHEST_TUTORIAL_DRAG_CLICK_RADIUS_TILES,
+  SEA_TURTLE_SPAWN_MIN_MS,
+  SEA_TURTLE_SPAWN_MAX_MS,
+  SEA_TURTLE_SPEED_PX_PER_S,
+  SEA_TURTLE_SCREEN_Y,
+  SEA_TURTLE_BOB_AMPLITUDE_PX,
+  SEA_TURTLE_BOB_PERIOD_MS,
+  SEA_TURTLE_RADIUS_PX,
+  SEA_TURTLE_BABY_MIN_COUNT,
+  SEA_TURTLE_BABY_MAX_COUNT,
+  SEA_TURTLE_BABY_SPACING_PX,
+  SEA_TURTLE_BABY_MAX_SCALE,
+  SEA_TURTLE_BABY_MIN_SCALE,
+  SEA_TURTLE_BUBBLE_INTERVAL_MS,
+  SEA_TURTLE_COLOR_SHELL,
+  SEA_TURTLE_COLOR_SHELL_PATTERN,
+  SEA_TURTLE_COLOR_SKIN,
+  SEA_TURTLE_COIN_BASE_VALUE,
+  SEA_TURTLE_COIN_VALUE_PER_COLLECT,
 } from './Config.js';
 import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop } from './Engine.js';
 import { pushGameNotification } from './Notifications.js';
 import { loadLevel, LEVELS } from './Levels.js';
 import { updateStoryTriggers, updateAutosave } from './Systems.js';
-import { updateAmbience, renderAmbienceBehindLab, renderAmbienceFrontLab, spawnCursorBubbles, renderWaterSurface } from './Ambience.js';
+import { updateAmbience, renderAmbienceBehindLab, renderAmbienceFrontLab, spawnCursorBubbles, renderWaterSurface, spawnSeaTurtleBubble } from './Ambience.js';
 import { resumeAudio, startGameMusic, playAlienHit, setBattleMusicActive, triggerBossMusic, playBuildPlace, playDemolish } from './Sound.js';
 import {
   updateEntities,
@@ -134,6 +152,7 @@ import {
   spawnFishCheat,
   getCoinColor,
   getCoinTier,
+  createCoin,
   createPickupText,
   getFishPurchaseCost,
   findFishAt,
@@ -1120,18 +1139,24 @@ input.mouseDownHandlers.push((sx, sy) => {
   // regardless of where the cursor is, matching "a fish selected for
   // purchasing" explicitly named in the request.
   // Per direct follow-up report ("I keep grabbing food instead of spawning
-  // food") — the literal Food tool itself no longer starts an item drag at
-  // all, since a click with it armed is supposed to unambiguously drop a
-  // new pellet, not fight over whether the player meant to grab an existing
-  // one sitting nearby. A build/blueprint tool silently falling back to
-  // Food-like click behavior while hovering open water (effectiveToolAt,
-  // above) is a different, narrower case the report wasn't about — that
-  // still allows a drag, same as before.
-  if (!isCursorOrFoodTool(effectiveToolAt(world.y)) || state.ui.selectedTool === 'food') return;
+  // food"), later partially reverted per an even more direct follow-up
+  // ("the only thing that can't be dragged by the food tool is food —
+  // everything else should be able to be dragged with the food tool") — the
+  // literal Food tool no longer blocks starting a drag entirely; it only
+  // still refuses to grab an existing FOOD pellet (the item-type check just
+  // below), since a click on empty water with it armed is still supposed to
+  // unambiguously drop a new pellet, not fight over whether the player meant
+  // to grab one sitting nearby. Every other draggable item type (coin/waste/
+  // science/etc.) is grabbable with the Food tool exactly like the plain
+  // cursor tool. A build/blueprint tool silently falling back to Food-like
+  // click behavior while hovering open water (effectiveToolAt, above) still
+  // isn't a real drag-blocking tool either way — unchanged from before.
+  if (!isCursorOrFoodTool(effectiveToolAt(world.y))) return;
   let best = null;
   let bestDistSq = Infinity;
   for (const item of state.level.items) {
     if (!DRAGGABLE_ITEM_TYPES.includes(item.type)) continue;
+    if (item.type === 'food' && state.ui.selectedTool === 'food') continue;
     // Already claimed as a building's input (mid-disintegrate) — per direct
     // report, can't be grabbed at all while that's happening, not even a
     // Collector-held coin/Science Bubble (which tracks its own hold via
@@ -1164,6 +1189,20 @@ input.mouseUpHandlers.push(() => {
   if (draggedItemId != null) {
     const movedPx = Math.hypot(input.mouse.x - itemDragStartSx, input.mouse.y - itemDragStartSy);
     itemDragMoved = movedPx >= ITEM_DRAG_MOVE_THRESHOLD_PX;
+    // A genuine drag (not just a click-to-bank) on the Sea Turtle's own
+    // attached coin permanently detaches it — per direct spec the coin only
+    // needs to stay glued to the turtle "unless" the player deliberately
+    // grabs it; without this, updateSeaTurtle would just snap it straight
+    // back onto the turtle's back the very next real frame, fighting
+    // whatever the player just dragged it to. A plain click never reaches
+    // here with itemDragMoved true, so the normal click-to-bank path (and
+    // this feature's own $ pricing/collect-count bump) is completely
+    // unaffected.
+    if (itemDragMoved && state.level.seaTurtle && state.level.seaTurtle.coinItemId === draggedItemId) {
+      state.level.seaTurtle.coinItemId = null;
+      const coin = state.level.items.find((it) => it.id === draggedItemId);
+      if (coin) coin.seaTurtleAttached = false;
+    }
   }
   // Deliberately doesn't touch the dragged item's vx/vy — updateItemDrag
   // (below) already leaves it carrying real, cursor-derived velocity every
@@ -4002,6 +4041,224 @@ function updateCanvasCursor() {
   canvas.style.cursor = CURSOR_BY_TOOL[cursorKey] || '';
 }
 
+// ---- Sea Turtle ambience convoy ----
+// See Config.js's "Sea Turtle" section for the full rationale. Every field
+// here is plain SCREEN space, not world space — the whole convoy travels at
+// a fixed height under #notification-ticker regardless of camera scroll or
+// zoom, same idea as Ambience.js's renderWaterSurface. Only the coin it
+// carries (a real state.level.items entry) is ever converted to world space,
+// via screenToWorld, so it renders/click-banks through every existing coin
+// code path with zero special-casing there.
+//
+// Driven entirely by REAL wall-clock ms, read fresh every render() call
+// (which itself always runs once per real rAF frame no matter what
+// Pause Time/2x Speed/the debug time-scale cheat are doing to update()'s own
+// dtMs — see Engine.js's createGameLoop) rather than any dtMs this file
+// already has lying around, per direct spec that none of those three should
+// ever touch the turtle's timer, travel speed, or bob animation. A huge real
+// gap (e.g. a backgrounded tab) is clamped the same way createGameLoop
+// clamps its own frameTime, so it can't teleport the convoy across the
+// screen or instantly expire a long spawn cooldown.
+let lastSeaTurtleRealMs = null;
+const SEA_TURTLE_STALL_CLAMP_MS = 250;
+
+// index 0 = the lead turtle, 1..babyCount = trailing kids. A baby's x lags
+// the leader by a flat screen-space offset, and its bob phase is delayed by
+// exactly the time it'd take to cover that same offset at cruise speed — the
+// two together mean a baby always shows the EXACT y the leader itself had
+// when it was at that same x, i.e. a baby genuinely retraces the leader's
+// own path instead of just approximating it, which is what makes the whole
+// convoy read as "following," not just "in formation."
+function seaTurtleMemberPosition(turtle, index) {
+  const spacing = index * SEA_TURTLE_BABY_SPACING_PX;
+  const leaderX = turtle.startScreenX + (turtle.elapsedMs / 1000) * SEA_TURTLE_SPEED_PX_PER_S;
+  const x = leaderX - spacing;
+  const delayS = spacing / SEA_TURTLE_SPEED_PX_PER_S;
+  const bobAngle = ((turtle.elapsedMs / 1000 - delayS) / (SEA_TURTLE_BOB_PERIOD_MS / 1000)) * Math.PI * 2;
+  const y = SEA_TURTLE_SCREEN_Y + Math.sin(bobAngle) * SEA_TURTLE_BOB_AMPLITUDE_PX;
+  return { x, y, bobAngle };
+}
+
+// Progressively smaller "kids" — 1st baby is the biggest, last is the
+// smallest, per direct spec ("progressively smaller... so small to smaller
+// compared to the big turtle").
+function seaTurtleMemberScale(index, babyCount) {
+  if (index === 0) return 1;
+  if (babyCount <= 1) return SEA_TURTLE_BABY_MAX_SCALE;
+  const t = (index - 1) / (babyCount - 1);
+  return SEA_TURTLE_BABY_MAX_SCALE - t * (SEA_TURTLE_BABY_MAX_SCALE - SEA_TURTLE_BABY_MIN_SCALE);
+}
+
+function spawnSeaTurtle(state) {
+  const babyCount = SEA_TURTLE_BABY_MIN_COUNT + Math.floor(Math.random() * (SEA_TURTLE_BABY_MAX_COUNT - SEA_TURTLE_BABY_MIN_COUNT + 1));
+  // Far enough left that the ENTIRE convoy (leader plus every trailing baby)
+  // starts fully off the left edge, not just the leader.
+  const startScreenX = -(SEA_TURTLE_RADIUS_PX * 2 + babyCount * SEA_TURTLE_BABY_SPACING_PX + 40);
+  const turtle = { startScreenX, elapsedMs: 0, babyCount, coinItemId: null, bubbleTimerMs: 0 };
+  // Per direct request — $50 base, plus $50 for every sea-turtle coin ever
+  // collected THIS level so far (Config.js's own comment has the full
+  // worked example). Every other coin in the game is untouched by this.
+  const coinValue = SEA_TURTLE_COIN_BASE_VALUE + SEA_TURTLE_COIN_VALUE_PER_COLLECT * (state.level.seaTurtleCoinCollectCount || 0);
+  const leadPos = seaTurtleMemberPosition(turtle, 0);
+  const coinWorld = screenToWorld(leadPos.x, leadPos.y - SEA_TURTLE_RADIUS_PX * 0.55, state.camera);
+  const coin = createCoin(coinWorld.x, coinWorld.y, coinValue);
+  coin.seaTurtleAttached = true; // exempts it from gravity in Entities.js's updateCoin — this function's own per-frame follow below is what actually moves it
+  coin.vx = 0;
+  coin.vy = 0;
+  state.level.items.push(coin);
+  turtle.coinItemId = coin.id;
+  state.level.seaTurtle = turtle;
+}
+
+function updateSeaTurtle(state, nowMs) {
+  if (lastSeaTurtleRealMs == null) { lastSeaTurtleRealMs = nowMs; return; } // first-ever call — nothing to diff against yet
+  let realDtMs = nowMs - lastSeaTurtleRealMs;
+  lastSeaTurtleRealMs = nowMs;
+  if (realDtMs < 0) realDtMs = 0;
+  if (realDtMs > SEA_TURTLE_STALL_CLAMP_MS) realDtMs = SEA_TURTLE_STALL_CLAMP_MS;
+
+  const turtle = state.level.seaTurtle;
+  if (!turtle) {
+    state.level.seaTurtleCooldownMs -= realDtMs;
+    if (state.level.seaTurtleCooldownMs <= 0) spawnSeaTurtle(state);
+    return;
+  }
+
+  turtle.elapsedMs += realDtMs;
+
+  // Keep the still-attached coin glued to the lead turtle's back — skipped
+  // while the player is actively dragging it away (see the mouseUpHandlers
+  // above for how a genuine drag permanently clears coinItemId so this
+  // doesn't just snap it straight back the following frame).
+  if (turtle.coinItemId != null && draggedItemId !== turtle.coinItemId) {
+    const coin = state.level.items.find((it) => it.id === turtle.coinItemId);
+    if (!coin) {
+      turtle.coinItemId = null; // banked (or otherwise removed) elsewhere this tick
+    } else {
+      const leadPos = seaTurtleMemberPosition(turtle, 0);
+      const coinWorld = screenToWorld(leadPos.x, leadPos.y - SEA_TURTLE_RADIUS_PX * 0.55, state.camera);
+      coin.x = coinWorld.x;
+      coin.y = coinWorld.y;
+    }
+  }
+
+  // A trailing bubble off the very back of the convoy, per direct request
+  // ("leaving a trail of bubbles") — timed off this same real clock so the
+  // trail's own rate is just as pause/speed-immune as the turtle itself.
+  turtle.bubbleTimerMs -= realDtMs;
+  if (turtle.bubbleTimerMs <= 0) {
+    turtle.bubbleTimerMs += SEA_TURTLE_BUBBLE_INTERVAL_MS;
+    const tailPos = seaTurtleMemberPosition(turtle, turtle.babyCount);
+    const tailWorld = screenToWorld(tailPos.x, tailPos.y, state.camera);
+    spawnSeaTurtleBubble(tailWorld.x, tailWorld.y);
+  }
+
+  // Done once the LAST (furthest-back) member has cleared the right edge —
+  // per direct spec, the next cooldown doesn't start until the whole convoy
+  // (coin collected or not) is off-screen.
+  const exitScreenX = canvas.width + SEA_TURTLE_RADIUS_PX + turtle.babyCount * SEA_TURTLE_BABY_SPACING_PX + 40;
+  const leaderX = turtle.startScreenX + (turtle.elapsedMs / 1000) * SEA_TURTLE_SPEED_PX_PER_S;
+  if (leaderX >= exitScreenX) {
+    // An uncollected coin leaves WITH the turtle rather than being abandoned
+    // mid-air off-screen with gravity suddenly switched back on for it.
+    if (turtle.coinItemId != null) {
+      state.level.items = state.level.items.filter((it) => it.id !== turtle.coinItemId);
+    }
+    state.level.seaTurtle = null;
+    state.level.seaTurtleCooldownMs = SEA_TURTLE_SPAWN_MIN_MS + Math.random() * (SEA_TURTLE_SPAWN_MAX_MS - SEA_TURTLE_SPAWN_MIN_MS);
+  }
+}
+
+// One turtle-shaped shell+head+flippers, drawn directly in screen space
+// (no worldToScreen — see this section's own header comment). facingRight is
+// always true (the whole convoy only ever swims left to right, per spec).
+function drawOneSeaTurtleMember(ctx, x, y, scale, bobAngle, waterCurrentPhase) {
+  const r = SEA_TURTLE_RADIUS_PX * scale;
+  const flipperSwing = Math.sin(bobAngle * 1.6) * 0.5;
+  ctx.save();
+  ctx.translate(x, y);
+
+  // A soft trailing "current" wake — a few fading, elongated ellipses
+  // streaming out behind the member, per direct request ("a slight water
+  // current animation as it goes").
+  for (let i = 1; i <= 3; i++) {
+    const wakeAlpha = 0.10 - i * 0.026;
+    if (wakeAlpha <= 0) continue;
+    ctx.fillStyle = `rgba(255, 255, 255, ${wakeAlpha})`;
+    ctx.beginPath();
+    ctx.ellipse(-r * (1.1 + i * 0.55), Math.sin(waterCurrentPhase + i) * 2, r * 0.55, r * 0.18, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Rear flippers
+  ctx.fillStyle = SEA_TURTLE_COLOR_SKIN;
+  for (const side of [-1, 1]) {
+    ctx.save();
+    ctx.translate(-r * 0.45, side * r * 0.62);
+    ctx.rotate(side * (0.5 + flipperSwing * side));
+    ctx.beginPath();
+    ctx.ellipse(0, 0, r * 0.42, r * 0.2, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+  // Front flippers (swing opposite the rear pair, like a real swim stroke)
+  for (const side of [-1, 1]) {
+    ctx.save();
+    ctx.translate(r * 0.35, side * r * 0.68);
+    ctx.rotate(side * (0.35 - flipperSwing * side));
+    ctx.beginPath();
+    ctx.ellipse(0, 0, r * 0.5, r * 0.22, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Head + neck (leading edge — the convoy always swims left to right)
+  ctx.fillStyle = SEA_TURTLE_COLOR_SKIN;
+  ctx.beginPath();
+  ctx.ellipse(r * 0.95, 0, r * 0.3, r * 0.22, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.beginPath();
+  ctx.arc(r * 1.22, 0, r * 0.2, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+  ctx.beginPath();
+  ctx.arc(r * 1.28, -r * 0.06, r * 0.045, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Shell
+  ctx.fillStyle = SEA_TURTLE_COLOR_SHELL;
+  ctx.beginPath();
+  ctx.ellipse(0, 0, r, r * 0.72, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = SEA_TURTLE_COLOR_SHELL_PATTERN;
+  ctx.lineWidth = Math.max(1, r * 0.06);
+  ctx.beginPath();
+  ctx.ellipse(0, 0, r * 0.68, r * 0.46, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  for (let i = -1; i <= 1; i++) {
+    ctx.beginPath();
+    ctx.moveTo(i * r * 0.34, -r * 0.5);
+    ctx.lineTo(i * r * 0.5, r * 0.5);
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+function renderSeaTurtle(ctx, state, canvasWidth, canvasHeight) {
+  const turtle = state.level.seaTurtle;
+  if (!turtle) return;
+  const waterCurrentPhase = turtle.elapsedMs / 260;
+  for (let i = turtle.babyCount; i >= 0; i--) {
+    // Drawn tail-first so the leader always overlaps its own trailing kids,
+    // same front-to-back layering a real convoy swimming in a line would have.
+    const pos = seaTurtleMemberPosition(turtle, i);
+    if (pos.x < -SEA_TURTLE_RADIUS_PX * 3 || pos.x > canvasWidth + SEA_TURTLE_RADIUS_PX * 3) continue;
+    const scale = seaTurtleMemberScale(i, turtle.babyCount);
+    drawOneSeaTurtleMember(ctx, pos.x, pos.y, scale, pos.bobAngle, waterCurrentPhase + i * 0.7);
+  }
+}
+
 function render() {
   if (state.ui.replaySplashPending) {
     state.ui.replaySplashPending = false;
@@ -4015,6 +4272,14 @@ function render() {
     fpsCounter = 0;
     lastFpsTime = now;
   }
+
+  // Real-wall-clock-driven, called every render() frame unconditionally —
+  // see updateSeaTurtle's own header comment for why it deliberately can't
+  // hook into update()'s dtMs the way everything else does. Gated on
+  // gameStarted only, same "frozen (not even ticking) until Start is
+  // clicked" precedent the rest of ambience already follows — NOT gated on
+  // state.ui.paused/timePaused, per direct spec.
+  if (state.ui.gameStarted) updateSeaTurtle(state, now);
 
   ctx.fillStyle = waterBackgroundGradient(ctx, canvas.height);
   ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -4260,6 +4525,12 @@ function render() {
     state.ui.blueprintCost = null;
     state.ui.blueprintReplaceInfo = null;
   }
+
+  // Drawn just before the items loop below (not any earlier, ambience-style
+  // layer) so the coin riding its back — a completely normal state.level.items
+  // entry — draws on TOP of it in that very next loop, reading as sitting on
+  // the shell rather than floating in front of/behind the turtle.
+  renderSeaTurtle(ctx, state, canvas.width, canvas.height);
 
   for (const item of state.level.items) {
     const pos = worldToScreen(item.x, item.y, state.camera);

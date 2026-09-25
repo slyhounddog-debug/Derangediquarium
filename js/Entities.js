@@ -1437,6 +1437,16 @@ export function tryBankCoinAt(state, worldX, worldY) {
       playCoinBank();
       const color = getCoinColor(item.value);
       state.level.floatingTexts.push(createPickupText(item.x, item.y, `+$${item.value}`, color));
+      // Per direct request — each Sea Turtle coin banked prices every FUTURE
+      // one $50 higher (Config.js's SEA_TURTLE_COIN_VALUE_PER_COLLECT), read
+      // by main.js's spawnSeaTurtle the next time a turtle appears. Detaching
+      // the still-active turtle's own reference here (rather than leaving it
+      // dangling) is what stops updateSeaTurtle from trying to keep
+      // re-forcing a now-deleted item's position every frame.
+      if (item.seaTurtleAttached) {
+        state.level.seaTurtleCoinCollectCount = (state.level.seaTurtleCoinCollectCount || 0) + 1;
+        if (state.level.seaTurtle && state.level.seaTurtle.coinItemId === item.id) state.level.seaTurtle.coinItemId = null;
+      }
       items.splice(i, 1);
       return true;
     }
@@ -2058,6 +2068,14 @@ function updateFood(item, state, dtMs) {
 }
 
 function updateCoin(item, state, dtMs) {
+  // A coin currently riding a Sea Turtle's back (item.seaTurtleAttached) is
+  // entirely exempt from gravity/physics — per direct request, "isn't
+  // affected by gravity" — main.js's updateSeaTurtle drives its x/y directly
+  // every REAL frame instead (so it stays glued to the turtle regardless of
+  // Pause Time/2x Speed). It's still a completely normal item otherwise: it
+  // still renders through the loop below and is still click-bankable via
+  // tryBankCoinAt, which is what actually clears this flag.
+  if (item.seaTurtleAttached) return true;
   const dt = dtMs / 1000;
   const physics = { gravity: GRAVITY, maxFallSpeed: MAX_FALL_SPEED };
   if (isItemInOpenWater(item)) {

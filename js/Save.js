@@ -7,7 +7,7 @@
 // deliberately NOT saved — they're session-local (camera pan position, which
 // tool is selected, debug overlay state), not campaign progress.
 
-import { WORLD_TILES_H, WORLD_TILES_W, TILE_EMPTY } from './Config.js';
+import { WORLD_TILES_H, WORLD_TILES_W, TILE_EMPTY, SEA_TURTLE_SPAWN_MIN_MS, SEA_TURTLE_SPAWN_MAX_MS } from './Config.js';
 
 const SAVE_KEY = 'derangiquarium_save_v1';
 
@@ -85,6 +85,21 @@ export function loadSaveGame() {
     for (const key of ['turretMuzzleFlashes', 'turretImpactEffects', 'coinSparkleEffects', 'fishGrowthAbsorbEffects', 'fishGrowthEffects']) {
       if (!Array.isArray(parsed.level[key])) parsed.level[key] = [];
     }
+    // A save written before the Sea Turtle ambience convoy won't have any of
+    // these three fields — main.js's updateSeaTurtle reads seaTurtleCooldownMs
+    // unconditionally every real frame (undefined -= realDtMs goes NaN, which
+    // fails the <= 0 spawn check forever, silently killing the feature for
+    // that save) and tryBankCoinAt reads seaTurtleCoinCollectCount the first
+    // time any sea-turtle coin is ever banked post-load. seaTurtle itself
+    // defaults to null (no turtle was ever "in flight" across a save/load
+    // boundary before this feature existed, so there's nothing to restore),
+    // and the cooldown gets a fresh random 30-90s roll, same as a brand-new
+    // level would.
+    if (typeof parsed.level.seaTurtle === 'undefined') parsed.level.seaTurtle = null;
+    if (typeof parsed.level.seaTurtleCooldownMs !== 'number') {
+      parsed.level.seaTurtleCooldownMs = SEA_TURTLE_SPAWN_MIN_MS + Math.random() * (SEA_TURTLE_SPAWN_MAX_MS - SEA_TURTLE_SPAWN_MIN_MS);
+    }
+    if (typeof parsed.level.seaTurtleCoinCollectCount !== 'number') parsed.level.seaTurtleCoinCollectCount = 0;
     return { meta: parsed.meta, level: parsed.level };
   } catch (err) {
     console.error('Derangiquarium: load failed', err);

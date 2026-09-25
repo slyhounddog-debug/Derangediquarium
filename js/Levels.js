@@ -3,7 +3,7 @@
 // which species/buildings are available, win conditions, alien waves, and
 // meta rewards granted on completion.
 
-import { SPECIES_LIST, BUILDING_LIST, ALIEN_WAVE_INTERVAL_EARLY_MS, ALIEN_FIRST_WAVE_EARLY_MS, AUTOSAVE_INTERVAL_MS, POWER_WARNING_CHECK_INTERVAL_MS } from './Config.js';
+import { SPECIES_LIST, BUILDING_LIST, ALIEN_WAVE_INTERVAL_EARLY_MS, ALIEN_FIRST_WAVE_EARLY_MS, AUTOSAVE_INTERVAL_MS, POWER_WARNING_CHECK_INTERVAL_MS, SEA_TURTLE_SPAWN_MIN_MS, SEA_TURTLE_SPAWN_MAX_MS } from './Config.js';
 import { createGrid } from './Grid.js';
 
 // The very first entry in state.level.notifications, pushed at level load
@@ -183,6 +183,14 @@ export function loadLevel(state, levelId) {
     coinSparkleEffects: [], // { x, y, age } — a quick radiating sparkle pushed by Entities.js's updateCoin the instant a coin is banked by a Collector, aged out by updateCoinSparkleEffects, rendered by main.js
     fishGrowthAbsorbEffects: [], // { fishId, startX, startY, age } — the "two orbiting food bits fly into the fish" animation on its 3rd pre-critical feed, pushed by Entities.js's updateFish, aged out by updateFishGrowthAbsorbEffects, rendered by main.js (which looks fishId up live each frame so it tracks a still-moving fish)
     fishGrowthEffects: [], // { x, y, age } — the grow-to-adult particle burst shared by that same 3rd-feed conversion AND Mutagen Paste's own instant Adult growth, pushed by Entities.js's updateFish, aged out by updateFishGrowthEffects, rendered by main.js
+    // Sea Turtle ambience convoy — see Config.js's "Sea Turtle" section and
+    // main.js's updateSeaTurtle/renderSeaTurtle. null whenever no turtle is
+    // currently swimming across the screen. Advanced by REAL wall-clock ms
+    // (not dtMs), so it's completely immune to Pause Time/2x Speed/the debug
+    // time-scale cheat — unlike every other transient effect array here.
+    seaTurtle: null, // { startScreenX, elapsedMs, babyCount, babyScales: [n,...], coinItemId, bubbleTimerMs } once spawned
+    seaTurtleCooldownMs: SEA_TURTLE_SPAWN_MIN_MS + Math.random() * (SEA_TURTLE_SPAWN_MAX_MS - SEA_TURTLE_SPAWN_MIN_MS), // real ms remaining until the NEXT turtle spawns — only ticks down while seaTurtle is null; re-rolled to a fresh random 30-90s value the instant a turtle fully clears the right edge
+    seaTurtleCoinCollectCount: 0, // lifetime count of sea-turtle coins actually banked this level — prices every future one (Config.js's SEA_TURTLE_COIN_BASE_VALUE + _VALUE_PER_COLLECT * this), see Entities.js's tryBankCoinAt
     lifetimeMoneyEarned: 0, // real in-play income only (coins banked) — NOT the starting endowment or the bankruptcy bailout gift; see Entities.js's bankMoney and Config.js's MONEY_MILESTONE_1K
     // End-game stats-modal counters (main.js's showGameOverModal), per direct
     // spec ("stats about the game like how much total of each resource was

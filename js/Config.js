@@ -2001,6 +2001,46 @@ export const TURRET_PROJECTILE_COLOR = '#ffe066'; // a bright, easy-to-track yel
 export const TURRET_MUZZLE_FLASH_DURATION_MS = 150;
 export const TURRET_IMPACT_EFFECT_DURATION_MS = 220;
 
+// ---- Sea Turtle (ambience convoy) ----
+// Per direct request: every 30-90s (real time), a big sea turtle swims in
+// from the top-left of the SCREEN (under the notification/"chat" pill),
+// trailed by 2-4 progressively smaller "kid" turtles, until the whole convoy
+// clears the right edge — only THEN does the next 30-90s cooldown start
+// (see main.js's updateSeaTurtle). Carries a real, click-bankable coin on the
+// lead turtle's back. Deliberately driven by REAL wall-clock ms, never
+// dtMs — per direct spec, Pause Time / 2x Speed / the debug time-scale cheat
+// must never touch its timer, its travel speed, or its bob/leg animation.
+// Positioned and animated in plain SCREEN space (not worldToScreen'd), same
+// "fixed relative to the viewport, not the scrolling/zoomable world" idea as
+// Ambience.js's renderWaterSurface — it should always pass under the pill
+// regardless of camera scroll or zoom. Only the coin it carries is a real
+// world-space item (state.level.items), so it renders/click-banks through
+// every existing coin code path with zero special-casing there.
+export const SEA_TURTLE_SPAWN_MIN_MS = 30000;
+export const SEA_TURTLE_SPAWN_MAX_MS = 90000;
+export const SEA_TURTLE_SPEED_PX_PER_S = 36; // roughly a Guppy's own cruising swimSpeed (35, see SPECIES.guppy)
+export const SEA_TURTLE_SCREEN_Y = 92; // just under #notification-ticker's own ~14px top + ~45px pill height
+export const SEA_TURTLE_BOB_AMPLITUDE_PX = 8;
+export const SEA_TURTLE_BOB_PERIOD_MS = 2400;
+export const SEA_TURTLE_RADIUS_PX = 24; // lead turtle's shell half-width, before per-member scale
+export const SEA_TURTLE_BABY_MIN_COUNT = 2;
+export const SEA_TURTLE_BABY_MAX_COUNT = 4;
+export const SEA_TURTLE_BABY_SPACING_PX = 58; // screen-space gap between each successive member of the convoy
+export const SEA_TURTLE_BABY_MAX_SCALE = 0.62; // closest (1st) baby, relative to the lead turtle's own size
+export const SEA_TURTLE_BABY_MIN_SCALE = 0.32; // furthest-back baby
+export const SEA_TURTLE_BUBBLE_INTERVAL_MS = 260; // real ms between trailing bubbles, per member currently on screen
+export const SEA_TURTLE_COLOR_SHELL = '#3f7a3a';
+export const SEA_TURTLE_COLOR_SHELL_PATTERN = '#2c5a29';
+export const SEA_TURTLE_COLOR_SKIN = '#5fa855';
+// The coin riding the lead turtle's back — per direct request, $50 base,
+// plus another $50 for every time a sea-turtle coin has EVER been collected
+// this level (state.level.seaTurtleCoinCollectCount), so the 5th one banked
+// is worth 50 + 50*4 = $250. Every other coin in the game (drops, chests,
+// etc.) is completely untouched by this — only ever read at the moment a
+// fresh turtle spawns (main.js's spawnSeaTurtle) to price that ONE coin.
+export const SEA_TURTLE_COIN_BASE_VALUE = 50;
+export const SEA_TURTLE_COIN_VALUE_PER_COLLECT = 50;
+
 // ---- Refinery family (replaces the Auto-Feeder) ----
 // foodProcessMs is how long the Waste->Food recipe takes on that tier, per
 // direct spec (20 -> 14 -> 9 -> 5 seconds across the 4 tiers); the Alien
