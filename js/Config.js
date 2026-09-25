@@ -339,7 +339,7 @@ export const GRID_SWEEP_SUBSTEP = TILE_SIZE / 4; // px — every swept move is w
 // are. The cone is a fixed-direction blow (uniform along the fan's aim
 // angle, not radiating outward from its center like an explosion), narrowing
 // force linearly to 0 at max range.
-export const FAN_CONE_HALF_ANGLE_DEG = 28; // total cone width = 2x this = 56° (was 15/30°, then 20/40°, then 25/50° — widened slightly again per direct request)
+export const FAN_CONE_HALF_ANGLE_DEG = 24; // total cone width = 2x this = 48° (was 15/30°, then 20/40°, then 25/50°, then 28/56° — narrowed a few degrees per direct request)
 // Placeholder balance per tier, same as every other economy/physics constant
 // in this file — tune once real playtesting exists. Power cost is drawn
 // unconditionally while a Fan is placed (Grid.js's computeCurrentPowerDemand)
@@ -362,13 +362,13 @@ export const FAN_CONE_HALF_ANGLE_DEG = 28; // total cone width = 2x this = 56° 
 // masses at identical equilibrium points; Waste's 80% match was prioritized
 // since it was named explicitly alongside the coin figure).
 export const FAN_T2_MAX_FORCE = 260; // Rudimentary Fan — force magnitude at the emitter (see Grid.js's a = F/mass integration). Originally deliberately too weak to hover a coin at all when coin mass was 3 (3*88=264 > 260); after the coin-mass retune (now 2, weight 176 < 260), a coin CAN hover under this tier — see the mass-retune comment above ITEM_MASS_BY_TYPE for the current numbers.
-export const FAN_T2_MAX_RANGE = 320; // px — 10 tiles (was 3, then 5, then 6, then 7, then 9; +1 more tile per direct request, the 7th such increase this session)
+export const FAN_T2_MAX_RANGE = 352; // px — 11 tiles (was 3, then 5, then 6, then 7, then 9, then 10; +1 more tile per direct request)
 export const FAN_T2_POWER_COST = 0; // per direct request — "the rudimentary fan takes 0mw electricity"
 export const FAN_T3_MAX_FORCE = 320; // Electric Fan — cut 520 -> 350, now 320 per direct request, alongside the T4 cut and mass retune below — sits between Rudimentary (260) and Turbo (400)
-export const FAN_T3_MAX_RANGE = 496; // px — 15.5 tiles (was 5.5, then 8.5, then 9.5, then 10.5, then 13.5; +2 more tiles)
+export const FAN_T3_MAX_RANGE = 528; // px — 16.5 tiles (was 5.5, then 8.5, then 9.5, then 10.5, then 13.5, then 15.5; +1 more tile per direct request)
 export const FAN_T3_POWER_COST = 2; // doubled from 1 per direct request ("make all the buildings take twice as much electricity as they do right now")
 export const FAN_T4_MAX_FORCE = 400; // Turbo Fan — cut 1100 -> 440, now 400 per direct request, alongside the T3 cut and mass retune above
-export const FAN_T4_MAX_RANGE = 640; // px — 20 tiles, unchanged per direct request ("the same range, but less powerful")
+export const FAN_T4_MAX_RANGE = 672; // px — 21 tiles (was 20, unchanged for a while per an earlier direct request ("the same range, but less powerful") — now +1 more tile per direct request, same as the other two tiers)
 export const FAN_T4_POWER_COST = 6; // doubled from 3 per direct request ("make all the buildings take twice as much electricity as they do right now")
 
 // ---- Shared building output point ----
