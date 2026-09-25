@@ -4209,10 +4209,14 @@ function renderRecipeItemIcon(ctx, itemType, cx, cy, r) {
 // individual value (FIFO, see ejectOneFromChest), there's still no single
 // "the" coin this one small generic indicator icon could represent.
 function renderChestContentsIcon(ctx, itemType, cx, cy, r) {
-  if (itemType === 'waste' || itemType === 'coin') {
+  if (itemType === 'waste') {
+    drawWastePoopIcon(ctx, cx, cy, r);
+    return;
+  }
+  if (itemType === 'coin') {
     ctx.beginPath();
     ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fillStyle = itemType === 'coin' ? COIN_TIERS[1].color : WASTE_COLOR; // silver, per direct request (was gold, COIN_TIERS[2])
+    ctx.fillStyle = COIN_TIERS[1].color; // silver, per direct request (was gold, COIN_TIERS[2])
     ctx.fill();
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
     ctx.lineWidth = Math.max(1, r * 0.14);
@@ -4224,6 +4228,51 @@ function renderChestContentsIcon(ctx, itemType, cx, cy, r) {
     return;
   }
   renderRecipeItemIcon(ctx, itemType, cx, cy, r);
+}
+
+// Same gently 3-lobed blobby outline main.js's own tracePoopBlobPath draws
+// for the real in-tank Waste item, duplicated here rather than imported —
+// same "each render module draws its own item art" convention every other
+// shared icon shape in this file already follows (see renderRecipeItemIcon's
+// own header comment on why main.js can't just be imported from here).
+// Filled/stroked/textured as one self-contained call since this is the
+// ONLY place in Grid.js that ever draws a Waste icon (Storage Chest
+// contents badge) — main.js's own version stays a separate trace-then-fill
+// pair since it also needs the bare outline for the tutorial ghost-Waste
+// animation.
+function drawWastePoopIcon(ctx, cx, cy, r) {
+  const lobes = 3;
+  const steps = lobes * 2;
+  const pts = [];
+  for (let i = 0; i < steps; i++) {
+    const angle = (i / steps) * Math.PI * 2 - Math.PI / 2;
+    const rad = r * (i % 2 === 0 ? 1.18 : 0.84);
+    pts.push({ x: cx + Math.cos(angle) * rad, y: cy + Math.sin(angle) * rad });
+  }
+  ctx.beginPath();
+  const start = pts[steps - 1];
+  const first = pts[0];
+  ctx.moveTo((start.x + first.x) / 2, (start.y + first.y) / 2);
+  for (let i = 0; i < steps; i++) {
+    const next = pts[(i + 1) % steps];
+    ctx.quadraticCurveTo(pts[i].x, pts[i].y, (pts[i].x + next.x) / 2, (pts[i].y + next.y) / 2);
+  }
+  ctx.closePath();
+  ctx.fillStyle = WASTE_COLOR;
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
+  ctx.lineWidth = Math.max(1, r * 0.14);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.22)';
+  ctx.lineWidth = Math.max(1, r * 0.09);
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.arc(cx, cy - r * 0.05, r * 0.48, Math.PI * 0.12, Math.PI * 0.82);
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+  ctx.beginPath();
+  ctx.arc(cx - r * 0.28, cy - r * 0.32, r * 0.2, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 // A recipe identifier marking a Manufacturer/Power Plant's chosen recipe —

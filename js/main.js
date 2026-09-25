@@ -122,7 +122,7 @@ import {
   SEA_TURTLE_SPAWN_MIN_MS,
   SEA_TURTLE_SPAWN_MAX_MS,
   SEA_TURTLE_SPEED_PX_PER_S,
-  SEA_TURTLE_SCREEN_Y,
+  SEA_TURTLE_WORLD_Y,
   SEA_TURTLE_BOB_AMPLITUDE_PX,
   SEA_TURTLE_BOB_PERIOD_MS,
   SEA_TURTLE_RADIUS_PX,
@@ -311,12 +311,14 @@ minimapCanvas.addEventListener('click', (e) => {
 // tank (world width AND total height, whichever is the tighter constraint)
 // within the viewport at once, so nothing needs scrolling; toggling back to
 // "fit to width" instead zooms so the tank's full WIDTH exactly fills the
-// viewport, ignoring height (the normal "scroll to see more" zoom). Neither
-// replaces the page-load/resize default (fitCameraZoom, which fits the
-// water column height) unless the player has actually clicked this button at
-// least once — tankZoomMode stays null until then, and fitCameraZoom below
-// keeps using its original formula in that case.
-let tankZoomMode = null; // null | 'whole' | 'width'
+// viewport, ignoring height (the normal "scroll to see more" zoom).
+// Defaults to 'width' per a later direct request ("start the game in fit to
+// width mode") — index.html's own #minimap-expand-btn already ships with
+// the '⤢'/"Zoom to fit the whole tank" label that matches this being the
+// STARTING mode (that label describes what clicking it next would do), so
+// no DOM change was needed alongside this. Still overridden the instant the
+// player clicks that button (toggleTankZoomMode below), same as before.
+let tankZoomMode = 'width'; // null | 'whole' | 'width'
 // Per direct report ("the zoom to fit isn't completely zoom to fit, I can
 // still scroll... zoom out enough that you can't scroll up or down at
 // all") — the real scrollable range Engine.js's updateCamera clamps against
@@ -449,6 +451,87 @@ function disintegrateItemColor(item) {
   if (item.type === 'biomass') return BIOMASS_COLOR_CORE;
   if (item.type === 'alien_egg') return ALIEN_EGG_COLOR;
   return ITEM_FLAT_COLOR_BY_TYPE[item.type] || '#ffffff';
+}
+
+// A "$" glyph centered on a coin, per direct request ("add in dollar '$'
+// symbols on coins so it's more obvious they are coins") — a dark, mostly-
+// opaque fill reads clearly against every tier's own color, bronze/silver/
+// gold's flat fill AND the diamond tier's much lighter gem gradient alike.
+// Called from both of the item-render loop's own coin branches (the
+// diamond-gem special case and the flat-fill fallback every other tier
+// still uses), right after each one's own highlight, so it always ends up
+// the topmost detail. Saves/restores ctx state since textAlign/textBaseline
+// aren't touched anywhere else in this render pass and shouldn't leak into
+// the floatingTexts loop right after this one (which fillText's assuming
+// the canvas default left/alphabetic alignment).
+function drawCoinDollarMark(ctx, x, y, radius) {
+  ctx.save();
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+  ctx.font = `bold ${Math.max(7, radius * 1.05)}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('$', x, y + radius * 0.04);
+  ctx.restore();
+}
+
+// Traces (does NOT fill/stroke) a closed, gently 3-lobed blobby outline
+// centered on (cx, cy) — per direct request ("change waste so it looks more
+// like poop... keep it mostly sphere shaped, not completely, but make it
+// like circular poop"). Built as small bump peaks/valleys off a single base
+// radius (quadratic curves through alternating near/far control points),
+// NOT as several stacked separate circles — that keeps the whole outline
+// one seamless path, fillable/strokeable with no visible seams, unlike
+// overlapping-circle approaches would give. Still fundamentally round (the
+// peaks are only ~18% bigger than the base radius) rather than the tall
+// spiral-swirl "poop emoji" silhouette. Duplicated in Grid.js
+// (renderChestContentsIcon) and UI.js (drawItemIconCanvas) rather than
+// imported — same "each render module draws its own item art" convention
+// every other shared icon shape in this game already follows (see e.g.
+// Grid.js's own renderRecipeItemIcon comment).
+function tracePoopBlobPath(ctx, cx, cy, r) {
+  const lobes = 3;
+  const steps = lobes * 2;
+  const pts = [];
+  for (let i = 0; i < steps; i++) {
+    const angle = (i / steps) * Math.PI * 2 - Math.PI / 2;
+    const rad = r * (i % 2 === 0 ? 1.18 : 0.84);
+    pts.push({ x: cx + Math.cos(angle) * rad, y: cy + Math.sin(angle) * rad });
+  }
+  ctx.beginPath();
+  const start = pts[steps - 1];
+  const first = pts[0];
+  ctx.moveTo((start.x + first.x) / 2, (start.y + first.y) / 2);
+  for (let i = 0; i < steps; i++) {
+    const next = pts[(i + 1) % steps];
+    ctx.quadraticCurveTo(pts[i].x, pts[i].y, (pts[i].x + next.x) / 2, (pts[i].y + next.y) / 2);
+  }
+  ctx.closePath();
+}
+
+// Fills/strokes/textures tracePoopBlobPath's outline into a full waste item
+// — the actual reusable "draw one poop" call every render site below uses.
+function drawWastePoop(ctx, cx, cy, r) {
+  tracePoopBlobPath(ctx, cx, cy, r);
+  ctx.fillStyle = WASTE_COLOR;
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+  ctx.lineWidth = Math.max(1, r * 0.12);
+  ctx.stroke();
+  // A couple of short curved "wrinkle" lines instead of the plain glossy
+  // highlight dot every other item gets — reads as texture, not shine.
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+  ctx.lineWidth = Math.max(1, r * 0.08);
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.arc(cx, cy - r * 0.05, r * 0.48, Math.PI * 0.12, Math.PI * 0.82);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(cx, cy + r * 0.32, r * 0.38, Math.PI * 1.12, Math.PI * 1.75);
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+  ctx.beginPath();
+  ctx.arc(cx - r * 0.32, cy - r * 0.4, r * 0.18, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 // Browsers refuse to let an AudioContext make sound until a real user
@@ -600,6 +683,19 @@ const state = {
     // UI.js's isCursorOrFoodTool for the shared "either of these two neutral
     // tools" check used everywhere that distinction matters.
     selectedTool: 'cursor',
+    // "<flowId>:<step>" of whichever tutorial step the player last pressed a
+    // 1/2/3 tool hotkey during — per direct request ("during tutorials you
+    // can use hotkeys 1-3 to toggle the tools on or off, in case they are on
+    // and need to be turned off for the tutorial"). UI.js's own
+    // updateTutorialOverlay force-reasserts a step's own required tool every
+    // single frame (its own comment explains why — a real fix for players
+    // getting stranded on the wrong tool), which would otherwise immediately
+    // stomp a deliberate manual toggle back the very next frame. Matching
+    // this key suppresses just that one re-assertion for the step the
+    // override was set on; it naturally stops applying the instant the flow
+    // advances to a different step (a fresh key that was never set), no
+    // separate clear-on-step-change needed.
+    tutorialToolOverrideStep: null,
     lastArmedTool: null, // the last 'build:<id>'/'fish:<id>' tool armed (UI.js's selectSpeciesForPreview/selectBuildingForPreview) — the Q hotkey's "reselect last building/fish" fallback, see main.js's KeyQ handler
     blueprintCost: null, // live total $ cost of the currently-armed Blueprint stamp, written fresh every render() frame, null while no stamp is armed — read by UI.js's updateHUD for the bottom-left cost bubble
     blueprintClipboardActive: false, // whether a Blueprint stamp is currently captured/armed, written fresh every render() frame — read by UI.js's updateHUD to switch the persistent Q legend to "Clear Blueprint"
@@ -787,16 +883,17 @@ const state = {
 
 loadLevel(state, LEVELS[0].id);
 
-// Zooms out so the water column (y=0..SEABED_FLOOR_Y) fits within
-// CAMERA_WATER_COLUMN_FIT_FRACTION of the viewport height — deliberately a
-// bit less than 100%, so a sliver of the seabed city is always visible
-// below it. That keeps feeding/collecting free of vertical panning while
-// still cueing that there's a city to scroll down to. Never zooms in past
-// 1x on a tall window; recomputed on every resize. Once the player has
-// clicked the minimap's expand/minimize button at least once (tankZoomMode
-// no longer null — see that button's own comment), THAT explicit choice
-// takes over here instead, including across a later window resize, until
-// the button is clicked again.
+// The game now STARTS in 'width' mode (tankZoomMode's own default, above),
+// so this function's own water-column-height fraction formula only ever
+// actually applies once the player has toggled tankZoomMode back to null...
+// which never happens any more (toggleTankZoomMode only ever switches
+// between 'whole' and 'width') — kept as the fallback formula regardless,
+// both for that plain "not set yet" case and as a documented reference for
+// what the OLD default used to be: zooms out so the water column
+// (y=0..SEABED_FLOOR_Y) fits within CAMERA_WATER_COLUMN_FIT_FRACTION of the
+// viewport height, deliberately a bit less than 100%, so a sliver of the
+// seabed city is always visible below it. Never zooms in past 1x on a tall
+// window. Recomputed on every resize either way.
 function fitCameraZoom() {
   if (tankZoomMode === 'whole') state.camera.zoom = computeFitWholeTankZoom();
   else if (tankZoomMode === 'width') state.camera.zoom = computeFitWidthZoom();
@@ -2576,6 +2673,27 @@ input.keydownHandlers.push((e) => {
     }
     return;
   }
+  // Per direct request ("make it so that during tutorials you can use
+  // hotkeys 1-3 to toggle the tools on or off, in case they are on and need
+  // to be turned off for the tutorial") — a third exception to "every hotkey
+  // is swallowed during a tutorial," alongside Escape/KeyE above. selectTool
+  // already toggles (re-pressing an already-armed tool's own hotkey clears
+  // back to the plain cursor — see its own comment), so this reuses it
+  // completely unchanged rather than duplicating that logic; Merge's own
+  // isMergeToolAvailable already gates itself correctly during a tutorial
+  // (blocked by any OTHER flow, allowed by the 'mergefish' flow itself).
+  // Also records state.ui.tutorialToolOverrideStep (see its own comment) so
+  // UI.js's per-frame "keep the step's own required tool selected" self-heal
+  // doesn't immediately stomp this deliberate toggle back on the very next
+  // frame — every real tutorial step specifies a required tool, so without
+  // this the toggle would be functionally invisible (on for one frame, then
+  // silently reverted).
+  if (state.level.tutorialFlow) {
+    const flow = state.level.tutorialFlow;
+    if (e.code === 'Digit1') { selectTool(state, 'food'); state.ui.tutorialToolOverrideStep = `${flow.id}:${flow.step}`; return; }
+    if (e.code === 'Digit2') { selectTool(state, 'merge'); state.ui.tutorialToolOverrideStep = `${flow.id}:${flow.step}`; return; }
+    if (e.code === 'Digit3') { selectTool(state, 'blueprint'); state.ui.tutorialToolOverrideStep = `${flow.id}:${flow.step}`; return; }
+  }
   // Guided tutorial flows (see UI.js's TUTORIAL_FLOWS) swallow every OTHER
   // hotkey, same reasoning as the cinematic intro above — the overlay's own
   // click-through "hole" is the only interaction that should work.
@@ -4049,12 +4167,16 @@ function updateCanvasCursor() {
 
 // ---- Sea Turtle ambience convoy ----
 // See Config.js's "Sea Turtle" section for the full rationale. Every field
-// here is plain SCREEN space, not world space — the whole convoy travels at
-// a fixed height under #notification-ticker regardless of camera scroll or
-// zoom, same idea as Ambience.js's renderWaterSurface. Only the coin it
-// carries (a real state.level.items entry) is ever converted to world space,
-// via screenToWorld, so it renders/click-banks through every existing coin
-// code path with zero special-casing there.
+// here is plain WORLD space, exactly like a fish or any other creature — per
+// direct follow-up request ("the turtles should have a fixed position in
+// the world, they should not scroll down with me if I scroll down... they
+// should be rendered within the world like everything else"), reverting an
+// earlier screen-space-pinned design. The convoy sits at a fixed WORLD y
+// (SEA_TURTLE_WORLD_Y, near the very top of the tank) — scroll down and it
+// scrolls up out of view exactly like a shallow-swimming fish would, rather
+// than staying glued under the chat pill regardless of camera position. Its
+// coin (a real state.level.items entry) needs no conversion any more since
+// both it and the turtle now live in the same coordinate space.
 //
 // Driven entirely by REAL wall-clock ms, read fresh every render() call
 // (which itself always runs once per real rAF frame no matter what
@@ -4069,19 +4191,21 @@ let lastSeaTurtleRealMs = null;
 const SEA_TURTLE_STALL_CLAMP_MS = 250;
 
 // index 0 = the lead turtle, 1..babyCount = trailing kids. A baby's x lags
-// the leader by a flat screen-space offset, and its bob phase is delayed by
+// the leader by a flat WORLD-space offset, and its bob phase is delayed by
 // exactly the time it'd take to cover that same offset at cruise speed — the
 // two together mean a baby always shows the EXACT y the leader itself had
 // when it was at that same x, i.e. a baby genuinely retraces the leader's
 // own path instead of just approximating it, which is what makes the whole
-// convoy read as "following," not just "in formation."
+// convoy read as "following," not just "in formation." Returns plain WORLD
+// coordinates — callers convert via worldToScreen/screenToWorld exactly like
+// every other world-space entity in the game.
 function seaTurtleMemberPosition(turtle, index) {
   const spacing = index * SEA_TURTLE_BABY_SPACING_PX;
-  const leaderX = turtle.startScreenX + (turtle.elapsedMs / 1000) * SEA_TURTLE_SPEED_PX_PER_S;
+  const leaderX = turtle.startWorldX + (turtle.elapsedMs / 1000) * SEA_TURTLE_SPEED_PX_PER_S;
   const x = leaderX - spacing;
   const delayS = spacing / SEA_TURTLE_SPEED_PX_PER_S;
   const bobAngle = ((turtle.elapsedMs / 1000 - delayS) / (SEA_TURTLE_BOB_PERIOD_MS / 1000)) * Math.PI * 2;
-  const y = SEA_TURTLE_SCREEN_Y + Math.sin(bobAngle) * SEA_TURTLE_BOB_AMPLITUDE_PX;
+  const y = SEA_TURTLE_WORLD_Y + Math.sin(bobAngle) * SEA_TURTLE_BOB_AMPLITUDE_PX;
   return { x, y, bobAngle };
 }
 
@@ -4098,16 +4222,21 @@ function seaTurtleMemberScale(index, babyCount) {
 function spawnSeaTurtle(state) {
   const babyCount = SEA_TURTLE_BABY_MIN_COUNT + Math.floor(Math.random() * (SEA_TURTLE_BABY_MAX_COUNT - SEA_TURTLE_BABY_MIN_COUNT + 1));
   // Far enough left that the ENTIRE convoy (leader plus every trailing baby)
-  // starts fully off the left edge, not just the leader.
-  const startScreenX = -(SEA_TURTLE_RADIUS_PX * 2 + babyCount * SEA_TURTLE_BABY_SPACING_PX + 40);
-  const turtle = { startScreenX, elapsedMs: 0, babyCount, coinItemId: null, bubbleTimerMs: 0 };
+  // starts fully off the left edge of the CURRENT viewport, not just the
+  // leader — screenToWorld's own -150 screen-px margin (comfortably
+  // off-screen regardless of zoom, since camera.x is always 0) is the
+  // leader's OWN starting point; every trailing baby then needs that same
+  // margin again on top of its own spacing lag, or it'd still be
+  // (partially) on-screen the instant the leader itself first appears.
+  const offscreenLeftWorldX = screenToWorld(-150, 0, state.camera).x;
+  const startWorldX = offscreenLeftWorldX - babyCount * SEA_TURTLE_BABY_SPACING_PX;
+  const turtle = { startWorldX, elapsedMs: 0, babyCount, coinItemId: null, bubbleTimerMs: 0 };
   // Per direct request — $50 base, plus $50 for every sea-turtle coin ever
   // collected THIS level so far (Config.js's own comment has the full
   // worked example). Every other coin in the game is untouched by this.
   const coinValue = SEA_TURTLE_COIN_BASE_VALUE + SEA_TURTLE_COIN_VALUE_PER_COLLECT * (state.level.seaTurtleCoinCollectCount || 0);
   const leadPos = seaTurtleMemberPosition(turtle, 0);
-  const coinWorld = screenToWorld(leadPos.x, leadPos.y - SEA_TURTLE_RADIUS_PX * 0.55, state.camera);
-  const coin = createCoin(coinWorld.x, coinWorld.y, coinValue);
+  const coin = createCoin(leadPos.x, leadPos.y - SEA_TURTLE_RADIUS_PX * 0.55, coinValue);
   coin.seaTurtleAttached = true; // exempts it from gravity in Entities.js's updateCoin — this function's own per-frame follow below is what actually moves it
   coin.vx = 0;
   coin.vy = 0;
@@ -4154,9 +4283,8 @@ function updateSeaTurtle(state, nowMs) {
       turtle.coinItemId = null; // banked (or otherwise removed) elsewhere this tick
     } else {
       const leadPos = seaTurtleMemberPosition(turtle, 0);
-      const coinWorld = screenToWorld(leadPos.x, leadPos.y - SEA_TURTLE_RADIUS_PX * 0.55, state.camera);
-      coin.x = coinWorld.x;
-      coin.y = coinWorld.y;
+      coin.x = leadPos.x;
+      coin.y = leadPos.y - SEA_TURTLE_RADIUS_PX * 0.55;
     }
   }
 
@@ -4169,16 +4297,20 @@ function updateSeaTurtle(state, nowMs) {
   if (turtle.bubbleTimerMs <= 0) {
     turtle.bubbleTimerMs += SEA_TURTLE_BUBBLE_INTERVAL_MS;
     const tailPos = seaTurtleMemberPosition(turtle, turtle.babyCount);
-    const tailWorld = screenToWorld(tailPos.x, tailPos.y, state.camera);
-    spawnSeaTurtleBubble(tailWorld.x, tailWorld.y);
+    spawnSeaTurtleBubble(tailPos.x, tailPos.y);
   }
 
-  // Done once the LAST (furthest-back) member has cleared the right edge —
-  // per direct spec, the next cooldown doesn't start until the whole convoy
-  // (coin collected or not) is off-screen.
-  const exitScreenX = canvas.width + SEA_TURTLE_RADIUS_PX + turtle.babyCount * SEA_TURTLE_BABY_SPACING_PX + 40;
-  const leaderX = turtle.startScreenX + (turtle.elapsedMs / 1000) * SEA_TURTLE_SPEED_PX_PER_S;
-  if (leaderX >= exitScreenX) {
+  // Done once the LAST (furthest-back) member has cleared the right edge of
+  // the CURRENT viewport — per direct spec, the next cooldown doesn't start
+  // until the whole convoy (coin collected or not) is off-screen. Checked in
+  // SCREEN space (worldToScreen) rather than a flat world-unit threshold
+  // since "off the right edge" is inherently a viewport-relative idea — a
+  // world-space convoy at a fixed zoom would otherwise take a wildly
+  // different amount of real time to "exit" depending on how zoomed in the
+  // player happens to be.
+  const tailPos = seaTurtleMemberPosition(turtle, turtle.babyCount);
+  const tailScreenX = worldToScreen(tailPos.x, tailPos.y, state.camera).x;
+  if (tailScreenX >= canvas.width + SEA_TURTLE_RADIUS_PX * state.camera.zoom + 20) {
     // An uncollected coin leaves WITH the turtle rather than being abandoned
     // mid-air off-screen with gravity suddenly switched back on for it.
     if (turtle.coinItemId != null) {
@@ -4205,9 +4337,10 @@ function updateSeaTurtle(state, nowMs) {
 // radii out — per a further follow-up, that's tuned so the shell (painted
 // right after this whole pass) covers almost exactly the near half of it,
 // so it reads as "emerging from under the shell" rather than starting
-// clear of it.
-function drawSeaTurtleWake(ctx, x, y, scale, waterCurrentPhase) {
-  const r = SEA_TURTLE_RADIUS_PX * scale;
+// clear of it. Takes x/y/r already converted to SCREEN space/pixels (see
+// renderSeaTurtle) — same worldToScreen-then-draw convention every other
+// world-space creature in this game follows.
+function drawSeaTurtleWake(ctx, x, y, r, waterCurrentPhase) {
   ctx.save();
   ctx.translate(x, y);
   for (let i = 0; i < SEA_TURTLE_WAKE_SEGMENT_COUNT; i++) {
@@ -4224,11 +4357,11 @@ function drawSeaTurtleWake(ctx, x, y, scale, waterCurrentPhase) {
   ctx.restore();
 }
 
-// One turtle-shaped shell+head+flippers, drawn directly in screen space
-// (no worldToScreen — see this section's own header comment). facingRight is
-// always true (the whole convoy only ever swims left to right, per spec).
-function drawOneSeaTurtleMember(ctx, x, y, scale, bobAngle) {
-  const r = SEA_TURTLE_RADIUS_PX * scale;
+// One turtle-shaped shell+head+flippers. x/y/r are already SCREEN space/
+// pixels (converted by renderSeaTurtle via worldToScreen, same as every
+// other world-space creature in this game) — facingRight is always true
+// (the whole convoy only ever swims left to right, per spec).
+function drawOneSeaTurtleMember(ctx, x, y, r, bobAngle) {
   const flipperSwing = Math.sin(bobAngle * 1.6) * 0.5;
   ctx.save();
   ctx.translate(x, y);
@@ -4292,19 +4425,27 @@ function renderSeaTurtle(ctx, state, canvasWidth, canvasHeight) {
   const turtle = state.level.seaTurtle;
   if (!turtle) return;
   const waterCurrentPhase = turtle.elapsedMs / 260;
+  const zoom = state.camera.zoom;
   const visibleMembers = [];
   for (let i = turtle.babyCount; i >= 0; i--) {
     // Tail-first order, same front-to-back layering a real convoy swimming
     // in a line would have — kept for the shell pass below (so the leader
     // still overlaps its own trailing kids); the wake pass ahead of it
     // doesn't actually depend on this order (see drawSeaTurtleWake's own
-    // comment on why it's a fully separate pass now).
-    const pos = seaTurtleMemberPosition(turtle, i);
-    if (pos.x < -SEA_TURTLE_RADIUS_PX * 3 || pos.x > canvasWidth + SEA_TURTLE_RADIUS_PX * 3) continue;
-    visibleMembers.push({ pos, scale: seaTurtleMemberScale(i, turtle.babyCount), i });
+    // comment on why it's a fully separate pass now). worldPos is plain
+    // WORLD space (seaTurtleMemberPosition's own return) — converted to a
+    // real screen position/radius here via worldToScreen, exactly like
+    // every other world-space creature this game renders, per direct
+    // request ("rendered within the world like everything else").
+    const worldPos = seaTurtleMemberPosition(turtle, i);
+    const screen = worldToScreen(worldPos.x, worldPos.y, state.camera);
+    const scale = seaTurtleMemberScale(i, turtle.babyCount);
+    const r = SEA_TURTLE_RADIUS_PX * scale * zoom;
+    if (screen.x < -r * 3 || screen.x > canvasWidth + r * 3 || screen.y < -r * 3 || screen.y > canvasHeight + r * 3) continue;
+    visibleMembers.push({ x: screen.x, y: screen.y, r, bobAngle: worldPos.bobAngle, i });
   }
-  for (const m of visibleMembers) drawSeaTurtleWake(ctx, m.pos.x, m.pos.y, m.scale, waterCurrentPhase + m.i * 0.7);
-  for (const m of visibleMembers) drawOneSeaTurtleMember(ctx, m.pos.x, m.pos.y, m.scale, m.pos.bobAngle);
+  for (const m of visibleMembers) drawSeaTurtleWake(ctx, m.x, m.y, m.r, waterCurrentPhase + m.i * 0.7);
+  for (const m of visibleMembers) drawOneSeaTurtleMember(ctx, m.x, m.y, m.r, m.bobAngle);
 }
 
 function render() {
@@ -4696,6 +4837,7 @@ function render() {
       ctx.beginPath();
       ctx.arc(pos.x - item.radius * 0.32, pos.y - item.radius * 0.32, item.radius * 0.24, 0, Math.PI * 2);
       ctx.fill();
+      drawCoinDollarMark(ctx, pos.x, pos.y, item.radius);
       continue;
     }
 
@@ -4719,6 +4861,11 @@ function render() {
       ctx.beginPath();
       ctx.arc(pos.x - item.radius * 0.32, pos.y - item.radius * 0.32, item.radius * 0.28, 0, Math.PI * 2);
       ctx.fill();
+      continue;
+    }
+
+    if (item.type === 'waste') {
+      drawWastePoop(ctx, pos.x, pos.y, item.radius);
       continue;
     }
 
@@ -4748,6 +4895,7 @@ function render() {
     ctx.beginPath();
     ctx.arc(pos.x - item.radius * 0.32, pos.y - item.radius * 0.32, item.radius * 0.32, 0, Math.PI * 2);
     ctx.fill();
+    if (item.type === 'coin') drawCoinDollarMark(ctx, pos.x, pos.y, item.radius);
   }
 
   for (const ft of state.level.floatingTexts) {
@@ -5765,8 +5913,7 @@ function render() {
       ctx.save();
       ctx.globalAlpha = 0.55;
       ctx.fillStyle = WASTE_COLOR;
-      ctx.beginPath();
-      ctx.arc(screen.x, screen.y, WASTE_RADIUS * state.camera.zoom, 0, Math.PI * 2);
+      tracePoopBlobPath(ctx, screen.x, screen.y, WASTE_RADIUS * state.camera.zoom);
       ctx.fill();
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.85)';
       ctx.lineWidth = 1.5;

@@ -2005,30 +2005,34 @@ export const TURRET_IMPACT_EFFECT_DURATION_MS = 220;
 // Per direct request: every 40-50s (real time — narrowed from an original
 // 30-90s per a direct follow-up, "just random enough that they can't time
 // it, but not so random they are penalized by luck"), a big sea turtle
-// swims in from the top-left of the SCREEN (under the notification/"chat"
-// pill), trailed by 2-4 progressively smaller "kid" turtles, until the
-// whole convoy clears the right edge — only THEN does the next 40-50s
-// cooldown start (see main.js's updateSeaTurtle). Carries a real,
-// click-bankable coin on the lead turtle's back. Deliberately driven by
-// REAL wall-clock ms, never dtMs — per direct spec, Pause Time / 2x Speed /
-// the debug time-scale cheat must never touch its timer, its travel speed,
-// or its bob/leg animation. Positioned and animated in plain SCREEN space
-// (not worldToScreen'd), same "fixed relative to the viewport, not the
-// scrolling/zoomable world" idea as Ambience.js's renderWaterSurface — it
-// should always pass under the pill regardless of camera scroll or zoom.
-// Only the coin it carries is a real world-space item (state.level.items),
-// so it renders/click-banks through every existing coin code path with zero
-// special-casing there.
+// swims in from the left side of the tank, near the very top of the water
+// column, trailed by 2-4 progressively smaller "kid" turtles, until the
+// whole convoy clears the right edge of the CURRENT viewport — only THEN
+// does the next 40-50s cooldown start (see main.js's updateSeaTurtle).
+// Carries a real, click-bankable coin on the lead turtle's back.
+// Deliberately driven by REAL wall-clock ms, never dtMs — per direct spec,
+// Pause Time / 2x Speed / the debug time-scale cheat must never touch its
+// timer, its travel speed, or its bob/leg animation (a guided tutorial DOES
+// still freeze it, per a later direct follow-up — see updateSeaTurtle's own
+// comment on why that's a different, non-player-driven kind of pause).
+// Positioned and animated in plain WORLD space, exactly like a fish or any
+// other creature — per direct follow-up request ("they should have a fixed
+// position in the world, they should not scroll down with me if I scroll
+// down... rendered within the world like everything else"), reverting an
+// earlier screen-space-pinned design. Scroll away from the top of the tank
+// and the convoy scrolls out of view like anything else would; it's only
+// ever near the notification/"chat" pill while the camera happens to be at
+// the very top.
 export const SEA_TURTLE_SPAWN_MIN_MS = 40000;
 export const SEA_TURTLE_SPAWN_MAX_MS = 50000;
-export const SEA_TURTLE_SPEED_PX_PER_S = 36; // roughly a Guppy's own cruising swimSpeed (35, see SPECIES.guppy)
-export const SEA_TURTLE_SCREEN_Y = 92; // just under #notification-ticker's own ~14px top + ~45px pill height
+export const SEA_TURTLE_SPEED_PX_PER_S = 36; // roughly a Guppy's own cruising swimSpeed (35, see SPECIES.guppy) — a real WORLD px/sec now, same units as swimSpeed
+export const SEA_TURTLE_WORLD_Y = 120; // world-y the convoy swims at — near the very top of the water column (SEABED_FLOOR_Y is much further down), similar depth to a shallow-swimming fish
 export const SEA_TURTLE_BOB_AMPLITUDE_PX = 8;
 export const SEA_TURTLE_BOB_PERIOD_MS = 2400;
-export const SEA_TURTLE_RADIUS_PX = 24; // lead turtle's shell half-width, before per-member scale
+export const SEA_TURTLE_RADIUS_PX = 24; // lead turtle's shell half-width (world units), before per-member scale — comparable to FISH_BASE_SIZE (32)
 export const SEA_TURTLE_BABY_MIN_COUNT = 2;
 export const SEA_TURTLE_BABY_MAX_COUNT = 4;
-export const SEA_TURTLE_BABY_SPACING_PX = 58; // screen-space gap between each successive member of the convoy
+export const SEA_TURTLE_BABY_SPACING_PX = 58; // world-space gap between each successive member of the convoy
 export const SEA_TURTLE_BABY_MAX_SCALE = 0.62; // closest (1st) baby, relative to the lead turtle's own size
 export const SEA_TURTLE_BABY_MIN_SCALE = 0.32; // furthest-back baby
 export const SEA_TURTLE_BUBBLE_INTERVAL_MS = 260; // real ms between trailing bubbles — only the LAST (furthest-back, smallest) convoy member emits, per direct request to revert the brief per-member/size-scaled experiment back to how this looked originally

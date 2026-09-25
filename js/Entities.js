@@ -3679,9 +3679,25 @@ export function updateEntities(state, dtMs) {
   // at all this tick. See updateFish's own comment for why this is a hard
   // gate, not a per-fish proximity check.
   const anyAlienAlive = state.level.entities.some((e) => e.type === 'alien' && e.hp > 0);
+  // Per direct request ("fish and aliens should stay paused during
+  // tutorials if they don't already, except for the fish merging
+  // tutorial") — a guided tutorial flow already blocks most of the rest of
+  // the game (see main.js's update() and its own big comment on
+  // state.level.tutorialFlow), but a handful of steps (the "drag Waste into
+  // the Turret"/chest feed/trickle steps) deliberately keep the WHOLE
+  // simulation — this function included — running normally so their own
+  // drag mechanic actually works (see main.js's own comment on why). That
+  // incidentally left fish/aliens free to wander/attack/hunt during those
+  // steps too, which wasn't the intent. Gated here rather than by skipping
+  // this whole function, since the Waste/Chest steps above still need
+  // everything ELSE in this function (item physics, building intake scans,
+  // turret fire) to keep running — only the fish/alien branches below
+  // freeze. The 'mergefish' flow is the one exception, for both its own
+  // steps: its whole point is dragging one live fish onto another.
+  const fishAliensFrozenForTutorial = state.level.tutorialFlow != null && state.level.tutorialFlow.id !== 'mergefish';
   state.level.entities = state.level.entities.filter((entity) => {
-    if (entity.type === 'fish') return updateFish(entity, state, dtMs, anyAlienAlive);
-    if (entity.type === 'alien') return updateAlien(entity, state, dtMs);
+    if (entity.type === 'fish') return fishAliensFrozenForTutorial || updateFish(entity, state, dtMs, anyAlienAlive);
+    if (entity.type === 'alien') return fishAliensFrozenForTutorial || updateAlien(entity, state, dtMs);
     return true;
   });
   for (const spawn of pendingBossMinionSpawns) {

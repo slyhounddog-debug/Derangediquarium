@@ -21,6 +21,7 @@ import {
   MOUND_HEIGHT_PX,
   TIER_UNLOCKS,
   TILE_STORAGE_CHEST,
+  SCIENCE_LAB_UPGRADES,
 } from './Config.js';
 import { worldToScreen } from './Engine.js';
 import { createShimmerTimer, updateShimmerTimer, drawShimmerSweep, UI_SHEEN_SWEEP_DURATION_MS } from './Shimmer.js';
@@ -127,6 +128,59 @@ export function getMoundCrackCount(state) {
 export function canCrackMound(state) {
   if (state.level.tier >= MOUND_MAX_TIER) return false;
   return state.level.money >= getMoundNextCost(state);
+}
+
+// Per direct request ("if the player has 2 times the amount of money/
+// science needed for the mound tier/science node upgrade, have the mound/
+// science lab pulse slowly") — a simple "you've got plenty banked, go spend
+// it" signal. Mound has one obvious "next" cost (getMoundNextCost); read by
+// renderMound below.
+function shouldPulseMound(state) {
+  if (state.level.tier >= MOUND_MAX_TIER) return false;
+  return state.level.money >= getMoundNextCost(state) * 2;
+}
+
+// The Science Lab has no single "next" cost — its tree can have several
+// nodes purchasable at once (prerequisites met, not yet bought) — so this
+// pulses the instant ANY of them would cost the player at most half of what
+// they currently have (in BOTH Science and Gold, since every node charges
+// both — see labNodeHasEnoughScience's own comment in UI.js for the
+// scienceCost:0 "gold-only" case this mirrors). Duplicated from that same
+// "has enough" shape rather than imported — UI.js already imports FROM this
+// file (openMoundMenu/openLabMenu's own hit-tests), so the reverse import
+// isn't available; this only needs the two plain state/data reads, not any
+// of UI.js's own DOM-touching logic.
+function shouldPulseScienceLab(state) {
+  if (state.level.tier < MOUND_MAX_TIER) return false;
+  for (const node of Object.values(SCIENCE_LAB_UPGRADES)) {
+    if (state.meta.labUpgradesPurchased.includes(node.id)) continue;
+    if (!node.requires.every((r) => state.meta.labUpgradesPurchased.includes(r))) continue;
+    const scienceOk = node.scienceCost === 0 || state.level.science >= node.scienceCost * 2;
+    const goldOk = state.level.money >= node.goldCost * 2;
+    if (scienceOk && goldOk) return true;
+  }
+  return false;
+}
+
+// How slowly the glow breathes in/out — per direct request ("pulse
+// slowly"), noticeably gentler than the ~1.1s one-shot shimmer sweep above.
+const PULSE_PERIOD_MS = 2600;
+// A soft glow drawn BEHIND the Mound/Lab's own shape (called before either
+// function's real fill below) rather than a scale-transform of the existing
+// geometry — the Mound's own render already nests a clip + a translated
+// double-stroke per crack, and scaling all of that risked subtly misaligning
+// the crack/branch math against the (unscaled) dome silhouette clip. A
+// pulsing aura behind it reads just as clearly as "this wants attention"
+// without touching any of that.
+function drawPulseGlow(ctx, cx, cy, w, h, elapsedMs) {
+  const pulse = 0.5 + 0.5 * Math.sin((elapsedMs / PULSE_PERIOD_MS) * Math.PI * 2);
+  ctx.save();
+  ctx.globalAlpha = 0.16 + 0.16 * pulse;
+  ctx.fillStyle = '#ffd76b';
+  ctx.beginPath();
+  ctx.ellipse(cx, cy, (w / 2) * (1.08 + 0.08 * pulse), (h / 2) * (1.08 + 0.08 * pulse), 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
 }
 
 export function crackMound(state) {
@@ -250,6 +304,8 @@ export function renderMound(ctx, state) {
   const w = MOUND_WIDTH_PX * camera.zoom;
   const h = (MOUND_HEIGHT_PX + TILE_SIZE) * camera.zoom;
 
+  if (shouldPulseMound(state)) drawPulseGlow(ctx, topLeft.x + w / 2, topLeft.y + h / 2, w, h, state.level.elapsed);
+
   ctx.save();
   ctx.beginPath();
   ctx.moveTo(topLeft.x, topLeft.y + h);
@@ -362,6 +418,8 @@ export function renderScienceLab(ctx, state) {
   const w = MOUND_WIDTH_PX * camera.zoom;
   const h = (MOUND_HEIGHT_PX + TILE_SIZE) * camera.zoom;
   const cx = topLeft.x + w / 2;
+
+  if (shouldPulseScienceLab(state)) drawPulseGlow(ctx, cx, topLeft.y + h / 2, w, h, state.level.elapsed);
 
   // A small rounded structure with a glowing dome — reads as "lab," not
   // "dirt mound," at a glance, still built on the same rubble-base visual

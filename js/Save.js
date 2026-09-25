@@ -104,13 +104,18 @@ export function loadSaveGame() {
     // `turtle.bubbleTimerMs -= realDtMs`, which just goes NaN forever
     // against an object that never had that field (rather than throwing,
     // but just as dead — NaN <= 0 is always false, so the bubble timer would
-    // never fire again for that save). Same "nothing mid-flight survives a
-    // save/load anyway, purely decorative" precedent as the effect arrays
-    // above: treat it as "no turtle currently in flight" and let a fresh one
-    // spawn on its own timer. Its coin (if any) is cleaned up the exact same
-    // way the normal off-screen-exit path already does, so it doesn't linger
-    // as a permanently-ungrabbable, gravity-exempt orphan.
-    if (parsed.level.seaTurtle && typeof parsed.level.seaTurtle.bubbleTimerMs !== 'number') {
+    // never fire again for that save). Likewise, a save written before the
+    // convoy became a real world-space entity has `startScreenX` instead of
+    // `startWorldX` — seaTurtleMemberPosition reads the latter unconditionally
+    // now, and `undefined + n` is NaN, which would silently freeze the whole
+    // convoy off in NaN-position limbo rather than throwing. Same "nothing
+    // mid-flight survives a save/load anyway, purely decorative" precedent
+    // as the effect arrays above either way: treat it as "no turtle
+    // currently in flight" and let a fresh one spawn on its own timer, in
+    // the current shape. Its coin (if any) is cleaned up the exact same way
+    // the normal off-screen-exit path already does, so it doesn't linger as
+    // a permanently-ungrabbable, gravity-exempt orphan.
+    if (parsed.level.seaTurtle && (typeof parsed.level.seaTurtle.bubbleTimerMs !== 'number' || typeof parsed.level.seaTurtle.startWorldX !== 'number')) {
       if (parsed.level.seaTurtle.coinItemId != null && Array.isArray(parsed.level.items)) {
         parsed.level.items = parsed.level.items.filter((it) => it.id !== parsed.level.seaTurtle.coinItemId);
       }

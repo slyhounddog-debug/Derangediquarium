@@ -641,10 +641,17 @@ function drawOneKelp(ctx, camera, canvasWidth, k) {
   // Opaque now, same reasoning/fix as drawOneSeaweed's own comment (a
   // shadow fish drawn earlier at this screen position — both are behind
   // kelp in the depth order — used to show straight through the old
-  // alpha:0.55 fill). Lightness bumped 30% -> 38% to compensate for losing
-  // that alpha blend, so it doesn't read as a much heavier/darker blade
-  // than before.
-  ctx.fillStyle = `hsl(${k.hue}, 45%, 38%)`;
+  // alpha:0.55 fill). Per a later direct request ("change the tall seaweed
+  // so it blends into the background more, by opacity or color or both") —
+  // saturation dropped hard (45% -> 14%) and lightness raised (38% -> 52%,
+  // closer to the water's own mid-tone) the same "mute it toward the water
+  // gradient while staying fully opaque" technique drawOneSeaweed's own
+  // multiple tuning passes already used, rather than reintroducing real
+  // transparency (which is what caused the original occlusion bug this
+  // opaque fill exists to avoid). Still a hair warmer than the water's blue
+  // so it's not a literal recolor into seaweed's own green, just far less
+  // visually loud than the old solid golden-brown.
+  ctx.fillStyle = `hsl(${k.hue}, 14%, 52%)`;
   ctx.beginPath();
   ctx.moveTo(screen.x - w / 2, screen.y);
   ctx.quadraticCurveTo(screen.x + sway - w * 0.3, screen.y - h * 0.5, screen.x + sway * 0.4, screen.y - h);

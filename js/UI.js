@@ -3091,9 +3091,53 @@ function drawItemIconCanvas(canvas, itemType) {
     ctx.fill();
     return;
   }
-  // Generic flat-fill-plus-rim-and-highlight path — covers Coins, Food,
-  // Waste, Bio-Sludge, and Mutagen Paste (see FLAT_ICON_COLOR_BY_TYPE above)
-  // plus a plain gray fallback for anything unrecognized.
+  if (itemType === 'waste') {
+    // A gently 3-lobed blobby outline (quadratic curves through alternating
+    // near/far control points off one base radius, not stacked separate
+    // circles — keeps it one seamless fillable/strokeable path) — per
+    // direct request ("change waste so it looks more like poop... keep it
+    // mostly sphere shaped, not completely"). Duplicated from main.js's own
+    // tracePoopBlobPath/drawWastePoop — same "each render module draws its
+    // own item art" convention this whole function already follows (see its
+    // own header comment on why main.js can't just be imported from here).
+    const lobes = 3;
+    const steps = lobes * 2;
+    const pts = [];
+    for (let i = 0; i < steps; i++) {
+      const angle = (i / steps) * Math.PI * 2 - Math.PI / 2;
+      const rad = r * (i % 2 === 0 ? 1.18 : 0.84);
+      pts.push({ x: cx + Math.cos(angle) * rad, y: cy + Math.sin(angle) * rad });
+    }
+    ctx.beginPath();
+    const start = pts[steps - 1];
+    const first = pts[0];
+    ctx.moveTo((start.x + first.x) / 2, (start.y + first.y) / 2);
+    for (let i = 0; i < steps; i++) {
+      const next = pts[(i + 1) % steps];
+      ctx.quadraticCurveTo(pts[i].x, pts[i].y, (pts[i].x + next.x) / 2, (pts[i].y + next.y) / 2);
+    }
+    ctx.closePath();
+    ctx.fillStyle = WASTE_COLOR;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.lineWidth = Math.max(1, r * 0.12);
+    ctx.stroke();
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+    ctx.lineWidth = Math.max(1, r * 0.08);
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(cx, cy - r * 0.05, r * 0.48, Math.PI * 0.12, Math.PI * 0.82);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+    ctx.beginPath();
+    ctx.arc(cx - r * 0.3, cy - r * 0.35, r * 0.18, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+  // Generic flat-fill-plus-rim-and-highlight path — covers Coins, Food, and
+  // Mutagen Paste (see FLAT_ICON_COLOR_BY_TYPE above) plus a plain gray
+  // fallback for anything unrecognized. Waste gets its own poop-shaped path
+  // above instead.
   const flatColor = FLAT_ICON_COLOR_BY_TYPE[itemType] || '#cccccc';
   ctx.beginPath();
   ctx.fillStyle = flatColor;
@@ -5431,7 +5475,14 @@ function updateTutorialOverlay(state) {
   // active, not just once on entry, so it's self-healing the same way
   // isFanAimingActive() already is: whatever else might have nudged
   // selectedTool away gets corrected right back on the very next frame.
-  if (stepDef.tool && state.ui.selectedTool !== stepDef.tool) {
+  // Suppressed for exactly this one step by a matching
+  // state.ui.tutorialToolOverrideStep — per a later direct request, the
+  // player can deliberately toggle the tool off (main.js's 1/2/3 hotkey
+  // handler during a tutorial) if it's in the way of something else; this
+  // self-heal would otherwise immediately undo that the very next frame.
+  // The override key is step-scoped (`${flow.id}:${flow.step}`) so it stops
+  // applying the instant the flow moves on, with no separate clear needed.
+  if (stepDef.tool && state.ui.selectedTool !== stepDef.tool && state.ui.tutorialToolOverrideStep !== `${flow.id}:${flow.step}`) {
     state.ui.selectedTool = stepDef.tool;
     updateToolbar(state);
   }

@@ -188,7 +188,7 @@ export function loadLevel(state, levelId) {
     // currently swimming across the screen. Advanced by REAL wall-clock ms
     // (not dtMs), so it's completely immune to Pause Time/2x Speed/the debug
     // time-scale cheat — unlike every other transient effect array here.
-    seaTurtle: null, // { startScreenX, elapsedMs, babyCount, coinItemId, bubbleTimerMs } once spawned
+    seaTurtle: null, // { startWorldX, elapsedMs, babyCount, coinItemId, bubbleTimerMs } once spawned — all WORLD-space, see Config.js's "Sea Turtle" section
     seaTurtleCooldownMs: SEA_TURTLE_SPAWN_MIN_MS + Math.random() * (SEA_TURTLE_SPAWN_MAX_MS - SEA_TURTLE_SPAWN_MIN_MS), // real ms remaining until the NEXT turtle spawns — only ticks down while seaTurtle is null; re-rolled to a fresh random 40-50s value the instant a turtle fully clears the right edge
     seaTurtleCoinCollectCount: 0, // lifetime count of sea-turtle coins actually banked this level — prices every future one (Config.js's SEA_TURTLE_COIN_BASE_VALUE + _VALUE_PER_COLLECT * this), see Entities.js's tryBankCoinAt
     lifetimeMoneyEarned: 0, // real in-play income only (coins banked) — NOT the starting endowment or the bankruptcy bailout gift; see Entities.js's bankMoney and Config.js's MONEY_MILESTONE_1K
