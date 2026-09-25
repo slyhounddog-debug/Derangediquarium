@@ -524,24 +524,26 @@ function tracePoopBlobPath(ctx, cx, cy, r) {
 // waste, but visually make them 10% bigger, so part of the visuals go
 // outside the collision circle... right now it looks like they're floating
 // against other objects because you fit the whole poop within the circle
-// instead of having part of it spill out"), bumped +5%, then +10%, then
-// settled back down to 1.2x total per a further follow-up — always a
+// instead of having part of it spill out"), bumped +5%, then +10%, then back
+// down to 1.2x, then settled at 1.22x — the final tweak, per direct request
+// ("last tweak for the waste... then I'm done tweaking it") — always a
 // purely visual inflation applied only here (and to the tutorial
 // ghost-Waste animation below, so it still looks like a real Waste item),
 // never to the real physics radius (item.radius, WASTE_RADIUS, or mass) two
 // adjacent items' collision circles are actually resolved against — see
 // Grid.js's resolveItemCollisions.
-const WASTE_VISUAL_SCALE = 1.2;
+const WASTE_VISUAL_SCALE = 1.22;
 // Per a direct follow-up ("the main issue is it looks like it's floating on
 // the floor, buildings, or other objects... moving the center of the visual
 // graphic down a tiny bit should fix this, like 10% of the height of the
-// waste") — the poop shape's own drawn center is nudged DOWN by this
-// fraction of its (already-scaled) radius, purely visual same as the scale
-// above: 0.2 * r is 10% of the shape's full height (its own diameter, 2r),
-// so it reads as sitting slightly lower/resting against whatever's beneath
-// it, without moving the real collision circle (still centered on the
-// item's own unmodified x/y) at all.
-const WASTE_VISUAL_Y_OFFSET_FRACTION = 0.2;
+// waste"), then dialed back to 8% as the final tweak — the poop shape's own
+// drawn center is nudged DOWN by this fraction of its (already-scaled)
+// radius, purely visual same as the scale above: 0.16 * r is 8% of the
+// shape's full height (its own diameter, 2r), so it reads as sitting
+// slightly lower/resting against whatever's beneath it, without moving the
+// real collision circle (still centered on the item's own unmodified x/y)
+// at all.
+const WASTE_VISUAL_Y_OFFSET_FRACTION = 0.16;
 
 // Fills/strokes/textures tracePoopBlobPath's outline into a full waste item
 // — the actual reusable "draw one poop" call every render site below uses.
