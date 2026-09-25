@@ -147,6 +147,7 @@ export function loadSaveGame() {
         item.spinCooldownMs = 0;
         item.spinAngleRad = 0;
         item.spinTargetRad = 0;
+        item.spinSettleMs = 0;
       }
     }
     return { meta: parsed.meta, level: parsed.level };

@@ -763,7 +763,18 @@ export const COIN_SPIN_COOLDOWN_MIN_MS = 4000;
 export const COIN_SPIN_COOLDOWN_MAX_MS = 8000; // real ms between spins once a coin has already done its first one, for as long as it keeps sitting still
 export const COIN_SPIN_ROTATIONS_MIN = 1;
 export const COIN_SPIN_ROTATIONS_MAX = 2; // random 1-2 full rotations per spin
-export const COIN_SPIN_MS_PER_ROTATION = 746; // how long one full 360° rotation takes — a 2-rotation spin takes twice as long as a 1-rotation one. Was 500 (a 500/0.67 ≈ 746 bump), per direct request ("slow the coin spin animation by 33%") — a 33% slower rotation SPEED means each rotation takes 1/0.67 as long, not just +33% longer.
+export const COIN_SPIN_MS_PER_ROTATION = 1113; // how long one full 360° rotation takes — a 2-rotation spin takes twice as long as a 1-rotation one. Was 500, then 746 (500/0.67), now 1113 (746/0.67) per a direct follow-up ("slow down the coin spin animation by 33% more") — each further 33% slower rotation SPEED means each rotation takes 1/0.67 as long again, not just +33% longer.
+// A spin's random total (COIN_SPIN_ROTATIONS_MIN..MAX rotations) essentially
+// never lands exactly on a whole rotation, so the coin is still partway
+// squashed (mid-cosine) the instant it finishes — per direct request ("have
+// the visuals transition back to a normal coin instead of snap back...
+// when the animation is done"), main.js's renderer now eases the squash
+// scale from wherever it was at that moment back up to 1 (full width) over
+// this many real ms, instead of item.spinAngleRad resetting to 0 (which
+// reads as scale 1 too) the very same frame the rotation itself stops —
+// see Entities.js's updateCoinSpin (item.spinSettleMs) and main.js's own
+// coinSpinScaleX.
+export const COIN_SPIN_SETTLE_MS = 220;
 
 // ---- Waste (Phase 3 — two sources) ----
 // A third item type alongside food/coin. Spawned two ways: (1) a basic

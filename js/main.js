@@ -4,6 +4,7 @@
 // happens in Entities.js/Levels.js, called from here.
 
 import {
+  COIN_SPIN_SETTLE_MS,
   SPECIES,
   SPECIES_LIST,
   BUILDING_LIST,
@@ -499,6 +500,31 @@ function drawCoinDollarMark(ctx, x, y, radius, coinColorHex) {
   ctx.fillStyle = lerpRgbToString(hexToRgb(coinColorHex), { r: 0, g: 0, b: 0 }, 0.2);
   ctx.fillText('$', x, textY);
   ctx.restore();
+}
+
+// The idle-spin horizontal squash factor for one coin — Math.abs so the
+// "back half" of a rotation thins to an edge-on sliver rather than
+// mirroring the "$" into backwards text (a flat coin's face is symmetric
+// either way). A spin's random total (Entities.js's updateCoinSpin) almost
+// never lands the rotation exactly on a whole turn, so item.spinAngleRad is
+// still mid-cosine the instant the rotation itself stops — per direct
+// request ("have the visuals transition back to a normal coin instead of
+// snap back... when the animation is done"), item.spinSettleMs (also owned
+// by updateCoinSpin) counts down over a short window right after that,
+// during which THIS function eases the drawn scale from that frozen
+// mid-spin value up to 1 (smoothstep, for a natural ease-out) instead of
+// jumping there in a single frame. Reads as scale 1 (a no-op transform)
+// whenever neither spinAngleRad nor spinSettleMs is set, i.e. the coin
+// isn't currently spinning or settling — the common case, so this stays
+// free the rest of the time.
+function coinSpinScaleX(item) {
+  const raw = Math.abs(Math.cos(item.spinAngleRad || 0));
+  if (item.spinSettleMs > 0) {
+    const t = 1 - item.spinSettleMs / COIN_SPIN_SETTLE_MS;
+    const eased = t * t * (3 - 2 * t);
+    return raw + (1 - raw) * eased;
+  }
+  return raw;
 }
 
 // Every non-diamond coin tier's real render — per direct request ("rework
@@ -4953,16 +4979,12 @@ function render() {
       // coin") instead of the flat single-color fill every other coin tier
       // gets below.
       // Idle spin — per direct request ("add a coin spinning animation if a
-      // coin hasn't moved for more than 3 seconds"). Entities.js's
-      // updateCoinSpin owns all the timing/state (item.spinAngleRad); this
-      // just squashes the WHOLE gem drawing horizontally around its own
-      // center, Math.abs so the "back half" of a rotation thins down to an
-      // edge-on sliver rather than mirroring anything (a plain circular gem
-      // is symmetric either way, and abs keeps the "$" glyph below from ever
-      // rendering as backwards/mirrored text). A no-op transform (scale 1)
-      // whenever spinAngleRad is 0 (not currently spinning, the common
-      // case), so this is free the rest of the time.
-      const spinScaleX = Math.abs(Math.cos(item.spinAngleRad || 0));
+      // coin hasn't moved for more than 3 seconds"). Squashes the WHOLE gem
+      // drawing horizontally around its own center — see coinSpinScaleX's
+      // own comment for the full rationale (including the ease-back-to-
+      // normal settle phase) and why this stays a free no-op the rest of
+      // the time.
+      const spinScaleX = coinSpinScaleX(item);
       ctx.save();
       ctx.translate(pos.x, pos.y);
       ctx.scale(spinScaleX, 1);
@@ -5006,14 +5028,12 @@ function render() {
 
     if (item.type === 'coin') {
       // Idle spin — per direct request ("add a coin spinning animation if a
-      // coin hasn't moved for more than 3 seconds"). Entities.js's
-      // updateCoinSpin owns all the timing/state (item.spinAngleRad); this
-      // squashes the WHOLE flat-coin drawing horizontally around its own
-      // center, Math.abs so the "back half" of a rotation thins to an
-      // edge-on sliver rather than mirroring the "$" into backwards text. A
-      // no-op transform (scale 1) whenever spinAngleRad is 0 (the common,
-      // not-currently-spinning case), so this is free the rest of the time.
-      const spinScaleX = Math.abs(Math.cos(item.spinAngleRad || 0));
+      // coin hasn't moved for more than 3 seconds"). Squashes the WHOLE
+      // flat-coin drawing horizontally around its own center — see
+      // coinSpinScaleX's own comment for the full rationale (including the
+      // ease-back-to-normal settle phase) and why this stays a free no-op
+      // the rest of the time.
+      const spinScaleX = coinSpinScaleX(item);
       ctx.save();
       ctx.translate(pos.x, pos.y);
       ctx.scale(spinScaleX, 1);

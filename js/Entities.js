@@ -19,6 +19,7 @@ import {
   COIN_SPIN_ROTATIONS_MIN,
   COIN_SPIN_ROTATIONS_MAX,
   COIN_SPIN_MS_PER_ROTATION,
+  COIN_SPIN_SETTLE_MS,
   FISH_EAT_RADIUS,
   HUNGER_MAX,
   HUNGER_SEEK_THRESHOLD,
@@ -561,8 +562,9 @@ export function createCoin(x, y, value) {
     spinStationaryOriginY: y,
     spinIdleTimerMs: 0,
     spinCooldownMs: 0,
-    spinAngleRad: 0, // current in-progress rotation angle this burst, 0 while not spinning — main.js's renderer reads this directly
-    spinTargetRad: 0, // how far (in radians) the CURRENT spin burst goes before it ends, 0 while not spinning
+    spinAngleRad: 0, // current in-progress rotation angle this burst, 0 while not spinning — also read directly by main.js's coinSpinScaleX during the settle phase below (frozen at whatever it was when the rotation itself stopped)
+    spinTargetRad: 0, // how far (in radians) the CURRENT spin burst's rotation phase goes before it stops, 0 while not actively rotating
+    spinSettleMs: 0, // counts down during the brief "ease back to normal" phase right after a spin's rotation ends, 0 the rest of the time — see updateCoinSpin's own comment
   };
 }
 
@@ -2095,9 +2097,9 @@ function updateFood(item, state, dtMs) {
 // Idle spin animation bookkeeping — per direct request ("add a coin
 // spinning animation if a coin hasn't moved for more than 3 seconds. spin
 // periodically 1-2 rotations. this shouldn't change any physics or the
-// collision box"). Purely visual: only ever writes item.spinAngleRad
-// (main.js's item render loop reads it to squash-scale the drawn coin
-// horizontally) — never item.radius/mass/velocity/position, so the real
+// collision box"). Purely visual: only ever writes item.spinAngleRad/
+// spinSettleMs (main.js's item render loop reads both — see its own
+// coinSpinScaleX) — never item.radius/mass/velocity/position, so the real
 // physics/collision circle are completely untouched. Position-based
 // stationary detection, same precedent as updateFood's own
 // stationary-to-Waste tracking above (see its own comment for why position,
@@ -2108,6 +2110,19 @@ function updateFood(item, state, dtMs) {
 // threshold rather than reset — spinCooldownMs alone gates every
 // subsequent spin from then on, which is what makes it repeat
 // periodically for as long as the coin keeps sitting still.
+//
+// The random total (COIN_SPIN_ROTATIONS_MIN..MAX rotations) essentially
+// never lands the rotation phase exactly on a whole turn, so the coin is
+// still partway squashed the instant it stops — per direct follow-up
+// ("transition back... instead of snap back... when the animation is
+// done"), the rotation phase's own end no longer resets spinAngleRad
+// straight to 0 (which is what caused the snap, since scale reads 1 there
+// too — an instant jump from whatever mid-cosine value it just was).
+// Instead it freezes spinAngleRad exactly where it stopped and starts a
+// short spinSettleMs countdown; main.js's coinSpinScaleX eases the drawn
+// scale from that frozen value up to 1 over that window, and only once it
+// finishes does spinAngleRad actually reset to 0 and the real cooldown
+// begin.
 function updateCoinSpin(item, dtMs) {
   const movedPx = Math.hypot(item.x - item.spinStationaryOriginX, item.y - item.spinStationaryOriginY);
   if (movedPx > COIN_SPIN_STATIONARY_TOLERANCE_PX) {
@@ -2117,13 +2132,22 @@ function updateCoinSpin(item, dtMs) {
     item.spinCooldownMs = 0;
     item.spinAngleRad = 0;
     item.spinTargetRad = 0;
+    item.spinSettleMs = 0;
     return;
   }
   if (item.spinTargetRad > 0) {
     item.spinAngleRad += ((Math.PI * 2) / COIN_SPIN_MS_PER_ROTATION) * dtMs;
     if (item.spinAngleRad >= item.spinTargetRad) {
+      item.spinTargetRad = 0; // rotation phase over — spinAngleRad deliberately left as-is here, see this function's own header comment
+      item.spinSettleMs = COIN_SPIN_SETTLE_MS;
+    }
+    return;
+  }
+  if (item.spinSettleMs > 0) {
+    item.spinSettleMs -= dtMs;
+    if (item.spinSettleMs <= 0) {
+      item.spinSettleMs = 0;
       item.spinAngleRad = 0;
-      item.spinTargetRad = 0;
       item.spinCooldownMs = COIN_SPIN_COOLDOWN_MIN_MS + Math.random() * (COIN_SPIN_COOLDOWN_MAX_MS - COIN_SPIN_COOLDOWN_MIN_MS);
     }
     return;
