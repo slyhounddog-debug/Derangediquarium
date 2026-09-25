@@ -524,15 +524,15 @@ function tracePoopBlobPath(ctx, cx, cy, r) {
 // waste, but visually make them 10% bigger, so part of the visuals go
 // outside the collision circle... right now it looks like they're floating
 // against other objects because you fit the whole poop within the circle
-// instead of having part of it spill out"), bumped again per a direct
-// follow-up ("make the waste 5% bigger visually without changing any
-// collision boxes or physics or mass") — a purely visual inflation applied
-// only here (and to the tutorial ghost-Waste animation below, so it still
-// looks like a real Waste item), never to the real physics radius
-// (item.radius, WASTE_RADIUS, or mass) two adjacent items' collision
-// circles are actually resolved against — see Grid.js's
+// instead of having part of it spill out"), bumped +5% ("make the waste 5%
+// bigger visually without changing any collision boxes or physics or
+// mass"), then +10% again ("it's almost done floating") — a purely visual
+// inflation applied only here (and to the tutorial ghost-Waste animation
+// below, so it still looks like a real Waste item), never to the real
+// physics radius (item.radius, WASTE_RADIUS, or mass) two adjacent items'
+// collision circles are actually resolved against — see Grid.js's
 // resolveItemCollisions.
-const WASTE_VISUAL_SCALE = 1.15;
+const WASTE_VISUAL_SCALE = 1.25;
 
 // Fills/strokes/textures tracePoopBlobPath's outline into a full waste item
 // — the actual reusable "draw one poop" call every render site below uses.
