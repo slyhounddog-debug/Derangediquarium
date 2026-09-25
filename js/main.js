@@ -85,6 +85,12 @@ import {
   TURRET_IMPACT_EFFECT_DURATION_MS,
   COIN_SPARKLE_EFFECT_DURATION_MS,
   COIN_SPARKLE_COLOR,
+  FISH_GROWTH_ORBIT_RADIUS_PX,
+  FISH_GROWTH_ORBIT_FOOD_RADIUS_PX,
+  FISH_GROWTH_ORBIT_TRAIL_ARC_RAD,
+  FISH_GROWTH_ABSORB_DURATION_MS,
+  FISH_GROWTH_EFFECT_DURATION_MS,
+  FISH_GROWTH_EFFECT_COLOR,
   COIN_RADIUS,
   PRODUCTION_BLOCKED_EFFECT_DURATION_MS,
   FISH_BUBBLE_LIFETIME_MS,
@@ -147,6 +153,7 @@ import {
   spawnTurretTutorialWaste,
   spawnChestTutorialWaste,
   materializeChestSpawnPoints,
+  computeGrowthOrbitPosition,
 } from './Entities.js';
 import {
   renderSeabedGrid,
@@ -4890,6 +4897,42 @@ function render() {
       ctx.fillStyle = hungerIconColor;
       ctx.fill();
     }
+
+    // Growth-feed-streak orbiting food + trail — per direct request, one
+    // small food-and-trail visual per pre-critical feed so far (0-2 shown
+    // at once; the 3rd converts both into the fly-in + particle burst
+    // rendered in a separate pass below, instead of adding a 3rd). Smaller
+    // than a real Food pellet (FISH_GROWTH_ORBIT_FOOD_RADIUS_PX <
+    // FOOD_RADIUS) so it never reads as an actual edible item.
+    for (let i = 0; i < (fish.growthFeedStreak || 0); i++) {
+      const orbit = computeGrowthOrbitPosition(fish, i, state.level.elapsed);
+      const opos = worldToScreen(orbit.x, orbit.y, state.camera);
+      const r = FISH_GROWTH_ORBIT_FOOD_RADIUS_PX * state.camera.zoom;
+      // Fading trail — a handful of short segments walking back along the
+      // same circle from the food's current angle, each dimmer than the
+      // last, rather than one flat-opacity stroke.
+      ctx.save();
+      ctx.strokeStyle = FOOD_COLOR;
+      ctx.lineWidth = Math.max(1, r * 0.9);
+      ctx.lineCap = 'round';
+      const trailSteps = 6;
+      for (let s = 1; s <= trailSteps; s++) {
+        const aStart = orbit.angle - ((s - 1) / trailSteps) * FISH_GROWTH_ORBIT_TRAIL_ARC_RAD;
+        const aEnd = orbit.angle - (s / trailSteps) * FISH_GROWTH_ORBIT_TRAIL_ARC_RAD;
+        const p1 = worldToScreen(fish.x + Math.cos(aStart) * FISH_GROWTH_ORBIT_RADIUS_PX, fish.y + Math.sin(aStart) * FISH_GROWTH_ORBIT_RADIUS_PX, state.camera);
+        const p2 = worldToScreen(fish.x + Math.cos(aEnd) * FISH_GROWTH_ORBIT_RADIUS_PX, fish.y + Math.sin(aEnd) * FISH_GROWTH_ORBIT_RADIUS_PX, state.camera);
+        ctx.globalAlpha = 0.3 * (1 - s / trailSteps);
+        ctx.beginPath();
+        ctx.moveTo(p1.x, p1.y);
+        ctx.lineTo(p2.x, p2.y);
+        ctx.stroke();
+      }
+      ctx.restore();
+      ctx.beginPath();
+      ctx.fillStyle = FOOD_COLOR;
+      ctx.arc(opos.x, opos.y, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
 
   // Off-screen critical-hunger notification bubbles — per direct request
@@ -5118,6 +5161,80 @@ function render() {
     const coreR = 14 * state.camera.zoom * (1 - t * 0.6);
     const grad = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, coreR);
     grad.addColorStop(0, `rgba(255, 255, 255, ${alpha * 0.8})`);
+    grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, coreR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Growth-feed-streak fly-in — the two orbiting food bits converging on
+  // the fish on its 3rd pre-critical feed, per direct request. Looks the
+  // fish up fresh by id every frame (rather than caching a reference) so it
+  // correctly tracks a fish that's still swimming around while this plays;
+  // if the fish is somehow already gone (died mid-animation), it just skips
+  // drawing that piece for the rest of its natural age-out instead of
+  // erroring. Purely decorative — see Entities.js's updateFish (pushes) /
+  // updateFishGrowthAbsorbEffects (culls).
+  for (const effect of state.level.fishGrowthAbsorbEffects) {
+    const targetFish = state.level.entities.find((e) => e.id === effect.fishId && e.type === 'fish');
+    if (!targetFish) continue;
+    const t = Math.min(1, effect.age / FISH_GROWTH_ABSORB_DURATION_MS);
+    const ease = t * t; // accelerates in, reads as being "pulled" toward the fish
+    const worldX = effect.startX + (targetFish.x - effect.startX) * ease;
+    const worldY = effect.startY + (targetFish.y - effect.startY) * ease;
+    const pos = worldToScreen(worldX, worldY, state.camera);
+    if (pos.x < -30 || pos.x > canvas.width + 30 || pos.y < -30 || pos.y > canvas.height + 30) continue;
+    const r = FISH_GROWTH_ORBIT_FOOD_RADIUS_PX * state.camera.zoom * (1 - t * 0.4);
+    ctx.save();
+    ctx.globalAlpha = 1 - t * 0.2;
+    ctx.fillStyle = FOOD_COLOR;
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Grow-to-adult particle burst — shared by the growth-feed-streak
+  // conversion above AND Mutagen Paste's own instant Adult growth, per
+  // direct request ("use this same particle animation whenever a fish eats
+  // mutagen paste"). An expanding ring plus radiating sparkle particles
+  // (same overall shape as the alien-death burst) plus a bright core flash
+  // (same trick the coin sparkle's core uses), in FISH_GROWTH_EFFECT_COLOR's
+  // soft green so it reads distinctly as "growth" rather than a recolor of
+  // either of those. Purely decorative — see Entities.js's updateFish/the
+  // Mutagen Paste branch (pushes) / updateFishGrowthEffects (culls).
+  for (const effect of state.level.fishGrowthEffects) {
+    const pos = worldToScreen(effect.x, effect.y, state.camera);
+    if (pos.x < -40 || pos.x > canvas.width + 40 || pos.y < -40 || pos.y > canvas.height + 40) continue;
+    const t = effect.age / FISH_GROWTH_EFFECT_DURATION_MS; // 0 -> 1
+    const alpha = 1 - t;
+    const gc = FISH_GROWTH_EFFECT_COLOR;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    const ringRadius = 18 * state.camera.zoom * (1 + t * 1.8);
+    ctx.strokeStyle = `rgb(${gc.r}, ${gc.g}, ${gc.b})`;
+    ctx.lineWidth = Math.max(1, 3 * state.camera.zoom * (1 - t));
+    ctx.beginPath();
+    ctx.arc(pos.x, pos.y, ringRadius, 0, Math.PI * 2);
+    ctx.stroke();
+    const particleDist = 10 * state.camera.zoom * (0.5 + t * 2);
+    ctx.fillStyle = `rgba(${gc.r}, ${gc.g}, ${gc.b}, 0.9)`;
+    for (let i = 0; i < 8; i++) {
+      const angle = (i / 8) * Math.PI * 2 + t * 1.2;
+      const px = pos.x + Math.cos(angle) * particleDist;
+      const py = pos.y + Math.sin(angle) * particleDist;
+      ctx.beginPath();
+      ctx.arc(px, py, Math.max(1, 2.5 * state.camera.zoom * (1 - t)), 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    const coreR = 20 * state.camera.zoom * (1 - t * 0.5);
+    const grad = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, coreR);
+    grad.addColorStop(0, `rgba(255, 255, 255, ${alpha * 0.7})`);
     grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
     ctx.fillStyle = grad;
     ctx.beginPath();

@@ -47,7 +47,11 @@ import {
   TAIL_WAG_RATE,
   COIN_TIMER_FEED_BONUS_FRACTION_BY_LEVEL,
   WASTE_TIMER_FEED_BONUS_FRACTION,
-  FISH_OVERFEED_STREAK_TARGET,
+  FISH_GROWTH_FEED_STREAK_TARGET,
+  FISH_GROWTH_EFFECT_DURATION_MS,
+  FISH_GROWTH_ABSORB_DURATION_MS,
+  FISH_GROWTH_ORBIT_RADIUS_PX,
+  FISH_GROWTH_ORBIT_SPEED,
   SEABED_FLOOR_Y,
   FISH_MIN_X,
   FISH_MAX_X,
@@ -1068,6 +1072,22 @@ function maxHpForStage(def, stage, state) {
   return base + FISH_HEALTH_UPGRADE_BONUS_PER_LEVEL * state.level.upgrades.fishHealth;
 }
 
+// Live world-space position of one of a fish's growthFeedStreak orbiting
+// food visuals (index 0 or 1 — the 2nd, per direct request, always sits
+// exactly 180 degrees opposite the 1st). A pure function of the fish's own
+// stored phase offset plus the current elapsed clock, so Entities.js (to
+// snapshot a starting point for the fly-into-the-fish effect) and main.js
+// (to render the still-orbiting ones live) always agree without either
+// side needing to track any extra state of its own.
+export function computeGrowthOrbitPosition(fish, index, elapsedMs) {
+  const angle = (fish.growthOrbitPhase || 0) + (elapsedMs / 1000) * FISH_GROWTH_ORBIT_SPEED + index * Math.PI;
+  return {
+    x: fish.x + Math.cos(angle) * FISH_GROWTH_ORBIT_RADIUS_PX,
+    y: fish.y + Math.sin(angle) * FISH_GROWTH_ORBIT_RADIUS_PX,
+    angle,
+  };
+}
+
 export function createFish(speciesId, x, y, state, { grown = false, starTier = 1, dropValueOverride = null } = {}) {
   const def = SPECIES[speciesId];
   const totalFeeds = grown ? def.growthStages[def.growthStages.length - 1].feedsRequired : 0;
@@ -1091,7 +1111,8 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
     deathFacing: 1, // frozen facing direction at the moment death began — see beginFishDeathAnimation
     hp: maxHp, // starts full; damaged by a living alien touching it (updateAlien), regenerates over FISH_HEALTH_REGEN_DURATION_MS once no aliens are alive at all (updateFish) — never regenerates while any alien is alive anywhere. main.js's render only draws a health bar while hp < maxHp, per direct request ("health bars only when they are damaged").
     dropTimer: 0,
-    overfeedStreak: 0, // consecutive plain-Food feeds in a row that pushed hunger negative — 3 in a row (FISH_OVERFEED_STREAK_TARGET) instantly grows a non-adult fish to adult on that 3rd feed; reset to 0 by any feed that doesn't overfeed. See updateFish's plain-Food eat branch.
+    growthFeedStreak: 0, // consecutive plain-Food feeds in a row landing while hunger is still below HUNGER_CRITICAL_THRESHOLD — 3 in a row (FISH_GROWTH_FEED_STREAK_TARGET) instantly grows a non-adult fish to adult on that 3rd feed; reset to 0 the instant hunger reaches HUNGER_CRITICAL_THRESHOLD. See updateFish's plain-Food eat branch and its hunger-critical-check block.
+    growthOrbitPhase: Math.random() * Math.PI * 2, // per-fish random starting angle for the growthFeedStreak orbiting-food visual, so different fish's circling food don't all spin in lockstep — see computeGrowthOrbitPosition/main.js's render
     poopTimer: 0, // WASTE_POOP_INTERVAL_MS — a non-Scavenger fish poops out Waste directly on this timer, see updateFish
     eatCooldownRemainingMs: 0, // Scavenger only — see updateFish's SCAVENGER eat branch; a growth-stage's dropInterval is reused as the eat cooldown
     distanceAccumPx: 0, // pure-Generator only — pixels swum since the last MW produced, see updateFish's GENERATOR branch
@@ -2669,6 +2690,11 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
   // back below the threshold (feeding, typically), so the whole sequence can
   // fire again next time this fish gets that hungry.
   if (fish.hunger >= HUNGER_CRITICAL_THRESHOLD) {
+    // Per direct request ("if the fish gets to the second stage of hunger
+    // at any point, remove all the food circling around a fish") — checked
+    // every tick, continuously, not just when a feed happens to land while
+    // already critical.
+    fish.growthFeedStreak = 0;
     const chimesBefore = fish.hungerChimesPlayed;
     while (
       fish.hungerChimesPlayed < FISH_HUNGER_CHIME_FRACTIONS.length
@@ -2857,29 +2883,53 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
             fish.hp = fish.maxHp;
             playGrowToAdult();
             awardTankPoint(state, fish);
+            // Per direct request ("use this same particle animation whenever
+            // a fish eats mutagen paste") — the exact same grow-to-adult
+            // burst the 3-feed orbit conversion below uses.
+            state.level.fishGrowthEffects.push({ x: fish.x, y: fish.y, age: 0 });
           } else {
             fish.mutagenBuffActive = true;
           }
         } else {
           // Food Quality Tank Upgrade: relief is a flat lookup by purchased
           // level, not clamped to the fish's current hunger — a higher-
-          // quality pellet than the fish actually needed pushes hunger
-          // negative, an "overfed" state. 3 overfeeds in a row
-          // (FISH_OVERFEED_STREAK_TARGET) grows a non-adult fish straight to
-          // adult on that 3rd feed, per direct request — done by just
-          // maxing out totalFeeds before the standard feeds-required tail
-          // below runs, so the usual stageIndexForFeeds recompute,
+          // quality pellet than the fish actually needed can still push
+          // hunger negative ("overfed"), though that no longer has any
+          // special meaning of its own. Per direct request ("make it so
+          // they just need to be fed 3 times before getting to the second
+          // stage of hunger... easier for the player to visually track")
+          // — 3 feeds in a row landing while hunger is still below
+          // HUNGER_CRITICAL_THRESHOLD (FISH_GROWTH_FEED_STREAK_TARGET) grow
+          // a non-adult fish straight to adult on that 3rd feed, done by
+          // just maxing out totalFeeds before the standard feeds-required
+          // tail below runs, so the usual stageIndexForFeeds recompute,
           // shimmer/sound, full heal, and Tank Point award all fire exactly
-          // like a normal stage advance would.
+          // like a normal stage advance would. Guarded off for an
+          // already-Adult fish — it can't grow further, so there's nothing
+          // for the orbiting-food visual to be building toward.
           const relief = FOOD_HUNGER_RELIEF_BY_LEVEL[state.level.upgrades.foodQuality];
-          const wasOverfed = fish.hunger - relief < 0;
+          const isAlreadyAdult = fish.stage === def.growthStages.length - 1;
+          const fedBeforeCritical = !isAlreadyAdult && fish.hunger < HUNGER_CRITICAL_THRESHOLD;
           fish.hunger -= relief;
-          // (fish.overfeedStreak || 0): a fish loaded from a save written
-          // before this field existed has it as undefined, not 0.
-          fish.overfeedStreak = wasOverfed ? (fish.overfeedStreak || 0) + 1 : 0;
-          if (wasOverfed && fish.overfeedStreak >= FISH_OVERFEED_STREAK_TARGET) {
-            fish.overfeedStreak = 0;
-            fish.totalFeeds = def.growthStages[def.growthStages.length - 1].feedsRequired;
+          if (fedBeforeCritical) {
+            fish.growthFeedStreak = (fish.growthFeedStreak || 0) + 1;
+            if (fish.growthFeedStreak >= FISH_GROWTH_FEED_STREAK_TARGET) {
+              fish.growthFeedStreak = 0;
+              // Per direct request — the two orbiting food bits fly into
+              // the fish (a short, purely decorative animation — the real
+              // stage change below still fires instantly, same as every
+              // other growth path here) and the shared grow-to-adult
+              // particle burst plays (see the Mutagen Paste branch above
+              // for its other trigger).
+              const p0 = computeGrowthOrbitPosition(fish, 0, state.level.elapsed);
+              const p1 = computeGrowthOrbitPosition(fish, 1, state.level.elapsed);
+              state.level.fishGrowthAbsorbEffects.push(
+                { fishId: fish.id, startX: p0.x, startY: p0.y, age: 0 },
+                { fishId: fish.id, startX: p1.x, startY: p1.y, age: 0 }
+              );
+              state.level.fishGrowthEffects.push({ x: fish.x, y: fish.y, age: 0 });
+              fish.totalFeeds = def.growthStages[def.growthStages.length - 1].feedsRequired;
+            }
           }
         }
         if (!skipStandardGrowth) {
@@ -3303,6 +3353,22 @@ function updateCoinSparkleEffects(state, dtMs) {
     return effect.age < COIN_SPARKLE_EFFECT_DURATION_MS;
   });
 }
+// Same age-and-cull shape, for the two fish-growth effects — the "two
+// orbiting food bits fly into the fish" animation (fishGrowthAbsorbEffects)
+// and the particle burst it (and Mutagen Paste's own instant-grow) both
+// end in (fishGrowthEffects).
+function updateFishGrowthAbsorbEffects(state, dtMs) {
+  state.level.fishGrowthAbsorbEffects = state.level.fishGrowthAbsorbEffects.filter((effect) => {
+    effect.age += dtMs;
+    return effect.age < FISH_GROWTH_ABSORB_DURATION_MS;
+  });
+}
+function updateFishGrowthEffects(state, dtMs) {
+  state.level.fishGrowthEffects = state.level.fishGrowthEffects.filter((effect) => {
+    effect.age += dtMs;
+    return effect.age < FISH_GROWTH_EFFECT_DURATION_MS;
+  });
+}
 
 // Same age-and-cull pattern, for the "on fire, disintegrating" effect
 // triggerProductionBlocked pushes when a coin OR science drop is blocked by
@@ -3476,6 +3542,8 @@ export function updateEntities(state, dtMs) {
   updateTurretMuzzleFlashes(state, dtMs);
   updateTurretImpactEffects(state, dtMs);
   updateCoinSparkleEffects(state, dtMs);
+  updateFishGrowthAbsorbEffects(state, dtMs);
+  updateFishGrowthEffects(state, dtMs);
   updateProductionBlockedEffects(state, dtMs);
   updateFishBubbleEffects(state, dtMs);
   pendingFoodToWasteSpawns.length = 0; // updateFood (below) fills this — see its own comment for why it can't push into state.level.items directly

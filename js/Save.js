@@ -72,6 +72,19 @@ export function loadSaveGame() {
     // would contaminate every fish's maxHp/hp from that point on. Defaults
     // to 0, same migration shape as tankExpansionTier just above.
     if (typeof parsed.level.upgrades.fishHealth !== 'number') parsed.level.upgrades.fishHealth = 0;
+    // A save written before the turret muzzle/impact, coin sparkle, or fish
+    // growth (orbiting-food-streak / Mutagen Paste burst) polish effects
+    // won't have these arrays at all — Entities.js's own updateEntities
+    // unconditionally calls .filter() on each of them every tick
+    // (updateTurretMuzzleFlashes/updateTurretImpactEffects/
+    // updateCoinSparkleEffects/updateFishGrowthAbsorbEffects/
+    // updateFishGrowthEffects), which throws immediately on `undefined`
+    // rather than just silently no-opping. All five are purely decorative
+    // and momentary, so defaulting to empty (nothing mid-flight survives a
+    // save/load anyway) is a total no-op for real gameplay.
+    for (const key of ['turretMuzzleFlashes', 'turretImpactEffects', 'coinSparkleEffects', 'fishGrowthAbsorbEffects', 'fishGrowthEffects']) {
+      if (!Array.isArray(parsed.level[key])) parsed.level[key] = [];
+    }
     return { meta: parsed.meta, level: parsed.level };
   } catch (err) {
     console.error('Derangiquarium: load failed', err);

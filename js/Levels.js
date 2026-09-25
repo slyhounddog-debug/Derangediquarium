@@ -181,6 +181,8 @@ export function loadLevel(state, levelId) {
     turretMuzzleFlashes: [], // { x, y, age } — a brief flash at the firing tile the instant a turret shot leaves it, pushed by Entities.js's updateEntities alongside the real projectile, aged out by updateTurretMuzzleFlashes, rendered by main.js
     turretImpactEffects: [], // { x, y, age } — a small spark burst where a turret shot actually lands, pushed by Entities.js's updateTurretProjectiles on impact, aged out by updateTurretImpactEffects, rendered by main.js
     coinSparkleEffects: [], // { x, y, age } — a quick radiating sparkle pushed by Entities.js's updateCoin the instant a coin is banked by a Collector, aged out by updateCoinSparkleEffects, rendered by main.js
+    fishGrowthAbsorbEffects: [], // { fishId, startX, startY, age } — the "two orbiting food bits fly into the fish" animation on its 3rd pre-critical feed, pushed by Entities.js's updateFish, aged out by updateFishGrowthAbsorbEffects, rendered by main.js (which looks fishId up live each frame so it tracks a still-moving fish)
+    fishGrowthEffects: [], // { x, y, age } — the grow-to-adult particle burst shared by that same 3rd-feed conversion AND Mutagen Paste's own instant Adult growth, pushed by Entities.js's updateFish, aged out by updateFishGrowthEffects, rendered by main.js
     lifetimeMoneyEarned: 0, // real in-play income only (coins banked) — NOT the starting endowment or the bankruptcy bailout gift; see Entities.js's bankMoney and Config.js's MONEY_MILESTONE_1K
     // End-game stats-modal counters (main.js's showGameOverModal), per direct
     // spec ("stats about the game like how much total of each resource was

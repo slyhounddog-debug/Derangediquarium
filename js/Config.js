@@ -1072,8 +1072,9 @@ export const HUNGER_ICON_BOUNCE_FAST_AMPLITUDE_PX = 7;
 // current hunger); each level after that is roughly a 20-25% bump, capping
 // at level 4 (100 — a single feed can fully clear even max hunger). Relief
 // is not clamped to the fish's current hunger — if it exceeds what's left,
-// hunger goes negative, an "overfed" state (see FISH_OVERFEED_STREAK_TARGET
-// below — 3 overfeeds in a row instantly grows the fish to adult).
+// hunger goes negative, an "overfed" state that no longer has any special
+// gameplay meaning on its own — see FISH_GROWTH_FEED_STREAK_TARGET below
+// for the (now unrelated) mechanic that instantly grows a fish to adult.
 export const FOOD_HUNGER_RELIEF_BY_LEVEL = [60, 65, 75, 85, 100, 115]; // index 0 = unupgraded; 6 entries now that Food Quality goes to level 5, see FOOD_QUALITY_UPGRADE_COSTS
 // Eating a pellet also advances that fish's coin-drop timer by this fraction
 // of its current stage's dropInterval — e.g. a 20s cycle fed at the 10s mark
@@ -1087,12 +1088,45 @@ export const FOOD_HUNGER_RELIEF_BY_LEVEL = [60, 65, 75, 85, 100, 115]; // index 
 // an instant coin AND leave the next one arriving sooner, the same way
 // hunger is allowed to go negative from an overfed pellet.
 export const COIN_TIMER_FEED_BONUS_FRACTION_BY_LEVEL = [0.25, 0.35, 0.45, 0.55, 0.65, 0.75];
-// How many Food-fed "overfeeds" in a row (a feed whose flat relief pushes
-// hunger negative) instantly grow a non-adult fish straight to adult on that
-// same feed — per direct request, rewards feeding a fish before it's really
-// hungry. Resets to 0 on any feed that doesn't overfeed. See Entities.js's
-// updateFish (fish.overfeedStreak) and FOOD_HUNGER_RELIEF_BY_LEVEL above.
-export const FISH_OVERFEED_STREAK_TARGET = 3;
+// How many plain-Food feeds in a row, each landing while hunger is still
+// BELOW HUNGER_CRITICAL_THRESHOLD (the "second stage" of hunger — the "!!"
+// indicator), instantly grow a non-adult fish straight to adult on that
+// 3rd feed — per direct request, replacing the old "3 overfeeds in a row"
+// trigger (hunger pushed negative, which required a high Food Quality
+// level to even be reachable) with something "easier for the player to
+// visually track." Resets to 0 the instant hunger reaches
+// HUNGER_CRITICAL_THRESHOLD, checked every tick (not just at feed time) —
+// see Entities.js's updateFish (fish.growthFeedStreak). Each qualifying
+// feed also adds one small orbiting food-with-trail visual around the fish
+// (FISH_GROWTH_ORBIT_* below); on the 3rd, both fly into the fish and
+// FISH_GROWTH_EFFECT_DURATION_MS's particle burst plays — the same burst
+// Mutagen Paste's own instant-grow uses, per direct request.
+export const FISH_GROWTH_FEED_STREAK_TARGET = 3;
+// The small food-and-trail visual orbiting a fish for each pre-critical
+// feed so far (0-2 of them showing at once — the 3rd feed converts both
+// into the grow-to-adult burst instead of adding a third). Deliberately
+// smaller than a real Food pellet (FOOD_RADIUS) so it never reads as an
+// actual edible item drifting nearby. The second one always sits exactly
+// FISH_GROWTH_ORBIT_COUNT_MAX-ths of a full circle from the first (i.e.
+// 180 degrees opposite, per direct request) — see main.js's render for how
+// the orbit angle itself is computed (elapsed time + a per-fish phase
+// offset so different fish don't spin in lockstep).
+export const FISH_GROWTH_ORBIT_RADIUS_PX = 22;
+export const FISH_GROWTH_ORBIT_SPEED = 2.2; // radians/sec
+export const FISH_GROWTH_ORBIT_FOOD_RADIUS_PX = 3.2;
+export const FISH_GROWTH_ORBIT_TRAIL_ARC_RAD = 0.9; // how far back along the circle the fading trail reaches
+// How long the "two orbiting bits fly into the fish" animation takes on the
+// 3rd qualifying feed — purely decorative (the actual stage change/heal/
+// sound/Tank Point already fire instantly, same as every other growth path
+// in this file), tracked in state.level.fishGrowthAbsorbEffects.
+export const FISH_GROWTH_ABSORB_DURATION_MS = 350;
+// The particle burst shared by BOTH the 3rd-feed orbit conversion above AND
+// Mutagen Paste's own instant Adult growth — per direct request ("use this
+// same particle animation whenever a fish eats mutagen paste"). Tracked in
+// state.level.fishGrowthEffects, same push/age/cull/render shape as
+// alienDeathEffects/coinSparkleEffects elsewhere in this file.
+export const FISH_GROWTH_EFFECT_DURATION_MS = 550;
+export const FISH_GROWTH_EFFECT_COLOR = { r: 130, g: 230, b: 160 }; // soft "growth" green, distinct from the coin sparkle's gold and the alien burst's red/tier colors
 // Same idea, for a non-Scavenger fish's Waste poop timer — per direct
 // request ("make it so that food fills up the waste meter of a fish by
 // 25%, if the fish produces waste, similar to how food also makes money
