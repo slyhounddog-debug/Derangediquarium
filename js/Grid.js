@@ -850,7 +850,7 @@ export function getUnlockedWorldH(state) {
   return (getUnlockedSeabedRowEnd(state) + 1) * TILE_SIZE;
 }
 
-// Shift+Click: Snap Placement — per direct request, holding Shift with a
+// Ctrl+Click: Snap Placement — per direct request, holding Ctrl with a
 // build tool armed snaps a line of ghost buildings from the last-placed (or
 // last-pipetted — see UI.js's pipetteSelectBuilding) building's tile to the
 // cursor's tile, snapped to the nearest of the 8 compass directions

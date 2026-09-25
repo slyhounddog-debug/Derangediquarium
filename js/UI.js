@@ -4056,7 +4056,7 @@ export function pipetteSelectSpecies(state, speciesId) {
 // none today, but keeps the signature safe) still works with just a
 // buildingId, same as before.
 //
-// Also doubles as a Shift+Click: Snap Placement anchor, per direct request
+// Also doubles as a Ctrl+Click: Snap Placement anchor, per direct request
 // ("if the player uses Q to pipette a building, have that act as the last
 // placed building") — a real tileKey means the player pipetted an actual
 // placed tile, which is just as valid a line-start point as one they placed
@@ -4781,7 +4781,7 @@ export function updateHUD(state) {
     buildLegendText = formatBuildCostLegendText(state.ui.blueprintCost);
     showReplaceLabel = !!(state.ui.blueprintReplaceInfo && state.ui.blueprintReplaceInfo.replacing);
   } else if (state.ui.selectedTool.startsWith('build:')) {
-    // Shift + Click: Snap Placement's own live multi-building total — per
+    // Ctrl + Click: Snap Placement's own live multi-building total — per
     // direct request ("make sure the cost is dynamically updated to show
     // the multi-building cost... take into account the refunds... like the
     // blueprint does"), takes priority over the single-tile cost below
@@ -4809,11 +4809,13 @@ export function updateHUD(state) {
   els.buildLegend.textContent = buildLegendText;
   els.buildLegend.classList.toggle('hidden', !buildLegendVisible);
   els.buildReplaceLegend.classList.toggle('hidden', !(buildLegendVisible && showReplaceLabel));
-  // Shift + Click: Snap Placement's own hint pill, per direct request ("add
-  // into the legend above the cost a 'Shift + Click: Snap Placement'") —
+  // Ctrl + Click: Snap Placement's own hint pill, per direct request ("add
+  // into the legend above the cost a 'Shift + Click: Snap Placement'"),
+  // later moved off Shift onto Ctrl entirely (see main.js's isCtrlHeld) —
   // shares the exact same above-the-cost-legend slot as "Shift+Click:
-  // Replace" (positionBottomLeftLegends stacks whichever is visible), so the
-  // two are deliberately mutually exclusive: Replace only ever applies while
+  // Replace" (positionBottomLeftLegends stacks whichever is visible); the
+  // two no longer share a modifier key, but the hint pills themselves stay
+  // mutually exclusive the same way: Replace only ever applies while
   // hovering an occupied tile, Snap Placement everywhere else a build tool
   // is armed (fish:/Blueprint excluded — this hint is buildings-only).
   const showSnapLabel = buildLegendVisible && state.ui.selectedTool.startsWith('build:') && !showReplaceLabel;
@@ -5016,7 +5018,7 @@ function positionBottomLeftLegends() {
   const legendHeight = els.buildLegend.getBoundingClientRect().height || 0;
   const stackedBottom = `${window.innerHeight - rect.bottom + legendHeight + 6}px`;
   els.buildReplaceLegend.style.bottom = stackedBottom;
-  // "Shift + Click: Snap Placement" shares this exact same stacked slot —
+  // "Ctrl + Click: Snap Placement" shares this exact same stacked slot —
   // see updateHUD's own comment on why the two are mutually exclusive.
   els.buildSnapLegend.style.right = right;
   els.buildSnapLegend.style.bottom = stackedBottom;

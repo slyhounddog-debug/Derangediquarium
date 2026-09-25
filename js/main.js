@@ -524,12 +524,15 @@ function tracePoopBlobPath(ctx, cx, cy, r) {
 // waste, but visually make them 10% bigger, so part of the visuals go
 // outside the collision circle... right now it looks like they're floating
 // against other objects because you fit the whole poop within the circle
-// instead of having part of it spill out") — a purely visual inflation
-// applied only here (and to the tutorial ghost-Waste animation below, so it
-// still looks like a real Waste item), never to the real physics radius
-// (item.radius, WASTE_RADIUS) two adjacent items' collision circles are
-// actually resolved against — see Grid.js's resolveItemCollisions.
-const WASTE_VISUAL_SCALE = 1.1;
+// instead of having part of it spill out"), bumped again per a direct
+// follow-up ("make the waste 5% bigger visually without changing any
+// collision boxes or physics or mass") — a purely visual inflation applied
+// only here (and to the tutorial ghost-Waste animation below, so it still
+// looks like a real Waste item), never to the real physics radius
+// (item.radius, WASTE_RADIUS, or mass) two adjacent items' collision
+// circles are actually resolved against — see Grid.js's
+// resolveItemCollisions.
+const WASTE_VISUAL_SCALE = 1.15;
 
 // Fills/strokes/textures tracePoopBlobPath's outline into a full waste item
 // — the actual reusable "draw one poop" call every render site below uses.
@@ -740,7 +743,7 @@ const state = {
     // never stale leftovers from an earlier, unrelated pipette.
     pipetteRecipeId: null,
     pipetteFilterItems: null,
-    // Shift + Click: Snap Placement — per direct request, holding Shift with
+    // Ctrl + Click: Snap Placement — per direct request, holding Ctrl with
     // a build tool armed snaps a line of ghost buildings from here to the
     // cursor (Grid.js's computeSnapLine). Set on every successful non-Fan
     // placement (updateBuildDrag) and the Fan click handler's own two
@@ -954,6 +957,19 @@ let lastCursorBubbleWorldY = null;
 // the same way it does for a real click handler.
 function isShiftHeld() {
   return input.keysDown.has('ShiftLeft') || input.keysDown.has('ShiftRight');
+}
+
+// Ctrl+Click: Snap Placement — per direct request ("switch the line snap
+// tool hotkey... from shift + click to ctrl + click, currently it overlaps
+// with the replace hotkey"), moved off Shift entirely so it no longer
+// contends with Shift-click Replace right above (both used to poll the same
+// key, and Snap Placement's own check ran first in updateBuildDrag, so a
+// Shift-held Replace attempt could get swallowed by a snap-line placement
+// instead). Same live input.keysDown poll as isShiftHeld, for the same
+// reason (works whether Ctrl was already held or pressed mid-drag, and for
+// updateBuildDrag's per-tick polling which has no event object).
+function isCtrlHeld() {
+  return input.keysDown.has('ControlLeft') || input.keysDown.has('ControlRight');
 }
 
 // Economy Fish Combining (Tier 2) drag state — see Entities.js's
@@ -2573,7 +2589,7 @@ input.middleClickHandlers.push((sx, sy) => {
 // (not once per physics tick) so dragging across several cells lays a row
 // without re-spending money on a cell it's already sitting over.
 let lastBuildCell = null;
-// Shift + Click: Snap Placement's own one-shot-per-press guard — cleared
+// Ctrl + Click: Snap Placement's own one-shot-per-press guard — cleared
 // alongside lastBuildCell on mouse-up, set the instant a press places its
 // line so holding the button down doesn't keep re-placing more lines every
 // tick the way normal drag-placement re-places a single tile per cell.
@@ -3115,7 +3131,7 @@ function updateBuildDrag() {
   if (world.y < SEABED_FLOOR_Y) return;
   const { col, row } = worldToTile(world.x, world.y);
 
-  // Shift + Click: Snap Placement — per direct request, a discrete one-shot
+  // Ctrl + Click: Snap Placement — per direct request, a discrete one-shot
   // action (buy the WHOLE previewed line in a single click) rather than the
   // normal continuous per-cell-entered drag-placement below, so it's gated
   // on snapLinePlacedThisPress (cleared on mouse-up, same as lastBuildCell)
@@ -3125,8 +3141,12 @@ function updateBuildDrag() {
   // itself, or the very first step is already blocked) falls through to the
   // normal single-tile placement/Replace path below instead of silently
   // no-opping, matching exactly what render()'s own ghost preview shows for
-  // that same case (see its matching snap.tiles.length check).
-  if (isShiftHeld() && state.ui.lastPlacedTileCol != null) {
+  // that same case (see its matching snap.tiles.length check). Moved off
+  // Shift onto Ctrl per direct request ("switch the line snap tool hotkey
+  // from shift + click to ctrl + click, currently it overlaps with the
+  // replace hotkey") — Shift-click Replace's own check further down is
+  // unaffected.
+  if (isCtrlHeld() && state.ui.lastPlacedTileCol != null) {
     const snap = computeSnapLine(state, state.ui.lastPlacedTileCol, state.ui.lastPlacedTileRow, col, row, buildingId);
     if (snap.tiles.length > 0) {
       if (!snapLinePlacedThisPress) {
@@ -3231,7 +3251,7 @@ function updateBuildDrag() {
   }
 }
 
-// Shift + Click: Snap Placement's actual purchase — called once per press
+// Ctrl + Click: Snap Placement's actual purchase — called once per press
 // from updateBuildDrag above with the SAME tile list its own computeSnapLine
 // call just produced (so what gets bought is exactly what the caller
 // decided was worth buying, no risk of recomputing against a since-changed
@@ -4551,7 +4571,7 @@ function render() {
   // "Shift+Click: Replace" label. Defaults null (not shown) unless one of
   // the build-ghost branches below actually sets it.
   state.ui.buildReplaceInfo = null;
-  // Shift + Click: Snap Placement's own live total — same "null unless a
+  // Ctrl + Click: Snap Placement's own live total — same "null unless a
   // branch below actually sets it" pattern, read by UI.js's updateHUD for
   // the cost legend (see its own comment for why it takes priority over
   // buildReplaceInfo whenever both would otherwise apply).
@@ -4580,7 +4600,7 @@ function render() {
     const { col, row } = worldToTile(world.x, world.y);
     const angle = angleFromTileToPoint(col, row, world.x, world.y);
     const shiftHeld = isShiftHeld();
-    // Shift + Click: Snap Placement — per direct request, a line of ghosts
+    // Ctrl + Click: Snap Placement — per direct request, a line of ghosts
     // from state.ui.lastPlacedTileCol/Row (see its own comment for where
     // that gets set — a real placement, a drag-placed tile, or a pipetted
     // one) out to the cursor's tile, snapped to the nearest of the 8 compass
@@ -4588,7 +4608,10 @@ function render() {
     // ghosts below anyway, but more fundamentally they never take this path
     // for real either — see placeSnapLineTiles' own comment) so a
     // Fan-tool hover always falls through to the single-ghost branch below.
-    const snapEligible = shiftHeld && state.ui.lastPlacedTileCol != null && !FAN_BUILDING_IDS.includes(buildingId);
+    // Moved off Shift onto Ctrl per direct request (see updateBuildDrag's own
+    // matching comment) — shiftHeld above is still read by the Replace ghost
+    // preview further down, unaffected by this.
+    const snapEligible = isCtrlHeld() && state.ui.lastPlacedTileCol != null && !FAN_BUILDING_IDS.includes(buildingId);
     const snap = snapEligible ? computeSnapLine(state, state.ui.lastPlacedTileCol, state.ui.lastPlacedTileRow, col, row, buildingId) : null;
     if (snap && snap.tiles.length > 0) {
       for (const t of snap.tiles) {
