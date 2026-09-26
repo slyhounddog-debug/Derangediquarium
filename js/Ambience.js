@@ -170,11 +170,11 @@ const SHADOW_FISH_BIG_MAX_SIZE = 130 * 1.1;
 // ---- Shadow Fish fade in/out ----
 // Per direct request ("add in 3 independent timers for each fish that are
 // random each time... so it looks like they're fading in and out of the
-// background"): each fish cycles fadeOut -> hidden -> fadeIn -> fadeOut...
-// forever, with a freshly-rolled random duration for whichever phase it's
-// about to enter each time (so no two fish, and no two cycles of the same
-// fish, ever line up). Alpha is reintroduced here specifically for this
-// effect — the earlier "no transparency" decision (see the Shadow Fish
+// background"): each fish cycles fadeOut -> hidden -> fadeIn -> visible ->
+// fadeOut... forever, with a freshly-rolled random duration for whichever
+// phase it's about to enter each time (so no two fish, and no two cycles of
+// the same fish, ever line up). Alpha is reintroduced here specifically for
+// this effect — the earlier "no transparency" decision (see the Shadow Fish
 // section comment above) only ever applied to the OLD static low-alpha
 // look; it doesn't reopen the "seaweed doesn't occlude" bug that decision
 // was fixing, since shadow fish are still drawn before (behind) the opaque
@@ -187,8 +187,37 @@ const SHADOW_FISH_FADE_HOLD_MAX_S = 10;
 // alpha climbs back to 1 — "as their opacity lowers have their size
 // slightly [decrease], a total decrease of 10% size when opacity is 0%."
 const SHADOW_FISH_FADE_SIZE_SHRINK = 0.1;
+// The 4 phases in cycle order, and which duration range each one rolls —
+// used both by the live state machine below and by randomStartingFadeState
+// (each fish's own starting point, picked at random so they don't all fade
+// out together right as the game starts).
+const SHADOW_FISH_FADE_PHASES = ['out', 'hidden', 'in', 'visible'];
+function fadeDurationRangeForPhase(phase) {
+  return phase === 'out' || phase === 'in'
+    ? [SHADOW_FISH_FADE_MIN_S, SHADOW_FISH_FADE_MAX_S]
+    : [SHADOW_FISH_FADE_HOLD_MIN_S, SHADOW_FISH_FADE_HOLD_MAX_S];
+}
 function randomFadeDurationS(minS, maxS) {
   return minS + Math.random() * (maxS - minS);
+}
+// Per direct request ("at the start of the game, have the fish start one of
+// the 4 timers instead of all starting at the same timer so they all fade
+// off the screen at the same time at the beginning") — picks a random phase
+// AND a random progress within that phase's duration, so fish start spread
+// across the whole cycle (including some already mid-fade or fully
+// invisible) rather than every fish beginning fully visible and about to
+// dim in lockstep.
+function randomStartingFadeState() {
+  const fadePhase = SHADOW_FISH_FADE_PHASES[Math.floor(Math.random() * SHADOW_FISH_FADE_PHASES.length)];
+  const [minS, maxS] = fadeDurationRangeForPhase(fadePhase);
+  const fadeDurationS = randomFadeDurationS(minS, maxS);
+  const fadeElapsedS = Math.random() * fadeDurationS;
+  const t = fadeElapsedS / fadeDurationS;
+  let alpha;
+  if (fadePhase === 'out') alpha = 1 - t;
+  else if (fadePhase === 'in') alpha = t;
+  else alpha = fadePhase === 'hidden' ? 0 : 1; // 'hidden' -> 0, 'visible' -> 1
+  return { fadePhase, fadeElapsedS, fadeDurationS, alpha };
 }
 function updateShadowFishFade(f, dt) {
   f.fadeElapsedS += dt;
@@ -208,8 +237,16 @@ function updateShadowFishFade(f, dt) {
       f.fadeElapsedS = 0;
       f.fadeDurationS = randomFadeDurationS(SHADOW_FISH_FADE_MIN_S, SHADOW_FISH_FADE_MAX_S);
     }
-  } else { // 'in'
+  } else if (f.fadePhase === 'in') {
     f.alpha = t;
+    if (f.fadeElapsedS >= f.fadeDurationS) {
+      f.fadePhase = 'visible';
+      f.fadeElapsedS = 0;
+      f.fadeDurationS = randomFadeDurationS(SHADOW_FISH_FADE_HOLD_MIN_S, SHADOW_FISH_FADE_HOLD_MAX_S);
+      f.alpha = 1;
+    }
+  } else { // 'visible' — holds at full opacity before the cycle restarts
+    f.alpha = 1;
     if (f.fadeElapsedS >= f.fadeDurationS) {
       f.fadePhase = 'out';
       f.fadeElapsedS = 0;
@@ -242,12 +279,10 @@ function randomShadowFish(big) {
     fillColor: colors.fill,
     haloColor: colors.halo,
     depth: Math.random() * 10, // always the furthest-back layer, below every sun ray
-    // Every fish starts mid-visible and already counting down its own
-    // random fadeOut timer — see updateShadowFishFade above.
-    fadePhase: 'out',
-    fadeElapsedS: 0,
-    fadeDurationS: randomFadeDurationS(SHADOW_FISH_FADE_MIN_S, SHADOW_FISH_FADE_MAX_S),
-    alpha: 1,
+    // Each fish starts at a random point somewhere in the 4-phase fade
+    // cycle (a fish starting already invisible is fine) — see
+    // randomStartingFadeState above.
+    ...randomStartingFadeState(),
   };
 }
 const shadowFish = [];
