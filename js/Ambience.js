@@ -153,17 +153,20 @@ function shadowFishColors(blendT) {
     halo: mixRGB(SHADOW_FISH_DEEP, SHADOW_FISH_FAINT, Math.min(1, blendT + 0.35)),
   };
 }
-// Count doubled and sizes bumped 10% per direct request ("increase the
-// amount of background Shadow fish by 100%... increase the size by 10% for
-// the big and small variants").
-const SHADOW_FISH_COUNT = 10;
+// Count doubled (5->10) and sizes bumped 10% per direct request ("increase
+// the amount of background Shadow fish by 100%... increase the size by 10%
+// for the big and small variants"), then bumped again (10->12) per a direct
+// follow-up request.
+const SHADOW_FISH_COUNT = 12;
 const SHADOW_FISH_MIN_SIZE = 20 * 1.1;
 const SHADOW_FISH_MAX_SIZE = 42 * 1.1;
 // Per direct request ("add a few more, even more faint, much bigger fish
 // silhouettes in the background") — a second, smaller pool sharing every
 // mechanic the regular shadow fish already have (drift, wrap, bob, tail-wag),
 // just bigger and blended further toward the faint end of the color range.
-const SHADOW_FISH_BIG_COUNT = 6;
+// Count doubled (3->6), then bumped again (6->9) per a direct follow-up
+// request, same as the small variant above.
+const SHADOW_FISH_BIG_COUNT = 9;
 const SHADOW_FISH_BIG_MIN_SIZE = 70 * 1.1;
 const SHADOW_FISH_BIG_MAX_SIZE = 130 * 1.1;
 
