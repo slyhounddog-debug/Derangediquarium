@@ -153,16 +153,71 @@ function shadowFishColors(blendT) {
     halo: mixRGB(SHADOW_FISH_DEEP, SHADOW_FISH_FAINT, Math.min(1, blendT + 0.35)),
   };
 }
-const SHADOW_FISH_COUNT = 5;
-const SHADOW_FISH_MIN_SIZE = 20;
-const SHADOW_FISH_MAX_SIZE = 42;
+// Count doubled and sizes bumped 10% per direct request ("increase the
+// amount of background Shadow fish by 100%... increase the size by 10% for
+// the big and small variants").
+const SHADOW_FISH_COUNT = 10;
+const SHADOW_FISH_MIN_SIZE = 20 * 1.1;
+const SHADOW_FISH_MAX_SIZE = 42 * 1.1;
 // Per direct request ("add a few more, even more faint, much bigger fish
 // silhouettes in the background") — a second, smaller pool sharing every
 // mechanic the regular shadow fish already have (drift, wrap, bob, tail-wag),
 // just bigger and blended further toward the faint end of the color range.
-const SHADOW_FISH_BIG_COUNT = 3;
-const SHADOW_FISH_BIG_MIN_SIZE = 70;
-const SHADOW_FISH_BIG_MAX_SIZE = 130;
+const SHADOW_FISH_BIG_COUNT = 6;
+const SHADOW_FISH_BIG_MIN_SIZE = 70 * 1.1;
+const SHADOW_FISH_BIG_MAX_SIZE = 130 * 1.1;
+
+// ---- Shadow Fish fade in/out ----
+// Per direct request ("add in 3 independent timers for each fish that are
+// random each time... so it looks like they're fading in and out of the
+// background"): each fish cycles fadeOut -> hidden -> fadeIn -> fadeOut...
+// forever, with a freshly-rolled random duration for whichever phase it's
+// about to enter each time (so no two fish, and no two cycles of the same
+// fish, ever line up). Alpha is reintroduced here specifically for this
+// effect — the earlier "no transparency" decision (see the Shadow Fish
+// section comment above) only ever applied to the OLD static low-alpha
+// look; it doesn't reopen the "seaweed doesn't occlude" bug that decision
+// was fixing, since shadow fish are still drawn before (behind) the opaque
+// seaweed in depth order regardless of their own alpha.
+const SHADOW_FISH_FADE_MIN_S = 10;
+const SHADOW_FISH_FADE_MAX_S = 20;
+const SHADOW_FISH_FADE_HOLD_MIN_S = 3;
+const SHADOW_FISH_FADE_HOLD_MAX_S = 10;
+// Total size shrink at fully-faded (alpha 0), eased back to full size as
+// alpha climbs back to 1 — "as their opacity lowers have their size
+// slightly [decrease], a total decrease of 10% size when opacity is 0%."
+const SHADOW_FISH_FADE_SIZE_SHRINK = 0.1;
+function randomFadeDurationS(minS, maxS) {
+  return minS + Math.random() * (maxS - minS);
+}
+function updateShadowFishFade(f, dt) {
+  f.fadeElapsedS += dt;
+  const t = Math.min(1, f.fadeElapsedS / f.fadeDurationS);
+  if (f.fadePhase === 'out') {
+    f.alpha = 1 - t;
+    if (f.fadeElapsedS >= f.fadeDurationS) {
+      f.fadePhase = 'hidden';
+      f.fadeElapsedS = 0;
+      f.fadeDurationS = randomFadeDurationS(SHADOW_FISH_FADE_HOLD_MIN_S, SHADOW_FISH_FADE_HOLD_MAX_S);
+      f.alpha = 0;
+    }
+  } else if (f.fadePhase === 'hidden') {
+    f.alpha = 0;
+    if (f.fadeElapsedS >= f.fadeDurationS) {
+      f.fadePhase = 'in';
+      f.fadeElapsedS = 0;
+      f.fadeDurationS = randomFadeDurationS(SHADOW_FISH_FADE_MIN_S, SHADOW_FISH_FADE_MAX_S);
+    }
+  } else { // 'in'
+    f.alpha = t;
+    if (f.fadeElapsedS >= f.fadeDurationS) {
+      f.fadePhase = 'out';
+      f.fadeElapsedS = 0;
+      f.fadeDurationS = randomFadeDurationS(SHADOW_FISH_FADE_MIN_S, SHADOW_FISH_FADE_MAX_S);
+      f.alpha = 1;
+    }
+  }
+}
 function randomShadowFish(big) {
   const dir = Math.random() < 0.5 ? 1 : -1;
   const minSize = big ? SHADOW_FISH_BIG_MIN_SIZE : SHADOW_FISH_MIN_SIZE;
@@ -187,6 +242,12 @@ function randomShadowFish(big) {
     fillColor: colors.fill,
     haloColor: colors.halo,
     depth: Math.random() * 10, // always the furthest-back layer, below every sun ray
+    // Every fish starts mid-visible and already counting down its own
+    // random fadeOut timer — see updateShadowFishFade above.
+    fadePhase: 'out',
+    fadeElapsedS: 0,
+    fadeDurationS: randomFadeDurationS(SHADOW_FISH_FADE_MIN_S, SHADOW_FISH_FADE_MAX_S),
+    alpha: 1,
   };
 }
 const shadowFish = [];
@@ -217,6 +278,7 @@ export function updateAmbience(dtMs) {
     // visibly "pops."
     if (f.dir > 0 && f.x > WORLD_W + 80) f.x = -80;
     else if (f.dir < 0 && f.x < -80) f.x = WORLD_W + 80;
+    updateShadowFishFade(f, dt);
   }
   updateCrabs(dt);
   updateTreasureChest(dt);
@@ -294,9 +356,13 @@ function drawShadowFishSilhouette(ctx, x, y, size, dir, fillColor, haloColor) {
 }
 
 function drawOneShadowFish(ctx, camera, canvasWidth, canvasHeight, f) {
+  if (f.alpha <= 0) return; // fully faded out — see updateShadowFishFade
   const bobY = f.baseY + Math.sin(elapsed * f.bobFreq + f.bobPhase) * f.bobAmp;
   const screen = worldToScreen(f.x, bobY, camera);
-  const size = f.size * camera.zoom;
+  // Shrinks in step with its own fade — full size at alpha 1, 10% smaller
+  // at alpha 0 (fully faded). See SHADOW_FISH_FADE_SIZE_SHRINK.
+  const sizeScale = 1 - SHADOW_FISH_FADE_SIZE_SHRINK * (1 - f.alpha);
+  const size = f.size * sizeScale * camera.zoom;
   if (screen.x < -size * 2 || screen.x > canvasWidth + size * 2 || screen.y < -size || screen.y > canvasHeight + size) return;
   // A slight tail-wag "squash" on the horizontal scale, same idea as a real
   // fish's own tail animation, just baked into one silhouette shape rather
@@ -304,6 +370,7 @@ function drawOneShadowFish(ctx, camera, canvasWidth, canvasHeight, f) {
   // "swimming," not just sliding.
   const wag = 1 + Math.sin(elapsed * f.tailFreq + f.tailPhase) * 0.06;
   ctx.save();
+  ctx.globalAlpha = f.alpha;
   ctx.translate(screen.x, screen.y);
   ctx.scale(wag, 1);
   drawShadowFishSilhouette(ctx, 0, 0, size, f.dir, f.fillColor, f.haloColor);
