@@ -498,17 +498,7 @@ function renderShadowBubbles(ctx, camera, canvasWidth, canvasHeight) {
     const lifeT = b.ageS / b.ttlS;
     const fade = lifeT < 0.75 ? 1 : Math.max(0, 1 - (lifeT - 0.75) / 0.25);
     const r = Math.max(1, b.radius * camera.zoom);
-    ctx.globalAlpha = 0.18 * fade;
-    ctx.fillStyle = 'rgba(150, 165, 175, 0.5)';
-    ctx.beginPath();
-    ctx.arc(screen.x, screen.y, r * 1.35, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalAlpha = 0.22 * fade;
-    ctx.strokeStyle = 'rgba(180, 195, 200, 0.6)';
-    ctx.lineWidth = Math.max(1, camera.zoom);
-    ctx.beginPath();
-    ctx.arc(screen.x, screen.y, r, 0, Math.PI * 2);
-    ctx.stroke();
+    drawSoftMutedBubble(ctx, screen.x, screen.y, r, 0.24 * fade); // see drawSoftMutedBubble's own comment (darker + gradient-faked blur, per direct request)
   }
   ctx.globalAlpha = 1;
   ctx.restore();
@@ -1642,59 +1632,94 @@ export function renderAmbienceFrontLab(ctx, state, canvasWidth, canvasHeight) {
 // 16 filtered strokes/frame (see drawOneSeaweed's own comment) — Chromium
 // re-rasterizes each filtered draw individually, so it doesn't get cheaper
 // by only setting `ctx.filter` once outside a loop. Applying a real blur
-// filter to the FULL expanded decor set (seaweed+boulders+coral+kelp+sand
-// castles alone is 40+ individual shapes) every single frame would revisit
-// that exact regression. Instead, everything with NO per-frame animation
-// (seaweed, boulders, sand castles, coral, kelp) is pre-rendered ONCE to an
-// offscreen canvas with a real blur+desaturate filter applied at BAKE time
-// only (see buildBgStaticCanvas) — every frame after that is just one cheap
-// drawImage of the finished bitmap, scaled/positioned to match the current
-// camera. The few pieces that DO need to animate every frame (sea urchins'
-// bob, crabs' roaming + bubbles, the chest's open/close cycle + bubbles) are
-// drawn live, un-filtered, at reduced alpha instead — cheap (a handful of
-// shapes, not the whole decor set) and still reads as "muted/background"
-// blended against the water behind it.
+// filter to the FULL expanded decor set every single frame would revisit
+// that exact regression (measured directly: filtering just 5 live objects
+// individually roughly QUINTUPLED frame time). Instead, everything with NO
+// per-frame POSITIONAL animation (seaweed, boulders, sand castles, coral,
+// kelp, and sea urchins — an urchin's only "animation" is a 1-3px bob,
+// imperceptible once frozen into a blurred background layer) is pre-rendered
+// ONCE to an offscreen canvas with a real blur+desaturate filter applied at
+// BAKE time only (see buildBgStaticCanvas) — every frame after that is just
+// one cheap drawImage of the finished bitmap. The pieces that DO need real
+// per-frame position changes (crabs roaming, the chest's open/close cycle +
+// bubbles) are drawn live via renderLiveTinted, which fakes the
+// desaturation with a `source-atop` tint fill (masked to the object's own
+// silhouette, not a bounding box — no real filter, no per-frame blur cost)
+// instead. The chest additionally gets a real single-object filtered blur
+// (see renderLiveBlurredTinted) since filtering exactly one object measured
+// as cheap, unlike looping it over many.
 //
 // Fully self-contained and decoupled from every other system here: its own
 // pools, its own update/render functions, called separately by main.js.
 const BG_PARALLAX_BOULDER_COUNT = 4;
-const BG_PARALLAX_CORAL_COUNT = 5;
+// Per direct request ("there needs to be the same number of coral, seaweed,
+// and urchins in the background layer as the foreground layer") — these
+// three now mirror their foreground CORAL_COUNT/SEAWEED_COUNT/
+// SEA_URCHIN_COUNT exactly, instead of a smaller sampled-down count.
+const BG_PARALLAX_CORAL_COUNT = CORAL_COUNT;
 const BG_PARALLAX_SAND_CASTLE_COUNT = 1;
-const BG_PARALLAX_SEAWEED_COUNT = 6;
+const BG_PARALLAX_SEAWEED_COUNT = SEAWEED_COUNT;
 const BG_PARALLAX_KELP_COUNT = 2;
-const BG_PARALLAX_SEA_URCHIN_COUNT = 5;
+const BG_PARALLAX_SEA_URCHIN_COUNT = SEA_URCHIN_COUNT;
 const BG_PARALLAX_CRAB_COUNT = 2;
+// Per direct request ("shrink the size of all the decorations in the
+// background layer by 10%, leaving the foreground decorations... unchanged")
+// — applied to every bg pool below via the shrinkX helpers (boulders/coral
+// have precomputed per-branch/per-bump sub-fields that need scaling too, not
+// just their own top-level `size`; sand castles/kelp/urchins/crabs/the chest
+// derive everything else from their own width/height/radius/size at DRAW
+// time, so scaling just that one field is enough for those).
+const BG_PARALLAX_SIZE_SCALE = 0.9;
+function shrinkBoulder(b) {
+  b.size *= BG_PARALLAX_SIZE_SCALE;
+  for (const bump of b.bumps) { bump.dx *= BG_PARALLAX_SIZE_SCALE; bump.r *= BG_PARALLAX_SIZE_SCALE; }
+  return b;
+}
+function shrinkCoral(c) {
+  c.size *= BG_PARALLAX_SIZE_SCALE;
+  for (const br of c.branches) { br.length *= BG_PARALLAX_SIZE_SCALE; br.width *= BG_PARALLAX_SIZE_SCALE; }
+  return c;
+}
+function shrinkSandCastle(sc) { sc.width *= BG_PARALLAX_SIZE_SCALE; sc.height *= BG_PARALLAX_SIZE_SCALE; return sc; }
+function shrinkKelp(k) { k.height *= BG_PARALLAX_SIZE_SCALE; k.width *= BG_PARALLAX_SIZE_SCALE; return k; }
+function shrinkSeaUrchin(u) { u.radius *= BG_PARALLAX_SIZE_SCALE; return u; }
+function shrinkCrab(c) { c.size *= BG_PARALLAX_SIZE_SCALE; return c; }
+function shrinkChest(c) { c.size *= BG_PARALLAX_SIZE_SCALE; return c; }
 // Raises the layer ~20% of the water column's own height above the real
 // floor line (SEABED_FLOOR_Y) — enough to visibly separate it from the
 // foreground floor without floating it up into open water.
 const BG_PARALLAX_FLOOR_Y = SEABED_FLOOR_Y - SEABED_FLOOR_Y * 0.2;
-const BG_PARALLAX_ALPHA = 0.8; // shared by both the baked static bitmap and the live animated pieces, so they read as one consistent layer
+const BG_PARALLAX_ALPHA = 0.8; // shared by every piece of this layer (baked static bitmap, live crabs/chest, the ground) so they all read as one consistent layer
 
 // ---- Static subset (baked once) ----
-const bgBoulders = Array.from({ length: BG_PARALLAX_BOULDER_COUNT }, randomBoulder);
-const bgCorals = Array.from({ length: BG_PARALLAX_CORAL_COUNT }, randomCoral);
-const bgSandCastles = Array.from({ length: BG_PARALLAX_SAND_CASTLE_COUNT }, randomSandCastle);
+const bgBoulders = Array.from({ length: BG_PARALLAX_BOULDER_COUNT }, () => shrinkBoulder(randomBoulder()));
+const bgCorals = Array.from({ length: BG_PARALLAX_CORAL_COUNT }, () => shrinkCoral(randomCoral()));
+const bgSandCastles = Array.from({ length: BG_PARALLAX_SAND_CASTLE_COUNT }, () => shrinkSandCastle(randomSandCastle()));
 const bgSeaweeds = Array.from({ length: BG_PARALLAX_SEAWEED_COUNT }, () => ({
   x: Math.random() * WORLD_W,
-  height: SEAWEED_MIN_HEIGHT + Math.random() * (SEAWEED_MAX_HEIGHT - SEAWEED_MIN_HEIGHT),
-  width: SEAWEED_MIN_WIDTH + Math.random() * (SEAWEED_MAX_WIDTH - SEAWEED_MIN_WIDTH),
+  height: (SEAWEED_MIN_HEIGHT + Math.random() * (SEAWEED_MAX_HEIGHT - SEAWEED_MIN_HEIGHT)) * BG_PARALLAX_SIZE_SCALE,
+  width: (SEAWEED_MIN_WIDTH + Math.random() * (SEAWEED_MAX_WIDTH - SEAWEED_MIN_WIDTH)) * BG_PARALLAX_SIZE_SCALE,
   blurFactor: 0.6 + Math.random() * 0.55,
   sway: 0, freq: 0, phase: 0, // frozen (no sway) — this copy is baked once, see the perf note above
   hue: 90 + Math.random() * 35,
 }));
-const bgKelps = Array.from({ length: BG_PARALLAX_KELP_COUNT }, () => ({ ...randomKelp(), sway: 0 })); // frozen, same reasoning as bgSeaweeds
+const bgKelps = Array.from({ length: BG_PARALLAX_KELP_COUNT }, () => shrinkKelp({ ...randomKelp(), sway: 0 })); // frozen, same reasoning as bgSeaweeds
+// Per direct request ("the background urchins need to be blurred") — moved
+// into the static baked subset (see the perf note above for why freezing an
+// urchin's own tiny bob is an acceptable trade) so they get the same real
+// blur/desaturate as everything else here, instead of the live/un-filtered
+// treatment they used to share with crabs.
+const bgSeaUrchins = Array.from({ length: BG_PARALLAX_SEA_URCHIN_COUNT }, () => shrinkSeaUrchin(randomSeaUrchin()));
 
 // Offscreen canvas the static subset is drawn into exactly once, in WORLD
 // pixels (1 world unit = 1 canvas pixel, no camera/zoom involved) spanning
 // just the vertical band this decor actually occupies — tall enough for the
-// tallest kelp/seaweed above BG_PARALLAX_FLOOR_Y, and (per direct request,
-// "duplicate the bottom part of the tank and vertically offset it for the
-// background layer... blurry and desaturated matching the seaweed and
-// coral") down far enough below BG_PARALLAX_FLOOR_Y to cover the visible gap
-// down to the REAL seabed line (SEABED_FLOOR_Y) — the real, opaque
-// renderSeabedGrid draws over anything below that line anyway (it renders
-// after this layer), so this only ever needs to cover the sliver of open
-// water between the raised duplicate floor and the real one.
+// tallest kelp/seaweed above BG_PARALLAX_FLOOR_Y, and down far enough below
+// BG_PARALLAX_FLOOR_Y to cover the visible gap down to the REAL seabed line
+// (SEABED_FLOOR_Y) — the real, opaque renderSeabedGrid draws over anything
+// below that line anyway (it renders after this layer), so this only ever
+// needs to cover the sliver of open water between the raised duplicate floor
+// and the real one.
 const BG_STATIC_CANVAS_MARGIN_ABOVE = SEAWEED_MAX_HEIGHT + 40;
 const BG_STATIC_CANVAS_MARGIN_BELOW = Math.ceil(SEABED_FLOOR_Y - BG_PARALLAX_FLOOR_Y) + 40;
 const bgStaticCanvas = document.createElement('canvas');
@@ -1711,29 +1736,50 @@ function buildBgStaticCanvas() {
   const localFloorY = BG_PARALLAX_FLOOR_Y;
   bctx.save();
   bctx.filter = 'blur(4px) saturate(0.18) brightness(0.82)';
-  // The duplicated tank bottom itself — a simple earth-tone gradient echoing
-  // Grid.js's real sediment strata colors, drawn FIRST (so every piece of
-  // decor below sits on top of it) and inside this same filter scope so it
-  // gets exactly the same blur/desaturation treatment as the seaweed/coral.
-  const groundGradient = bctx.createLinearGradient(0, localFloorY, 0, bgStaticCanvas.height);
-  groundGradient.addColorStop(0, '#5b4530');
-  groundGradient.addColorStop(0.5, '#4a3624');
-  groundGradient.addColorStop(1, '#372414');
-  bctx.fillStyle = groundGradient;
-  bctx.fillRect(0, localFloorY, bgStaticCanvas.width, bgStaticCanvas.height - localFloorY);
+  // The duplicated tank bottom (see buildBgGroundCanvas below) is baked as
+  // its OWN separate canvas and drawn last, on top of everything in this
+  // layer — per direct request ("make sure all the components of the
+  // background layer sit behind the background lower tank part that was
+  // duplicated") — so it isn't drawn here at all any more.
   for (const w of bgSeaweeds) drawOneSeaweed(bctx, bakeCamera, bgStaticCanvas.width, w, localFloorY);
   for (const b of bgBoulders) drawOneBoulder(bctx, bakeCamera, bgStaticCanvas.width, b, localFloorY);
   for (const k of bgKelps) drawOneKelp(bctx, bakeCamera, bgStaticCanvas.width, k, localFloorY);
   for (const sc of bgSandCastles) drawOneSandCastle(bctx, bakeCamera, bgStaticCanvas.width, sc, localFloorY);
   for (const c of bgCorals) drawOneCoral(bctx, bakeCamera, bgStaticCanvas.width, c, localFloorY);
+  for (const u of bgSeaUrchins) drawOneSeaUrchin(bctx, bakeCamera, bgStaticCanvas.width, u, localFloorY);
   bctx.restore();
 }
 buildBgStaticCanvas();
 
-// ---- Live subset (drawn every frame, un-filtered, at reduced alpha) ----
-const bgSeaUrchins = Array.from({ length: BG_PARALLAX_SEA_URCHIN_COUNT }, randomSeaUrchin);
-const bgCrabs = Array.from({ length: BG_PARALLAX_CRAB_COUNT }, randomCrab);
-const bgTreasureChest = randomTreasureChest();
+// The duplicated "bottom of the tank" itself, baked separately from the
+// decor above so it can be drawn LAST — on top of every other piece of this
+// layer (the static decor bitmap AND the live crabs/chest) — per direct
+// request ("make sure all the components of the background layer sit behind
+// the background lower tank part that was duplicated"). Same world
+// placement/size as bgStaticCanvas so it can reuse the exact same camera
+// transform when drawn.
+const bgGroundCanvas = document.createElement('canvas');
+bgGroundCanvas.width = bgStaticCanvas.width;
+bgGroundCanvas.height = bgStaticCanvas.height;
+function buildBgGroundCanvas() {
+  const gctx = bgGroundCanvas.getContext('2d');
+  gctx.clearRect(0, 0, bgGroundCanvas.width, bgGroundCanvas.height);
+  const localFloorYPx = worldToScreen(0, BG_PARALLAX_FLOOR_Y, { x: 0, y: BG_STATIC_TOP_WORLD_Y, zoom: 1 }).y;
+  gctx.save();
+  gctx.filter = 'blur(4px) saturate(0.18) brightness(0.82)'; // same params as buildBgStaticCanvas's own filter, so the two read as one layer
+  const groundGradient = gctx.createLinearGradient(0, localFloorYPx, 0, bgGroundCanvas.height);
+  groundGradient.addColorStop(0, '#5b4530');
+  groundGradient.addColorStop(0.5, '#4a3624');
+  groundGradient.addColorStop(1, '#372414');
+  gctx.fillStyle = groundGradient;
+  gctx.fillRect(0, localFloorYPx, bgGroundCanvas.width, bgGroundCanvas.height - localFloorYPx);
+  gctx.restore();
+}
+buildBgGroundCanvas();
+
+// ---- Live subset (drawn every frame; see this section's own perf note) ----
+const bgCrabs = Array.from({ length: BG_PARALLAX_CRAB_COUNT }, () => shrinkCrab(randomCrab()));
+const bgTreasureChest = shrinkChest(randomTreasureChest());
 // Bubbles from the background crabs/chest land here instead of the real
 // cursorBubbles pool, so they can get their own muted rendering (see
 // renderBgBubbles) instead of the crisp white foreground look.
@@ -1746,8 +1792,30 @@ function updateBackgroundParallaxDecor(dt) {
   updateSimpleBubblePool(bgBubbles, dt, dragMul);
 }
 
-// Same muted-grey treatment as renderShadowBubbles, just reused here for the
-// background crabs'/chest's own bubbles instead of a shadow fish's.
+// Per direct follow-up request ("make the background bubbles from all the
+// background sources slightly darker and more blurred") — darker grey-blue
+// (was 150-195 range, now 70-110) and, since a real per-bubble ctx.filter
+// blur would add a filtered draw call per bubble (expensive at any bubble
+// count — see this section's own perf note), the "blur" is faked the cheap
+// way instead: a soft radial gradient (fading fully to transparent at its
+// own edge) in place of the old flat-alpha fill + crisp stroke outline —
+// gradients read as soft-edged with no filter cost, while a stroked circle
+// reads as sharp/crisp regardless of alpha. Shared by renderBgBubbles (the
+// background crabs'/chest's own bubbles) and renderShadowBubbles (the
+// background silhouette fish's), since both are "background bubble sources."
+function drawSoftMutedBubble(ctx, x, y, r, alpha) {
+  const grad = ctx.createRadialGradient(x, y, 0, x, y, r * 1.6);
+  grad.addColorStop(0, `rgba(70, 90, 105, ${(alpha * 0.9).toFixed(3)})`);
+  grad.addColorStop(0.6, `rgba(85, 105, 120, ${(alpha * 0.55).toFixed(3)})`);
+  grad.addColorStop(1, 'rgba(85, 105, 120, 0)');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.arc(x, y, r * 1.6, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+// Reused here for the background crabs'/chest's own bubbles instead of a
+// shadow fish's — see drawSoftMutedBubble's own comment above.
 function renderBgBubbles(ctx, camera, canvasWidth, canvasHeight) {
   for (const b of bgBubbles) {
     const wobbleX = Math.sin(elapsed * b.wobbleFreq + b.wobblePhase) * b.wobbleAmp;
@@ -1756,17 +1824,7 @@ function renderBgBubbles(ctx, camera, canvasWidth, canvasHeight) {
     const lifeT = b.ageS / b.ttlS;
     const fade = lifeT < 0.75 ? 1 : Math.max(0, 1 - (lifeT - 0.75) / 0.25);
     const r = Math.max(1, b.radius * camera.zoom);
-    ctx.globalAlpha = 0.22 * fade;
-    ctx.fillStyle = 'rgba(150, 165, 175, 0.5)';
-    ctx.beginPath();
-    ctx.arc(screen.x, screen.y, r * 1.3, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.globalAlpha = 0.28 * fade;
-    ctx.strokeStyle = 'rgba(180, 195, 200, 0.6)';
-    ctx.lineWidth = Math.max(1, camera.zoom);
-    ctx.beginPath();
-    ctx.arc(screen.x, screen.y, r, 0, Math.PI * 2);
-    ctx.stroke();
+    drawSoftMutedBubble(ctx, screen.x, screen.y, r, 0.3 * fade);
   }
 }
 
@@ -1825,10 +1883,49 @@ function renderLiveTinted(destCtx, camera, canvasWidth, worldX, floorY, drawFn) 
   destCtx.drawImage(liveTintScratch, 0, 0, LIVE_TINT_SCRATCH_SIZE, LIVE_TINT_SCRATCH_SIZE, realScreen.x - LIVE_TINT_SCRATCH_CENTER, realScreen.y - LIVE_TINT_SCRATCH_CENTER, LIVE_TINT_SCRATCH_SIZE, LIVE_TINT_SCRATCH_SIZE);
 }
 
+// Per direct follow-up request ("fix the chest in the background to be
+// darker and more blurry... right now it just looks washed out") — the
+// chest's own bright gold/gem colors showed through the plain tint above far
+// more than the muted rocks/crabs did, reading as "veiled" rather than
+// genuinely darkened. This variant uses a darker, more opaque tint, plus a
+// cheap fake blur: downscaling the tinted scratch canvas down to a tiny
+// bitmap and immediately drawing THAT back out at full size (bilinear
+// resampling on both the down- and up-scale blends neighboring pixels
+// together, reading as soft/blurred) — no `ctx.filter` involved. A real
+// filter here was tried first and measured costing 15-18fps EVEN FOR THIS
+// SINGLE OBJECT in this environment (filtering a modest scratch canvas isn't
+// "cheap because it's only one call" — the earlier assumption to that effect
+// was wrong), so it's avoided entirely now, the same as every other live
+// piece in this file.
+const LIVE_BLUR_DOWNSCALE_SIZE = 36;
+const liveBlurDownscaleCanvas = document.createElement('canvas');
+liveBlurDownscaleCanvas.width = LIVE_BLUR_DOWNSCALE_SIZE;
+liveBlurDownscaleCanvas.height = LIVE_BLUR_DOWNSCALE_SIZE;
+const liveBlurDownscaleCtx = liveBlurDownscaleCanvas.getContext('2d');
+
+function renderLiveBlurredTinted(destCtx, camera, canvasWidth, worldX, floorY, drawFn) {
+  const realScreen = worldToScreen(worldX, floorY, camera);
+  if (realScreen.x < -LIVE_TINT_SCRATCH_SIZE || realScreen.x > canvasWidth + LIVE_TINT_SCRATCH_SIZE) return;
+  liveTintScratchCtx.clearRect(0, 0, LIVE_TINT_SCRATCH_SIZE, LIVE_TINT_SCRATCH_SIZE);
+  const localCamera = {
+    x: worldX - LIVE_TINT_SCRATCH_CENTER / camera.zoom,
+    y: floorY - LIVE_TINT_SCRATCH_CENTER / camera.zoom,
+    zoom: camera.zoom,
+  };
+  drawFn(liveTintScratchCtx, localCamera, LIVE_TINT_SCRATCH_SIZE);
+  liveTintScratchCtx.globalCompositeOperation = 'source-atop';
+  liveTintScratchCtx.fillStyle = 'rgba(55, 75, 92, 0.82)'; // darker + more opaque than renderLiveTinted's own tint
+  liveTintScratchCtx.fillRect(0, 0, LIVE_TINT_SCRATCH_SIZE, LIVE_TINT_SCRATCH_SIZE);
+  liveTintScratchCtx.globalCompositeOperation = 'source-over';
+  liveBlurDownscaleCtx.clearRect(0, 0, LIVE_BLUR_DOWNSCALE_SIZE, LIVE_BLUR_DOWNSCALE_SIZE);
+  liveBlurDownscaleCtx.drawImage(liveTintScratch, 0, 0, LIVE_TINT_SCRATCH_SIZE, LIVE_TINT_SCRATCH_SIZE, 0, 0, LIVE_BLUR_DOWNSCALE_SIZE, LIVE_BLUR_DOWNSCALE_SIZE);
+  destCtx.drawImage(liveBlurDownscaleCanvas, 0, 0, LIVE_BLUR_DOWNSCALE_SIZE, LIVE_BLUR_DOWNSCALE_SIZE, realScreen.x - LIVE_TINT_SCRATCH_CENTER, realScreen.y - LIVE_TINT_SCRATCH_CENTER, LIVE_TINT_SCRATCH_SIZE, LIVE_TINT_SCRATCH_SIZE);
+}
+
 export function renderBackgroundParallaxDecor(ctx, camera, canvasWidth, canvasHeight) {
-  // The baked static bitmap, scaled/positioned to match the current camera —
-  // one drawImage instead of redrawing 40+ shapes, see this section's own
-  // perf note above.
+  // The baked static bitmap (seaweed/boulders/kelp/sand castles/coral/
+  // urchins), scaled/positioned to match the current camera — one drawImage
+  // instead of redrawing 50+ shapes, see this section's own perf note above.
   const topLeft = worldToScreen(0, BG_STATIC_TOP_WORLD_Y, camera);
   const destW = bgStaticCanvas.width * camera.zoom;
   const destH = bgStaticCanvas.height * camera.zoom;
@@ -1836,39 +1933,22 @@ export function renderBackgroundParallaxDecor(ctx, camera, canvasWidth, canvasHe
   ctx.globalAlpha = BG_PARALLAX_ALPHA;
   ctx.drawImage(bgStaticCanvas, 0, 0, bgStaticCanvas.width, bgStaticCanvas.height, topLeft.x, topLeft.y, destW, destH);
 
-  // Live animated pieces — see renderLiveTinted's own comment above for why
-  // these get a real per-object blur instead of the static bake's one-shot
-  // filter, at the same overall opacity so they read as one layer.
-  for (const u of bgSeaUrchins) {
-    renderLiveTinted(ctx, camera, canvasWidth, u.x, BG_PARALLAX_FLOOR_Y, (c2, cam2, cw2) => drawOneSeaUrchin(c2, cam2, cw2, u, BG_PARALLAX_FLOOR_Y));
-  }
+  // Live animated pieces — crabs get the cheap tint-only treatment, the
+  // (single) chest additionally gets the downscale/upscale fake-blur (see
+  // renderLiveBlurredTinted above), all at the same overall opacity so they
+  // read as one layer.
   for (const c of bgCrabs) {
     renderLiveTinted(ctx, camera, canvasWidth, c.x, BG_PARALLAX_FLOOR_Y, (c2, cam2, cw2) => drawOneCrab(c2, cam2, cw2, c, BG_PARALLAX_FLOOR_Y));
   }
-  renderLiveTinted(ctx, camera, canvasWidth, bgTreasureChest.x, BG_PARALLAX_FLOOR_Y, (c2, cam2, cw2) => drawOneTreasureChest(c2, cam2, cw2, bgTreasureChest, BG_PARALLAX_FLOOR_Y));
+  renderLiveBlurredTinted(ctx, camera, canvasWidth, bgTreasureChest.x, BG_PARALLAX_FLOOR_Y, (c2, cam2, cw2) => drawOneTreasureChest(c2, cam2, cw2, bgTreasureChest, BG_PARALLAX_FLOOR_Y));
   renderBgBubbles(ctx, camera, canvasWidth, canvasHeight);
+
+  // The duplicated tank bottom, drawn LAST — on top of the static decor AND
+  // the live crabs/chest above — per direct request ("make sure all the
+  // components of the background layer sit behind the background lower tank
+  // part that was duplicated"). Shares bgStaticCanvas's own placement/size,
+  // so the same transform applies unchanged.
+  ctx.drawImage(bgGroundCanvas, 0, 0, bgGroundCanvas.width, bgGroundCanvas.height, topLeft.x, topLeft.y, destW, destH);
   ctx.restore();
 }
 
-// ---- Caustic stamp targets ----
-// Per direct request ("cast [the caustic net] onto every object at the
-// bottom: the treasure chest, the rocks, the corals, and the base of the sea
-// grass (ignoring the background duplicated layer)") — main.js's
-// CausticOverlay doesn't know anything about individual boulders/coral/etc.
-// (it's deliberately decoupled from game/ambience state, see its own header
-// comment), so it just asks for a flat list of {x, y, radius} world-space
-// targets to stamp the SAME caustic texture onto. Deliberately only the
-// FOREGROUND pools (boulders/corals/treasureChest/seaweeds) — the background
-// parallax copies are excluded, per that same direct request.
-export function getCausticStampTargets() {
-  const targets = [];
-  for (const b of boulders) targets.push({ x: b.x, y: SEABED_FLOOR_Y, radius: b.size * 0.9 });
-  for (const c of corals) targets.push({ x: c.x, y: SEABED_FLOOR_Y, radius: c.size * 0.9 });
-  // Seaweed is thin and dense (SEAWEED_COUNT strands packed along the whole
-  // floor) — every other base is plenty (stamping all of them is both
-  // redundant, since neighbors sit only a few px apart, and a real per-frame
-  // cost: one caustic-field sample plus one gradient draw per stamp).
-  for (let i = 0; i < seaweeds.length; i += 2) targets.push({ x: seaweeds[i].x, y: SEABED_FLOOR_Y, radius: seaweeds[i].width * 1.6 });
-  targets.push({ x: treasureChest.x, y: SEABED_FLOOR_Y, radius: treasureChest.size * 1.3 });
-  return targets;
-}
