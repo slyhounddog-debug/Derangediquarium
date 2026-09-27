@@ -9,7 +9,7 @@
 
 import { WORLD_TILES_H, WORLD_TILES_W, TILE_EMPTY, SEA_TURTLE_SPAWN_MIN_MS, SEA_TURTLE_SPAWN_MAX_MS } from './Config.js';
 
-const SAVE_KEY = 'derangiquarium_save_v1';
+const SAVE_KEY = 'finsanity_save_v1';
 
 export function hasSaveGame() {
   try {
@@ -25,7 +25,7 @@ export function saveGame(state) {
     localStorage.setItem(SAVE_KEY, payload);
     return true;
   } catch (err) {
-    console.error('Derangiquarium: save failed', err);
+    console.error('Finsanity: save failed', err);
     return false;
   }
 }
@@ -152,7 +152,7 @@ export function loadSaveGame() {
     }
     return { meta: parsed.meta, level: parsed.level };
   } catch (err) {
-    console.error('Derangiquarium: load failed', err);
+    console.error('Finsanity: load failed', err);
     return null;
   }
 }

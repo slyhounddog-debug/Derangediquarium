@@ -1,5 +1,5 @@
 // ============================================================
-// Derangiquarium — Config.js
+// Finsanity — Config.js
 // All balance numbers and world constants live here (§3.6 of the
 // build spec). No magic numbers in system files — Engine/Entities/
 // Grid/Systems/UI all import what they need from this file.

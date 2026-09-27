@@ -18,5 +18,5 @@ app.use('/audio', express.static(path.join(__dirname, 'audio')));
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
 app.listen(PORT, () => {
-  console.log(`Derangiquarium running at http://localhost:${PORT}`);
+  console.log(`Finsanity running at http://localhost:${PORT}`);
 });

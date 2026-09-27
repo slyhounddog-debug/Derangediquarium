@@ -156,19 +156,21 @@ function shadowFishColors(blendT) {
 // Count doubled (5->10) and sizes bumped 10% per direct request ("increase
 // the amount of background Shadow fish by 100%... increase the size by 10%
 // for the big and small variants"), then bumped again (10->12) per a direct
-// follow-up request.
-const SHADOW_FISH_COUNT = 12;
-const SHADOW_FISH_MIN_SIZE = 20 * 1.1;
-const SHADOW_FISH_MAX_SIZE = 42 * 1.1;
+// follow-up request, then bumped again (12->13, size +10% more) per a
+// further direct follow-up request.
+const SHADOW_FISH_COUNT = 13;
+const SHADOW_FISH_MIN_SIZE = 20 * 1.1 * 1.1;
+const SHADOW_FISH_MAX_SIZE = 42 * 1.1 * 1.1;
 // Per direct request ("add a few more, even more faint, much bigger fish
 // silhouettes in the background") — a second, smaller pool sharing every
 // mechanic the regular shadow fish already have (drift, wrap, bob, tail-wag),
 // just bigger and blended further toward the faint end of the color range.
 // Count doubled (3->6), then bumped again (6->9) per a direct follow-up
-// request, same as the small variant above.
-const SHADOW_FISH_BIG_COUNT = 9;
-const SHADOW_FISH_BIG_MIN_SIZE = 70 * 1.1;
-const SHADOW_FISH_BIG_MAX_SIZE = 130 * 1.1;
+// request, then bumped again (9->10, size +10% more) per a further direct
+// follow-up request, same as the small variant above.
+const SHADOW_FISH_BIG_COUNT = 10;
+const SHADOW_FISH_BIG_MIN_SIZE = 70 * 1.1 * 1.1;
+const SHADOW_FISH_BIG_MAX_SIZE = 130 * 1.1 * 1.1;
 
 // ---- Shadow Fish fade in/out ----
 // Per direct request ("add in 3 independent timers for each fish that are
@@ -397,9 +399,11 @@ function drawOneShadowFish(ctx, camera, canvasWidth, canvasHeight, f) {
   if (f.alpha <= 0) return; // fully faded out — see updateShadowFishFade
   const bobY = f.baseY + Math.sin(elapsed * f.bobFreq + f.bobPhase) * f.bobAmp;
   const screen = worldToScreen(f.x, bobY, camera);
-  // Shrinks in step with its own fade — full size at alpha 1, 10% smaller
-  // at alpha 0 (fully faded). See SHADOW_FISH_FADE_SIZE_SHRINK.
-  const sizeScale = 1 - SHADOW_FISH_FADE_SIZE_SHRINK * (1 - f.alpha);
+  // Shrinks in step with its own fade, but only over the bottom half of the
+  // fade — full size all the way down to alpha 0.5, then shrinking to 10%
+  // smaller by alpha 0 (fully faded). See SHADOW_FISH_FADE_SIZE_SHRINK.
+  const shrinkT = f.alpha < 0.5 ? (0.5 - f.alpha) / 0.5 : 0;
+  const sizeScale = 1 - SHADOW_FISH_FADE_SIZE_SHRINK * shrinkT;
   const size = f.size * sizeScale * camera.zoom;
   if (screen.x < -size * 2 || screen.x > canvasWidth + size * 2 || screen.y < -size || screen.y > canvasHeight + size) return;
   // A slight tail-wag "squash" on the horizontal scale, same idea as a real
@@ -684,6 +688,14 @@ function randomCoral() {
       width: 3 + Math.random() * 4,
     })),
     depth: 45 + Math.random() * 20, // always >= LAB_DEPTH_THRESHOLD — coral always draws in front of the Science Lab
+    // Per direct request ("coral all sways slightly back and forth, like the
+    // water is moving the coral") — same sine-wave idea as kelp/seaweed's own
+    // sway, just applied as a small angle wobble per branch instead of a
+    // curve offset, and each coral head gets its own random freq/phase so a
+    // whole cluster of coral doesn't wave in lockstep.
+    swayAmp: (0.04 + Math.random() * 0.05) * Math.PI, // small angle wobble, not a full flail
+    swayFreq: 0.25 + Math.random() * 0.3,
+    swayPhase: Math.random() * Math.PI * 2,
   };
 }
 const corals = [];
@@ -695,10 +707,12 @@ function drawOneCoral(ctx, camera, canvasWidth, c) {
   if (screen.x < -size * 2 || screen.x > canvasWidth + size * 2) return;
   ctx.save();
   ctx.lineCap = 'round';
+  const sway = Math.sin(elapsed * c.swayFreq + c.swayPhase) * c.swayAmp;
   for (const br of c.branches) {
     const len = br.length * camera.zoom;
-    const endX = screen.x + Math.cos(br.angle) * len;
-    const endY = screen.y + Math.sin(br.angle) * len;
+    const angle = br.angle + sway;
+    const endX = screen.x + Math.cos(angle) * len;
+    const endY = screen.y + Math.sin(angle) * len;
     ctx.strokeStyle = `hsl(${c.hue}, 60%, 55%)`;
     ctx.lineWidth = Math.max(1.5, br.width * camera.zoom);
     ctx.beginPath();
