@@ -1687,9 +1687,16 @@ const bgKelps = Array.from({ length: BG_PARALLAX_KELP_COUNT }, () => ({ ...rando
 // Offscreen canvas the static subset is drawn into exactly once, in WORLD
 // pixels (1 world unit = 1 canvas pixel, no camera/zoom involved) spanning
 // just the vertical band this decor actually occupies — tall enough for the
-// tallest kelp/seaweed above BG_PARALLAX_FLOOR_Y plus a margin below it.
+// tallest kelp/seaweed above BG_PARALLAX_FLOOR_Y, and (per direct request,
+// "duplicate the bottom part of the tank and vertically offset it for the
+// background layer... blurry and desaturated matching the seaweed and
+// coral") down far enough below BG_PARALLAX_FLOOR_Y to cover the visible gap
+// down to the REAL seabed line (SEABED_FLOOR_Y) — the real, opaque
+// renderSeabedGrid draws over anything below that line anyway (it renders
+// after this layer), so this only ever needs to cover the sliver of open
+// water between the raised duplicate floor and the real one.
 const BG_STATIC_CANVAS_MARGIN_ABOVE = SEAWEED_MAX_HEIGHT + 40;
-const BG_STATIC_CANVAS_MARGIN_BELOW = 40;
+const BG_STATIC_CANVAS_MARGIN_BELOW = Math.ceil(SEABED_FLOOR_Y - BG_PARALLAX_FLOOR_Y) + 40;
 const bgStaticCanvas = document.createElement('canvas');
 bgStaticCanvas.width = Math.ceil(WORLD_W);
 bgStaticCanvas.height = Math.ceil(BG_STATIC_CANVAS_MARGIN_ABOVE + BG_STATIC_CANVAS_MARGIN_BELOW);
@@ -1704,6 +1711,16 @@ function buildBgStaticCanvas() {
   const localFloorY = BG_PARALLAX_FLOOR_Y;
   bctx.save();
   bctx.filter = 'blur(4px) saturate(0.18) brightness(0.82)';
+  // The duplicated tank bottom itself — a simple earth-tone gradient echoing
+  // Grid.js's real sediment strata colors, drawn FIRST (so every piece of
+  // decor below sits on top of it) and inside this same filter scope so it
+  // gets exactly the same blur/desaturation treatment as the seaweed/coral.
+  const groundGradient = bctx.createLinearGradient(0, localFloorY, 0, bgStaticCanvas.height);
+  groundGradient.addColorStop(0, '#5b4530');
+  groundGradient.addColorStop(0.5, '#4a3624');
+  groundGradient.addColorStop(1, '#372414');
+  bctx.fillStyle = groundGradient;
+  bctx.fillRect(0, localFloorY, bgStaticCanvas.width, bgStaticCanvas.height - localFloorY);
   for (const w of bgSeaweeds) drawOneSeaweed(bctx, bakeCamera, bgStaticCanvas.width, w, localFloorY);
   for (const b of bgBoulders) drawOneBoulder(bctx, bakeCamera, bgStaticCanvas.width, b, localFloorY);
   for (const k of bgKelps) drawOneKelp(bctx, bakeCamera, bgStaticCanvas.width, k, localFloorY);
@@ -1753,29 +1770,59 @@ function renderBgBubbles(ctx, camera, canvasWidth, canvasHeight) {
   }
 }
 
-// Desaturates+tints a small rectangular patch of whatever was JUST drawn
-// into it, using canvas blend modes ('saturation' then 'color') instead of
-// `ctx.filter` — per this section's own perf note, a real filter costs
-// roughly the same whether it wraps one shape or twenty (Chromium
-// re-rasterizes each filtered draw individually), but a plain composite-mode
-// fillRect is an ordinary hardware-accelerated blend like any other draw
-// call, so ONE extra fillRect per live object (not per-stroke) is cheap
-// regardless of how many strokes/fills that object itself was built from.
-// Used for the live (unbaked) background pieces — sea urchins/crabs/the
-// chest — right after they're drawn normally, so they end up genuinely
-// desaturated and blue-grey-tinted toward the water, not just alpha-blended.
-function desaturatePatch(ctx, x, y, halfSize) {
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(x - halfSize, y - halfSize, halfSize * 2, halfSize * 2);
-  ctx.clip();
-  ctx.globalCompositeOperation = 'saturation';
-  ctx.fillStyle = 'hsl(200, 8%, 50%)';
-  ctx.fillRect(x - halfSize, y - halfSize, halfSize * 2, halfSize * 2);
-  ctx.globalCompositeOperation = 'color';
-  ctx.fillStyle = 'rgba(96, 134, 162, 0.55)';
-  ctx.fillRect(x - halfSize, y - halfSize, halfSize * 2, halfSize * 2);
-  ctx.restore();
+// ---- Desaturating the LIVE pieces (sea urchins/crabs/the chest) ----
+// Per direct follow-up request ("change the urchins, crabs and chest to
+// match [the seaweed/coral/rocks/sand castles] instead of having a gray
+// square around each one of them") — the FIRST attempt at this (a flat
+// composite-mode fillRect clipped to each object's bounding RECTANGLE)
+// tinted the whole rectangle uniformly, including all the plain background
+// water visible through the gaps in an object's own silhouette — reading as
+// a visible gray square. A SECOND attempt (draw onto a small scratch canvas,
+// then a single `ctx.filter` blur+saturate blit of that whole scratch per
+// object) fixed the square but measured a much bigger frame-rate hit than
+// expected — profiling showed `ctx.filter`'s cost scales with the FILTERED
+// SOURCE AREA, not just "once per object," so even one call per object over
+// a modest scratch canvas was expensive.
+//
+// This version drops `ctx.filter` entirely: draw the object at full color
+// onto a small reusable scratch canvas, then tint it with
+// `globalCompositeOperation = 'source-atop'` — which, unlike 'saturation'/
+// 'color', only ever paints over pixels the destination ALREADY has alpha
+// on, leaving the scratch canvas's transparent background untouched. That's
+// what actually fixes the square (the tint is masked to the object's own
+// silhouette by construction) without needing any per-pixel filter pass —
+// just one extra fillRect, exactly as cheap as any other draw call here.
+// True blur is skipped for these few live/animated pieces (the cost of
+// literally re-blurring them every frame isn't worth it); the muted tint
+// plus their small size/position among the already-blurred static bake is
+// enough for them to read as part of the same background layer.
+const LIVE_TINT_SCRATCH_SIZE = 260;
+const LIVE_TINT_SCRATCH_CENTER = LIVE_TINT_SCRATCH_SIZE / 2;
+const liveTintScratch = document.createElement('canvas');
+liveTintScratch.width = LIVE_TINT_SCRATCH_SIZE;
+liveTintScratch.height = LIVE_TINT_SCRATCH_SIZE;
+const liveTintScratchCtx = liveTintScratch.getContext('2d');
+
+// drawFn(ctx, localCamera, canvasWidth) must draw the object using worldX/
+// floorY exactly as it would with the real camera — localCamera is built so
+// that (worldX, floorY) lands dead-center on the scratch canvas regardless
+// of the real camera's own pan, at the same zoom (so sizing still matches
+// the rest of the scene).
+function renderLiveTinted(destCtx, camera, canvasWidth, worldX, floorY, drawFn) {
+  const realScreen = worldToScreen(worldX, floorY, camera);
+  if (realScreen.x < -LIVE_TINT_SCRATCH_SIZE || realScreen.x > canvasWidth + LIVE_TINT_SCRATCH_SIZE) return;
+  liveTintScratchCtx.clearRect(0, 0, LIVE_TINT_SCRATCH_SIZE, LIVE_TINT_SCRATCH_SIZE);
+  const localCamera = {
+    x: worldX - LIVE_TINT_SCRATCH_CENTER / camera.zoom,
+    y: floorY - LIVE_TINT_SCRATCH_CENTER / camera.zoom,
+    zoom: camera.zoom,
+  };
+  drawFn(liveTintScratchCtx, localCamera, LIVE_TINT_SCRATCH_SIZE);
+  liveTintScratchCtx.globalCompositeOperation = 'source-atop';
+  liveTintScratchCtx.fillStyle = 'rgba(110, 140, 165, 0.6)'; // same blue-grey the static bake's own saturate/brightness filter settles toward
+  liveTintScratchCtx.fillRect(0, 0, LIVE_TINT_SCRATCH_SIZE, LIVE_TINT_SCRATCH_SIZE);
+  liveTintScratchCtx.globalCompositeOperation = 'source-over';
+  destCtx.drawImage(liveTintScratch, 0, 0, LIVE_TINT_SCRATCH_SIZE, LIVE_TINT_SCRATCH_SIZE, realScreen.x - LIVE_TINT_SCRATCH_CENTER, realScreen.y - LIVE_TINT_SCRATCH_CENTER, LIVE_TINT_SCRATCH_SIZE, LIVE_TINT_SCRATCH_SIZE);
 }
 
 export function renderBackgroundParallaxDecor(ctx, camera, canvasWidth, canvasHeight) {
@@ -1789,24 +1836,16 @@ export function renderBackgroundParallaxDecor(ctx, camera, canvasWidth, canvasHe
   ctx.globalAlpha = BG_PARALLAX_ALPHA;
   ctx.drawImage(bgStaticCanvas, 0, 0, bgStaticCanvas.width, bgStaticCanvas.height, topLeft.x, topLeft.y, destW, destH);
 
-  // Live animated pieces — un-blurred (see perf note) but genuinely
-  // desaturated+tinted right after drawing (see desaturatePatch), at the
-  // same overall opacity as the static bake so they read as one layer.
+  // Live animated pieces — see renderLiveTinted's own comment above for why
+  // these get a real per-object blur instead of the static bake's one-shot
+  // filter, at the same overall opacity so they read as one layer.
   for (const u of bgSeaUrchins) {
-    drawOneSeaUrchin(ctx, camera, canvasWidth, u, BG_PARALLAX_FLOOR_Y);
-    const screen = worldToScreen(u.x, BG_PARALLAX_FLOOR_Y, camera);
-    desaturatePatch(ctx, screen.x, screen.y - u.radius * camera.zoom, u.radius * 3 * camera.zoom);
+    renderLiveTinted(ctx, camera, canvasWidth, u.x, BG_PARALLAX_FLOOR_Y, (c2, cam2, cw2) => drawOneSeaUrchin(c2, cam2, cw2, u, BG_PARALLAX_FLOOR_Y));
   }
   for (const c of bgCrabs) {
-    drawOneCrab(ctx, camera, canvasWidth, c, BG_PARALLAX_FLOOR_Y);
-    const screen = worldToScreen(c.x, BG_PARALLAX_FLOOR_Y, camera);
-    desaturatePatch(ctx, screen.x, screen.y - c.size * camera.zoom, c.size * 2.5 * camera.zoom);
+    renderLiveTinted(ctx, camera, canvasWidth, c.x, BG_PARALLAX_FLOOR_Y, (c2, cam2, cw2) => drawOneCrab(c2, cam2, cw2, c, BG_PARALLAX_FLOOR_Y));
   }
-  drawOneTreasureChest(ctx, camera, canvasWidth, bgTreasureChest, BG_PARALLAX_FLOOR_Y);
-  {
-    const screen = worldToScreen(bgTreasureChest.x, BG_PARALLAX_FLOOR_Y, camera);
-    desaturatePatch(ctx, screen.x, screen.y - bgTreasureChest.size * camera.zoom, bgTreasureChest.size * 2 * camera.zoom);
-  }
+  renderLiveTinted(ctx, camera, canvasWidth, bgTreasureChest.x, BG_PARALLAX_FLOOR_Y, (c2, cam2, cw2) => drawOneTreasureChest(c2, cam2, cw2, bgTreasureChest, BG_PARALLAX_FLOOR_Y));
   renderBgBubbles(ctx, camera, canvasWidth, canvasHeight);
   ctx.restore();
 }

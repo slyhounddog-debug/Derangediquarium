@@ -40,12 +40,22 @@
 
 const OVERLAY_OPACITY = 0.5; // per-blob peak alpha; blobs overlap under 'lighter' blending, so the effective wash reads far softer than this in isolation
 
+// Per direct follow-up request ("make the new caustic lighting effect 1/5th
+// the speed, with 1/3rd as many light particles on screen... it's literal
+// visual insanity right now") — a single multiplier on the time value fed
+// into every drift/pulse/rotation calculation below, rather than hand-tuning
+// each individual frequency constant, so "speed" stays one dial.
+const CAUSTIC_SPEED_MULTIPLIER = 0.2;
+
 // A grid of overlapping soft blobs spanning normalized (u, v) in [0,1]x[0,1]
 // — dense enough (and each wide enough relative to its own cell) to read as
 // one continuous net once all the overlapping 'lighter' blends are summed,
-// not a sparse dot grid.
-const GRID_COLS = 8;
-const GRID_ROWS = 5;
+// not a sparse dot grid. Per the same direct follow-up request, cut to
+// roughly a third of the original 8x5=40 cells — both dimensions scaled by
+// sqrt(1/3) (not just one axis) so the grid's aspect ratio, and each cell's
+// own footprint relative to the screen, stays the same shape as before.
+const GRID_COLS = 5;
+const GRID_ROWS = 3;
 const cells = [];
 for (let row = 0; row < GRID_ROWS; row++) {
   for (let col = 0; col < GRID_COLS; col++) {
@@ -134,6 +144,7 @@ export class CausticOverlay {
     const spanHeight = spanBottom - spanTop;
     if (spanHeight <= 0) return;
     const floorFrac = Math.max(0.15, Math.min(0.95, (seabedTopScreenY - spanTop) / spanHeight));
+    const t = elapsedS * CAUSTIC_SPEED_MULTIPLIER;
 
     destCtx.save();
     destCtx.globalCompositeOperation = 'lighter';
@@ -141,10 +152,10 @@ export class CausticOverlay {
     const cellPxH = CELL_SPACING_V * spanHeight;
     const baseR = Math.max(cellPxW, cellPxH) * 0.9;
     for (const c of cells) {
-      const u = c.u0 + Math.sin(elapsedS * c.driftFreqX + c.driftPhaseX) * DRIFT_AMP_U;
-      const v = c.v0 + Math.sin(elapsedS * c.driftFreqY + c.driftPhaseY) * DRIFT_AMP_V;
-      const pulse = 0.5 + 0.5 * Math.sin(elapsedS * c.pulseFreq + c.pulsePhase);
-      const field = causticBrightnessAt(u, v, elapsedS);
+      const u = c.u0 + Math.sin(t * c.driftFreqX + c.driftPhaseX) * DRIFT_AMP_U;
+      const v = c.v0 + Math.sin(t * c.driftFreqY + c.driftPhaseY) * DRIFT_AMP_V;
+      const pulse = 0.5 + 0.5 * Math.sin(t * c.pulseFreq + c.pulsePhase);
+      const field = causticBrightnessAt(u, v, t);
       const brightness = field * (0.55 + pulse * 0.45) * this.verticalIntensity(v, floorFrac);
       if (brightness <= 0.03) continue;
       const x = u * canvasWidth;
@@ -158,14 +169,14 @@ export class CausticOverlay {
       // together along the floor, their stamps overlap heavily under this
       // same additive blend, so a lower per-stamp contribution is what keeps
       // dense clusters from blowing straight out to solid white.
-      for (const t of stampTargets) {
-        if (t.x + t.radius < 0 || t.x - t.radius > canvasWidth || t.y + t.radius < 0) continue;
-        const u = t.x / canvasWidth;
-        const v = (t.y - spanTop) / spanHeight;
+      for (const target of stampTargets) {
+        if (target.x + target.radius < 0 || target.x - target.radius > canvasWidth || target.y + target.radius < 0) continue;
+        const u = target.x / canvasWidth;
+        const v = (target.y - spanTop) / spanHeight;
         if (v < -0.2 || v > 1.2) continue;
-        const field = causticBrightnessAt(u, v, elapsedS);
+        const field = causticBrightnessAt(u, v, t);
         const brightness = field * this.verticalIntensity(v, floorFrac) * 0.7;
-        this.drawBlob(destCtx, t.x, t.y, t.radius, brightness);
+        this.drawBlob(destCtx, target.x, target.y, target.radius, brightness);
       }
     }
     destCtx.restore();
