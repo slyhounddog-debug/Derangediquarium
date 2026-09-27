@@ -3353,6 +3353,119 @@ function getUndergroundTexturePattern(ctx) {
   return undergroundTexturePattern;
 }
 
+// ---- Sediment Strata ----
+// Per direct request ("add subtle sediment color variations and organic bed
+// stratification into the bottom part of the tank to make the bottom half
+// match the polish of the water section") — the seabed used to be a single
+// flat 2-stop gradient with no internal structure. Now it's built from
+// several overlapping earth-tone bands with softly wavy (not ruler-straight)
+// boundaries, like sediment layers compacted over time. Each band's wavy
+// boundary is two summed sine waves with a random amplitude/frequency/phase
+// rolled ONCE at module load (strataBoundaryOffsets below), not regenerated
+// every frame — the render function below only ever resamples that fixed
+// wave shape through the current camera, so the per-frame cost is filling a
+// handful of cheap polygons, same "randomize once, resample cheaply" idiom
+// boulders/corals/etc. in Ambience.js already use.
+const SEDIMENT_STRATA = [
+  { topFrac: 0.0, colorTop: '#5b4530', colorBottom: '#4a3624' }, // upper sand — matches the old top color
+  { topFrac: 0.2, colorTop: '#4a3624', colorBottom: '#42351f' },
+  { topFrac: 0.42, colorTop: '#3f2f1c', colorBottom: '#3a2a1a' }, // ochre/clay band
+  { topFrac: 0.64, colorTop: '#37281a', colorBottom: '#332417' },
+  { topFrac: 0.84, colorTop: '#302013', colorBottom: '#3d3122' }, // deepest band — matches the old bottom color
+];
+const STRATA_SAMPLE_STEP_PX = 64; // world-space sample spacing for the wavy boundary lines
+const strataBoundaryOffsets = SEDIMENT_STRATA.map(() => ({
+  amp1: 6 + Math.random() * 10,
+  freq1: 0.004 + Math.random() * 0.003,
+  phase1: Math.random() * Math.PI * 2,
+  amp2: 3 + Math.random() * 6,
+  freq2: 0.011 + Math.random() * 0.008,
+  phase2: Math.random() * Math.PI * 2,
+}));
+function strataWaveAt(x, o) {
+  return Math.sin(x * o.freq1 + o.phase1) * o.amp1 + Math.sin(x * o.freq2 + o.phase2) * o.amp2;
+}
+// A second, colored blotch texture layered on top of the plain black/white
+// getCityTexturePattern speckle — warm rust/clay/mineral tones at low alpha,
+// so the sediment reads as compositionally varied (not just "lighter/darker
+// noise") the same way the water column's sun rays/caustics give it varied
+// color, not just varied brightness. Cached the same lazy-singleton way as
+// getCityTexturePattern/getUndergroundTexturePattern just above.
+let sedimentSpecklePattern = null;
+function getSedimentSpecklePattern(ctx) {
+  if (sedimentSpecklePattern) return sedimentSpecklePattern;
+  const tile = document.createElement('canvas');
+  tile.width = 96;
+  tile.height = 96;
+  const tctx = tile.getContext('2d');
+  const blotchColors = ['rgba(139, 94, 52, 0.10)', 'rgba(90, 74, 48, 0.10)', 'rgba(168, 125, 74, 0.08)', 'rgba(60, 50, 38, 0.12)', 'rgba(120, 100, 70, 0.09)'];
+  for (let i = 0; i < 14; i++) {
+    const x = Math.random() * 96;
+    const y = Math.random() * 96;
+    const r = 4 + Math.random() * 10;
+    tctx.fillStyle = blotchColors[Math.floor(Math.random() * blotchColors.length)];
+    tctx.beginPath();
+    tctx.ellipse(x, y, r, r * (0.5 + Math.random() * 0.4), Math.random() * Math.PI, 0, Math.PI * 2);
+    tctx.fill();
+  }
+  sedimentSpecklePattern = ctx.createPattern(tile, 'repeat');
+  return sedimentSpecklePattern;
+}
+// Fills the seabed's [seabedTopWorldY, worldBottomY) span with the wavy
+// multi-band strata above, replacing the old single 2-stop gradient. Only
+// covers up to worldBottomY — the region below that (the pure-visual camera
+// buffer strip) keeps getting its own separate treatment from
+// renderCameraBottomBuffer, drawn right after this in renderSeabedGrid.
+function drawSedimentStrata(ctx, camera, canvasWidth, seabedTopWorldY, worldBottomY) {
+  const seabedHeight = worldBottomY - seabedTopWorldY;
+  if (seabedHeight <= 0) return;
+  const worldLeft = camera.x;
+  const worldRight = camera.x + canvasWidth / camera.zoom;
+  const xs = [];
+  const startX = Math.floor(worldLeft / STRATA_SAMPLE_STEP_PX) * STRATA_SAMPLE_STEP_PX - STRATA_SAMPLE_STEP_PX;
+  for (let x = startX; x <= worldRight + STRATA_SAMPLE_STEP_PX; x += STRATA_SAMPLE_STEP_PX) xs.push(x);
+
+  for (let i = 0; i < SEDIMENT_STRATA.length; i++) {
+    const band = SEDIMENT_STRATA[i];
+    const nextBand = SEDIMENT_STRATA[i + 1];
+    const bandTopWorldY = seabedTopWorldY + seabedHeight * band.topFrac;
+    const bandBottomWorldY = nextBand ? seabedTopWorldY + seabedHeight * nextBand.topFrac : worldBottomY;
+    const topOffsets = strataBoundaryOffsets[i];
+    const bottomOffsets = nextBand ? strataBoundaryOffsets[i + 1] : null;
+
+    const gradient = ctx.createLinearGradient(0, worldToScreen(0, bandTopWorldY, camera).y, 0, worldToScreen(0, bandBottomWorldY, camera).y);
+    gradient.addColorStop(0, band.colorTop);
+    gradient.addColorStop(1, band.colorBottom);
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    for (let j = 0; j < xs.length; j++) {
+      // Per direct request ("move the waves...up so that the lowest part of
+      // the wave matches the split between the top and bottom of the tank...
+      // occasional hills instead of empty dips") — only the topmost band's
+      // own top edge (the one visible right at the water/sand line) is
+      // clamped to a hills-only shape (never dips below seabedTopWorldY, the
+      // flat line every foreground floor decor is actually rooted at — see
+      // Ambience.js's SEABED_FLOOR_Y). A full signed wave here used to dip
+      // BELOW that fixed line in places, opening a gap of bare water between
+      // a rooted object's base and the sand surface that had receded out
+      // from under it. Deeper inter-band boundaries keep the full signed
+      // wave — they're hidden under decor/texture, so a dip there is never
+      // visible as a gap.
+      const y = i === 0 ? bandTopWorldY - Math.abs(strataWaveAt(xs[j], topOffsets)) : bandTopWorldY + strataWaveAt(xs[j], topOffsets);
+      const screen = worldToScreen(xs[j], y, camera);
+      if (j === 0) ctx.moveTo(screen.x, screen.y);
+      else ctx.lineTo(screen.x, screen.y);
+    }
+    for (let j = xs.length - 1; j >= 0; j--) {
+      const y = bottomOffsets ? bandBottomWorldY + strataWaveAt(xs[j], bottomOffsets) : bandBottomWorldY;
+      const screen = worldToScreen(xs[j], y, camera);
+      ctx.lineTo(screen.x, screen.y);
+    }
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
 // The jagged Rocky Shelf (a hard physical barrier partway down, splitting
 // the seabed into a visually distinct "city" and "underground") is gone
 // entirely — per direct request, "remove the upper and lower sections of
@@ -3395,23 +3508,28 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
   // lower sections of the city, make it all the same section... food,
   // money, waste, and science should all fall to the very bottom of the
   // tank" (see sweepVertical's own updated stop, now at WORLD_H instead of
-  // the old ROCK_SHELF_Y). What's left of the two-tone look is purely a
-  // color gradient across the same single fill — top stop is the old city
-  // color, bottom stop (at the world's real bottom edge) is the old
-  // underground color — one continuous surface, not two.
+  // the old ROCK_SHELF_Y). What used to be a single flat top-to-bottom
+  // gradient is now the wavy multi-band sediment strata drawn by
+  // drawSedimentStrata (see that function's own comment above) — still one
+  // continuous surface, not two, just with actual internal structure now.
   const topOfSeabed = worldToScreen(0, SEABED_ROW_START * TILE_SIZE, camera);
-  const bottomOfWorld = worldToScreen(0, worldBottomY, camera);
-  const seabedGradient = ctx.createLinearGradient(0, topOfSeabed.y, 0, bottomOfWorld.y);
-  seabedGradient.addColorStop(0, '#4a3624');
-  seabedGradient.addColorStop(1, '#3d3122');
-  ctx.fillStyle = seabedGradient;
-  ctx.fillRect(0, Math.max(0, topOfSeabed.y), canvasWidth, canvasHeight);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, Math.max(0, topOfSeabed.y), canvasWidth, canvasHeight);
+  ctx.clip();
+  drawSedimentStrata(ctx, camera, canvasWidth, SEABED_ROW_START * TILE_SIZE, worldBottomY);
+  ctx.restore();
   ctx.fillStyle = '#6b4f34';
   ctx.fillRect(0, Math.max(0, topOfSeabed.y), canvasWidth, 4); // seabed surface highlight line
 
   ctx.save();
   ctx.fillStyle = getCityTexturePattern(ctx);
   ctx.globalAlpha = 0.55;
+  ctx.fillRect(0, Math.max(0, topOfSeabed.y) + 4, canvasWidth, canvasHeight);
+  ctx.restore();
+
+  ctx.save();
+  ctx.fillStyle = getSedimentSpecklePattern(ctx);
   ctx.fillRect(0, Math.max(0, topOfSeabed.y) + 4, canvasWidth, canvasHeight);
   ctx.restore();
 

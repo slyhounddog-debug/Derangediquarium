@@ -149,7 +149,8 @@ import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop
 import { pushGameNotification } from './Notifications.js';
 import { loadLevel, LEVELS } from './Levels.js';
 import { updateStoryTriggers, updateAutosave } from './Systems.js';
-import { updateAmbience, renderAmbienceBehindLab, renderAmbienceFrontLab, spawnCursorBubbles, renderWaterSurface, spawnSeaTurtleBubble } from './Ambience.js';
+import { updateAmbience, renderAmbienceBehindLab, renderAmbienceFrontLab, spawnCursorBubbles, renderWaterSurface, spawnSeaTurtleBubble, renderBackgroundParallaxDecor, renderShadowFish, getCausticStampTargets } from './Ambience.js';
+import { CausticOverlay } from './CausticOverlay.js';
 import { resumeAudio, startGameMusic, playAlienHit, setBattleMusicActive, triggerBossMusic, playBuildPlace, playDemolish } from './Sound.js';
 import {
   updateEntities,
@@ -3201,6 +3202,11 @@ async function runLoadingSequence() {
 }
 runLoadingSequence();
 
+// Procedural caustic lighting overlay — see CausticOverlay.js's own header
+// comment. A single long-lived instance (it owns its own offscreen canvases,
+// no reason to recreate it every frame), toggled via causticOverlay.enabled.
+const causticOverlay = new CausticOverlay();
+
 // ---- Perf counters for the debug overlay ----
 let fpsCounter = 0;
 let fpsDisplay = 0;
@@ -4644,6 +4650,20 @@ function render() {
   // still layer over it, same as real plants breaking a water surface would.
   renderWaterSurface(ctx, state, canvas.width, canvas.height);
 
+  // Shadow fish silhouettes, drawn before the blurred background parallax
+  // decor layer — per direct request ("the background silhouette fish go
+  // behind the duplicated background decorations"). See Ambience.js's own
+  // header comment on renderShadowFish for why this is its own explicit
+  // call now instead of folding into renderAmbienceBehindLab below.
+  renderShadowFish(ctx, state, canvas.width, canvas.height);
+
+  // A blurred, desaturated, raised-up duplicate of the floor decor — see
+  // Ambience.js's own header comment on renderBackgroundParallaxDecor. Drawn
+  // before every real ambience/decor layer so it reads as sitting further
+  // back/behind them, giving the floor a sense of depth the same way the
+  // water column already has via sun rays/caustics.
+  renderBackgroundParallaxDecor(ctx, state.camera, canvas.width, canvas.height);
+
   // Ambience (bubbles/seaweed/boulders/etc.) renders immediately after the
   // plain background fill and before anything else — per direct request, it
   // needs to sit behind the seabed/city and every building/item/fish drawn
@@ -4679,6 +4699,25 @@ function render() {
   renderAmbienceFrontLab(ctx, state, canvas.width, canvas.height);
   renderSeabedGrid(ctx, state, canvas.width, canvas.height);
   renderTankWalls(ctx, state, canvas.width);
+
+  // Procedural caustic light wash — see CausticOverlay.js's own header
+  // comment. Per direct request ("a dynamic underwater caustic lighting
+  // shader that unifies the entire scene, from the surface to the soil
+  // bed... this exact pattern must reach the tank floor... cast it onto
+  // every object at the bottom") — spans world y=0 (water's true top) all
+  // the way down to the tank's real current bottom (not just the sand line),
+  // and is drawn AFTER the seabed/decor/buildings so the same light net
+  // visibly washes over and stamps onto them, not just the open water above.
+  {
+    const causticTopY = worldToScreen(0, 0, state.camera).y;
+    const causticSeabedTopY = worldToScreen(0, SEABED_FLOOR_Y, state.camera).y;
+    const causticWorldBottomY = worldToScreen(0, getUnlockedWorldH(state), state.camera).y;
+    const stampTargets = getCausticStampTargets().map((t) => {
+      const screen = worldToScreen(t.x, t.y, state.camera);
+      return { x: screen.x, y: screen.y, radius: t.radius * state.camera.zoom };
+    });
+    causticOverlay.render(ctx, canvas.width, canvas.height, causticTopY, causticSeabedTopY, causticWorldBottomY, state.level.elapsed, stampTargets);
+  }
 
   // Shared by every ghost-preview branch below, and — via effectiveToolAt —
   // what makes a Build tool's ghost simply not show at all while hovering

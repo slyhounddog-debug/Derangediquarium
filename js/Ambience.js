@@ -260,6 +260,17 @@ function updateShadowFishFade(f, dt) {
     }
   }
 }
+// Per direct request ("the background silhouette fish occasionally let out
+// desaturated and blurry bubbles, relative to the size of the fish, with
+// diminishing returns so the bubbles don't get too huge") — a slow, random
+// per-fish timer, same "trickle over a random range" idiom as a crab's own
+// bubbleTimer (see CRAB_BUBBLE_MIN_S/MAX_S). Kept in a pool separate from
+// cursorBubbles/the ambient `bubbles` column so it can get its own muted,
+// slightly-blurred render treatment (see renderShadowBubbles) instead of the
+// crisp white cursor-bubble look.
+const SHADOW_FISH_BUBBLE_MIN_S = 6;
+const SHADOW_FISH_BUBBLE_MAX_S = 14;
+const shadowBubbles = [];
 function randomShadowFish(big) {
   const dir = Math.random() < 0.5 ? 1 : -1;
   const minSize = big ? SHADOW_FISH_BIG_MIN_SIZE : SHADOW_FISH_MIN_SIZE;
@@ -283,7 +294,8 @@ function randomShadowFish(big) {
     baseY: 0, // set below, before first use
     fillColor: colors.fill,
     haloColor: colors.halo,
-    depth: Math.random() * 10, // always the furthest-back layer, below every sun ray
+    depth: Math.random() * 10, // always the furthest-back layer — see renderShadowFish, called before every other ambience layer
+    bubbleTimer: SHADOW_FISH_BUBBLE_MIN_S + Math.random() * (SHADOW_FISH_BUBBLE_MAX_S - SHADOW_FISH_BUBBLE_MIN_S),
     // Each fish starts at a random point somewhere in the 4-phase fade
     // cycle (a fish starting already invisible is fine) — see
     // randomStartingFadeState above.
@@ -334,14 +346,39 @@ export function updateAmbience(dtMs) {
   // harmless no-op for it either way, letting both populations share this
   // one loop/pool.
   const dragMul = Math.exp(-CURSOR_BUBBLE_BURST_DRAG_PER_S * dt);
-  for (let i = cursorBubbles.length - 1; i >= 0; i--) {
-    const b = cursorBubbles[i];
+  updateSimpleBubblePool(cursorBubbles, dt, dragMul);
+
+  // Shadow fish occasionally let out their own small bubbles — per direct
+  // request ("the background silhouette fish occasionally let out
+  // desaturated and blurry bubbles, relative to the size of the fish, with
+  // diminishing returns"). Same timer-driven trickle as a crab's own
+  // bubbleTimer above, just per-shadow-fish.
+  for (const f of shadowFish) {
+    f.bubbleTimer -= dt;
+    if (f.bubbleTimer <= 0) {
+      spawnShadowFishBubble(f);
+      f.bubbleTimer = SHADOW_FISH_BUBBLE_MIN_S + Math.random() * (SHADOW_FISH_BUBBLE_MAX_S - SHADOW_FISH_BUBBLE_MIN_S);
+    }
+  }
+  updateSimpleBubblePool(shadowBubbles, dt, dragMul);
+
+  updateBackgroundParallaxDecor(dt);
+}
+
+// Shared rise/wobble-drag/fade-out physics for every "loose bubble in a
+// plain array" pool in this file (cursorBubbles, shadowBubbles, bgBubbles) —
+// factored out once real per-bubble velocity (vx/vy, decaying via dragMul)
+// was added for cursorBubbles, since shadowBubbles/bgBubbles want the exact
+// same rise-and-fade behavior without duplicating this loop three times.
+function updateSimpleBubblePool(pool, dt, dragMul) {
+  for (let i = pool.length - 1; i >= 0; i--) {
+    const b = pool[i];
     b.ageS += dt;
     b.vx *= dragMul;
     b.vy *= dragMul;
     b.x += b.vx * dt;
     b.y += b.vy * dt - b.speed * dt;
-    if (b.ageS >= b.ttlS) cursorBubbles.splice(i, 1);
+    if (b.ageS >= b.ttlS) pool.splice(i, 1);
   }
 }
 
@@ -419,6 +456,64 @@ function drawOneShadowFish(ctx, camera, canvasWidth, canvasHeight, f) {
   ctx.restore();
 }
 
+// One small bubble released from a shadow fish's own current position. Size
+// scales with the fish's own size but with diminishing returns (sqrt, not
+// linear) — per direct request ("relative to the size of the fish, with
+// diminishing returns so the bubbles don't get too huge"), so the big
+// background-variant fish (SHADOW_FISH_BIG_*, up to ~3x a small fish's size)
+// don't end up trailing comically oversized bubbles. Pushed into the
+// separate shadowBubbles pool (not cursorBubbles) so renderShadowBubbles can
+// give it its own muted, slightly-soft look instead of the crisp white
+// cursor-bubble style.
+function spawnShadowFishBubble(f) {
+  if (shadowBubbles.length >= CURSOR_BUBBLE_MAX) shadowBubbles.shift();
+  const speed = 14 + Math.random() * 14;
+  const radius = Math.min(5, 1.2 + Math.sqrt(f.size) * 0.45);
+  shadowBubbles.push({
+    x: f.x - f.size * 0.5 * f.dir + (Math.random() - 0.5) * 6, // released from roughly the tail end
+    y: f.baseY + (Math.random() - 0.5) * f.size * 0.3,
+    vx: 0,
+    vy: 0,
+    radius,
+    speed,
+    wobbleFreq: 0.6 + Math.random() * 1,
+    wobblePhase: Math.random() * Math.PI * 2,
+    wobbleAmp: 3 + Math.random() * 5,
+    ageS: 0,
+    ttlS: Math.max(0.1, f.baseY / speed),
+  });
+}
+
+// Muted grey-blue, slightly softened (double-pass halo, the same cheap
+// fake-blur idiom this file already uses instead of a real ctx.filter — see
+// drawOneSeaweed's own comment on why filter blur is avoided per-frame)
+// rather than the crisp white cursor-bubble look, so these read as "released
+// by a faint background fish" rather than "released by the player's cursor."
+function renderShadowBubbles(ctx, camera, canvasWidth, canvasHeight) {
+  ctx.save();
+  for (const b of shadowBubbles) {
+    const wobbleX = Math.sin(elapsed * b.wobbleFreq + b.wobblePhase) * b.wobbleAmp;
+    const screen = worldToScreen(b.x + wobbleX, b.y, camera);
+    if (screen.x < -20 || screen.x > canvasWidth + 20 || screen.y < -20 || screen.y > canvasHeight + 20) continue;
+    const lifeT = b.ageS / b.ttlS;
+    const fade = lifeT < 0.75 ? 1 : Math.max(0, 1 - (lifeT - 0.75) / 0.25);
+    const r = Math.max(1, b.radius * camera.zoom);
+    ctx.globalAlpha = 0.18 * fade;
+    ctx.fillStyle = 'rgba(150, 165, 175, 0.5)';
+    ctx.beginPath();
+    ctx.arc(screen.x, screen.y, r * 1.35, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 0.22 * fade;
+    ctx.strokeStyle = 'rgba(180, 195, 200, 0.6)';
+    ctx.lineWidth = Math.max(1, camera.zoom);
+    ctx.beginPath();
+    ctx.arc(screen.x, screen.y, r, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
 // Fakes a soft/blurred edge cheaply instead of the real thing — a canvas 2D
 // `ctx.filter` blur was tried first and tanked frame rate hard (measured
 // ~60fps -> ~11fps with just 16 filtered strokes a frame; Chromium
@@ -444,8 +539,8 @@ function drawOneShadowFish(ctx, camera, canvasWidth, canvasHeight, f) {
 // tone to read as barely-there texture rather than a distinct plant color —
 // while staying fully opaque (alpha untouched) so the occlusion fix above
 // still holds regardless of how muted the color itself gets.
-function drawOneSeaweed(ctx, camera, canvasWidth, w) {
-  const screen = worldToScreen(w.x, SEABED_FLOOR_Y, camera);
+function drawOneSeaweed(ctx, camera, canvasWidth, w, floorY = SEABED_FLOOR_Y) {
+  const screen = worldToScreen(w.x, floorY, camera);
   if (screen.x < -100 || screen.x > canvasWidth + 100) return;
   ctx.save();
   ctx.lineCap = 'round';
@@ -494,8 +589,8 @@ function randomBoulder() {
 const boulders = [];
 for (let i = 0; i < BOULDER_COUNT; i++) boulders.push(randomBoulder());
 
-function drawOneBoulder(ctx, camera, canvasWidth, b) {
-  const screen = worldToScreen(b.x, SEABED_FLOOR_Y, camera);
+function drawOneBoulder(ctx, camera, canvasWidth, b, floorY = SEABED_FLOOR_Y) {
+  const screen = worldToScreen(b.x, floorY, camera);
   const size = b.size * camera.zoom;
   if (screen.x < -size * 2 || screen.x > canvasWidth + size * 2) return;
   ctx.save();
@@ -548,8 +643,8 @@ function randomSandCastle() {
 const sandCastles = [];
 for (let i = 0; i < SAND_CASTLE_COUNT; i++) sandCastles.push(randomSandCastle());
 
-function drawOneSandCastle(ctx, camera, canvasWidth, sc) {
-  const screen = worldToScreen(sc.x, SEABED_FLOOR_Y, camera);
+function drawOneSandCastle(ctx, camera, canvasWidth, sc, floorY = SEABED_FLOOR_Y) {
+  const screen = worldToScreen(sc.x, floorY, camera);
   const w = sc.width * camera.zoom;
   const h = sc.height * camera.zoom;
   if (screen.x < -w || screen.x > canvasWidth + w) return;
@@ -634,8 +729,8 @@ function randomSeaUrchin() {
 const seaUrchins = [];
 for (let i = 0; i < SEA_URCHIN_COUNT; i++) seaUrchins.push(randomSeaUrchin());
 
-function drawOneSeaUrchin(ctx, camera, canvasWidth, u) {
-  const screen = worldToScreen(u.x, SEABED_FLOOR_Y, camera);
+function drawOneSeaUrchin(ctx, camera, canvasWidth, u, floorY = SEABED_FLOOR_Y) {
+  const screen = worldToScreen(u.x, floorY, camera);
   const r = u.radius * camera.zoom;
   if (screen.x < -r * 4 || screen.x > canvasWidth + r * 4) return;
   ctx.save();
@@ -701,8 +796,8 @@ function randomCoral() {
 const corals = [];
 for (let i = 0; i < CORAL_COUNT; i++) corals.push(randomCoral());
 
-function drawOneCoral(ctx, camera, canvasWidth, c) {
-  const screen = worldToScreen(c.x, SEABED_FLOOR_Y, camera);
+function drawOneCoral(ctx, camera, canvasWidth, c, floorY = SEABED_FLOOR_Y) {
+  const screen = worldToScreen(c.x, floorY, camera);
   const size = c.size * camera.zoom;
   if (screen.x < -size * 2 || screen.x > canvasWidth + size * 2) return;
   ctx.save();
@@ -750,8 +845,8 @@ function randomKelp() {
 const kelps = [];
 for (let i = 0; i < KELP_COUNT; i++) kelps.push(randomKelp());
 
-function drawOneKelp(ctx, camera, canvasWidth, k) {
-  const screen = worldToScreen(k.x, SEABED_FLOOR_Y, camera);
+function drawOneKelp(ctx, camera, canvasWidth, k, floorY = SEABED_FLOOR_Y) {
+  const screen = worldToScreen(k.x, floorY, camera);
   if (screen.x < -100 || screen.x > canvasWidth + 100) return;
   ctx.save();
   const sway = Math.sin(elapsed * k.freq + k.phase) * k.sway * camera.zoom;
@@ -824,11 +919,11 @@ for (let i = 0; i < CRAB_COUNT; i++) crabs.push(randomCrab());
 // existing rise/wobble/fade update+render code, and per direct request
 // ("make sure the bubbles go all the way to the top") uses the same
 // ttlS = y/speed trick so it doesn't fade out early.
-function spawnCrabBubble(c) {
-  if (cursorBubbles.length >= CURSOR_BUBBLE_MAX) cursorBubbles.shift();
+function spawnCrabBubble(c, targetArray = cursorBubbles, floorY = SEABED_FLOOR_Y) {
+  if (targetArray.length >= CURSOR_BUBBLE_MAX) targetArray.shift();
   const speed = 20 + Math.random() * 20;
-  const y = SEABED_FLOOR_Y - c.size * 0.5 + (Math.random() - 0.5) * 4;
-  cursorBubbles.push({
+  const y = floorY - c.size * 0.5 + (Math.random() - 0.5) * 4;
+  targetArray.push({
     x: c.x + (Math.random() - 0.5) * c.size,
     y,
     vx: 0,
@@ -905,8 +1000,8 @@ export function spawnCoinPickupBubbles(x, y) {
   }
 }
 
-function updateCrabs(dt) {
-  for (const c of crabs) {
+function updateCrabs(dt, list = crabs, targetArray = cursorBubbles, floorY = SEABED_FLOOR_Y) {
+  for (const c of list) {
     if (c.pauseTimer > 0) {
       c.pauseTimer -= dt;
       continue;
@@ -919,14 +1014,14 @@ function updateCrabs(dt) {
     // Only bubbles while actually moving (i.e. not during the pause above).
     c.bubbleTimer -= dt;
     if (c.bubbleTimer <= 0) {
-      spawnCrabBubble(c);
+      spawnCrabBubble(c, targetArray, floorY);
       c.bubbleTimer = CRAB_BUBBLE_MIN_S + Math.random() * (CRAB_BUBBLE_MAX_S - CRAB_BUBBLE_MIN_S);
     }
   }
 }
 
-function drawOneCrab(ctx, camera, canvasWidth, c) {
-  const screen = worldToScreen(c.x, SEABED_FLOOR_Y, camera);
+function drawOneCrab(ctx, camera, canvasWidth, c, floorY = SEABED_FLOOR_Y) {
+  const screen = worldToScreen(c.x, floorY, camera);
   const size = c.size * camera.zoom;
   if (screen.x < -size * 3 || screen.x > canvasWidth + size * 3) return;
   ctx.save();
@@ -988,27 +1083,30 @@ const CHEST_BUBBLE_SPAWN_WINDOW_S = CHEST_OPEN_DURATION_S + 0.5;
 function randomChestWaitS() {
   return CHEST_WAIT_MIN_S + Math.random() * (CHEST_WAIT_MAX_S - CHEST_WAIT_MIN_S);
 }
-const treasureChest = {
-  x: Math.random() * WORLD_W,
-  size: 34,
-  phase: 'closed', // 'closed' -> 'opening' -> 'open' -> 'closing' -> 'closed'...
-  timer: randomChestWaitS(),
-  lidT: 0, // 0 = fully closed, 1 = fully open — drives the lid's rotation and the treasure reveal
-  bubbleBudget: 0,
-  bubblesSpawned: 0,
-  bubbleElapsed: 0, // time since 'opening' began — spans the 'opening' phase AND the first CHEST_BUBBLE_SPAWN_WINDOW_S of 'open'
-  depth: 50 + Math.random() * 10, // always >= LAB_DEPTH_THRESHOLD — same front-of-Lab band as coral/urchins
-};
+function randomTreasureChest() {
+  return {
+    x: Math.random() * WORLD_W,
+    size: 34,
+    phase: 'closed', // 'closed' -> 'opening' -> 'open' -> 'closing' -> 'closed'...
+    timer: randomChestWaitS(),
+    lidT: 0, // 0 = fully closed, 1 = fully open — drives the lid's rotation and the treasure reveal
+    bubbleBudget: 0,
+    bubblesSpawned: 0,
+    bubbleElapsed: 0, // time since 'opening' began — spans the 'opening' phase AND the first CHEST_BUBBLE_SPAWN_WINDOW_S of 'open'
+    depth: 50 + Math.random() * 10, // always >= LAB_DEPTH_THRESHOLD — same front-of-Lab band as coral/urchins
+  };
+}
+const treasureChest = randomTreasureChest();
 
 // Spawns one bubble at the chest's own position, directly into the shared
 // cursorBubbles pool (same shape spawnCursorBubbles itself builds) so it
 // rides the exact same rise/wobble/fade update+render code already ticked
 // every frame — no separate bubble system needed just for this.
-function spawnChestBubble(c) {
-  if (cursorBubbles.length >= CURSOR_BUBBLE_MAX) cursorBubbles.shift();
+function spawnChestBubble(c, targetArray = cursorBubbles, floorY = SEABED_FLOOR_Y) {
+  if (targetArray.length >= CURSOR_BUBBLE_MAX) targetArray.shift();
   const speed = 25 + Math.random() * 25;
-  const y = SEABED_FLOOR_Y - c.size * 0.3 + (Math.random() - 0.5) * 6;
-  cursorBubbles.push({
+  const y = floorY - c.size * 0.3 + (Math.random() - 0.5) * 6;
+  targetArray.push({
     x: c.x + (Math.random() - 0.5) * c.size * 0.6,
     y,
     vx: 0, // no cursor-style launch burst for a chest bubble — straight up only
@@ -1031,8 +1129,7 @@ function spawnChestBubble(c) {
   });
 }
 
-function updateTreasureChest(dt) {
-  const c = treasureChest;
+function updateTreasureChest(dt, c = treasureChest, targetArray = cursorBubbles, floorY = SEABED_FLOOR_Y) {
   if (c.phase === 'closed') {
     c.timer -= dt;
     if (c.timer <= 0) {
@@ -1051,7 +1148,7 @@ function updateTreasureChest(dt) {
     // instead of dumping them all in one frame.
     const targetSpawned = Math.floor(Math.min(1, c.bubbleElapsed / CHEST_BUBBLE_SPAWN_WINDOW_S) * c.bubbleBudget);
     while (c.bubblesSpawned < targetSpawned) {
-      spawnChestBubble(c);
+      spawnChestBubble(c, targetArray, floorY);
       c.bubblesSpawned++;
     }
     if (c.lidT >= 1) { c.phase = 'open'; c.timer = 0; }
@@ -1060,7 +1157,7 @@ function updateTreasureChest(dt) {
     c.bubbleElapsed += dt;
     const targetSpawned = Math.floor(Math.min(1, c.bubbleElapsed / CHEST_BUBBLE_SPAWN_WINDOW_S) * c.bubbleBudget);
     while (c.bubblesSpawned < targetSpawned) {
-      spawnChestBubble(c);
+      spawnChestBubble(c, targetArray, floorY);
       c.bubblesSpawned++;
     }
     if (c.timer >= CHEST_HOLD_OPEN_DURATION_S) { c.phase = 'closing'; c.timer = 0; }
@@ -1071,8 +1168,8 @@ function updateTreasureChest(dt) {
   }
 }
 
-function drawOneTreasureChest(ctx, camera, canvasWidth, c) {
-  const screen = worldToScreen(c.x, SEABED_FLOOR_Y, camera);
+function drawOneTreasureChest(ctx, camera, canvasWidth, c, floorY = SEABED_FLOOR_Y) {
+  const screen = worldToScreen(c.x, floorY, camera);
   const size = c.size * camera.zoom;
   if (screen.x < -size * 3 || screen.x > canvasWidth + size * 3) return;
   ctx.save();
@@ -1481,7 +1578,6 @@ function addAmbienceJob(depth, draw) {
   (depth < LAB_DEPTH_THRESHOLD ? behindLabJobs : frontLabJobs).push({ depth, draw });
 }
 for (const c of caustics) addAmbienceJob(c.depth, (ctx, camera, cw, ch) => drawOneCaustic(ctx, camera, cw, ch, c));
-for (const f of shadowFish) addAmbienceJob(f.depth, (ctx, camera, cw, ch) => drawOneShadowFish(ctx, camera, cw, ch, f));
 for (const b of boulders) addAmbienceJob(b.depth, (ctx, camera, cw) => drawOneBoulder(ctx, camera, cw, b));
 for (const w of seaweeds) addAmbienceJob(w.depth, (ctx, camera, cw) => drawOneSeaweed(ctx, camera, cw, w));
 for (const k of kelps) addAmbienceJob(k.depth, (ctx, camera, cw) => drawOneKelp(ctx, camera, cw, k));
@@ -1494,11 +1590,27 @@ for (const ray of sunRays) addAmbienceJob(ray.depth, (ctx, camera, cw, ch) => dr
 behindLabJobs.sort((a, b) => a.depth - b.depth);
 frontLabJobs.sort((a, b) => a.depth - b.depth);
 
-// Everything at depth < LAB_DEPTH_THRESHOLD (shadow fish, boulders,
-// seaweed/kelp, and whichever sun rays happened to roll a low depth) — main
-// .js calls this, then renderScienceLab, then renderAmbienceFrontLab below.
+// Everything at depth < LAB_DEPTH_THRESHOLD (boulders, seaweed/kelp, and
+// whichever sun rays happened to roll a low depth) — main.js calls this,
+// then renderScienceLab, then renderAmbienceFrontLab below.
 export function renderAmbienceBehindLab(ctx, state, canvasWidth, canvasHeight) {
   for (const job of behindLabJobs) job.draw(ctx, state.camera, canvasWidth, canvasHeight);
+}
+
+// Shadow fish silhouettes — drawn as their own top-level pass, separate from
+// the depth-sorted job queue above, so main.js can call it BEFORE
+// renderBackgroundParallaxDecor. Per direct request ("the background
+// silhouette fish go behind the duplicated background decorations") — they
+// used to be folded into behindLabJobs (always the lowest depth, but still
+// sandwiched between the water background and the blurred parallax layer in
+// painter's-algorithm terms only by coincidence of call order); now it's
+// explicit: shadow fish, THEN the blurred background decor, THEN everything
+// else. Also renders their own occasional bubbles (see spawnShadowFishBubble)
+// immediately after, since those originate from the same back-of-the-tank
+// layer.
+export function renderShadowFish(ctx, state, canvasWidth, canvasHeight) {
+  for (const f of shadowFish) drawOneShadowFish(ctx, state.camera, canvasWidth, canvasHeight, f);
+  renderShadowBubbles(ctx, state.camera, canvasWidth, canvasHeight);
 }
 
 // Everything at depth >= LAB_DEPTH_THRESHOLD (coral, sea urchins, crabs, and
@@ -1509,4 +1621,215 @@ export function renderAmbienceFrontLab(ctx, state, canvasWidth, canvasHeight) {
   for (const job of frontLabJobs) job.draw(ctx, state.camera, canvasWidth, canvasHeight);
   renderBubbles(ctx, state.camera, canvasWidth, canvasHeight);
   renderCursorBubbles(ctx, state.camera, canvasWidth, canvasHeight);
+}
+
+// ---- Background Parallax Decor ----
+// Per direct request ("add a secondary background layer for the
+// decorations/substrate sitting on the upper tank floor... raised up
+// vertically by approximately 20% of the tank height... heavy desaturation
+// and a light Gaussian blur to give it depth-of-field"), later extended by a
+// direct follow-up request ("make sure everything except for the mound/
+// science lab is duplicated and procedurally placed on that layer as well...
+// urchins and crabs that move... a chest that lets out bubbles... desaturated
+// and blurry") — EVERY piece of floor decor in this file (seaweed, boulders,
+// sand castles, coral, kelp, sea urchins, crabs, a treasure chest) gets a
+// second, raised, muted copy, built from the exact same randomX generators
+// as the real foreground pools so it reads as "the same kind of scenery,
+// just further back," not a different art style.
+//
+// Perf note (why static vs. live are handled so differently below): this
+// file already measured `ctx.filter` blur tanking frame rate hard on a mere
+// 16 filtered strokes/frame (see drawOneSeaweed's own comment) — Chromium
+// re-rasterizes each filtered draw individually, so it doesn't get cheaper
+// by only setting `ctx.filter` once outside a loop. Applying a real blur
+// filter to the FULL expanded decor set (seaweed+boulders+coral+kelp+sand
+// castles alone is 40+ individual shapes) every single frame would revisit
+// that exact regression. Instead, everything with NO per-frame animation
+// (seaweed, boulders, sand castles, coral, kelp) is pre-rendered ONCE to an
+// offscreen canvas with a real blur+desaturate filter applied at BAKE time
+// only (see buildBgStaticCanvas) — every frame after that is just one cheap
+// drawImage of the finished bitmap, scaled/positioned to match the current
+// camera. The few pieces that DO need to animate every frame (sea urchins'
+// bob, crabs' roaming + bubbles, the chest's open/close cycle + bubbles) are
+// drawn live, un-filtered, at reduced alpha instead — cheap (a handful of
+// shapes, not the whole decor set) and still reads as "muted/background"
+// blended against the water behind it.
+//
+// Fully self-contained and decoupled from every other system here: its own
+// pools, its own update/render functions, called separately by main.js.
+const BG_PARALLAX_BOULDER_COUNT = 4;
+const BG_PARALLAX_CORAL_COUNT = 5;
+const BG_PARALLAX_SAND_CASTLE_COUNT = 1;
+const BG_PARALLAX_SEAWEED_COUNT = 6;
+const BG_PARALLAX_KELP_COUNT = 2;
+const BG_PARALLAX_SEA_URCHIN_COUNT = 5;
+const BG_PARALLAX_CRAB_COUNT = 2;
+// Raises the layer ~20% of the water column's own height above the real
+// floor line (SEABED_FLOOR_Y) — enough to visibly separate it from the
+// foreground floor without floating it up into open water.
+const BG_PARALLAX_FLOOR_Y = SEABED_FLOOR_Y - SEABED_FLOOR_Y * 0.2;
+const BG_PARALLAX_ALPHA = 0.8; // shared by both the baked static bitmap and the live animated pieces, so they read as one consistent layer
+
+// ---- Static subset (baked once) ----
+const bgBoulders = Array.from({ length: BG_PARALLAX_BOULDER_COUNT }, randomBoulder);
+const bgCorals = Array.from({ length: BG_PARALLAX_CORAL_COUNT }, randomCoral);
+const bgSandCastles = Array.from({ length: BG_PARALLAX_SAND_CASTLE_COUNT }, randomSandCastle);
+const bgSeaweeds = Array.from({ length: BG_PARALLAX_SEAWEED_COUNT }, () => ({
+  x: Math.random() * WORLD_W,
+  height: SEAWEED_MIN_HEIGHT + Math.random() * (SEAWEED_MAX_HEIGHT - SEAWEED_MIN_HEIGHT),
+  width: SEAWEED_MIN_WIDTH + Math.random() * (SEAWEED_MAX_WIDTH - SEAWEED_MIN_WIDTH),
+  blurFactor: 0.6 + Math.random() * 0.55,
+  sway: 0, freq: 0, phase: 0, // frozen (no sway) — this copy is baked once, see the perf note above
+  hue: 90 + Math.random() * 35,
+}));
+const bgKelps = Array.from({ length: BG_PARALLAX_KELP_COUNT }, () => ({ ...randomKelp(), sway: 0 })); // frozen, same reasoning as bgSeaweeds
+
+// Offscreen canvas the static subset is drawn into exactly once, in WORLD
+// pixels (1 world unit = 1 canvas pixel, no camera/zoom involved) spanning
+// just the vertical band this decor actually occupies — tall enough for the
+// tallest kelp/seaweed above BG_PARALLAX_FLOOR_Y plus a margin below it.
+const BG_STATIC_CANVAS_MARGIN_ABOVE = SEAWEED_MAX_HEIGHT + 40;
+const BG_STATIC_CANVAS_MARGIN_BELOW = 40;
+const bgStaticCanvas = document.createElement('canvas');
+bgStaticCanvas.width = Math.ceil(WORLD_W);
+bgStaticCanvas.height = Math.ceil(BG_STATIC_CANVAS_MARGIN_ABOVE + BG_STATIC_CANVAS_MARGIN_BELOW);
+const BG_STATIC_TOP_WORLD_Y = BG_PARALLAX_FLOOR_Y - BG_STATIC_CANVAS_MARGIN_ABOVE;
+function buildBgStaticCanvas() {
+  const bctx = bgStaticCanvas.getContext('2d');
+  bctx.clearRect(0, 0, bgStaticCanvas.width, bgStaticCanvas.height);
+  // A fixed 1:1, no-pan "camera" so world coordinates land directly on this
+  // canvas's own pixel grid — floorY passed to each drawOneX call is
+  // BG_PARALLAX_FLOOR_Y translated into this local canvas space.
+  const bakeCamera = { x: 0, y: BG_STATIC_TOP_WORLD_Y, zoom: 1 };
+  const localFloorY = BG_PARALLAX_FLOOR_Y;
+  bctx.save();
+  bctx.filter = 'blur(4px) saturate(0.18) brightness(0.82)';
+  for (const w of bgSeaweeds) drawOneSeaweed(bctx, bakeCamera, bgStaticCanvas.width, w, localFloorY);
+  for (const b of bgBoulders) drawOneBoulder(bctx, bakeCamera, bgStaticCanvas.width, b, localFloorY);
+  for (const k of bgKelps) drawOneKelp(bctx, bakeCamera, bgStaticCanvas.width, k, localFloorY);
+  for (const sc of bgSandCastles) drawOneSandCastle(bctx, bakeCamera, bgStaticCanvas.width, sc, localFloorY);
+  for (const c of bgCorals) drawOneCoral(bctx, bakeCamera, bgStaticCanvas.width, c, localFloorY);
+  bctx.restore();
+}
+buildBgStaticCanvas();
+
+// ---- Live subset (drawn every frame, un-filtered, at reduced alpha) ----
+const bgSeaUrchins = Array.from({ length: BG_PARALLAX_SEA_URCHIN_COUNT }, randomSeaUrchin);
+const bgCrabs = Array.from({ length: BG_PARALLAX_CRAB_COUNT }, randomCrab);
+const bgTreasureChest = randomTreasureChest();
+// Bubbles from the background crabs/chest land here instead of the real
+// cursorBubbles pool, so they can get their own muted rendering (see
+// renderBgBubbles) instead of the crisp white foreground look.
+const bgBubbles = [];
+
+function updateBackgroundParallaxDecor(dt) {
+  const dragMul = Math.exp(-CURSOR_BUBBLE_BURST_DRAG_PER_S * dt);
+  updateCrabs(dt, bgCrabs, bgBubbles, BG_PARALLAX_FLOOR_Y);
+  updateTreasureChest(dt, bgTreasureChest, bgBubbles, BG_PARALLAX_FLOOR_Y);
+  updateSimpleBubblePool(bgBubbles, dt, dragMul);
+}
+
+// Same muted-grey treatment as renderShadowBubbles, just reused here for the
+// background crabs'/chest's own bubbles instead of a shadow fish's.
+function renderBgBubbles(ctx, camera, canvasWidth, canvasHeight) {
+  for (const b of bgBubbles) {
+    const wobbleX = Math.sin(elapsed * b.wobbleFreq + b.wobblePhase) * b.wobbleAmp;
+    const screen = worldToScreen(b.x + wobbleX, b.y, camera);
+    if (screen.x < -20 || screen.x > canvasWidth + 20 || screen.y < -20 || screen.y > canvasHeight + 20) continue;
+    const lifeT = b.ageS / b.ttlS;
+    const fade = lifeT < 0.75 ? 1 : Math.max(0, 1 - (lifeT - 0.75) / 0.25);
+    const r = Math.max(1, b.radius * camera.zoom);
+    ctx.globalAlpha = 0.22 * fade;
+    ctx.fillStyle = 'rgba(150, 165, 175, 0.5)';
+    ctx.beginPath();
+    ctx.arc(screen.x, screen.y, r * 1.3, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 0.28 * fade;
+    ctx.strokeStyle = 'rgba(180, 195, 200, 0.6)';
+    ctx.lineWidth = Math.max(1, camera.zoom);
+    ctx.beginPath();
+    ctx.arc(screen.x, screen.y, r, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
+// Desaturates+tints a small rectangular patch of whatever was JUST drawn
+// into it, using canvas blend modes ('saturation' then 'color') instead of
+// `ctx.filter` — per this section's own perf note, a real filter costs
+// roughly the same whether it wraps one shape or twenty (Chromium
+// re-rasterizes each filtered draw individually), but a plain composite-mode
+// fillRect is an ordinary hardware-accelerated blend like any other draw
+// call, so ONE extra fillRect per live object (not per-stroke) is cheap
+// regardless of how many strokes/fills that object itself was built from.
+// Used for the live (unbaked) background pieces — sea urchins/crabs/the
+// chest — right after they're drawn normally, so they end up genuinely
+// desaturated and blue-grey-tinted toward the water, not just alpha-blended.
+function desaturatePatch(ctx, x, y, halfSize) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x - halfSize, y - halfSize, halfSize * 2, halfSize * 2);
+  ctx.clip();
+  ctx.globalCompositeOperation = 'saturation';
+  ctx.fillStyle = 'hsl(200, 8%, 50%)';
+  ctx.fillRect(x - halfSize, y - halfSize, halfSize * 2, halfSize * 2);
+  ctx.globalCompositeOperation = 'color';
+  ctx.fillStyle = 'rgba(96, 134, 162, 0.55)';
+  ctx.fillRect(x - halfSize, y - halfSize, halfSize * 2, halfSize * 2);
+  ctx.restore();
+}
+
+export function renderBackgroundParallaxDecor(ctx, camera, canvasWidth, canvasHeight) {
+  // The baked static bitmap, scaled/positioned to match the current camera —
+  // one drawImage instead of redrawing 40+ shapes, see this section's own
+  // perf note above.
+  const topLeft = worldToScreen(0, BG_STATIC_TOP_WORLD_Y, camera);
+  const destW = bgStaticCanvas.width * camera.zoom;
+  const destH = bgStaticCanvas.height * camera.zoom;
+  ctx.save();
+  ctx.globalAlpha = BG_PARALLAX_ALPHA;
+  ctx.drawImage(bgStaticCanvas, 0, 0, bgStaticCanvas.width, bgStaticCanvas.height, topLeft.x, topLeft.y, destW, destH);
+
+  // Live animated pieces — un-blurred (see perf note) but genuinely
+  // desaturated+tinted right after drawing (see desaturatePatch), at the
+  // same overall opacity as the static bake so they read as one layer.
+  for (const u of bgSeaUrchins) {
+    drawOneSeaUrchin(ctx, camera, canvasWidth, u, BG_PARALLAX_FLOOR_Y);
+    const screen = worldToScreen(u.x, BG_PARALLAX_FLOOR_Y, camera);
+    desaturatePatch(ctx, screen.x, screen.y - u.radius * camera.zoom, u.radius * 3 * camera.zoom);
+  }
+  for (const c of bgCrabs) {
+    drawOneCrab(ctx, camera, canvasWidth, c, BG_PARALLAX_FLOOR_Y);
+    const screen = worldToScreen(c.x, BG_PARALLAX_FLOOR_Y, camera);
+    desaturatePatch(ctx, screen.x, screen.y - c.size * camera.zoom, c.size * 2.5 * camera.zoom);
+  }
+  drawOneTreasureChest(ctx, camera, canvasWidth, bgTreasureChest, BG_PARALLAX_FLOOR_Y);
+  {
+    const screen = worldToScreen(bgTreasureChest.x, BG_PARALLAX_FLOOR_Y, camera);
+    desaturatePatch(ctx, screen.x, screen.y - bgTreasureChest.size * camera.zoom, bgTreasureChest.size * 2 * camera.zoom);
+  }
+  renderBgBubbles(ctx, camera, canvasWidth, canvasHeight);
+  ctx.restore();
+}
+
+// ---- Caustic stamp targets ----
+// Per direct request ("cast [the caustic net] onto every object at the
+// bottom: the treasure chest, the rocks, the corals, and the base of the sea
+// grass (ignoring the background duplicated layer)") — main.js's
+// CausticOverlay doesn't know anything about individual boulders/coral/etc.
+// (it's deliberately decoupled from game/ambience state, see its own header
+// comment), so it just asks for a flat list of {x, y, radius} world-space
+// targets to stamp the SAME caustic texture onto. Deliberately only the
+// FOREGROUND pools (boulders/corals/treasureChest/seaweeds) — the background
+// parallax copies are excluded, per that same direct request.
+export function getCausticStampTargets() {
+  const targets = [];
+  for (const b of boulders) targets.push({ x: b.x, y: SEABED_FLOOR_Y, radius: b.size * 0.9 });
+  for (const c of corals) targets.push({ x: c.x, y: SEABED_FLOOR_Y, radius: c.size * 0.9 });
+  // Seaweed is thin and dense (SEAWEED_COUNT strands packed along the whole
+  // floor) — every other base is plenty (stamping all of them is both
+  // redundant, since neighbors sit only a few px apart, and a real per-frame
+  // cost: one caustic-field sample plus one gradient draw per stamp).
+  for (let i = 0; i < seaweeds.length; i += 2) targets.push({ x: seaweeds[i].x, y: SEABED_FLOOR_Y, radius: seaweeds[i].width * 1.6 });
+  targets.push({ x: treasureChest.x, y: SEABED_FLOOR_Y, radius: treasureChest.size * 1.3 });
+  return targets;
 }
