@@ -293,15 +293,7 @@ let ctx = mainCtx;
 // interactively invisible.
 const causticVideo = document.createElement('video');
 causticVideo.src = 'lighting effect.mp4';
-// Native `loop` re-decodes from the very start on every repeat, and a black
-// flash shows up somewhere across that cycle — per direct report. Trimming
-// progressively more off the END (last third, then last two thirds) never
-// made it go away, which points away from "it's baked into the tail" and
-// toward either the very START of the clip, or the reset/seek itself. This
-// now tests the former by skipping the first third too (see
-// CAUSTIC_LOOP_START_FRACTION, below) — if the flash is still there, the next
-// suspect is the manual seek-back mechanism, not the footage.
-causticVideo.loop = false;
+causticVideo.loop = false; // looped manually below, off a cached frame — see causticFrameCache's own comment for why
 causticVideo.muted = true;
 causticVideo.playsInline = true;
 causticVideo.autoplay = true;
@@ -314,21 +306,34 @@ causticVideo.style.pointerEvents = 'none';
 document.body.appendChild(causticVideo);
 causticVideo.play().catch(() => {}); // autoplay can be blocked until the player's first click/tap — Start button click resumes it, see gameStarted handling elsewhere; harmless no-op if it never resolves
 
-// Fraction of the clip's own duration to skip at the start — per direct
-// request, now cutting the first third instead of the end, to rule out
-// whether the flash actually lives right at frame 0 (checked every render()
-// frame, below, rather than on a 'timeupdate' listener, since timeupdate's
-// own firing rate is too coarse/browser-dependent to land this precisely and
-// render() already runs every rAF tick). The loop now runs the clip's own
-// true end, unlike the last two attempts.
-const CAUSTIC_LOOP_START_FRACTION = 1 / 3;
-causticVideo.addEventListener('loadedmetadata', () => {
-  causticVideo.currentTime = causticVideo.duration * CAUSTIC_LOOP_START_FRACTION;
-});
+// Trimming both ends of the clip, progressively further each time, never
+// made the reported black flash go away — confirming (per direct report)
+// it's not baked into the footage at all, but an artifact of the manual
+// currentTime reset itself: `.currentTime = x` starts an async seek, and the
+// video element can return a blank/garbage decoded frame for the handful of
+// frames until the browser's own 'seeked' event fires.
+//
+// Fixed by never drawing from `causticVideo` directly — instead, every frame
+// where it ISN'T mid-seek, its current frame is copied into this cache
+// canvas; compositeCausticForeground always reads from the cache instead.
+// During a seek, the cache simply keeps showing the last good frame (a
+// several-millisecond freeze on a slowly-drifting light texture, completely
+// unnoticeable) instead of whatever transient frame the seek itself produces.
+const causticFrameCache = document.createElement('canvas');
+const causticFrameCacheCtx = causticFrameCache.getContext('2d');
+
+const CAUSTIC_LOOP_KEEP_FRACTION = 2 / 3; // back to trimming just the tail, now that the reset itself (not the footage) is what's actually being fixed
 function updateCausticVideoLoop() {
   if (causticVideo.playbackRate !== 0.8) causticVideo.playbackRate = 0.8; // some browsers reset this across a manual seek/loop restart
-  if (causticVideo.duration && causticVideo.currentTime >= causticVideo.duration - 0.05) {
-    causticVideo.currentTime = causticVideo.duration * CAUSTIC_LOOP_START_FRACTION;
+  if (causticVideo.duration && causticVideo.currentTime >= causticVideo.duration * CAUSTIC_LOOP_KEEP_FRACTION) {
+    causticVideo.currentTime = 0;
+  }
+  if (!causticVideo.seeking && causticVideo.readyState >= 2 && causticVideo.videoWidth > 0) {
+    if (causticFrameCache.width !== causticVideo.videoWidth || causticFrameCache.height !== causticVideo.videoHeight) {
+      causticFrameCache.width = causticVideo.videoWidth;
+      causticFrameCache.height = causticVideo.videoHeight;
+    }
+    causticFrameCacheCtx.drawImage(causticVideo, 0, 0);
   }
 }
 
@@ -367,7 +372,11 @@ function compositeCausticForeground() {
   causticMaskCtx.clearRect(0, 0, w, h);
   causticMaskCtx.globalCompositeOperation = 'source-over';
   causticMaskCtx.drawImage(foregroundCanvas, 0, 0);
-  if (causticVideo.readyState >= 2 && causticVideo.videoWidth > 0) {
+  if (causticFrameCache.width > 0) {
+    // Reads from causticFrameCache, never causticVideo directly — see that
+    // cache's own comment for why (a raw video element can hand back a
+    // blank/garbage frame for a few frames around every manual seek).
+    //
     // Desaturated per direct request — the source footage's own color cast
     // otherwise tints whatever it lands on; grayscale keeps this a pure
     // brightness effect instead.
@@ -384,7 +393,7 @@ function compositeCausticForeground() {
     // both axes, vertical tiling repeating the same way for a tank taller
     // than one tile.
     const camera = state.camera;
-    const videoAspect = causticVideo.videoHeight / causticVideo.videoWidth;
+    const videoAspect = causticFrameCache.height / causticFrameCache.width;
     const tileWorldW = WORLD_W;
     const tileWorldH = tileWorldW * videoAspect;
     const tileScreenW = tileWorldW * camera.zoom;
@@ -393,7 +402,7 @@ function compositeCausticForeground() {
     const camScreenOffsetY = camera.y * camera.zoom;
     let tileScreenY = -(((camScreenOffsetY % tileScreenH) + tileScreenH) % tileScreenH);
     while (tileScreenY < h) {
-      causticMaskCtx.drawImage(causticVideo, tileScreenX, tileScreenY, tileScreenW, tileScreenH);
+      causticMaskCtx.drawImage(causticFrameCache, tileScreenX, tileScreenY, tileScreenW, tileScreenH);
       tileScreenY += tileScreenH;
     }
     causticMaskCtx.filter = 'none';
