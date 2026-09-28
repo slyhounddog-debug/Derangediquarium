@@ -293,10 +293,16 @@ let ctx = mainCtx;
 // interactively invisible.
 const causticVideo = document.createElement('video');
 causticVideo.src = 'lighting effect.mp4';
-causticVideo.loop = true;
+// Native `loop` re-decodes from the very start on every repeat, and this
+// footage's own first/last frames flash black across that seam — per direct
+// report. Looped manually instead (see updateCausticVideoLoop, called once
+// per render() frame) by jumping back to 0 slightly BEFORE the true end, so
+// that flashed tail frame is never actually reached/drawn.
+causticVideo.loop = false;
 causticVideo.muted = true;
 causticVideo.playsInline = true;
 causticVideo.autoplay = true;
+causticVideo.playbackRate = 0.5; // per direct request — half speed
 causticVideo.style.position = 'absolute';
 causticVideo.style.width = '1px';
 causticVideo.style.height = '1px';
@@ -304,6 +310,19 @@ causticVideo.style.opacity = '0';
 causticVideo.style.pointerEvents = 'none';
 document.body.appendChild(causticVideo);
 causticVideo.play().catch(() => {}); // autoplay can be blocked until the player's first click/tap — Start button click resumes it, see gameStarted handling elsewhere; harmless no-op if it never resolves
+
+// How far before the clip's real end to cut the loop, in seconds — trims
+// past the flashed/corrupt tail frame(s) the direct report was about.
+// Checked every render() frame (see updateCausticVideoLoop), not on a
+// 'timeupdate' listener — timeupdate's own firing rate is too coarse/browser-
+// dependent to land this precisely, and render() already runs every rAF tick.
+const CAUSTIC_LOOP_TRIM_S = 0.15;
+function updateCausticVideoLoop() {
+  if (causticVideo.playbackRate !== 0.5) causticVideo.playbackRate = 0.5; // some browsers reset this across a manual seek/loop restart
+  if (causticVideo.duration && causticVideo.currentTime >= causticVideo.duration - CAUSTIC_LOOP_TRIM_S) {
+    causticVideo.currentTime = 0;
+  }
+}
 
 // Step 2's target — every foreground element (foreground decor, active fish,
 // coins, soil bed) is drawn here instead of straight to the main canvas, so
@@ -331,6 +350,8 @@ function compositeCausticForeground() {
   const w = canvas.width;
   const h = canvas.height;
 
+  updateCausticVideoLoop();
+
   // Step 3: clip the caustic video to the foreground's own silhouette. A
   // fresh copy of the foreground (not the foreground canvas itself) is used
   // as the clip mask, since 'source-in' would otherwise destroy the real
@@ -338,23 +359,39 @@ function compositeCausticForeground() {
   causticMaskCtx.clearRect(0, 0, w, h);
   causticMaskCtx.globalCompositeOperation = 'source-over';
   causticMaskCtx.drawImage(foregroundCanvas, 0, 0);
-  if (causticVideo.readyState >= 2) {
+  if (causticVideo.readyState >= 2 && causticVideo.videoWidth > 0) {
     // Desaturated per direct request — the source footage's own color cast
     // otherwise tints whatever it lands on; grayscale keeps this a pure
     // brightness effect instead.
     causticMaskCtx.filter = 'grayscale(1)';
     causticMaskCtx.globalCompositeOperation = 'source-in';
-    causticMaskCtx.drawImage(causticVideo, 0, 0, w, h);
+
+    // Tiled and scrolled in lockstep with the camera (1:1, not parallax) —
+    // per direct report, drawing this at a fixed (0,0,w,h) every frame made
+    // it read as a screen-space overlay sitting on top of the world instead
+    // of a light texture actually IN the world, since it never moved when
+    // the player scrolled. Each tile is tileScreenH tall — the video's own
+    // aspect ratio stretched across the full canvas width — and
+    // world y=0 always lands exactly on a tile boundary, so tiles slide up
+    // and down the screen exactly as fast as every other world-space object
+    // does when state.camera.y changes.
+    const videoAspect = causticVideo.videoHeight / causticVideo.videoWidth;
+    const tileScreenH = w * videoAspect;
+    const camScreenOffset = state.camera.y * state.camera.zoom;
+    let tileScreenY = -(((camScreenOffset % tileScreenH) + tileScreenH) % tileScreenH);
+    while (tileScreenY < h) {
+      causticMaskCtx.drawImage(causticVideo, 0, tileScreenY, w, tileScreenH);
+      tileScreenY += tileScreenH;
+    }
     causticMaskCtx.filter = 'none';
 
-    // Step 4: vertical fade — per direct request, the reverse of a
-    // top-down "sunlight" fade: fully transparent at the water's top,
-    // ramping up to 100% opacity at the very bottom of the screen (the
-    // soil bed), applied as an alpha multiply over the full canvas height.
+    // Step 4: vertical fade — brightest near the water's top, fading to 0%
+    // opacity by the very bottom of the screen — applied as an alpha
+    // multiply over the full canvas height.
     causticMaskCtx.globalCompositeOperation = 'destination-in';
     const gradient = causticMaskCtx.createLinearGradient(0, 0, 0, h);
-    gradient.addColorStop(0, 'rgba(255, 255, 255, 0)');
-    gradient.addColorStop(1, 'rgba(255, 255, 255, 1)');
+    gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+    gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
     causticMaskCtx.fillStyle = gradient;
     causticMaskCtx.fillRect(0, 0, w, h);
     causticMaskCtx.globalCompositeOperation = 'source-over';
