@@ -1362,7 +1362,10 @@ function drawOneCaustic(ctx, camera, canvasWidth, canvasHeight, c) {
   const pulse = 0.5 + 0.5 * Math.sin(elapsed * c.pulseFreq + c.pulsePhase);
   const opacity = 0.05 + pulse * 0.08;
   ctx.save();
-  ctx.globalCompositeOperation = 'lighter';
+  // 'screen' per direct request, replacing the old additive 'lighter' —
+  // still brightens without the blown-out, oversaturated look 'lighter' can
+  // get when several patches overlap.
+  ctx.globalCompositeOperation = 'screen';
   const cy = screen.y - h * 0.35;
   const grad = ctx.createRadialGradient(screen.x, cy, 0, screen.x, cy, w * 0.55);
   grad.addColorStop(0, `rgba(255, 249, 214, ${opacity})`);

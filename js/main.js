@@ -294,15 +294,16 @@ let ctx = mainCtx;
 const causticVideo = document.createElement('video');
 causticVideo.src = 'lighting effect.mp4';
 // Native `loop` re-decodes from the very start on every repeat, and this
-// footage's own first/last frames flash black across that seam — per direct
-// report. Looped manually instead (see updateCausticVideoLoop, called once
-// per render() frame) by jumping back to 0 slightly BEFORE the true end, so
-// that flashed tail frame is never actually reached/drawn.
+// footage flashes black somewhere across that seam — per direct report.
+// Looped manually instead (see updateCausticVideoLoop/CAUSTIC_LOOP_TRIM_S,
+// below) by never playing all the way to the true end OR starting exactly at
+// the true beginning, so whichever side the flash frame is actually on is
+// never reached/drawn.
 causticVideo.loop = false;
 causticVideo.muted = true;
 causticVideo.playsInline = true;
 causticVideo.autoplay = true;
-causticVideo.playbackRate = 0.5; // per direct request — half speed
+causticVideo.playbackRate = 0.8; // per direct request
 causticVideo.style.position = 'absolute';
 causticVideo.style.width = '1px';
 causticVideo.style.height = '1px';
@@ -311,16 +312,22 @@ causticVideo.style.pointerEvents = 'none';
 document.body.appendChild(causticVideo);
 causticVideo.play().catch(() => {}); // autoplay can be blocked until the player's first click/tap — Start button click resumes it, see gameStarted handling elsewhere; harmless no-op if it never resolves
 
-// How far before the clip's real end to cut the loop, in seconds — trims
-// past the flashed/corrupt tail frame(s) the direct report was about.
-// Checked every render() frame (see updateCausticVideoLoop), not on a
-// 'timeupdate' listener — timeupdate's own firing rate is too coarse/browser-
-// dependent to land this precisely, and render() already runs every rAF tick.
-const CAUSTIC_LOOP_TRIM_S = 0.15;
+// How much to trim off BOTH the start and the end of the loop, in seconds —
+// per direct report a black flash was still visible and it wasn't clear
+// whether it lived at the head or tail of the clip, so both ends are cut.
+// The starting trim is applied once metadata is available (duration/seeking
+// aren't valid before then); the ending trim is checked every render() frame
+// (see updateCausticVideoLoop) rather than on a 'timeupdate' listener, since
+// timeupdate's own firing rate is too coarse/browser-dependent to land this
+// precisely and render() already runs every rAF tick.
+const CAUSTIC_LOOP_TRIM_S = 0.25;
+causticVideo.addEventListener('loadedmetadata', () => {
+  causticVideo.currentTime = CAUSTIC_LOOP_TRIM_S;
+});
 function updateCausticVideoLoop() {
-  if (causticVideo.playbackRate !== 0.5) causticVideo.playbackRate = 0.5; // some browsers reset this across a manual seek/loop restart
+  if (causticVideo.playbackRate !== 0.8) causticVideo.playbackRate = 0.8; // some browsers reset this across a manual seek/loop restart
   if (causticVideo.duration && causticVideo.currentTime >= causticVideo.duration - CAUSTIC_LOOP_TRIM_S) {
-    causticVideo.currentTime = 0;
+    causticVideo.currentTime = CAUSTIC_LOOP_TRIM_S;
   }
 }
 
