@@ -365,34 +365,45 @@ function compositeCausticForeground() {
     causticMaskCtx.filter = 'grayscale(1)';
     causticMaskCtx.globalCompositeOperation = 'source-in';
 
-    // Tiled and scrolled in lockstep with the camera (1:1, not parallax) —
-    // per direct report, drawing this at a fixed (0,0,w,h) every frame made
-    // it read as a screen-space overlay sitting on top of the world instead
-    // of a light texture actually IN the world, since it never moved when
-    // the player scrolled. Each tile is tileScreenH tall — the video's own
-    // aspect ratio stretched across the full canvas width — and
-    // world y=0 always lands exactly on a tile boundary, so tiles slide up
-    // and down the screen exactly as fast as every other world-space object
-    // does when state.camera.y changes.
+    // Tiled and positioned entirely in world space — per direct request, the
+    // effect must stay constant relative to the world (both its scale and
+    // its scroll position), not the screen/canvas. One tile is exactly
+    // WORLD_W wide (matching the tank), so it scales with zoom exactly like
+    // every other world object instead of always stretching to fill whatever
+    // the current canvas width happens to be; world (0,0) always lands
+    // exactly on a tile's top-left corner, so tiles track the camera 1:1 on
+    // both axes, vertical tiling repeating the same way for a tank taller
+    // than one tile.
+    const camera = state.camera;
     const videoAspect = causticVideo.videoHeight / causticVideo.videoWidth;
-    const tileScreenH = w * videoAspect;
-    const camScreenOffset = state.camera.y * state.camera.zoom;
-    let tileScreenY = -(((camScreenOffset % tileScreenH) + tileScreenH) % tileScreenH);
+    const tileWorldW = WORLD_W;
+    const tileWorldH = tileWorldW * videoAspect;
+    const tileScreenW = tileWorldW * camera.zoom;
+    const tileScreenH = tileWorldH * camera.zoom;
+    const tileScreenX = -camera.x * camera.zoom;
+    const camScreenOffsetY = camera.y * camera.zoom;
+    let tileScreenY = -(((camScreenOffsetY % tileScreenH) + tileScreenH) % tileScreenH);
     while (tileScreenY < h) {
-      causticMaskCtx.drawImage(causticVideo, 0, tileScreenY, w, tileScreenH);
+      causticMaskCtx.drawImage(causticVideo, tileScreenX, tileScreenY, tileScreenW, tileScreenH);
       tileScreenY += tileScreenH;
     }
     causticMaskCtx.filter = 'none';
 
     // Step 4: vertical fade — brightest near the water's top, reaching 0%
-    // opacity by 20% of the way down the tank (per direct request, higher up
-    // than the old full-height taper) and staying at 0% the rest of the way
-    // down — applied as an alpha multiply over the full canvas height.
+    // opacity 20% of the tank's height up from the bottom (i.e. 80% of the
+    // way down) and staying at 0% the rest of the way down. Anchored to
+    // world Y (getUnlockedWorldH(state), the tank's current real height),
+    // converted to screen space here, rather than a fixed screen-height
+    // fraction — per direct request, this must stay pinned to the same
+    // depth in the tank regardless of window size/zoom, not shift around
+    // with the screen.
     causticMaskCtx.globalCompositeOperation = 'destination-in';
-    const CAUSTIC_FADE_TANK_FRACTION = 0.2;
-    const gradient = causticMaskCtx.createLinearGradient(0, 0, 0, h);
+    const CAUSTIC_FADE_TANK_FRACTION = 0.8;
+    const tankWorldH = getUnlockedWorldH(state);
+    const fadeTopScreenY = (0 - camera.y) * camera.zoom;
+    const fadeBottomScreenY = (tankWorldH * CAUSTIC_FADE_TANK_FRACTION - camera.y) * camera.zoom;
+    const gradient = causticMaskCtx.createLinearGradient(0, fadeTopScreenY, 0, fadeBottomScreenY);
     gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
-    gradient.addColorStop(CAUSTIC_FADE_TANK_FRACTION, 'rgba(255, 255, 255, 0)');
     gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
     causticMaskCtx.fillStyle = gradient;
     causticMaskCtx.fillRect(0, 0, w, h);
