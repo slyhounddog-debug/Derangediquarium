@@ -296,7 +296,8 @@ causticVideo.src = 'lighting effect.mp4';
 // Native `loop` re-decodes from the very start on every repeat, and this
 // footage flashes black somewhere near its own tail — per direct report.
 // Looped manually instead (see updateCausticVideoLoop, below), cutting the
-// last third of the clip off entirely so that flash frame is never reached.
+// last two thirds of the clip off entirely so that flash frame is never
+// reached (a first attempt at just the last third still showed it).
 causticVideo.loop = false;
 causticVideo.muted = true;
 causticVideo.playsInline = true;
@@ -311,11 +312,11 @@ document.body.appendChild(causticVideo);
 causticVideo.play().catch(() => {}); // autoplay can be blocked until the player's first click/tap — Start button click resumes it, see gameStarted handling elsewhere; harmless no-op if it never resolves
 
 // Fraction of the clip's own duration to keep — per direct request, the last
-// third is cut off entirely (checked every render() frame, below, rather than
-// on a 'timeupdate' listener, since timeupdate's own firing rate is too
-// coarse/browser-dependent to land this precisely and render() already runs
-// every rAF tick).
-const CAUSTIC_LOOP_KEEP_FRACTION = 2 / 3;
+// two thirds are cut off entirely (checked every render() frame, below,
+// rather than on a 'timeupdate' listener, since timeupdate's own firing rate
+// is too coarse/browser-dependent to land this precisely and render() already
+// runs every rAF tick).
+const CAUSTIC_LOOP_KEEP_FRACTION = 1 / 3;
 function updateCausticVideoLoop() {
   if (causticVideo.playbackRate !== 0.8) causticVideo.playbackRate = 0.8; // some browsers reset this across a manual seek/loop restart
   if (causticVideo.duration && causticVideo.currentTime >= causticVideo.duration * CAUSTIC_LOOP_KEEP_FRACTION) {
