@@ -274,7 +274,103 @@ import {
 } from './UI.js';
 
 const canvas = document.getElementById('game-canvas');
-const ctx = canvas.getContext('2d');
+const mainCtx = canvas.getContext('2d');
+// Mutable so the foreground render pass (render()'s Step 2, below) can
+// temporarily point every existing ctx.* draw call at the offscreen
+// foreground canvas instead, without touching the hundreds of call sites in
+// this file that already read the module-level `ctx`. Always restored back
+// to mainCtx before render() returns — see render()'s own Step 1-5 comment.
+let ctx = mainCtx;
+
+// ---- Caustic lighting overlay ----
+// A looping, muted, hidden <video> used as a moving light texture (real
+// caustic-simulation footage) rather than a procedural effect. Per direct
+// spec, this must ONLY ever illuminate foreground content (active fish,
+// foreground decor, coins, the soil bed) and never the background layer/
+// background fish behind them — see render()'s Step 1-5 pipeline for how
+// that clipping is actually done. Kept in the DOM (not display:none, which
+// stops some browsers from decoding frames at all) but visually and
+// interactively invisible.
+const causticVideo = document.createElement('video');
+causticVideo.src = 'lighting effect.mp4';
+causticVideo.loop = true;
+causticVideo.muted = true;
+causticVideo.playsInline = true;
+causticVideo.autoplay = true;
+causticVideo.style.position = 'absolute';
+causticVideo.style.width = '1px';
+causticVideo.style.height = '1px';
+causticVideo.style.opacity = '0';
+causticVideo.style.pointerEvents = 'none';
+document.body.appendChild(causticVideo);
+causticVideo.play().catch(() => {}); // autoplay can be blocked until the player's first click/tap — Start button click resumes it, see gameStarted handling elsewhere; harmless no-op if it never resolves
+
+// Step 2's target — every foreground element (foreground decor, active fish,
+// coins, soil bed) is drawn here instead of straight to the main canvas, so
+// the caustic video can be clipped to exactly this layer's silhouette before
+// being composited back on top of it. causticMaskCanvas is a scratch buffer
+// used only to build that clipped-and-gradient-masked light layer (Steps 3-4)
+// before it's screen-blended onto foregroundCanvas (still Step 4) and the
+// whole thing is drawn onto the main canvas (Step 5).
+const foregroundCanvas = document.createElement('canvas');
+const foregroundCtx = foregroundCanvas.getContext('2d');
+const causticMaskCanvas = document.createElement('canvas');
+const causticMaskCtx = causticMaskCanvas.getContext('2d');
+
+function resizeForegroundCanvases() {
+  foregroundCanvas.width = canvas.width;
+  foregroundCanvas.height = canvas.height;
+  causticMaskCanvas.width = canvas.width;
+  causticMaskCanvas.height = canvas.height;
+}
+
+// Builds the lit foreground layer (Steps 3-4) and draws it onto the main
+// canvas (Step 5). Called once per frame, after every foreground element for
+// this frame has already been drawn into foregroundCanvas (Step 2).
+function compositeCausticForeground() {
+  const w = canvas.width;
+  const h = canvas.height;
+
+  // Step 3: clip the caustic video to the foreground's own silhouette. A
+  // fresh copy of the foreground (not the foreground canvas itself) is used
+  // as the clip mask, since 'source-in' would otherwise destroy the real
+  // fish/decor artwork it's clipping against.
+  causticMaskCtx.clearRect(0, 0, w, h);
+  causticMaskCtx.globalCompositeOperation = 'source-over';
+  causticMaskCtx.drawImage(foregroundCanvas, 0, 0);
+  if (causticVideo.readyState >= 2) {
+    // Desaturated per direct request — the source footage's own color cast
+    // otherwise tints whatever it lands on; grayscale keeps this a pure
+    // brightness effect instead.
+    causticMaskCtx.filter = 'grayscale(1)';
+    causticMaskCtx.globalCompositeOperation = 'source-in';
+    causticMaskCtx.drawImage(causticVideo, 0, 0, w, h);
+    causticMaskCtx.filter = 'none';
+
+    // Step 4: vertical fade — per direct request, the reverse of a
+    // top-down "sunlight" fade: fully transparent at the water's top,
+    // ramping up to 100% opacity at the very bottom of the screen (the
+    // soil bed), applied as an alpha multiply over the full canvas height.
+    causticMaskCtx.globalCompositeOperation = 'destination-in';
+    const gradient = causticMaskCtx.createLinearGradient(0, 0, 0, h);
+    gradient.addColorStop(0, 'rgba(255, 255, 255, 0)');
+    gradient.addColorStop(1, 'rgba(255, 255, 255, 1)');
+    causticMaskCtx.fillStyle = gradient;
+    causticMaskCtx.fillRect(0, 0, w, h);
+    causticMaskCtx.globalCompositeOperation = 'source-over';
+
+    // Screen-blend the clipped, gradient-masked light back onto the real
+    // foreground art — brightens only the foreground pixels it's clipped to,
+    // never the background layer (which was never drawn into either canvas
+    // here) and never the far background behind it.
+    foregroundCtx.globalCompositeOperation = 'screen';
+    foregroundCtx.drawImage(causticMaskCanvas, 0, 0);
+    foregroundCtx.globalCompositeOperation = 'source-over';
+  }
+
+  // Step 5: the completed, lit foreground layer onto the main canvas.
+  mainCtx.drawImage(foregroundCanvas, 0, 0);
+}
 
 // ---- Minimap ----
 // Per direct report ("the expand/minimize button doesn't work. It's
@@ -1051,6 +1147,7 @@ function fitCameraZoom() {
 function resizeCanvas() {
   canvas.width = window.innerWidth;
   canvas.height = window.innerHeight;
+  resizeForegroundCanvases();
   fitCameraZoom();
 }
 window.addEventListener('resize', resizeCanvas);
@@ -3114,6 +3211,7 @@ initUI(state);
 initStartScreen(state, () => {
   state.ui.gameStarted = true;
   startGameMusic(); // per direct request — only Start/Continue (both funnel through this one callback) should ever start the music, not Settings/Help
+  causticVideo.play().catch(() => {}); // retries the caustic overlay's autoplay, in case the browser blocked it before this first real user gesture
   triggerSplash();
   scheduleShopButtonReminder(state); // per direct request — bounces the shop toggle until it's opened for the first time
   // Game-start guided tutorial (Shop -> Guppy -> buy your first fish) no
@@ -4667,6 +4765,17 @@ function render() {
   // header comment for why.
   renderAmbienceBehindLab(ctx, state, canvas.width, canvas.height);
 
+  // ---- Step 1 done: background layer + background fish are on the main
+  // canvas. Step 2: everything from here to the caustic composite below
+  // (foreground decor, active fish, coins, soil bed, plus their cursor
+  // ghosts/effects) draws into foregroundCanvas instead, via this module's
+  // mutable `ctx` — every draw call below this line still just says `ctx.*`
+  // or passes `ctx` as an argument, unchanged, but it now targets the
+  // offscreen layer that the caustic video will be clipped to. Restored back
+  // to mainCtx right after compositeCausticForeground() runs, further down.
+  foregroundCtx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx = foregroundCtx;
+
   // Per direct bug report ("after placing a fan, it renders a static cone
   // AND a cone that follows the cursor") — while a fan's angle is still
   // being confirmed (fanAimingCell armed), the fan is already sitting in
@@ -6190,6 +6299,18 @@ function render() {
     ctx.fillText('✅', gx, gy + 1);
     ctx.restore();
   }
+
+  // Step 2 done: every foreground element + its cursor ghosts/effects have
+  // been drawn into foregroundCanvas. Steps 3-5: clip the caustic video to
+  // that layer's own silhouette, fade it vertically, screen-blend it back
+  // onto the foreground art, and composite the result onto the main canvas —
+  // see compositeCausticForeground's own comment. `ctx` is restored to
+  // mainCtx afterward so every draw call below this point (the boss white
+  // flash, HUD, minimap) goes back to drawing on the real, visible canvas —
+  // full-screen effects like that flash need to cover the background too, so
+  // they must run after this composite, not be clipped inside it.
+  compositeCausticForeground();
+  ctx = mainCtx;
 
   // Mother Alien Fish's reveal — the screen turning white, per direct spec.
   // Two halves, covering the two different moments this can be visible:
