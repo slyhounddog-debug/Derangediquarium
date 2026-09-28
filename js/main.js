@@ -294,11 +294,9 @@ let ctx = mainCtx;
 const causticVideo = document.createElement('video');
 causticVideo.src = 'lighting effect.mp4';
 // Native `loop` re-decodes from the very start on every repeat, and this
-// footage flashes black somewhere across that seam — per direct report.
-// Looped manually instead (see updateCausticVideoLoop/CAUSTIC_LOOP_TRIM_S,
-// below) by never playing all the way to the true end OR starting exactly at
-// the true beginning, so whichever side the flash frame is actually on is
-// never reached/drawn.
+// footage flashes black somewhere near its own tail — per direct report.
+// Looped manually instead (see updateCausticVideoLoop, below), cutting the
+// last third of the clip off entirely so that flash frame is never reached.
 causticVideo.loop = false;
 causticVideo.muted = true;
 causticVideo.playsInline = true;
@@ -312,22 +310,16 @@ causticVideo.style.pointerEvents = 'none';
 document.body.appendChild(causticVideo);
 causticVideo.play().catch(() => {}); // autoplay can be blocked until the player's first click/tap — Start button click resumes it, see gameStarted handling elsewhere; harmless no-op if it never resolves
 
-// How much to trim off BOTH the start and the end of the loop, in seconds —
-// per direct report a black flash was still visible and it wasn't clear
-// whether it lived at the head or tail of the clip, so both ends are cut.
-// The starting trim is applied once metadata is available (duration/seeking
-// aren't valid before then); the ending trim is checked every render() frame
-// (see updateCausticVideoLoop) rather than on a 'timeupdate' listener, since
-// timeupdate's own firing rate is too coarse/browser-dependent to land this
-// precisely and render() already runs every rAF tick.
-const CAUSTIC_LOOP_TRIM_S = 0.25;
-causticVideo.addEventListener('loadedmetadata', () => {
-  causticVideo.currentTime = CAUSTIC_LOOP_TRIM_S;
-});
+// Fraction of the clip's own duration to keep — per direct request, the last
+// third is cut off entirely (checked every render() frame, below, rather than
+// on a 'timeupdate' listener, since timeupdate's own firing rate is too
+// coarse/browser-dependent to land this precisely and render() already runs
+// every rAF tick).
+const CAUSTIC_LOOP_KEEP_FRACTION = 2 / 3;
 function updateCausticVideoLoop() {
   if (causticVideo.playbackRate !== 0.8) causticVideo.playbackRate = 0.8; // some browsers reset this across a manual seek/loop restart
-  if (causticVideo.duration && causticVideo.currentTime >= causticVideo.duration - CAUSTIC_LOOP_TRIM_S) {
-    causticVideo.currentTime = CAUSTIC_LOOP_TRIM_S;
+  if (causticVideo.duration && causticVideo.currentTime >= causticVideo.duration * CAUSTIC_LOOP_KEEP_FRACTION) {
+    causticVideo.currentTime = 0;
   }
 }
 
@@ -392,12 +384,15 @@ function compositeCausticForeground() {
     }
     causticMaskCtx.filter = 'none';
 
-    // Step 4: vertical fade — brightest near the water's top, fading to 0%
-    // opacity by the very bottom of the screen — applied as an alpha
-    // multiply over the full canvas height.
+    // Step 4: vertical fade — brightest near the water's top, reaching 0%
+    // opacity by 20% of the way down the tank (per direct request, higher up
+    // than the old full-height taper) and staying at 0% the rest of the way
+    // down — applied as an alpha multiply over the full canvas height.
     causticMaskCtx.globalCompositeOperation = 'destination-in';
+    const CAUSTIC_FADE_TANK_FRACTION = 0.2;
     const gradient = causticMaskCtx.createLinearGradient(0, 0, 0, h);
     gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+    gradient.addColorStop(CAUSTIC_FADE_TANK_FRACTION, 'rgba(255, 255, 255, 0)');
     gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
     causticMaskCtx.fillStyle = gradient;
     causticMaskCtx.fillRect(0, 0, w, h);
