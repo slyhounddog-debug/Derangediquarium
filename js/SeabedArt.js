@@ -19,7 +19,7 @@ let undergroundMode = false;
 function rockColor() {
   const c = rockColorRaw();
   if (!undergroundMode) return c;
-  return { h: c.h, s: c.s * 0.5, l: 20 + (c.l - 12) * 0.42 };
+  return { h: c.h, s: c.s * 0.75, l: 7.5 + c.l * 0.71 }; // halfway between raw and fully muted
 }
 function rockColorRaw() {
   const family = Math.random();
@@ -397,7 +397,7 @@ export function bakeSeabedCanvas(worldW, worldH, scale = 2, rowPx = 32) {
 
   undergroundMode = false;
   ctx.globalCompositeOperation = 'source-atop';
-  ctx.fillStyle = 'rgba(52, 40, 28, 0.38)';
+  ctx.fillStyle = 'rgba(52, 40, 28, 0.19)';
   ctx.fillRect(0, 0, worldW, worldH);
   ctx.globalCompositeOperation = 'source-over';
   ctx = baseCtx;
