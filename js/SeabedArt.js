@@ -285,7 +285,7 @@ function drawUndergroundBoulder(ctx) { drawBoulder(ctx, { rx: rand(9, 17), under
 // [drawer, weight]. Mostly pebbles/small stones; few fossils, bones and faceted rocks.
 const OBJECTS = [
   [drawPebble, 48], [drawFlatStone, 16], [drawAngularRock, 4], [drawUndergroundBoulder, 2.5],
-  [drawCrack, 9], [drawShell, 0.6], [drawAmmonite, 0.3], [drawBone, 0.4],
+  [drawCrack, 4.5], [drawShell, 0.6], [drawAmmonite, 0.3], [drawBone, 0.4],
   [drawRoot, 3], [drawLens, 7], [drawGravel, 16],
 ];
 const UNDER_OBJECTS = new Set([drawCrack, drawLens]); // painted first so nothing is drawn beneath them
@@ -308,7 +308,7 @@ function drawLayers(ctx, w, h, rowPx) {
   const layers = [];
   while (y < h) {
     // Whole tile rows thick, so every boundary lands on a row line and doubles as a building guide.
-    const thick = rowPx * (1 + Math.floor(Math.random() * 3));
+    const thick = rowPx * (1 + Math.floor(Math.random() * 2));
     layers.push({ top: y, bottom: y + thick, sand: isSand });
     y += thick; isSand = !isSand;
   }
