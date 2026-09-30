@@ -26,7 +26,7 @@
 // — see the job-list construction near the bottom of this file.
 import { WORLD_W, SEABED_FLOOR_Y } from './Config.js';
 import { worldToScreen } from './Engine.js';
-import { bakeBoulderSprite, bakeSandCastleSprite } from './SeabedArt.js';
+import { bakeBoulderSprite, bakeSandCastleSprite, bakeCoralBaseSprite } from './SeabedArt.js';
 
 let elapsed = 0; // seconds, drives every sway/wobble phase below
 
@@ -771,28 +771,75 @@ function randomCoral() {
 const corals = [];
 for (let i = 0; i < CORAL_COUNT; i++) corals.push(randomCoral());
 
+// Per direct request (rework coral to match the boulders/mound/seaweed — "lit,
+// rimmed, unique grain, contact shadow"): a baked rocky lump with a contact
+// shadow at the base, then the live-swaying branches drawn as ONE rimmed
+// silhouette (every branch's dark rim first, then every lit body on top, so
+// overlapping branches merge instead of each rim cutting into its neighbour),
+// a highlight down each branch's upper-left side, and a few grain specks.
+// Sway math, branch geometry and sizes are unchanged.
 function drawOneCoral(ctx, camera, canvasWidth, c, floorY = SEABED_FLOOR_Y) {
   const screen = worldToScreen(c.x, floorY, camera);
   const size = c.size * camera.zoom;
   if (screen.x < -size * 2 || screen.x > canvasWidth + size * 2) return;
+  if (!c.baseSprite) c.baseSprite = bakeCoralBaseSprite(c.size * 0.3, c.hue);
+  const sp = c.baseSprite;
+  const z = camera.zoom / sp.scale;
+  ctx.drawImage(sp.canvas, screen.x - sp.anchorX * z, screen.y - sp.ry * 0.35 * camera.zoom - sp.anchorY * z, sp.canvas.width * z, sp.canvas.height * z);
   ctx.save();
   ctx.lineCap = 'round';
   const sway = Math.sin(elapsed * c.swayFreq + c.swayPhase) * c.swayAmp;
-  for (const br of c.branches) {
-    const len = br.length * camera.zoom;
+  const rimPx = Math.max(1, 1.3 * camera.zoom);
+  const limbs = c.branches.map((br) => {
     const angle = br.angle + sway;
-    const endX = screen.x + Math.cos(angle) * len;
-    const endY = screen.y + Math.sin(angle) * len;
-    ctx.strokeStyle = `hsl(${c.hue}, 60%, 55%)`;
-    ctx.lineWidth = Math.max(1.5, br.width * camera.zoom);
+    const len = br.length * camera.zoom;
+    const w = Math.max(1.5, br.width * camera.zoom);
+    if (!br.specks) br.specks = [0, 1].map(() => ({ t: 0.25 + Math.random() * 0.55, side: Math.random() * 2 - 1, light: Math.random() < 0.5 }));
+    return { br, angle, w, endX: screen.x + Math.cos(angle) * len, endY: screen.y + Math.sin(angle) * len, tipR: Math.max(1.5, br.width * 0.6 * camera.zoom) };
+  });
+  ctx.strokeStyle = `hsl(${c.hue}, 55%, 30%)`;
+  ctx.fillStyle = `hsl(${c.hue}, 55%, 30%)`;
+  for (const l of limbs) {
+    ctx.lineWidth = l.w + rimPx * 2;
     ctx.beginPath();
     ctx.moveTo(screen.x, screen.y);
-    ctx.lineTo(endX, endY);
+    ctx.lineTo(l.endX, l.endY);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(l.endX, l.endY, l.tipR + rimPx, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  for (const l of limbs) {
+    ctx.strokeStyle = `hsl(${c.hue}, 60%, 55%)`;
+    ctx.lineWidth = l.w;
+    ctx.beginPath();
+    ctx.moveTo(screen.x, screen.y);
+    ctx.lineTo(l.endX, l.endY);
     ctx.stroke();
     ctx.fillStyle = `hsl(${c.hue}, 65%, 62%)`;
     ctx.beginPath();
-    ctx.arc(endX, endY, Math.max(1.5, br.width * 0.6 * camera.zoom), 0, Math.PI * 2);
+    ctx.arc(l.endX, l.endY, l.tipR, 0, Math.PI * 2);
     ctx.fill();
+    let nx = Math.sin(l.angle), ny = -Math.cos(l.angle); // left-hand normal; flipped below so the light always comes from the upper-left
+    if (nx + ny > 0) { nx = -nx; ny = -ny; }
+    const off = l.w * 0.22;
+    ctx.strokeStyle = `hsla(${c.hue}, 75%, 80%, 0.6)`;
+    ctx.lineWidth = Math.max(1, l.w * 0.28);
+    ctx.beginPath();
+    ctx.moveTo(screen.x + nx * off, screen.y + ny * off);
+    ctx.lineTo(l.endX + nx * off, l.endY + ny * off);
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+    ctx.beginPath();
+    ctx.arc(l.endX - l.tipR * 0.3, l.endY - l.tipR * 0.3, Math.max(0.7, l.tipR * 0.3), 0, Math.PI * 2);
+    ctx.fill();
+    for (const sk of l.br.specks) {
+      const t = sk.t;
+      ctx.fillStyle = sk.light ? `hsla(${c.hue}, 75%, 82%, 0.55)` : `hsla(${c.hue}, 60%, 26%, 0.4)`;
+      ctx.beginPath();
+      ctx.arc(screen.x + (l.endX - screen.x) * t + nx * sk.side * l.w * 0.22, screen.y + (l.endY - screen.y) * t + ny * sk.side * l.w * 0.22, Math.max(0.6, l.w * 0.11), 0, Math.PI * 2);
+      ctx.fill();
+    }
   }
   ctx.restore();
 }

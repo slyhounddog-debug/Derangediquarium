@@ -553,6 +553,48 @@ export function bakeLabSprite(w, h, scale = 2) {
   return { canvas, scale, pad };
 }
 
+// Bakes the small rocky lump a coral head grows out of, per direct request
+// ("rework the coral... same style" as the boulders) — a tiny boulder in the
+// coral's own muted hue (lit gradient, grain, rim, contact shadow) so each head
+// sits on the floor instead of starting from a bare point. The branches
+// themselves stay live-drawn in Ambience.js since they sway. Returns
+// { canvas, scale, anchorX, anchorY, ry } anchored at the lump's centre.
+export function bakeCoralBaseSprite(rx, hue, scale = 2) {
+  const ry = rx * 0.55;
+  const pad = 5;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.ceil((rx * 2 + pad * 2) * scale);
+  canvas.height = Math.ceil((ry * 2 + pad * 2) * scale);
+  const ctx = canvas.getContext('2d');
+  ctx.scale(scale, scale);
+  ctx.translate(rx + pad, ry + pad);
+  const c = { h: hue, s: 32, l: 38 };
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
+  ctx.beginPath();
+  ctx.ellipse(2, ry * 0.3, rx * 1.1, ry * 1.05, 0, 0, Math.PI * 2);
+  ctx.fill();
+  blobPath(ctx, rx, ry, 8, 0.12);
+  const g = ctx.createRadialGradient(-rx * 0.3, -ry * 0.4, rx * 0.1, 0, 0, rx * 1.1);
+  g.addColorStop(0, shade(c, 12));
+  g.addColorStop(1, shade(c, -14));
+  ctx.fillStyle = g;
+  ctx.fill();
+  ctx.save();
+  ctx.clip();
+  for (let i = 0; i < Math.max(5, Math.round(rx * 1.2)); i++) {
+    ctx.fillStyle = Math.random() < 0.5 ? shade(c, 20, 0.35) : shade(c, -22, 0.4);
+    ctx.beginPath();
+    ctx.arc(rand(-rx, rx), rand(-ry, ry), rand(0.5, 1.6), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+  blobPath(ctx, rx, ry, 8, 0.12);
+  ctx.strokeStyle = shade(c, -24, 0.7);
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+  return { canvas, scale, anchorX: (rx + pad) * scale, anchorY: (ry + pad) * scale, ry };
+}
+
 function drawShell(ctx) {
   const r = rand(5, 11);
   ctx.fillStyle = hsl(rand(32, 42), rand(25, 40), rand(58, 72), 0.9);

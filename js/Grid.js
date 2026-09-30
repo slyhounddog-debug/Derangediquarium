@@ -1072,7 +1072,7 @@ function writeFreshBuildingData(state, col, row, buildingId, angle) {
     state.level.buildingData[buildingKey(col, row)] = { type: buildingId, angle };
   } else if (TURRET_TILES.has(buildingId)) {
     // No player-chosen `angle` — a turret auto-targets, it doesn't have one.
-    // `aimAngle` is different: a purely visual field (renderTurretIcon's own
+    // `aimAngle` is different: a purely visual field (renderTurretArm's own
     // gun arm), continuously overwritten by updateBuildings' turret branch
     // toward whatever the nearest living alien is, every tick one exists —
     // defaults to straight up (-PI/2) so a freshly-placed turret with no
@@ -2580,7 +2580,7 @@ export function updateBuildings(state, dtMs) {
       // track its live target continuously, not just at the instant it
       // fires, so this can't be scoped inside the `if` the way it used to be
       // when only the shot itself needed it. data.aimAngle (read by
-      // renderTurretIcon) is only ever updated when a real target exists —
+      // renderTurretArm) is only ever updated when a real target exists —
       // with none, the arm just holds whatever direction it last pointed.
       let nearestAlien = null;
       let nearestDist = Infinity;
@@ -3575,7 +3575,7 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
         const screen = worldToScreen(col * TILE_SIZE, row * TILE_SIZE, camera);
         const size = TILE_SIZE * camera.zoom;
         const data = state.level.buildingData[buildingKey(col, row)];
-        renderTileShape(ctx, type, building.color, screen.x, screen.y, size, data, state.level.elapsed);
+        renderTileShape(ctx, type, building.color, screen.x, screen.y, size, data, state.level.elapsed, ((col * 73856093) ^ (row * 19349663)) >>> 0);
         // Fans are drawn separately below (renderFanIndicators), over EVERY
         // fan in state.level.buildingData rather than just the on-screen-tile-
         // culled ones this loop already skipped past — a Fan's cone can reach
@@ -3820,26 +3820,59 @@ function shadeHexColor(hex, t) {
   return `rgb(${r}, ${g}, ${b})`;
 }
 
-// A diagonal highlight/shadow bevel across a square tile's own bounds — a
-// lighter top-left triangle, a darker bottom-right one — per direct request
-// that buildings "pop more and look less flat" than a single flat fill.
-// Cheap (two extra filled triangles, no gradients/filters) so it's safe to
-// run every building, every frame.
-function renderSquareBevel(ctx, x, y, size) {
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.18)';
+// The shared base every building tile sits on, per direct request (rework
+// buildings to match the boulders/mound/seaweed — "lit, rimmed, unique grain,
+// contact shadow"): a lit radial gradient (highlight upper-left, same as
+// drawBoulder's), scattered speckle grain, a soft shadow settling along the
+// bottom edge, a crisp darker rim and a thin top/left highlight line. Replaces
+// the old flat fill + faint stroke + two-triangle bevel. Only ever runs while
+// baking a tile sprite (see getTileSprite below), so the grain's Math.random
+// is what makes each baked variant unique rather than a per-frame cost.
+function renderPolishedBase(ctx, x, y, size, color) {
+  const g = ctx.createRadialGradient(x + size * 0.3, y + size * 0.25, size * 0.05, x + size * 0.5, y + size * 0.5, size * 0.85);
+  g.addColorStop(0, shadeHexColor(color, 0.12));
+  g.addColorStop(1, shadeHexColor(color, -0.14));
+  ctx.fillStyle = g;
+  ctx.fillRect(x, y, size, size);
+  ctx.save();
   ctx.beginPath();
-  ctx.moveTo(x, y);
-  ctx.lineTo(x + size, y);
-  ctx.lineTo(x, y + size);
-  ctx.closePath();
-  ctx.fill();
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
+  ctx.rect(x, y, size, size);
+  ctx.clip();
+  const grains = Math.round((size * size) / 90);
+  for (let i = 0; i < grains; i++) {
+    ctx.fillStyle = Math.random() < 0.5 ? 'rgba(255, 255, 255, 0.16)' : 'rgba(0, 0, 0, 0.18)';
+    ctx.beginPath();
+    ctx.arc(x + Math.random() * size, y + Math.random() * size, size * (0.008 + Math.random() * 0.02), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  const shadow = ctx.createLinearGradient(0, y + size * 0.72, 0, y + size);
+  shadow.addColorStop(0, 'rgba(0, 0, 0, 0)');
+  shadow.addColorStop(1, 'rgba(0, 0, 0, 0.22)');
+  ctx.fillStyle = shadow;
+  ctx.fillRect(x, y + size * 0.72, size, size * 0.28);
+  ctx.restore();
+  const rim = Math.max(1, size * 0.045);
+  ctx.strokeStyle = shadeHexColor(color, -0.36);
+  ctx.lineWidth = rim;
+  ctx.strokeRect(x + rim / 2, y + rim / 2, size - rim, size - rim);
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+  ctx.lineWidth = Math.max(1, size * 0.02);
   ctx.beginPath();
-  ctx.moveTo(x + size, y);
-  ctx.lineTo(x + size, y + size);
-  ctx.lineTo(x, y + size);
-  ctx.closePath();
-  ctx.fill();
+  ctx.moveTo(x + rim * 1.4, y + rim * 1.6);
+  ctx.lineTo(x + size - rim * 1.4, y + rim * 1.6);
+  ctx.moveTo(x + rim * 1.6, y + rim * 1.4);
+  ctx.lineTo(x + rim * 1.6, y + size - rim * 1.4);
+  ctx.stroke();
+}
+
+// A horizontal lit-to-shaded gradient for a detail piece (a still, tower,
+// wall...) spanning x..x+w — the piece-sized version of the base's lighting,
+// so each machine part reads as lit from the upper-left like the boulders do.
+function litFill(ctx, x, w, color, lit = 0.16, dark = -0.18) {
+  const g = ctx.createLinearGradient(x, 0, x + w, 0);
+  g.addColorStop(0, shadeHexColor(color, lit));
+  g.addColorStop(1, shadeHexColor(color, dark));
+  return g;
 }
 
 // A small corner badge distinguishing the Electric/Advanced/Bio tier of a
@@ -3857,6 +3890,24 @@ function renderSquareBevel(ctx, x, y, size) {
 // can't" state in this file already uses (see renderBlueprintGhost's own
 // afford-check tint) rather than inventing a new one.
 const CHEST_FULL_BAR_COLOR = '#ff5a5a';
+
+// The Storage Chest's static half (base + lid seam) — baked into its tile
+// sprite; renderChestIcon below adds the live fill bar/icon/trickle arrow.
+function renderChestBase(ctx, x, y, size, color) {
+  renderPolishedBase(ctx, x, y, size, color);
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
+  ctx.lineWidth = Math.max(1, size * 0.05);
+  ctx.beginPath();
+  ctx.moveTo(x + size * 0.08, y + size * 0.38);
+  ctx.lineTo(x + size * 0.92, y + size * 0.38);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.22)';
+  ctx.lineWidth = Math.max(1, size * 0.025);
+  ctx.beginPath();
+  ctx.moveTo(x + size * 0.08, y + size * 0.38 + size * 0.05);
+  ctx.lineTo(x + size * 0.92, y + size * 0.38 + size * 0.05);
+  ctx.stroke();
+}
 
 // A plain bevelled square (same base every un-special-cased building tile
 // already gets) plus 4 pieces of live state: a dark "lid seam" so it reads
@@ -3876,21 +3927,6 @@ const CHEST_FULL_BAR_COLOR = '#ff5a5a';
 // the chest's own idle "trickle is armed" tell, driven by elapsedMs so it
 // keeps animating whether or not a drag is in progress).
 function renderChestIcon(ctx, x, y, size, color, data, elapsedMs) {
-  ctx.fillStyle = color;
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
-  ctx.beginPath();
-  ctx.rect(x, y, size, size);
-  ctx.fill();
-  ctx.stroke();
-  renderSquareBevel(ctx, x, y, size);
-
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
-  ctx.lineWidth = Math.max(1, size * 0.05);
-  ctx.beginPath();
-  ctx.moveTo(x + size * 0.08, y + size * 0.38);
-  ctx.lineTo(x + size * 0.92, y + size * 0.38);
-  ctx.stroke();
-
   if (data) {
     const capacity = STORAGE_CHEST_CAPACITY[data.type];
     const fillFraction = capacity > 0 ? Math.min(1, data.count / capacity) : 0;
@@ -3974,11 +4010,7 @@ function renderTierBadge(ctx, type, x, y, size) {
 // draws whatever sits in the center (Turret's own raised diamond boss,
 // Collector's existing dark "eye" circle).
 function renderArmorPlateBase(ctx, x, y, size, color) {
-  ctx.fillStyle = color;
-  ctx.fillRect(x, y, size, size);
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
-  ctx.strokeRect(x, y, size, size);
-  renderSquareBevel(ctx, x, y, size);
+  renderPolishedBase(ctx, x, y, size, color);
 
   const frame = size * 0.09;
   ctx.strokeStyle = shadeHexColor(color, -0.32);
@@ -4017,7 +4049,7 @@ function renderArmorPlateBase(ctx, x, y, size, color) {
 // every tick toward whichever living alien is currently nearest, defaulting
 // to straight up — see placeTile's own turret init) — the one part of this
 // icon that reflects live gameplay state instead of being fixed decoration.
-function renderTurretIcon(ctx, x, y, size, color, aimAngle) {
+function renderTurretBase(ctx, x, y, size, color) {
   renderArmorPlateBase(ctx, x, y, size, color);
   const cx = x + size / 2;
   const cy = y + size / 2;
@@ -4025,19 +4057,28 @@ function renderTurretIcon(ctx, x, y, size, color, aimAngle) {
   ctx.save();
   ctx.translate(cx, cy);
   ctx.rotate(Math.PI / 4);
-  ctx.fillStyle = shadeHexColor(color, 0.18);
+  ctx.fillStyle = litFill(ctx, -r, r * 2, color, 0.28, 0.02);
   ctx.fillRect(-r, -r, r * 2, r * 2);
   ctx.strokeStyle = shadeHexColor(color, -0.4);
   ctx.lineWidth = Math.max(1, size * 0.03);
   ctx.strokeRect(-r, -r, r * 2, r * 2);
   ctx.restore();
+}
 
+// The turret's live half — the pivoting gun arm and its center bolt, redrawn
+// every frame on top of the baked base above.
+function renderTurretArm(ctx, x, y, size, color, aimAngle) {
+  const cx = x + size / 2;
+  const cy = y + size / 2;
   const armLength = size * 0.42;
   const armWidth = size * 0.13;
   ctx.save();
   ctx.translate(cx, cy);
   ctx.rotate(aimAngle || -Math.PI / 2);
-  ctx.fillStyle = shadeHexColor(color, -0.2);
+  const armGrad = ctx.createLinearGradient(0, -armWidth / 2, 0, armWidth / 2);
+  armGrad.addColorStop(0, shadeHexColor(color, -0.04));
+  armGrad.addColorStop(1, shadeHexColor(color, -0.34));
+  ctx.fillStyle = armGrad;
   ctx.fillRect(0, -armWidth / 2, armLength, armWidth);
   ctx.strokeStyle = shadeHexColor(color, -0.5);
   ctx.lineWidth = Math.max(1, size * 0.02);
@@ -4065,11 +4106,7 @@ function renderTurretIcon(ctx, x, y, size, color, aimAngle) {
 // aim arrow and force cone (renderDirectionIndicator/renderFanIndicators)
 // still render in a completely separate pass on top of this, unchanged.
 function renderFanVentBase(ctx, x, y, size, color) {
-  ctx.fillStyle = color;
-  ctx.fillRect(x, y, size, size);
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
-  ctx.strokeRect(x, y, size, size);
-  renderSquareBevel(ctx, x, y, size);
+  renderPolishedBase(ctx, x, y, size, color);
 
   const frame = size * 0.07;
   ctx.strokeStyle = shadeHexColor(color, -0.3);
@@ -4081,13 +4118,21 @@ function renderFanVentBase(ctx, x, y, size, color) {
   const outerR = size * 0.36;
   const innerR = size * 0.1;
 
+  const discGrad = ctx.createRadialGradient(cx - outerR * 0.3, cy - outerR * 0.3, outerR * 0.1, cx, cy, outerR);
+  discGrad.addColorStop(0, shadeHexColor(color, -0.08));
+  discGrad.addColorStop(1, shadeHexColor(color, -0.34));
   ctx.beginPath();
-  ctx.fillStyle = shadeHexColor(color, -0.22);
+  ctx.fillStyle = discGrad;
   ctx.arc(cx, cy, outerR, 0, Math.PI * 2);
   ctx.fill();
+  ctx.strokeStyle = shadeHexColor(color, -0.5);
+  ctx.lineWidth = Math.max(1, size * 0.025);
+  ctx.stroke();
 
   const bladeCount = 6;
   ctx.fillStyle = shadeHexColor(color, 0.35);
+  ctx.strokeStyle = shadeHexColor(color, -0.3);
+  ctx.lineWidth = Math.max(1, size * 0.015);
   for (let i = 0; i < bladeCount; i++) {
     ctx.save();
     ctx.translate(cx, cy);
@@ -4098,6 +4143,7 @@ function renderFanVentBase(ctx, x, y, size, color) {
     ctx.quadraticCurveTo(outerR * 0.55, outerR * 0.15, 0, 0);
     ctx.closePath();
     ctx.fill();
+    ctx.stroke();
     ctx.restore();
   }
 
@@ -4120,20 +4166,19 @@ const REFINERY_COPPER = '#c9863a';
 const REFINERY_COPPER_DARK = '#8a5a24';
 const REFINERY_COPPER_LIGHT = '#e6b06a';
 function renderRefineryIcon(ctx, x, y, size, color) {
-  ctx.fillStyle = color;
-  ctx.fillRect(x, y, size, size);
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
-  ctx.strokeRect(x, y, size, size);
-  renderSquareBevel(ctx, x, y, size);
+  renderPolishedBase(ctx, x, y, size, color);
 
   const baseY = y + size * 0.86;
-  ctx.fillStyle = shadeHexColor(color, -0.28);
+  ctx.fillStyle = litFill(ctx, x + size * 0.08, size * 0.84, color, -0.1, -0.4);
   ctx.fillRect(x + size * 0.08, baseY, size * 0.84, size * 0.1);
+  ctx.strokeStyle = shadeHexColor(color, -0.5);
+  ctx.lineWidth = Math.max(1, size * 0.015);
+  ctx.strokeRect(x + size * 0.08, baseY, size * 0.84, size * 0.1);
 
   const drawStill = (cx, bodyW, bodyH, headH) => {
     const bodyX = cx - bodyW / 2;
     const bodyTop = baseY - bodyH;
-    ctx.fillStyle = REFINERY_COPPER;
+    ctx.fillStyle = litFill(ctx, bodyX, bodyW, REFINERY_COPPER, 0.18, -0.22);
     ctx.fillRect(bodyX, bodyTop, bodyW, bodyH);
     ctx.strokeStyle = REFINERY_COPPER_DARK;
     ctx.lineWidth = Math.max(1, size * 0.015);
@@ -4143,7 +4188,7 @@ function renderRefineryIcon(ctx, x, y, size, color) {
     ctx.lineTo(cx, bodyTop - headH);
     ctx.lineTo(bodyX + bodyW, bodyTop);
     ctx.closePath();
-    ctx.fillStyle = REFINERY_COPPER_LIGHT;
+    ctx.fillStyle = litFill(ctx, bodyX, bodyW, REFINERY_COPPER_LIGHT, 0.1, -0.2);
     ctx.fill();
     ctx.stroke();
     ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
@@ -4171,17 +4216,9 @@ function renderRefineryIcon(ctx, x, y, size, color) {
 // Manufacturer: a small factory building — a slanted roof, a chimney, and a
 // couple of window/door details — on the tile's own configured color.
 function renderManufacturerIcon(ctx, x, y, size, color) {
-  ctx.fillStyle = color;
-  ctx.fillRect(x, y, size, size);
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
-  ctx.strokeRect(x, y, size, size);
-  renderSquareBevel(ctx, x, y, size);
+  renderPolishedBase(ctx, x, y, size, color);
 
-  const wallColor = shadeHexColor(color, 0.18);
-  const roofColor = shadeHexColor(color, -0.38);
-  const chimneyColor = shadeHexColor(color, -0.22);
-
-  ctx.fillStyle = chimneyColor;
+  ctx.fillStyle = litFill(ctx, x + size * 0.24, size * 0.14, color, -0.06, -0.34);
   ctx.fillRect(x + size * 0.24, y + size * 0.14, size * 0.14, size * 0.36);
   ctx.strokeStyle = shadeHexColor(color, -0.48);
   ctx.lineWidth = Math.max(1, size * 0.015);
@@ -4191,7 +4228,7 @@ function renderManufacturerIcon(ctx, x, y, size, color) {
   const buildingY = y + size * 0.46;
   const buildingW = size * 0.68;
   const buildingH = size * 0.4;
-  ctx.fillStyle = wallColor;
+  ctx.fillStyle = litFill(ctx, buildingX, buildingW, color, 0.3, 0.06);
   ctx.fillRect(buildingX, buildingY, buildingW, buildingH);
   ctx.strokeStyle = shadeHexColor(color, -0.32);
   ctx.strokeRect(buildingX, buildingY, buildingW, buildingH);
@@ -4201,7 +4238,7 @@ function renderManufacturerIcon(ctx, x, y, size, color) {
   ctx.lineTo(buildingX + buildingW * 0.4, buildingY - size * 0.12);
   ctx.lineTo(buildingX + buildingW + size * 0.03, buildingY);
   ctx.closePath();
-  ctx.fillStyle = roofColor;
+  ctx.fillStyle = litFill(ctx, buildingX, buildingW, color, -0.26, -0.5);
   ctx.fill();
   ctx.stroke();
 
@@ -4213,13 +4250,8 @@ function renderManufacturerIcon(ctx, x, y, size, color) {
 // Power Plant: 3 rounded-top cooling towers of varying height, joined by a
 // base pipe, on the tile's own configured color.
 function renderPowerPlantIcon(ctx, x, y, size, color) {
-  ctx.fillStyle = color;
-  ctx.fillRect(x, y, size, size);
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
-  ctx.strokeRect(x, y, size, size);
-  renderSquareBevel(ctx, x, y, size);
+  renderPolishedBase(ctx, x, y, size, color);
 
-  const towerColor = shadeHexColor(color, 0.2);
   const towerDark = shadeHexColor(color, -0.32);
   const towerCount = 3;
   const towerW = size * 0.18;
@@ -4232,7 +4264,7 @@ function renderPowerPlantIcon(ctx, x, y, size, color) {
     const tx = startX + i * (towerW + gap);
     const th = size * (0.34 + (i === 1 ? 0.13 : 0)); // middle tower slightly taller
     const ty = baseY - th;
-    ctx.fillStyle = towerColor;
+    ctx.fillStyle = litFill(ctx, tx, towerW, color, 0.3, 0.04);
     ctx.fillRect(tx, ty, towerW, th);
     ctx.strokeStyle = towerDark;
     ctx.lineWidth = Math.max(1, size * 0.015);
@@ -4443,12 +4475,11 @@ function renderRecipeIcon(ctx, type, x, y, size, data) {
 // game's general "not flat" aesthetic without reusing the diagonal bevel
 // look every other building keeps.
 function renderBrickPattern(ctx, x, y, size, color) {
+  renderPolishedBase(ctx, x, y, size, color);
   ctx.save();
   ctx.beginPath();
   ctx.rect(x, y, size, size);
   ctx.clip();
-  ctx.fillStyle = color;
-  ctx.fillRect(x, y, size, size);
 
   const rows = 2;
   const rowH = size / rows;
@@ -4474,8 +4505,10 @@ function renderBrickPattern(ctx, x, y, size, color) {
   ctx.fillRect(x, y + size - mortarWidth, size, mortarWidth);
   ctx.restore();
 
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
-  ctx.lineWidth = Math.max(1, size * 0.04);
+  // The base's own rim sits under the mortar bands clipped in above, so the
+  // rim is redrawn on top.
+  ctx.strokeStyle = shadeHexColor(color, -0.36);
+  ctx.lineWidth = Math.max(1, size * 0.045);
   ctx.strokeRect(x + ctx.lineWidth / 2, y + ctx.lineWidth / 2, size - ctx.lineWidth, size - ctx.lineWidth);
 }
 
@@ -4498,6 +4531,18 @@ function renderPlatformRamp(ctx, x, y, size, color, tileType) {
   ctx.clip();
   renderBrickPattern(ctx, x, y, size, color);
   ctx.restore();
+  // A darker rim under the highlight, along the wedge's whole outline, so the
+  // sloped piece is rimmed like every other tile (the square's own rim only
+  // shows along its two straight legs once clipped to the triangle).
+  ctx.strokeStyle = shadeHexColor(color, -0.4);
+  ctx.lineWidth = Math.max(1.5, size * 0.06) * 1.7;
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(verts[0][0], verts[0][1]);
+  ctx.lineTo(verts[1][0], verts[1][1]);
+  ctx.lineTo(verts[2][0], verts[2][1]);
+  ctx.closePath();
+  ctx.stroke();
   ctx.strokeStyle = shadeHexColor(color, 0.35);
   ctx.lineWidth = Math.max(1.5, size * 0.06);
   ctx.beginPath();
@@ -4540,6 +4585,67 @@ function renderPlatformFilterBadge(ctx, x, y, size, data) {
   ctx.restore();
 }
 
+// ---- Baked tile sprites ----
+// Per direct request (same lit/rimmed/grained look as the boulders/mound),
+// every building's STATIC art — everything except the live state layered on
+// top (the turret's aim arm, a chest's fill bar/icon/arrow, tier badges, the
+// Manufacturer/Power Plant recipe icon, the platform filter check) — is drawn
+// once into a small offscreen canvas and then just blitted per tile per frame,
+// instead of redrawing a dozen gradients/strokes for every tile every frame.
+// TILE_SPRITE_VARIANTS different bakes per building type (each with its own
+// Math.random grain) are chosen per tile by a position hash, so neighboring
+// tiles of the same type don't show one repeated speckle pattern.
+const TILE_SPRITE_PX = 96; // bake resolution: comfortably above the on-screen tile size at normal zoom, so the blit stays crisp
+const TILE_SPRITE_VARIANTS = 6;
+const tileSpriteCache = new Map();
+
+function renderTileStatic(ctx, type, color, x, y, size) {
+  if (type === TILE_PLATFORM) {
+    renderBrickPattern(ctx, x, y, size, color);
+  } else if (RAMP_TRIANGLE_LOCAL_VERTS[type]) {
+    renderPlatformRamp(ctx, x, y, size, color, type);
+  } else if (COLLECTOR_TILES.has(type)) {
+    renderArmorPlateBase(ctx, x, y, size, color);
+    const eye = ctx.createRadialGradient(x + size * 0.45, y + size * 0.45, size * 0.02, x + size / 2, y + size / 2, size * COLLECTOR_CIRCLE_RADIUS_FRACTION);
+    eye.addColorStop(0, 'rgba(40, 40, 40, 0.6)');
+    eye.addColorStop(1, 'rgba(0, 0, 0, 0.75)');
+    ctx.beginPath();
+    ctx.fillStyle = eye;
+    ctx.arc(x + size / 2, y + size / 2, size * COLLECTOR_CIRCLE_RADIUS_FRACTION, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = shadeHexColor(color, -0.4);
+    ctx.lineWidth = Math.max(1, size * 0.03);
+    ctx.stroke();
+  } else if (TURRET_TILES.has(type)) {
+    renderTurretBase(ctx, x, y, size, color);
+  } else if (FAN_TILES.has(type)) {
+    renderFanVentBase(ctx, x, y, size, color);
+  } else if (REFINERY_TILES.has(type)) {
+    renderRefineryIcon(ctx, x, y, size, color);
+  } else if (type === TILE_MANUFACTURER) {
+    renderManufacturerIcon(ctx, x, y, size, color);
+  } else if (type === TILE_POWER_PLANT) {
+    renderPowerPlantIcon(ctx, x, y, size, color);
+  } else if (STORAGE_CHEST_TILES.has(type)) {
+    renderChestBase(ctx, x, y, size, color);
+  } else {
+    renderPolishedBase(ctx, x, y, size, color);
+  }
+}
+
+function getTileSprite(type, color, variant) {
+  const key = type + '|' + color + '|' + variant;
+  let sprite = tileSpriteCache.get(key);
+  if (!sprite) {
+    sprite = document.createElement('canvas');
+    sprite.width = TILE_SPRITE_PX;
+    sprite.height = TILE_SPRITE_PX;
+    renderTileStatic(sprite.getContext('2d'), type, color, 0, 0, TILE_SPRITE_PX);
+    tileSpriteCache.set(key, sprite);
+  }
+  return sprite;
+}
+
 // Dispatches to each family's own hand-drawn icon function above — per
 // direct request, replacing the old flat-square-plus-shop-icon-glyph look
 // (which needed a click to tell buildings apart) with a real drawn machine
@@ -4562,32 +4668,21 @@ function renderPlatformFilterBadge(ctx, x, y, size, data) {
 // building's actual look wherever the shop/Lab used to show a flat emoji
 // instead (per direct request), with `data` simply omitted there (only
 // Turret's own aim-arm angle reads it, defaulting to straight up).
-export function renderTileShape(ctx, type, color, x, y, size, data, elapsedMs) {
-  if (type === TILE_PLATFORM) {
-    renderBrickPattern(ctx, x, y, size, color);
+// `variantSeed` (a per-tile position hash from the real tile loop) picks which
+// of the baked grain variants this tile uses; omitted (shop/Lab icons, ghosts)
+// it's just variant 0.
+export function renderTileShape(ctx, type, color, x, y, size, data, elapsedMs, variantSeed = 0) {
+  const variant = Math.abs(variantSeed) % TILE_SPRITE_VARIANTS;
+  if (size < 48) { ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; } // small icons downscale the 96px bake by a lot
+  ctx.drawImage(getTileSprite(type, color, variant), x, y, size, size);
+  if (type === TILE_PLATFORM || RAMP_TRIANGLE_LOCAL_VERTS[type]) {
     renderPlatformFilterBadge(ctx, x, y, size, data);
-    return;
-  }
-  if (RAMP_TRIANGLE_LOCAL_VERTS[type]) {
-    renderPlatformRamp(ctx, x, y, size, color, type);
-    renderPlatformFilterBadge(ctx, x, y, size, data);
-    return;
-  }
-  if (COLLECTOR_TILES.has(type)) {
-    renderArmorPlateBase(ctx, x, y, size, color);
-    ctx.beginPath();
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
-    ctx.arc(x + size / 2, y + size / 2, size * COLLECTOR_CIRCLE_RADIUS_FRACTION, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.strokeStyle = shadeHexColor(color, -0.4);
-    ctx.lineWidth = Math.max(1, size * 0.03);
-    ctx.stroke();
+  } else if (COLLECTOR_TILES.has(type)) {
     renderTierBadge(ctx, type, x, y, size);
   } else if (TURRET_TILES.has(type)) {
-    renderTurretIcon(ctx, x, y, size, color, data && data.aimAngle);
+    renderTurretArm(ctx, x, y, size, color, data && data.aimAngle);
     renderTierBadge(ctx, type, x, y, size);
   } else if (FAN_TILES.has(type)) {
-    renderFanVentBase(ctx, x, y, size, color);
     renderTierBadge(ctx, type, x, y, size);
     // Per direct request ("add a matching visual to the fans that are
     // filtering items") — the exact same green-checkmark badge a filtering
@@ -4596,13 +4691,8 @@ export function renderTileShape(ctx, type, color, x, y, size, data, elapsedMs) {
     // unchanged here.
     renderPlatformFilterBadge(ctx, x, y, size, data);
   } else if (REFINERY_TILES.has(type)) {
-    renderRefineryIcon(ctx, x, y, size, color);
     renderTierBadge(ctx, type, x, y, size);
-  } else if (type === TILE_MANUFACTURER) {
-    renderManufacturerIcon(ctx, x, y, size, color);
-    renderRecipeIcon(ctx, type, x, y, size, data);
-  } else if (type === TILE_POWER_PLANT) {
-    renderPowerPlantIcon(ctx, x, y, size, color);
+  } else if (type === TILE_MANUFACTURER || type === TILE_POWER_PLANT) {
     renderRecipeIcon(ctx, type, x, y, size, data);
   } else if (STORAGE_CHEST_TILES.has(type)) {
     // No renderTierBadge here — it only knows the Collector/Refinery/Turret
@@ -4611,13 +4701,6 @@ export function renderTileShape(ctx, type, color, x, y, size, data, elapsedMs) {
     // without needing one.
     renderChestIcon(ctx, x, y, size, color, data, elapsedMs);
   } else {
-    ctx.fillStyle = color;
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
-    ctx.beginPath();
-    ctx.rect(x, y, size, size);
-    ctx.fill();
-    ctx.stroke();
-    renderSquareBevel(ctx, x, y, size);
     renderTierBadge(ctx, type, x, y, size);
   }
 }
