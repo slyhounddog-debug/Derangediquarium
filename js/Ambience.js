@@ -1601,8 +1601,23 @@ export function renderAmbienceBehindLab(ctx, state, canvasWidth, canvasHeight) {
 // else. Also renders their own occasional bubbles (see spawnShadowFishBubble)
 // immediately after, since those originate from the same back-of-the-tank
 // layer.
+const SHADOW_FISH_DOWNSCALE = 4;
+const shadowFishCanvas = document.createElement('canvas');
+const shadowFishCtx = shadowFishCanvas.getContext('2d');
+const shadowFishSmallCanvas = document.createElement('canvas');
+const shadowFishSmallCtx = shadowFishSmallCanvas.getContext('2d');
 export function renderShadowFish(ctx, state, canvasWidth, canvasHeight) {
-  for (const f of shadowFish) drawOneShadowFish(ctx, state.camera, canvasWidth, canvasHeight, f);
+  // Same pixelation as the background decor layer: draw to a scratch canvas,
+  // shrink it, and stretch it back up.
+  const w = Math.ceil(canvasWidth), h = Math.ceil(canvasHeight);
+  const sw = Math.max(1, Math.ceil(w / SHADOW_FISH_DOWNSCALE)), sh = Math.max(1, Math.ceil(h / SHADOW_FISH_DOWNSCALE));
+  if (shadowFishCanvas.width !== w || shadowFishCanvas.height !== h) { shadowFishCanvas.width = w; shadowFishCanvas.height = h; }
+  if (shadowFishSmallCanvas.width !== sw || shadowFishSmallCanvas.height !== sh) { shadowFishSmallCanvas.width = sw; shadowFishSmallCanvas.height = sh; }
+  shadowFishCtx.clearRect(0, 0, w, h);
+  for (const f of shadowFish) drawOneShadowFish(shadowFishCtx, state.camera, canvasWidth, canvasHeight, f);
+  shadowFishSmallCtx.clearRect(0, 0, sw, sh);
+  shadowFishSmallCtx.drawImage(shadowFishCanvas, 0, 0, w, h, 0, 0, sw, sh);
+  ctx.drawImage(shadowFishSmallCanvas, 0, 0, sw, sh, 0, 0, w, h);
   renderShadowBubbles(ctx, state.camera, canvasWidth, canvasHeight);
 }
 

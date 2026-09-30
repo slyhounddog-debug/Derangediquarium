@@ -107,6 +107,7 @@ import {
   BUILDING_FAMILIES,
 } from './Config.js';
 import { worldToScreen } from './Engine.js';
+import { bakeSeabedCanvas } from './SeabedArt.js';
 import { playBuildPlace, playDemolish, playTurretShoot, playIntake, playDispense } from './Sound.js';
 import { pushGameNotification } from './Notifications.js';
 
@@ -3475,6 +3476,27 @@ function drawSedimentStrata(ctx, camera, canvasWidth, seabedTopWorldY, worldBott
 // hard stop moved from the old ROCK_SHELF_Y down to WORLD_H, the world's
 // real bottom edge.
 
+// Layered sand/dirt backdrop with scattered rocks, cracks and buried objects
+// (see SeabedArt.js), baked once on first use and blitted each frame. The
+// caustic overlay and other effects are composited later by main.js, so they
+// still apply on top.
+let seabedArtCanvas = null;
+const SEABED_ART_SCALE = 2;
+function drawSeabedArt(ctx, camera, canvasWidth, seabedTopWorldY, worldBottomY) {
+  const fullW = WORLD_TILES_W * TILE_SIZE;
+  const fullH = WORLD_TILES_H * TILE_SIZE - seabedTopWorldY;
+  if (!seabedArtCanvas) seabedArtCanvas = bakeSeabedCanvas(fullW, fullH, SEABED_ART_SCALE);
+  const topLeft = worldToScreen(0, seabedTopWorldY, camera);
+  // Fill past the world's right edge / bottom of the unlocked region is clipped by the caller and the clip below.
+  const bottom = worldToScreen(0, worldBottomY, camera).y;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, topLeft.y, canvasWidth, bottom - topLeft.y);
+  ctx.clip();
+  ctx.drawImage(seabedArtCanvas, 0, 0, seabedArtCanvas.width, seabedArtCanvas.height, topLeft.x, topLeft.y, fullW * camera.zoom, fullH * camera.zoom);
+  ctx.restore();
+}
+
 export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
   const { camera } = state;
   const grid = state.level.grid;
@@ -3517,21 +3539,10 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
   ctx.beginPath();
   ctx.rect(0, Math.max(0, topOfSeabed.y), canvasWidth, canvasHeight);
   ctx.clip();
-  drawSedimentStrata(ctx, camera, canvasWidth, SEABED_ROW_START * TILE_SIZE, worldBottomY);
+  drawSeabedArt(ctx, camera, canvasWidth, SEABED_ROW_START * TILE_SIZE, worldBottomY);
   ctx.restore();
   ctx.fillStyle = '#6b4f34';
   ctx.fillRect(0, Math.max(0, topOfSeabed.y), canvasWidth, 4); // seabed surface highlight line
-
-  ctx.save();
-  ctx.fillStyle = getCityTexturePattern(ctx);
-  ctx.globalAlpha = 0.55;
-  ctx.fillRect(0, Math.max(0, topOfSeabed.y) + 4, canvasWidth, canvasHeight);
-  ctx.restore();
-
-  ctx.save();
-  ctx.fillStyle = getSedimentSpecklePattern(ctx);
-  ctx.fillRect(0, Math.max(0, topOfSeabed.y) + 4, canvasWidth, canvasHeight);
-  ctx.restore();
 
   // Alternating dirt/sand row tint — per direct request, a subtle pseudo-
   // grid so each seabed ROW reads as its own strip at a glance (useful for

@@ -3028,7 +3028,8 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
           // for the orbiting-food visual to be building toward.
           const relief = FOOD_HUNGER_RELIEF_BY_LEVEL[state.level.upgrades.foodQuality];
           const isAlreadyAdult = fish.stage === def.growthStages.length - 1;
-          const fedBeforeCritical = !isAlreadyAdult && fish.hunger < HUNGER_CRITICAL_THRESHOLD;
+          // An Adult builds the streak too — its 3rd quick feed pays out a bonus coin instead of growing it.
+          const fedBeforeCritical = fish.hunger < HUNGER_CRITICAL_THRESHOLD;
           fish.hunger -= relief;
           if (fedBeforeCritical) {
             fish.growthFeedStreak = (fish.growthFeedStreak || 0) + 1;
@@ -3046,8 +3047,14 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
                 { fishId: fish.id, startX: p0.x, startY: p0.y, age: 0 },
                 { fishId: fish.id, startX: p1.x, startY: p1.y, age: 0 }
               );
-              state.level.fishGrowthEffects.push({ x: fish.x, y: fish.y, age: 0 });
-              fish.totalFeeds = def.growthStages[def.growthStages.length - 1].feedsRequired;
+              if (isAlreadyAdult) {
+                // Adult: the 3 quick feeds buy an immediate coin (spawned in the coin block
+                // below) instead of growth. dropTimer is left untouched.
+                fish.pendingStreakCoin = true;
+              } else {
+                state.level.fishGrowthEffects.push({ x: fish.x, y: fish.y, age: 0 });
+                fish.totalFeeds = def.growthStages[def.growthStages.length - 1].feedsRequired;
+              }
             }
           }
         }
@@ -3256,6 +3263,13 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
     // utility-utility) still drops a coin on this timer, unchanged. A
     // SCAVENGER+FEEDER hybrid (Scrub-Guppy/Dartfin/Blimpfish) falls through
     // to here too — its dropInterval is a coin timer, not an eat cooldown.
+    if (fish.pendingStreakCoin && !fish.alienNearby) {
+      const streakBase = fish.dropValueOverride != null
+        ? fish.dropValueOverride
+        : Math.ceil(stageDef.dropValue * Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, (fish.starTier || 1) - 1));
+      const streakValue = Math.round(streakBase * (fish.mutagenBuffActive ? MUTAGEN_PASTE_COIN_MULTIPLIER : 1) * cleanlinessMoneyMultiplier(state));
+      if (streakValue > 0) state.level.items.push(createCoin(fish.x, fish.y, streakValue));
+    }
     fish.dropTimer += dtMs;
     // Per direct request, a fish can't produce money at all while close to a
     // living alien — no coin, no cap-blocked feedback either (that's
@@ -3318,6 +3332,7 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
       }
     }
   }
+  fish.pendingStreakCoin = false; // consumed above if this fish has a coin timer; dropped otherwise
   // (isScavenger falls through here with no passive drop at all — Suckerfish
   // produces nothing on a timer; its whole job is the eat-cooldown-gated
   // Waste consumption handled in the seek/eat branch above.)
