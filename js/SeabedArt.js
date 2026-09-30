@@ -13,7 +13,15 @@ const pick = (arr) => arr[Math.floor(Math.random() * arr.length)];
 const hsl = (h, s, l, a = 1) => `hsla(${h.toFixed(1)}, ${s.toFixed(1)}%, ${l.toFixed(1)}%, ${a})`;
 
 // Rock colour families: gray / tan / brown / dark brown.
+// While baking the city layer, colours are desaturated and compressed toward
+// the soil tones so rocks read as buried background, not collectibles.
+let undergroundMode = false;
 function rockColor() {
+  const c = rockColorRaw();
+  if (!undergroundMode) return c;
+  return { h: c.h, s: c.s * 0.5, l: 20 + (c.l - 12) * 0.42 };
+}
+function rockColorRaw() {
   const family = Math.random();
   if (family < 0.27) return { h: rand(28, 45), s: rand(3, 12), l: rand(32, 58) }; // gray
   if (family < 0.55) return { h: rand(32, 42), s: rand(22, 40), l: rand(46, 64) }; // tan
@@ -61,9 +69,6 @@ function drawPebble(ctx) {
   blobPath(ctx, rx, ry, 7, 0.14);
   ctx.fillStyle = shade(c, 0);
   ctx.fill();
-  ctx.strokeStyle = shade(c, -12, 0.6);
-  ctx.lineWidth = 1;
-  ctx.stroke();
 }
 
 function drawFlatStone(ctx) {
@@ -72,9 +77,6 @@ function drawFlatStone(ctx) {
   blobPath(ctx, rx, ry, 8, 0.12);
   ctx.fillStyle = shade(c, 0);
   ctx.fill();
-  ctx.strokeStyle = shade(c, -16, 0.8);
-  ctx.lineWidth = 1.2;
-  ctx.stroke();
 }
 
 function drawAngularRock(ctx) {
@@ -93,13 +95,6 @@ function drawAngularRock(ctx) {
     ctx.closePath();
     ctx.fill();
   }
-  ctx.beginPath();
-  ctx.moveTo(p[0].x, p[0].y);
-  for (let i = 1; i < p.length; i++) ctx.lineTo(p[i].x, p[i].y);
-  ctx.closePath();
-  ctx.strokeStyle = shade(c, -20, 0.85);
-  ctx.lineWidth = 1.2;
-  ctx.stroke();
 }
 
 function drawCrackLine(ctx, len, depth) {
@@ -169,9 +164,11 @@ export function drawBoulder(ctx, opts = {}) {
   drawCrackLine(ctx, rx * rand(0.8, 1.4), 1);
   ctx.restore();
   blobPath(ctx, rx, ry, 9, 0.12);
-  ctx.strokeStyle = shade(c, -24, ug ? 0.45 : 0.7);
-  ctx.lineWidth = ug ? 1.2 : 1.6;
-  ctx.stroke();
+  if (!ug) {
+    ctx.strokeStyle = shade(c, -24, 0.7);
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+  }
 }
 
 // Bakes one foreground boulder to a reusable sprite (same art as the city
@@ -198,7 +195,7 @@ function drawShell(ctx) {
   ctx.arc(0, r * 0.5, r, Math.PI, 0);
   ctx.closePath();
   ctx.fill();
-  ctx.strokeStyle = 'rgba(70, 50, 30, 0.5)';
+  ctx.strokeStyle = 'rgba(70, 50, 30, 0.22)';
   ctx.lineWidth = 0.9;
   const ribs = 4 + Math.floor(Math.random() * 3);
   for (let i = 0; i <= ribs; i++) {
@@ -222,9 +219,6 @@ function drawAmmonite(ctx) {
   }
   ctx.strokeStyle = shade(c, 0);
   ctx.lineWidth = rand(3, 4.5);
-  ctx.stroke();
-  ctx.strokeStyle = shade(c, -24, 0.7);
-  ctx.lineWidth = 1;
   ctx.stroke();
 }
 
@@ -365,9 +359,16 @@ export function bakeSeabedCanvas(worldW, worldH, scale = 2, rowPx = 32) {
   const canvas = document.createElement('canvas');
   canvas.width = Math.ceil(worldW * scale);
   canvas.height = Math.ceil(worldH * scale);
-  const ctx = canvas.getContext('2d');
+  let ctx = canvas.getContext('2d');
   ctx.scale(scale, scale);
   drawLayers(ctx, worldW, worldH, rowPx);
+  const baseCtx = ctx;
+  // Objects go on their own layer so a soil-coloured wash can mute only them.
+  const objCanvas = document.createElement('canvas');
+  objCanvas.width = canvas.width; objCanvas.height = canvas.height;
+  ctx = objCanvas.getContext('2d');
+  ctx.scale(scale, scale);
+  undergroundMode = true;
 
   // Semi-uniform scatter: jittered grid, ~35% of cells skipped, some cells
   // get two objects.
@@ -393,6 +394,14 @@ export function bakeSeabedCanvas(worldW, worldH, scale = 2, rowPx = 32) {
     it.fn(ctx);
     ctx.restore();
   }
+
+  undergroundMode = false;
+  ctx.globalCompositeOperation = 'source-atop';
+  ctx.fillStyle = 'rgba(52, 40, 28, 0.38)';
+  ctx.fillRect(0, 0, worldW, worldH);
+  ctx.globalCompositeOperation = 'source-over';
+  ctx = baseCtx;
+  ctx.drawImage(objCanvas, 0, 0, worldW, worldH);
 
   // Overall darkening with depth so the lower city reads deeper.
   const depth = ctx.createLinearGradient(0, 0, 0, worldH);
