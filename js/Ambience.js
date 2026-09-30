@@ -26,6 +26,7 @@
 // — see the job-list construction near the bottom of this file.
 import { WORLD_W, SEABED_FLOOR_Y } from './Config.js';
 import { worldToScreen } from './Engine.js';
+import { bakeBoulderSprite } from './SeabedArt.js';
 
 let elapsed = 0; // seconds, drives every sway/wobble phase below
 
@@ -579,26 +580,18 @@ function randomBoulder() {
 const boulders = [];
 for (let i = 0; i < BOULDER_COUNT; i++) boulders.push(randomBoulder());
 
+// Uses the same boulder art as the seabed/city layer (SeabedArt.js's
+// drawBoulder), baked once per boulder into a sprite so each keeps its own
+// stable, unique shape.
 function drawOneBoulder(ctx, camera, canvasWidth, b, floorY = SEABED_FLOOR_Y) {
   const screen = worldToScreen(b.x, floorY, camera);
   const size = b.size * camera.zoom;
   if (screen.x < -size * 2 || screen.x > canvasWidth + size * 2) return;
-  ctx.save();
-  for (const bump of b.bumps) {
-    const r = bump.r * camera.zoom;
-    const grey = Math.round(90 * b.shade);
-    ctx.fillStyle = `rgb(${grey}, ${grey}, ${Math.round(grey * 1.08)})`;
-    ctx.beginPath();
-    ctx.arc(screen.x + bump.dx * camera.zoom, screen.y - r * 0.55, r, 0, Math.PI * 2);
-    ctx.fill();
-  }
-  // A soft dark contact shadow where the boulder meets the floor, same
-  // "grounds it" trick the Mound's own rubble base uses.
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
-  ctx.beginPath();
-  ctx.ellipse(screen.x, screen.y, size * 0.75, size * 0.18, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
+  if (!b.sprite) b.sprite = bakeBoulderSprite(b.size);
+  const sp = b.sprite;
+  const z = camera.zoom / sp.scale;
+  // Boulder centre sits a bit above the floor line so it reads as resting on it.
+  ctx.drawImage(sp.canvas, screen.x - sp.anchorX * z, screen.y - b.size * 0.55 * camera.zoom - sp.anchorY * z, sp.canvas.width * z, sp.canvas.height * z);
 }
 
 // ---- Sand Castles ----

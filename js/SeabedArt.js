@@ -61,13 +61,9 @@ function drawPebble(ctx) {
   blobPath(ctx, rx, ry, 7, 0.14);
   ctx.fillStyle = shade(c, 0);
   ctx.fill();
-  ctx.strokeStyle = shade(c, -14, 0.8);
+  ctx.strokeStyle = shade(c, -12, 0.6);
   ctx.lineWidth = 1;
   ctx.stroke();
-  ctx.fillStyle = shade(c, 16, 0.55);
-  ctx.beginPath();
-  ctx.ellipse(-rx * 0.25, -ry * 0.3, rx * 0.4, ry * 0.3, 0, 0, Math.PI * 2);
-  ctx.fill();
 }
 
 function drawFlatStone(ctx) {
@@ -79,15 +75,11 @@ function drawFlatStone(ctx) {
   ctx.strokeStyle = shade(c, -16, 0.8);
   ctx.lineWidth = 1.2;
   ctx.stroke();
-  ctx.fillStyle = shade(c, 14, 0.4);
-  ctx.beginPath();
-  ctx.ellipse(0, -ry * 0.35, rx * 0.7, ry * 0.3, 0, 0, Math.PI * 2);
-  ctx.fill();
 }
 
 function drawAngularRock(ctx) {
   const c = rockColor();
-  const rx = rand(7, 20), ry = rx * rand(0.6, 1);
+  const rx = rand(5, 13), ry = rx * rand(0.6, 1);
   const p = polyPath(ctx, rx, ry, 5 + Math.floor(Math.random() * 4), 0.25);
   ctx.fillStyle = shade(c, 0);
   ctx.fill();
@@ -95,7 +87,7 @@ function drawAngularRock(ctx) {
   const cx = rand(-rx * 0.2, rx * 0.2), cy = rand(-ry * 0.2, ry * 0.2);
   for (let i = 0; i < p.length; i++) {
     const a = p[i], b = p[(i + 1) % p.length];
-    ctx.fillStyle = i % 2 ? shade(c, 13, 0.45) : shade(c, -13, 0.45);
+    ctx.fillStyle = i % 2 ? shade(c, 5, 0.25) : shade(c, -5, 0.25);
     ctx.beginPath();
     ctx.moveTo(cx, cy); ctx.lineTo(a.x, a.y); ctx.lineTo(b.x, b.y);
     ctx.closePath();
@@ -131,7 +123,7 @@ function drawCrackLine(ctx, len, depth) {
   ctx.beginPath();
   ctx.moveTo(pts[0].x + 1, pts[0].y + 1);
   for (const q of pts) ctx.lineTo(q.x + 1, q.y + 1);
-  ctx.strokeStyle = 'rgba(255, 230, 190, 0.1)';
+  ctx.strokeStyle = 'rgba(255, 230, 190, 0.05)';
   ctx.lineWidth = 1.2;
   ctx.stroke();
   ctx.beginPath();
@@ -143,25 +135,32 @@ function drawCrackLine(ctx, len, depth) {
 }
 function drawCrack(ctx) { drawCrackLine(ctx, rand(30, 110), 0); }
 
-function drawBoulder(ctx) {
-  const c = rockColor();
-  const rx = rand(22, 46), ry = rx * rand(0.6, 0.85);
-  // Contact shadow.
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
-  ctx.beginPath();
-  ctx.ellipse(3, ry * 0.25, rx * 1.05, ry * 1.05, 0, 0, Math.PI * 2);
-  ctx.fill();
+// opts.rx: half-width. opts.underground: flat, unlit, no cast shadow (city
+// layer); otherwise lit with a highlight and contact shadow (foreground).
+export function drawBoulder(ctx, opts = {}) {
+  const c = opts.color || rockColor();
+  const rx = opts.rx || rand(22, 46), ry = rx * rand(0.6, 0.85);
+  const ug = !!opts.underground;
+  if (!ug) {
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
+    ctx.beginPath();
+    ctx.ellipse(3, ry * 0.25, rx * 1.05, ry * 1.05, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
   blobPath(ctx, rx, ry, 9, 0.12);
-  const g = ctx.createRadialGradient(-rx * 0.3, -ry * 0.4, rx * 0.1, 0, 0, rx * 1.1);
-  g.addColorStop(0, shade(c, 12));
-  g.addColorStop(1, shade(c, -14));
-  ctx.fillStyle = g;
+  if (ug) {
+    ctx.fillStyle = shade(c, -4);
+  } else {
+    const g = ctx.createRadialGradient(-rx * 0.3, -ry * 0.4, rx * 0.1, 0, 0, rx * 1.1);
+    g.addColorStop(0, shade(c, 12));
+    g.addColorStop(1, shade(c, -14));
+    ctx.fillStyle = g;
+  }
   ctx.fill();
   ctx.save();
   ctx.clip();
-  // Mineral flecks and an internal crack.
-  for (let i = 0; i < 26; i++) {
-    ctx.fillStyle = Math.random() < 0.5 ? shade(c, 20, 0.35) : shade(c, -22, 0.4);
+  for (let i = 0; i < Math.round(rx * 0.6); i++) {
+    ctx.fillStyle = Math.random() < 0.5 ? shade(c, ug ? 8 : 20, ug ? 0.2 : 0.35) : shade(c, -22, 0.4);
     ctx.beginPath();
     ctx.arc(rand(-rx, rx), rand(-ry, ry), rand(0.6, 2.4), 0, Math.PI * 2);
     ctx.fill();
@@ -170,9 +169,25 @@ function drawBoulder(ctx) {
   drawCrackLine(ctx, rx * rand(0.8, 1.4), 1);
   ctx.restore();
   blobPath(ctx, rx, ry, 9, 0.12);
-  ctx.strokeStyle = shade(c, -24, 0.7);
-  ctx.lineWidth = 1.6;
+  ctx.strokeStyle = shade(c, -24, ug ? 0.45 : 0.7);
+  ctx.lineWidth = ug ? 1.2 : 1.6;
   ctx.stroke();
+}
+
+// Bakes one foreground boulder to a reusable sprite (same art as the city
+// layer's, lit version). Returns { canvas, scale, anchorX, anchorY } where the
+// anchor is the boulder centre in sprite pixels.
+export function bakeBoulderSprite(size, scale = 2) {
+  const rx = size * 1.05;
+  const pad = 6;
+  const w = Math.ceil((rx * 2 + pad * 2) * scale), h = Math.ceil((rx * 2 + pad * 2) * scale);
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(scale, scale);
+  ctx.translate(w / scale / 2, h / scale / 2);
+  drawBoulder(ctx, { rx });
+  return { canvas, scale, anchorX: w / 2, anchorY: h / 2 };
 }
 
 function drawShell(ctx) {
@@ -264,12 +279,16 @@ function drawGravel(ctx) {
   }
 }
 
-// [drawer, weight]
+// Small, unlit buried boulder for the city layer.
+function drawUndergroundBoulder(ctx) { drawBoulder(ctx, { rx: rand(9, 17), underground: true }); }
+
+// [drawer, weight]. Mostly pebbles/small stones; few fossils, bones and faceted rocks.
 const OBJECTS = [
-  [drawPebble, 22], [drawFlatStone, 10], [drawAngularRock, 14], [drawBoulder, 4],
-  [drawCrack, 9], [drawShell, 3], [drawAmmonite, 1.5], [drawBone, 1.5],
-  [drawRoot, 4], [drawLens, 8], [drawGravel, 9],
+  [drawPebble, 48], [drawFlatStone, 16], [drawAngularRock, 4], [drawUndergroundBoulder, 2.5],
+  [drawCrack, 9], [drawShell, 0.6], [drawAmmonite, 0.3], [drawBone, 0.4],
+  [drawRoot, 3], [drawLens, 7], [drawGravel, 16],
 ];
+const UNDER_OBJECTS = new Set([drawCrack, drawLens]); // painted first so nothing is drawn beneath them
 const OBJECT_WEIGHT_TOTAL = OBJECTS.reduce((s, o) => s + o[1], 0);
 function pickObject() {
   let r = Math.random() * OBJECT_WEIGHT_TOTAL;
@@ -280,8 +299,8 @@ function pickObject() {
 // Alternating sand / dirt layers, each with its own colour drift. Returns
 // nothing; paints onto ctx in unscaled world pixels (caller sets the scale).
 function drawLayers(ctx, w, h) {
-  const SAND = () => ({ h: rand(33, 41), s: rand(28, 42), l: rand(34, 44) });
-  const DIRT = () => ({ h: rand(22, 30), s: rand(28, 42), l: rand(17, 26) });
+  const SAND = () => ({ h: rand(31, 38), s: rand(22, 32), l: rand(28, 35) });
+  const DIRT = () => ({ h: rand(24, 30), s: rand(24, 34), l: rand(22, 28) });
   // Background fill first so wave gaps never show through.
   ctx.fillStyle = hsl(28, 35, 25);
   ctx.fillRect(0, 0, w, h);
@@ -295,8 +314,8 @@ function drawLayers(ctx, w, h) {
   for (const L of layers) {
     const c = L.sand ? SAND() : DIRT();
     const c2 = L.sand ? SAND() : DIRT();
-    const a1 = rand(5, 12), f1 = rand(0.003, 0.006), p1 = rand(0, 6.28);
-    const a2 = rand(2, 6), f2 = rand(0.011, 0.02), p2 = rand(0, 6.28);
+    const a1 = rand(3, 7), f1 = rand(0.003, 0.006), p1 = rand(0, 6.28);
+    const a2 = rand(1, 3), f2 = rand(0.011, 0.02), p2 = rand(0, 6.28);
     const wave = (x) => Math.sin(x * f1 + p1) * a1 + Math.sin(x * f2 + p2) * a2;
     const g = ctx.createLinearGradient(0, L.top, 0, L.bottom);
     g.addColorStop(0, hsl(c.h, c.s, c.l));
@@ -318,7 +337,7 @@ function drawLayers(ctx, w, h) {
       ctx.fill();
     }
     // Faint highlight along the top edge of sand layers / shadow on dirt.
-    ctx.strokeStyle = L.sand ? 'rgba(255, 230, 180, 0.10)' : 'rgba(0, 0, 0, 0.14)';
+    ctx.strokeStyle = L.sand ? 'rgba(255, 230, 180, 0.04)' : 'rgba(0, 0, 0, 0.05)';
     ctx.lineWidth = 2;
     ctx.beginPath();
     for (let x = 0; x <= w; x += 16) {
@@ -357,13 +376,13 @@ export function bakeSeabedCanvas(worldW, worldH, scale = 2) {
       for (let i = 0; i < n; i++) items.push({ x: cx + rand(0, CELL), y: cy + rand(0, CELL), fn: pickObject() });
     }
   }
-  // Paint small/flat first, boulders later by y order so lower objects overlap upper ones.
-  items.sort((a, b) => a.y - b.y);
+  // Cracks/streaks first so they sit under every pebble/rock; then the rest by y.
+  items.sort((a, b) => (UNDER_OBJECTS.has(b.fn) - UNDER_OBJECTS.has(a.fn)) || (a.y - b.y));
   for (const it of items) {
     ctx.save();
     ctx.translate(it.x, it.y);
     const flip = Math.random() < 0.5 ? -1 : 1;
-    const big = it.fn === drawBoulder;
+    const big = it.fn === drawUndergroundBoulder;
     ctx.rotate(big ? rand(-0.15, 0.15) : rand(-0.8, 0.8));
     const s = rand(0.8, 1.25);
     ctx.scale(flip * s, s);
