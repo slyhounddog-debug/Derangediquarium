@@ -538,15 +538,49 @@ function drawOneSeaweed(ctx, camera, canvasWidth, w, floorY = SEABED_FLOOR_Y) {
   const sway = Math.sin(elapsed * w.freq + w.phase) * w.sway * camera.zoom;
   const h = w.height * camera.zoom;
   const baseWidth = Math.max(2, w.width * camera.zoom);
+  // Per direct request ("the tall seaweed in the foreground should get a small
+  // rework/retweak so it better matches the aesthetic of the more polished
+  // boulders and city") — the old soft-halo-around-a-core look is now the
+  // boulders' own language: a crisp darker rim (drawBoulder's outline), a lit
+  // body, a highlight down the left edge and a shade down the right (its
+  // upper-left light), and a small contact shadow at the base. The rim + body
+  // together span exactly the old halo's total width (2.2 * blurFactor *
+  // baseWidth), so size/shape/sway are untouched, and every stroke is either
+  // opaque or drawn over the opaque body — the occlusion fix above still holds.
+  const totalW = baseWidth * 2.2 * w.blurFactor;
+  const rimPx = Math.max(1, 1.6 * camera.zoom);
+  const bodyW = Math.max(1, totalW - rimPx * 2);
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
   ctx.beginPath();
-  ctx.moveTo(screen.x, screen.y + 2);
-  ctx.quadraticCurveTo(screen.x + sway, screen.y - h * 0.5, screen.x + sway * 0.4, screen.y - h);
-  ctx.strokeStyle = `hsl(${w.hue}, 6%, 55%)`;
-  ctx.lineWidth = baseWidth * 2.2 * w.blurFactor;
+  ctx.ellipse(screen.x + 2, screen.y + 1, totalW * 0.75, Math.max(1.5, totalW * 0.22), 0, 0, Math.PI * 2);
+  ctx.fill();
+  const strand = () => {
+    ctx.beginPath();
+    ctx.moveTo(screen.x, screen.y + 2);
+    ctx.quadraticCurveTo(screen.x + sway, screen.y - h * 0.5, screen.x + sway * 0.4, screen.y - h);
+  };
+  strand();
+  ctx.strokeStyle = `hsl(${w.hue}, 11%, 34%)`;
+  ctx.lineWidth = totalW;
   ctx.stroke();
-  ctx.strokeStyle = `hsl(${w.hue}, 9%, 45%)`;
-  ctx.lineWidth = baseWidth;
+  strand();
+  ctx.strokeStyle = `hsl(${w.hue}, 9%, 47%)`;
+  ctx.lineWidth = bodyW;
   ctx.stroke();
+  ctx.save();
+  ctx.translate(-bodyW * 0.27, 0);
+  strand();
+  ctx.strokeStyle = `hsla(${w.hue}, 10%, 64%, 0.75)`;
+  ctx.lineWidth = bodyW * 0.3;
+  ctx.stroke();
+  ctx.restore();
+  ctx.save();
+  ctx.translate(bodyW * 0.3, 0);
+  strand();
+  ctx.strokeStyle = `hsla(${w.hue}, 11%, 30%, 0.4)`;
+  ctx.lineWidth = bodyW * 0.28;
+  ctx.stroke();
+  ctx.restore();
   ctx.restore();
 }
 
@@ -848,13 +882,46 @@ function drawOneKelp(ctx, camera, canvasWidth, k, floorY = SEABED_FLOOR_Y) {
   // opaque fill exists to avoid). Still a hair warmer than the water's blue
   // so it's not a literal recolor into seaweed's own green, just far less
   // visually loud than the old solid golden-brown.
-  ctx.fillStyle = `hsl(${k.hue}, 14%, 52%)`;
-  ctx.beginPath();
-  ctx.moveTo(screen.x - w / 2, screen.y);
-  ctx.quadraticCurveTo(screen.x + sway - w * 0.3, screen.y - h * 0.5, screen.x + sway * 0.4, screen.y - h);
-  ctx.quadraticCurveTo(screen.x + sway + w * 0.3, screen.y - h * 0.5, screen.x + w / 2, screen.y);
-  ctx.closePath();
+  // Per direct request (same rework as drawOneSeaweed — "matches the
+  // aesthetic of the more polished boulders"): the flat fill is now a
+  // left-lit gradient across the blade (same overall lightness as the old
+  // flat 52%, so it's no louder), a crisp darker rim like drawBoulder's
+  // outline, and a thin midrib with its own highlight. Silhouette/sway are
+  // unchanged, and it stays fully opaque.
+  const blade = () => {
+    ctx.beginPath();
+    ctx.moveTo(screen.x - w / 2, screen.y);
+    ctx.quadraticCurveTo(screen.x + sway - w * 0.3, screen.y - h * 0.5, screen.x + sway * 0.4, screen.y - h);
+    ctx.quadraticCurveTo(screen.x + sway + w * 0.3, screen.y - h * 0.5, screen.x + w / 2, screen.y);
+    ctx.closePath();
+  };
+  const g = ctx.createLinearGradient(screen.x - w / 2, 0, screen.x + w / 2, 0);
+  g.addColorStop(0, `hsl(${k.hue}, 15%, 60%)`);
+  g.addColorStop(1, `hsl(${k.hue}, 13%, 44%)`);
+  blade();
+  ctx.fillStyle = g;
   ctx.fill();
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = `hsla(${k.hue}, 16%, 32%, 0.75)`;
+  ctx.lineWidth = Math.max(1, 1.4 * camera.zoom);
+  ctx.stroke();
+  const midrib = () => {
+    ctx.beginPath();
+    ctx.moveTo(screen.x, screen.y);
+    ctx.quadraticCurveTo(screen.x + sway, screen.y - h * 0.5, screen.x + sway * 0.4, screen.y - h * 0.92);
+  };
+  ctx.lineCap = 'round';
+  ctx.save();
+  ctx.translate(Math.max(1, camera.zoom), 0);
+  midrib();
+  ctx.strokeStyle = `hsla(${k.hue}, 14%, 68%, 0.35)`;
+  ctx.lineWidth = Math.max(1, 1.2 * camera.zoom);
+  ctx.stroke();
+  ctx.restore();
+  midrib();
+  ctx.strokeStyle = `hsla(${k.hue}, 16%, 30%, 0.45)`;
+  ctx.lineWidth = Math.max(1, 1.2 * camera.zoom);
+  ctx.stroke();
   ctx.restore();
 }
 

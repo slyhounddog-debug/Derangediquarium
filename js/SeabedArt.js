@@ -187,6 +187,112 @@ export function bakeBoulderSprite(size, scale = 2) {
   return { canvas, scale, anchorX: w / 2, anchorY: h / 2 };
 }
 
+// The Mound's dome silhouette, per direct request ("a visual rework of the
+// mound so that it looks more like the boulders on the seabed, without the
+// copy and paste texture"). Fixed, non-random lumps (a few summed sines
+// instead of blobPath's per-call jitter) so Mound.js can re-trace the exact
+// same outline every frame for its crack/shimmer clip — the sprite below and
+// that clip must agree on the edge. Points run left base -> over the top ->
+// right base, then dip `extra` px below the floor line so the base corners
+// hide under the seabed instead of showing as rounded feet. Purely visual:
+// the Mound's hit-test is its own bounding box in Mound.js and doesn't read this.
+export function moundOutline(w, h, extra = 8) {
+  const N = 30;
+  const pts = [];
+  for (let i = 0; i <= N; i++) {
+    const a = Math.PI - (i / N) * Math.PI;
+    const c = Math.cos(a), s = Math.sin(a);
+    const lump = 1 + s * (0.05 * Math.sin(a * 3 + 0.8) + 0.03 * Math.sin(a * 7 + 2.1)); // tapers to 0 at both base corners
+    pts.push({
+      x: w / 2 + (w / 2) * Math.sign(c) * Math.pow(Math.abs(c), 2 / 2.4), // superellipse: fuller shoulders than a true ellipse
+      y: h - h * Math.pow(s, 2 / 2.4) * lump,
+    });
+  }
+  pts.push({ x: w, y: h + extra }, { x: 0, y: h + extra });
+  return pts;
+}
+
+// Smooths moundOutline's points through their midpoints, same technique as
+// blobPath, at an arbitrary origin/scale (screen space for Mound.js's clip).
+export function traceMoundPath(ctx, pts, ox, oy, k) {
+  const n = pts.length;
+  const mid = (a, b) => ({ x: ox + ((a.x + b.x) / 2) * k, y: oy + ((a.y + b.y) / 2) * k });
+  const start = mid(pts[n - 1], pts[0]);
+  ctx.beginPath();
+  ctx.moveTo(start.x, start.y);
+  for (let i = 0; i < n; i++) {
+    const m = mid(pts[i], pts[(i + 1) % n]);
+    ctx.quadraticCurveTo(ox + pts[i].x * k, oy + pts[i].y * k, m.x, m.y);
+  }
+  ctx.closePath();
+}
+
+// Bakes the Mound once to a reusable sprite, in the foreground boulder's own
+// lit style (radial highlight, speckle grain, contact shadow, darker rim) —
+// but baked fresh from Math.random once, not a tiled pattern, so no grain
+// repeats. Returns { canvas, scale, pad, outline }; the dome's top-left sits
+// `pad` world px in from the sprite's top-left.
+export function bakeMoundSprite(w, h, scale = 2) {
+  const pad = 6, extra = 8;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.ceil((w + pad * 2) * scale);
+  canvas.height = Math.ceil((h + extra + pad * 2) * scale);
+  const ctx = canvas.getContext('2d');
+  ctx.scale(scale, scale);
+  ctx.translate(pad, pad);
+  const outline = moundOutline(w, h, extra);
+  const c = { h: 34, s: 24, l: 46 }; // tan-brown, the same family the old flat #8a7458 fill sat in
+
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
+  ctx.beginPath();
+  ctx.ellipse(w / 2 + 3, h - 2, w * 0.54, h * 0.3, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  const g = ctx.createRadialGradient(w * 0.36, h * 0.32, w * 0.03, w * 0.5, h * 0.72, w * 0.62);
+  g.addColorStop(0, shade(c, 12));
+  g.addColorStop(1, shade(c, -14));
+  traceMoundPath(ctx, outline, 0, 0, 1);
+  ctx.fillStyle = g;
+  ctx.fill();
+
+  ctx.save();
+  ctx.clip();
+  // Grain, same light/dark dot mix as drawBoulder's.
+  for (let i = 0; i < Math.round(w * 0.45); i++) {
+    ctx.fillStyle = Math.random() < 0.5 ? shade(c, 20, 0.35) : shade(c, -22, 0.4);
+    ctx.beginPath();
+    ctx.arc(rand(0, w), rand(0, h), rand(0.6, 2.4), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // A few half-buried stones so it reads as a pile of the same rock the
+  // boulders are made of, not one smooth lump.
+  for (let i = 0; i < 7; i++) {
+    const rx = rand(5, 11);
+    ctx.save();
+    ctx.translate(rand(w * 0.12, w * 0.88), rand(h * 0.35, h * 0.95));
+    blobPath(ctx, rx, rx * rand(0.55, 0.8), 7, 0.14);
+    ctx.fillStyle = shade(c, rand(-8, 6), 0.45);
+    ctx.fill();
+    ctx.strokeStyle = shade(c, -22, 0.3);
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.restore();
+  }
+  // Settles the base into shadow so it sits on the floor rather than floating.
+  const floorShade = ctx.createLinearGradient(0, h * 0.5, 0, h + extra);
+  floorShade.addColorStop(0, 'rgba(20, 12, 4, 0)');
+  floorShade.addColorStop(1, 'rgba(20, 12, 4, 0.24)');
+  ctx.fillStyle = floorShade;
+  ctx.fillRect(0, 0, w, h + extra);
+  ctx.restore();
+
+  traceMoundPath(ctx, outline, 0, 0, 1);
+  ctx.strokeStyle = shade(c, -24, 0.7);
+  ctx.lineWidth = 1.6;
+  ctx.stroke();
+  return { canvas, scale, pad, outline };
+}
+
 function drawShell(ctx) {
   const r = rand(5, 11);
   ctx.fillStyle = hsl(rand(32, 42), rand(25, 40), rand(58, 72), 0.9);

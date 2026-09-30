@@ -27,6 +27,7 @@ import { worldToScreen } from './Engine.js';
 import { createShimmerTimer, updateShimmerTimer, drawShimmerSweep, UI_SHEEN_SWEEP_DURATION_MS } from './Shimmer.js';
 import { pushGameNotification } from './Notifications.js';
 import { playUpgrade } from './Sound.js';
+import { bakeMoundSprite, traceMoundPath } from './SeabedArt.js';
 
 const MOUND_WIDTH_PX = MOUND_WIDTH_TILES * TILE_SIZE;
 export const MOUND_X = WORLD_W / 2; // world-space center, fixed for the life of the level
@@ -244,29 +245,12 @@ export function isPointOnMound(state, worldX, worldY) {
   return worldX >= left && worldX <= right && worldY >= top && worldY <= bottom;
 }
 
-// Small speckle-noise tile, generated once and cached as a repeating
-// CanvasPattern — same technique as Grid.js's getCityTexturePattern, giving
-// the Mound's flat fill some grain instead of reading as one solid color,
-// per direct request ("texture to the mound similar to the city").
-let moundTexturePattern = null;
-function getMoundTexturePattern(ctx) {
-  if (moundTexturePattern) return moundTexturePattern;
-  const tile = document.createElement('canvas');
-  tile.width = 32;
-  tile.height = 32;
-  const tctx = tile.getContext('2d');
-  for (let i = 0; i < 34; i++) {
-    const x = Math.random() * 32;
-    const y = Math.random() * 32;
-    const r = 0.5 + Math.random() * 1.5;
-    tctx.fillStyle = Math.random() < 0.5 ? 'rgba(0, 0, 0, 0.16)' : 'rgba(255, 255, 255, 0.13)';
-    tctx.beginPath();
-    tctx.arc(x, y, r, 0, Math.PI * 2);
-    tctx.fill();
-  }
-  moundTexturePattern = ctx.createPattern(tile, 'repeat');
-  return moundTexturePattern;
-}
+// The Mound's body is a one-off baked sprite in the seabed boulders' own lit
+// style (see SeabedArt.js's bakeMoundSprite), per direct request ("looks more
+// like the boulders on the seafloor, without the copy and paste texture") —
+// replaces the old 32px speckle tile that repeated across the dome. Baked
+// lazily on the first render since it needs a canvas.
+let moundSprite = null;
 
 // A fixed set of jagged multi-segment crack shapes, generated once at module
 // load (not per-render — a fresh Math.random() every frame would make the
@@ -306,24 +290,17 @@ export function renderMound(ctx, state) {
 
   if (shouldPulseMound(state)) drawPulseGlow(ctx, topLeft.x + w / 2, topLeft.y + h / 2, w, h, state.level.elapsed);
 
+  if (!moundSprite) moundSprite = bakeMoundSprite(MOUND_WIDTH_PX, MOUND_HEIGHT_PX + TILE_SIZE);
+  const z = camera.zoom / moundSprite.scale;
+  ctx.drawImage(moundSprite.canvas, topLeft.x - moundSprite.pad * camera.zoom, topLeft.y - moundSprite.pad * camera.zoom, moundSprite.canvas.width * z, moundSprite.canvas.height * z);
+
   ctx.save();
-  ctx.beginPath();
-  ctx.moveTo(topLeft.x, topLeft.y + h);
-  ctx.quadraticCurveTo(topLeft.x, topLeft.y, topLeft.x + w / 2, topLeft.y);
-  ctx.quadraticCurveTo(topLeft.x + w, topLeft.y, topLeft.x + w, topLeft.y + h);
-  ctx.closePath();
-  ctx.fillStyle = '#8a7458';
-  ctx.fill();
-  // Constrains EVERYTHING drawn until ctx.restore() below (the texture fill
-  // AND the crack/branch strokes) to the dome's own silhouette — previously
-  // only wrapped the texture fill, so a branch's jittered endpoint could
-  // poke straight through the dome's edge into the water above it,
-  // especially near the top where the dome tapers to a point.
+  // Constrains EVERYTHING drawn until ctx.restore() below (the crack/branch
+  // strokes and the shimmer) to the dome's own silhouette — the same outline
+  // the sprite above was baked from — so a branch's jittered endpoint can't
+  // poke through the dome's edge into the water above it.
+  traceMoundPath(ctx, moundSprite.outline, topLeft.x, topLeft.y, camera.zoom);
   ctx.clip();
-  ctx.fillStyle = getMoundTexturePattern(ctx);
-  ctx.globalAlpha = 0.55;
-  ctx.fillRect(topLeft.x, topLeft.y, w, h);
-  ctx.globalAlpha = 1;
 
   // Crack lines scale with how many times it's already been cracked. Each
   // one is a jagged multi-segment fracture with a short forking branch (see
@@ -387,7 +364,7 @@ export function renderMound(ctx, state) {
     topLeft.x, topLeft.y, w, h,
     { peakAlpha: 0.7, ease: true }
   );
-  ctx.restore(); // lifts the dome-silhouette clip set above, now that the texture, every crack/branch, and the shimmer have been drawn through it
+  ctx.restore(); // lifts the dome-silhouette clip set above, now that every crack/branch and the shimmer have been drawn through it
 }
 
 // ---- Science Lab (Phase 4) ----

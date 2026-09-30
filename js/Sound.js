@@ -351,20 +351,42 @@ function playNoise(duration, { gain = 0.15, when = 0, destination = null } = {})
   src.start(start);
 }
 
+// ---- SFX cooldown ----
+// Per direct request ("the sound effects cannot stack (like when using the
+// blueprint tool or the ctrl + click line placing)... All sound effects in
+// the whole game should have a 50ms cooldown on it and only play one if
+// multiple sound effects of the same one happen at the same time") — every
+// exported play* function below opens with sfxOnCooldown(its own name), so
+// a burst of identical calls in the same instant (a blueprint paste, a
+// ctrl+click line of buildings, a dozen fish eating on one tick) collapses to
+// a single sound instead of summing into one very loud one. Keyed per sound,
+// not global: two DIFFERENT sounds landing together still both play.
+const SFX_COOLDOWN_MS = 50;
+const sfxLastPlayedAt = {};
+function sfxOnCooldown(name) {
+  const now = performance.now();
+  if (now - (sfxLastPlayedAt[name] ?? -Infinity) < SFX_COOLDOWN_MS) return true;
+  sfxLastPlayedAt[name] = now;
+  return false;
+}
+
 // ---- SFX ----
 // A cheerful two-note ascending blip — buying a fish.
 export function playPurchase() {
+  if (sfxOnCooldown('playPurchase')) return;
   playTone(523.25, 0.08, { type: 'square', gain: 0.16 }); // C5
   playTone(783.99, 0.1, { type: 'square', gain: 0.16, when: 0.07 }); // G5
 }
 
 // A tiny soft "plink" — dropping a food pellet.
 export function playFoodPlace() {
+  if (sfxOnCooldown('playFoodPlace')) return;
   playTone(1046.5, 0.05, { type: 'triangle', gain: 0.1 }); // C6
 }
 
 // Deliberately quiet, per direct request — a fish eating (Food or Waste).
 export function playEat() {
+  if (sfxOnCooldown('playEat')) return;
   playTone(660, 0.05, { type: 'sine', gain: 0.05, attack: 0.002, release: 0.03 });
 }
 
@@ -389,6 +411,7 @@ export function playEat() {
 // faster rhythm (FISH_HUNGER_CHIME_FRACTIONS' own shrinking gaps) and the
 // "aggressive bounce" the on-screen "!!" gets after the 2nd chime.
 export function playHunger(chimeIndex = 0) {
+  if (sfxOnCooldown('playHunger')) return;
   const volumeMultiplier = 1 + chimeIndex * 0.15;
   playTone(196, 0.1, { type: 'triangle', gain: 0.09 * volumeMultiplier, attack: 0.01, release: 0.06 }); // G3
   playTone(174.61, 0.14, { type: 'triangle', gain: 0.075 * volumeMultiplier, attack: 0.01, release: 0.08, when: 0.1 }); // F3
@@ -396,6 +419,7 @@ export function playHunger(chimeIndex = 0) {
 
 // A short descending sad phrase — a fish starving.
 export function playFishDeath() {
+  if (sfxOnCooldown('playFishDeath')) return;
   playTone(440, 0.13, { type: 'triangle', gain: 0.14 }); // A4
   playTone(370, 0.13, { type: 'triangle', gain: 0.13, when: 0.12 }); // F#4
   playTone(311, 0.22, { type: 'triangle', gain: 0.12, when: 0.24 }); // Eb4
@@ -410,6 +434,7 @@ export function playFishDeath() {
 // phrase than playFishDeath's own gentler triangle-wave one, so it reads as
 // more violent/sudden rather than a slow fade-out.
 export function playFishKilledByAlien() {
+  if (sfxOnCooldown('playFishKilledByAlien')) return;
   playNoise(0.07, { gain: 0.13 });
   playTone(330, 0.1, { type: 'sawtooth', gain: 0.12, when: 0.02 }); // E4
   playTone(220, 0.16, { type: 'sawtooth', gain: 0.11, when: 0.13 }); // A3
@@ -418,6 +443,7 @@ export function playFishKilledByAlien() {
 
 // A bright quick double-blip, Mario-coin style — banking a coin.
 export function playCoinBank() {
+  if (sfxOnCooldown('playCoinBank')) return;
   playTone(988, 0.05, { type: 'square', gain: 0.15 }); // B5
   playTone(1318.5, 0.14, { type: 'square', gain: 0.15, when: 0.05 }); // E6
 }
@@ -432,18 +458,21 @@ export function playCoinBank() {
 // "rising pitch reads as a good outcome" language playPurchase/playUpgrade
 // already use elsewhere in this file.
 export function playBuildPlace() {
+  if (sfxOnCooldown('playBuildPlace')) return;
   playTone(196, 0.08, { type: 'square', gain: 0.13 }); // G3
   playTone(261.63, 0.12, { type: 'square', gain: 0.15, when: 0.06 }); // C4
 }
 
 // A short crunch — demolishing a building.
 export function playDemolish() {
+  if (sfxOnCooldown('playDemolish')) return;
   playNoise(0.12, { gain: 0.14 });
   playTone(130, 0.08, { type: 'sawtooth', gain: 0.08, when: 0.02 });
 }
 
 // A rising 4-note arpeggio — buying a Tank Upgrade.
 export function playUpgrade() {
+  if (sfxOnCooldown('playUpgrade')) return;
   const notes = [392, 523.25, 659.25, 783.99]; // G4, C5, E5, G5
   notes.forEach((freq, i) => playTone(freq, 0.09, { type: 'square', gain: 0.14, when: i * 0.07 }));
 }
@@ -457,6 +486,7 @@ export function playUpgrade() {
 // nothing), where that one fires on a passive production cycle quietly
 // having nowhere to put its output.
 export function playInsufficientFunds() {
+  if (sfxOnCooldown('playInsufficientFunds')) return;
   playTone(196, 0.09, { type: 'sawtooth', gain: 0.11 }); // G3
   playTone(146.83, 0.13, { type: 'sawtooth', gain: 0.1, when: 0.08 }); // D3
 }
@@ -472,6 +502,7 @@ export function playInsufficientFunds() {
 // leading noise tick so it reads as a distinct event rather than blending
 // into the background.
 export function playProductionBlocked() {
+  if (sfxOnCooldown('playProductionBlocked')) return;
   playNoise(0.03, { gain: 0.07 });
   playTone(294, 0.08, { type: 'triangle', gain: 0.16, when: 0.01 }); // D4
   playTone(220, 0.1, { type: 'triangle', gain: 0.14, when: 0.09 }); // A3
@@ -480,6 +511,7 @@ export function playProductionBlocked() {
 
 // A small sparkle — a fish reaching adulthood and awarding a Tank Point.
 export function playTankPoint() {
+  if (sfxOnCooldown('playTankPoint')) return;
   playTone(1174.7, 0.06, { type: 'triangle', gain: 0.12 }); // D6
   playTone(1567.98, 0.09, { type: 'triangle', gain: 0.12, when: 0.05 }); // G6
 }
@@ -491,6 +523,7 @@ export function playTankPoint() {
 // this pair — the two are separate cues that happen to land on the same
 // moment, not a duplicate of each other).
 export function playGrowToMid() {
+  if (sfxOnCooldown('playGrowToMid')) return;
   playTone(880, 0.07, { type: 'sine', gain: 0.1 }); // A5
   playTone(1174.66, 0.09, { type: 'sine', gain: 0.1, when: 0.05 }); // D6
 }
@@ -502,6 +535,7 @@ export function playGrowToMid() {
 // last one for a touch of sparkle, per direct request ("a slightly more
 // magical sound when growing to the adult size").
 export function playGrowToAdult() {
+  if (sfxOnCooldown('playGrowToAdult')) return;
   playTone(659.25, 0.06, { type: 'sine', gain: 0.09 }); // E5
   playTone(880, 0.07, { type: 'sine', gain: 0.1, when: 0.06 }); // A5
   playTone(1318.5, 0.12, { type: 'sine', gain: 0.11, when: 0.13 }); // E6
@@ -514,6 +548,7 @@ export function playGrowToAdult() {
 // blip — this fires on nearly every click in this game's UI chrome, so it
 // needs to stay unobtrusive rather than compete for attention.
 export function playPanelOpen() {
+  if (sfxOnCooldown('playPanelOpen')) return;
   playTone(659.25, 0.05, { type: 'sine', gain: 0.09 }); // E5
   playTone(880, 0.07, { type: 'sine', gain: 0.09, when: 0.04 }); // A5
 }
@@ -521,6 +556,7 @@ export function playPanelOpen() {
 // The falling mirror of playPanelOpen — closing a panel or backing out of a
 // pause-menu sub-tab.
 export function playPanelClose() {
+  if (sfxOnCooldown('playPanelClose')) return;
   playTone(659.25, 0.05, { type: 'sine', gain: 0.08 }); // E5
   playTone(493.88, 0.07, { type: 'sine', gain: 0.08, when: 0.04 }); // B4
 }
@@ -562,6 +598,7 @@ const TURRET_SHOOT_DURATION_S = 0.08;
 const MAX_CONCURRENT_TURRET_SHOTS = 4;
 let activeTurretShotSounds = 0;
 export function playTurretShoot() {
+  if (sfxOnCooldown('playTurretShoot')) return;
   if (activeTurretShotSounds >= MAX_CONCURRENT_TURRET_SHOTS) return;
   activeTurretShotSounds++;
   setTimeout(() => { activeTurretShotSounds = Math.max(0, activeTurretShotSounds - 1); }, TURRET_SHOOT_DURATION_S * 1000);
@@ -572,6 +609,7 @@ export function playTurretShoot() {
 // Turret projectile) without dying. Distinct from playAlienDeath below —
 // this should read as "hit, still alive," not a defeat.
 export function playAlienHit() {
+  if (sfxOnCooldown('playAlienHit')) return;
   playNoise(0.05, { gain: 0.09 });
   playTone(180, 0.05, { type: 'sawtooth', gain: 0.08, when: 0.005 });
 }
@@ -580,6 +618,7 @@ export function playAlienHit() {
 // playAlienHit, with a genuine low-end resolve so it reads as "defeated,"
 // not just another hit.
 export function playAlienDeath() {
+  if (sfxOnCooldown('playAlienDeath')) return;
   playNoise(0.16, { gain: 0.15 });
   playTone(220, 0.1, { type: 'sawtooth', gain: 0.12, when: 0.02 });
   playTone(110, 0.16, { type: 'sawtooth', gain: 0.1, when: 0.09 });
@@ -589,6 +628,7 @@ export function playAlienDeath() {
 // pulled into a Processor/Auto-Feeder/Waste Turret's intake. Deliberately
 // quiet/short, since this can fire often in a busy factory.
 export function playIntake() {
+  if (sfxOnCooldown('playIntake')) return;
   playSweep(300, 700, 0.07, { type: 'sine', gain: 0.055 });
 }
 
@@ -598,6 +638,7 @@ export function playIntake() {
 // already has its own dedicated playCoinBank blip, so this doesn't also
 // fire there, to avoid two sounds landing on one event).
 export function playDispense() {
+  if (sfxOnCooldown('playDispense')) return;
   playTone(880, 0.05, { type: 'sine', gain: 0.08 });
   playTone(660, 0.06, { type: 'sine', gain: 0.07, when: 0.04 });
 }
