@@ -298,24 +298,25 @@ function pickObject() {
 
 // Alternating sand / dirt layers, each with its own colour drift. Returns
 // nothing; paints onto ctx in unscaled world pixels (caller sets the scale).
-function drawLayers(ctx, w, h) {
-  const SAND = () => ({ h: rand(31, 38), s: rand(22, 32), l: rand(28, 35) });
-  const DIRT = () => ({ h: rand(24, 30), s: rand(24, 34), l: rand(22, 28) });
+function drawLayers(ctx, w, h, rowPx) {
+  const SAND = () => ({ h: rand(31, 38), s: rand(22, 32), l: rand(30, 37) });
+  const DIRT = () => ({ h: rand(24, 30), s: rand(24, 34), l: rand(21, 27) });
   // Background fill first so wave gaps never show through.
   ctx.fillStyle = hsl(28, 35, 25);
   ctx.fillRect(0, 0, w, h);
   let y = 0, isSand = true;
   const layers = [];
   while (y < h) {
-    const thick = rand(48, 100);
+    // Whole tile rows thick, so every boundary lands on a row line and doubles as a building guide.
+    const thick = rowPx * (1 + Math.floor(Math.random() * 3));
     layers.push({ top: y, bottom: y + thick, sand: isSand });
     y += thick; isSand = !isSand;
   }
   for (const L of layers) {
     const c = L.sand ? SAND() : DIRT();
     const c2 = L.sand ? SAND() : DIRT();
-    const a1 = rand(3, 7), f1 = rand(0.003, 0.006), p1 = rand(0, 6.28);
-    const a2 = rand(1, 3), f2 = rand(0.011, 0.02), p2 = rand(0, 6.28);
+    const a1 = rand(0.6, 1.4), f1 = rand(0.003, 0.006), p1 = rand(0, 6.28);
+    const a2 = rand(0.2, 0.6), f2 = rand(0.011, 0.02), p2 = rand(0, 6.28);
     const wave = (x) => Math.sin(x * f1 + p1) * a1 + Math.sin(x * f2 + p2) * a2;
     const g = ctx.createLinearGradient(0, L.top, 0, L.bottom);
     g.addColorStop(0, hsl(c.h, c.s, c.l));
@@ -328,6 +329,8 @@ function drawLayers(ctx, w, h) {
     ctx.closePath();
     ctx.fill();
     // Colour drift inside the layer: big soft blotches of nearby hues.
+    ctx.save();
+    ctx.beginPath(); ctx.rect(0, L.top, w, L.bottom - L.top); ctx.clip(); // keep drift inside the layer so boundaries stay crisp
     const blotches = Math.floor(w / 40);
     for (let i = 0; i < blotches; i++) {
       const bc = L.sand ? SAND() : DIRT();
@@ -336,9 +339,10 @@ function drawLayers(ctx, w, h) {
       ctx.ellipse(rand(0, w), rand(L.top, L.bottom), rand(25, 90), rand(6, 22), rand(-0.2, 0.2), 0, Math.PI * 2);
       ctx.fill();
     }
+    ctx.restore();
     // Faint highlight along the top edge of sand layers / shadow on dirt.
-    ctx.strokeStyle = L.sand ? 'rgba(255, 230, 180, 0.04)' : 'rgba(0, 0, 0, 0.05)';
-    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.16)'; // thin guide line at the layer boundary
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
     for (let x = 0; x <= w; x += 16) {
       const yy = L.top + (L.top === 0 ? 0 : wave(x)) + 1;
@@ -357,13 +361,13 @@ function drawLayers(ctx, w, h) {
 
 // Bakes the seabed at `scale` x resolution. Returns the canvas; one canvas
 // pixel = 1/scale world px.
-export function bakeSeabedCanvas(worldW, worldH, scale = 2) {
+export function bakeSeabedCanvas(worldW, worldH, scale = 2, rowPx = 32) {
   const canvas = document.createElement('canvas');
   canvas.width = Math.ceil(worldW * scale);
   canvas.height = Math.ceil(worldH * scale);
   const ctx = canvas.getContext('2d');
   ctx.scale(scale, scale);
-  drawLayers(ctx, worldW, worldH);
+  drawLayers(ctx, worldW, worldH, rowPx);
 
   // Semi-uniform scatter: jittered grid, ~35% of cells skipped, some cells
   // get two objects.

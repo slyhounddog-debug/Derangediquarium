@@ -3553,27 +3553,8 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
   // and skipped entirely (same rowStart <= rowEnd gate the real tile loop
   // below uses) whenever no real seabed row is actually on screen.
   if (rowStart <= rowEnd) {
-    // Checkerboard tint + crisp tile lines so the building grid reads clearly
-    // over the sand/dirt art.
-    const tilePx = TILE_SIZE * camera.zoom;
-    for (let row = rowStart; row <= rowEnd; row++) {
-      const rowTop = worldToScreen(0, row * TILE_SIZE, camera).y;
-      for (let col = colStart; col <= colEnd; col++) {
-        ctx.fillStyle = (row + col) % 2 === 0 ? 'rgba(255, 235, 200, 0.07)' : 'rgba(0, 0, 0, 0.10)';
-        ctx.fillRect(worldToScreen(col * TILE_SIZE, 0, camera).x, rowTop, tilePx, tilePx);
-      }
-    }
-    const gridLeft = worldToScreen(colStart * TILE_SIZE, 0, camera).x;
-    const gridRight = worldToScreen((colEnd + 1) * TILE_SIZE, 0, camera).x;
-    const gridTop = worldToScreen(0, rowStart * TILE_SIZE, camera).y;
-    const gridBottom = worldToScreen(0, (rowEnd + 1) * TILE_SIZE, camera).y;
-    const lw = Math.max(1, camera.zoom);
-    ctx.fillStyle = 'rgba(15, 8, 2, 0.4)';
-    for (let row = rowStart; row <= rowEnd + 1; row++) ctx.fillRect(gridLeft, worldToScreen(0, row * TILE_SIZE, camera).y, gridRight - gridLeft, lw);
-    for (let col = colStart; col <= colEnd + 1; col++) ctx.fillRect(worldToScreen(col * TILE_SIZE, 0, camera).x, gridTop, lw, gridBottom - gridTop);
-    ctx.fillStyle = 'rgba(255, 235, 200, 0.12)';
-    for (let row = rowStart; row <= rowEnd + 1; row++) ctx.fillRect(gridLeft, worldToScreen(0, row * TILE_SIZE, camera).y + lw, gridRight - gridLeft, lw);
-    for (let col = colStart; col <= colEnd + 1; col++) ctx.fillRect(worldToScreen(col * TILE_SIZE, 0, camera).x + lw, gridTop, lw, gridBottom - gridTop);
+    // The horizontal guide lines come from the sand/dirt layer boundaries baked into
+    // the seabed art (SeabedArt.js), which are aligned to tile rows.
   }
 
   renderCameraBottomBuffer(ctx, camera, canvasWidth, canvasHeight, worldBottomY);
