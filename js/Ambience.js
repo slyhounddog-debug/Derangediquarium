@@ -1703,7 +1703,10 @@ const bgSeaweeds = Array.from({ length: BG_PARALLAX_SEAWEED_COUNT }, () => ({
   height: (SEAWEED_MIN_HEIGHT + Math.random() * (SEAWEED_MAX_HEIGHT - SEAWEED_MIN_HEIGHT)) * BG_PARALLAX_SIZE_SCALE,
   width: (SEAWEED_MIN_WIDTH + Math.random() * (SEAWEED_MAX_WIDTH - SEAWEED_MIN_WIDTH)) * BG_PARALLAX_SIZE_SCALE,
   blurFactor: 0.6 + Math.random() * 0.55,
-  sway: 0, freq: 0, phase: 0, // frozen (no sway) — this copy is baked once, see the perf note above
+  // Live-animated (drawn every frame through renderLivePixelatedLayer), same sway ranges as the foreground strands.
+  sway: 16 + Math.random() * 24,
+  freq: 0.5 + Math.random() * 0.6,
+  phase: Math.random() * Math.PI * 2,
   hue: 90 + Math.random() * 35,
 }));
 const bgKelps = Array.from({ length: BG_PARALLAX_KELP_COUNT }, () => shrinkKelp({ ...randomKelp(), sway: 0 })); // frozen, same reasoning as bgSeaweeds
@@ -1744,12 +1747,9 @@ function buildBgStaticCanvas() {
   // layer — per direct request ("make sure all the components of the
   // background layer sit behind the background lower tank part that was
   // duplicated") — so it isn't drawn here at all any more.
-  for (const w of bgSeaweeds) drawOneSeaweed(bctx, bakeCamera, bgStaticCanvas.width, w, localFloorY);
   for (const b of bgBoulders) drawOneBoulder(bctx, bakeCamera, bgStaticCanvas.width, b, localFloorY);
   for (const k of bgKelps) drawOneKelp(bctx, bakeCamera, bgStaticCanvas.width, k, localFloorY);
-  for (const sc of bgSandCastles) drawOneSandCastle(bctx, bakeCamera, bgStaticCanvas.width, sc, localFloorY);
   for (const c of bgCorals) drawOneCoral(bctx, bakeCamera, bgStaticCanvas.width, c, localFloorY);
-  for (const u of bgSeaUrchins) drawOneSeaUrchin(bctx, bakeCamera, bgStaticCanvas.width, u, localFloorY);
   bctx.restore();
 }
 buildBgStaticCanvas();
@@ -1925,6 +1925,42 @@ function renderLiveBlurredTinted(destCtx, camera, canvasWidth, worldX, floorY, d
   destCtx.drawImage(liveBlurDownscaleCanvas, 0, 0, LIVE_BLUR_DOWNSCALE_SIZE, LIVE_BLUR_DOWNSCALE_SIZE, realScreen.x - LIVE_TINT_SCRATCH_CENTER, realScreen.y - LIVE_TINT_SCRATCH_CENTER, LIVE_TINT_SCRATCH_SIZE, LIVE_TINT_SCRATCH_SIZE);
 }
 
+// Seaweed, sand castles, urchins and crabs get the same treatment as the
+// chest (dark source-atop tint, then a down/up-scale to fake blur and read as
+// pixelated background), but batched: all four are drawn into ONE band-sized
+// scratch canvas, tinted once, and resampled once, instead of a scratch per
+// object. The downscale is gentler than the chest's (1/LIVE_LAYER_DOWNSCALE
+// vs ~1/7) so thin seaweed strokes survive it. Drawn live every frame so
+// seaweed sways and urchins bob exactly like the foreground ones.
+const LIVE_LAYER_DOWNSCALE = 4;
+const liveLayerCanvas = document.createElement('canvas');
+const liveLayerCtx = liveLayerCanvas.getContext('2d');
+const liveLayerSmallCanvas = document.createElement('canvas');
+const liveLayerSmallCtx = liveLayerSmallCanvas.getContext('2d');
+function renderLivePixelatedLayer(destCtx, camera, canvasWidth, destY, destH) {
+  const w = Math.ceil(canvasWidth);
+  const h = Math.ceil(destH);
+  if (w <= 0 || h <= 0) return;
+  const sw = Math.max(1, Math.ceil(w / LIVE_LAYER_DOWNSCALE));
+  const sh = Math.max(1, Math.ceil(h / LIVE_LAYER_DOWNSCALE));
+  if (liveLayerCanvas.width !== w || liveLayerCanvas.height !== h) { liveLayerCanvas.width = w; liveLayerCanvas.height = h; }
+  if (liveLayerSmallCanvas.width !== sw || liveLayerSmallCanvas.height !== sh) { liveLayerSmallCanvas.width = sw; liveLayerSmallCanvas.height = sh; }
+  liveLayerCtx.clearRect(0, 0, w, h);
+  // Same x pan/zoom as the real camera, but y anchored to the top of this band.
+  const bandCamera = { x: camera.x, y: BG_STATIC_TOP_WORLD_Y, zoom: camera.zoom };
+  for (const wd of bgSeaweeds) drawOneSeaweed(liveLayerCtx, bandCamera, w, wd, BG_PARALLAX_FLOOR_Y);
+  for (const sc of bgSandCastles) drawOneSandCastle(liveLayerCtx, bandCamera, w, sc, BG_PARALLAX_FLOOR_Y);
+  for (const u of bgSeaUrchins) drawOneSeaUrchin(liveLayerCtx, bandCamera, w, u, BG_PARALLAX_FLOOR_Y);
+  for (const c of bgCrabs) drawOneCrab(liveLayerCtx, bandCamera, w, c, BG_PARALLAX_FLOOR_Y);
+  liveLayerCtx.globalCompositeOperation = 'source-atop';
+  liveLayerCtx.fillStyle = 'rgba(55, 75, 92, 0.82)'; // same dark tint as renderLiveBlurredTinted (the chest)
+  liveLayerCtx.fillRect(0, 0, w, h);
+  liveLayerCtx.globalCompositeOperation = 'source-over';
+  liveLayerSmallCtx.clearRect(0, 0, sw, sh);
+  liveLayerSmallCtx.drawImage(liveLayerCanvas, 0, 0, w, h, 0, 0, sw, sh);
+  destCtx.drawImage(liveLayerSmallCanvas, 0, 0, sw, sh, 0, destY, w, h);
+}
+
 export function renderBackgroundParallaxDecor(ctx, camera, canvasWidth, canvasHeight) {
   // The baked static bitmap (seaweed/boulders/kelp/sand castles/coral/
   // urchins), scaled/positioned to match the current camera — one drawImage
@@ -1940,9 +1976,7 @@ export function renderBackgroundParallaxDecor(ctx, camera, canvasWidth, canvasHe
   // (single) chest additionally gets the downscale/upscale fake-blur (see
   // renderLiveBlurredTinted above), all at the same overall opacity so they
   // read as one layer.
-  for (const c of bgCrabs) {
-    renderLiveTinted(ctx, camera, canvasWidth, c.x, BG_PARALLAX_FLOOR_Y, (c2, cam2, cw2) => drawOneCrab(c2, cam2, cw2, c, BG_PARALLAX_FLOOR_Y));
-  }
+  renderLivePixelatedLayer(ctx, camera, canvasWidth, topLeft.y, destH);
   renderLiveBlurredTinted(ctx, camera, canvasWidth, bgTreasureChest.x, BG_PARALLAX_FLOOR_Y, (c2, cam2, cw2) => drawOneTreasureChest(c2, cam2, cw2, bgTreasureChest, BG_PARALLAX_FLOOR_Y));
   renderBgBubbles(ctx, camera, canvasWidth, canvasHeight);
 
