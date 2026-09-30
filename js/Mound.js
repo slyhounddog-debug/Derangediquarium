@@ -27,7 +27,7 @@ import { worldToScreen } from './Engine.js';
 import { createShimmerTimer, updateShimmerTimer, drawShimmerSweep, UI_SHEEN_SWEEP_DURATION_MS } from './Shimmer.js';
 import { pushGameNotification } from './Notifications.js';
 import { playUpgrade } from './Sound.js';
-import { bakeMoundSprite, traceMoundPath } from './SeabedArt.js';
+import { bakeMoundSprite, bakeLabSprite, traceMoundPath } from './SeabedArt.js';
 
 const MOUND_WIDTH_PX = MOUND_WIDTH_TILES * TILE_SIZE;
 export const MOUND_X = WORLD_W / 2; // world-space center, fixed for the life of the level
@@ -251,6 +251,7 @@ export function isPointOnMound(state, worldX, worldY) {
 // replaces the old 32px speckle tile that repeated across the dome. Baked
 // lazily on the first render since it needs a canvas.
 let moundSprite = null;
+let labSprite = null; // the Science Lab's equivalent, see renderScienceLab
 
 // A fixed set of jagged multi-segment crack shapes, generated once at module
 // load (not per-render — a fresh Math.random() every frame would make the
@@ -398,27 +399,14 @@ export function renderScienceLab(ctx, state) {
 
   if (shouldPulseScienceLab(state)) drawPulseGlow(ctx, cx, topLeft.y + h / 2, w, h, state.level.elapsed);
 
-  // A small rounded structure with a glowing dome — reads as "lab," not
-  // "dirt mound," at a glance, still built on the same rubble-base visual
-  // language the Mound used so the transition doesn't feel like a random
-  // prop swap, just relocated higher up, clear of the city below.
-  ctx.fillStyle = '#5a5a6e';
-  ctx.fillRect(topLeft.x + w * 0.1, topLeft.y + h * 0.55, w * 0.8, h * 0.45);
-
-  ctx.fillStyle = '#7ad4e8';
-  ctx.beginPath();
-  ctx.arc(cx, topLeft.y + h * 0.55, w * 0.32, Math.PI, 0);
-  ctx.fill();
-  ctx.globalAlpha = 0.5;
-  ctx.fillStyle = '#e8fbff';
-  ctx.beginPath();
-  ctx.arc(cx, topLeft.y + h * 0.55, w * 0.32, Math.PI * 1.15, Math.PI * 1.75);
-  ctx.fill();
-  ctx.globalAlpha = 1;
-
-  ctx.strokeStyle = 'rgba(122, 212, 232, 0.6)';
-  ctx.lineWidth = Math.max(1, 2 * camera.zoom);
-  ctx.strokeRect(topLeft.x + w * 0.1, topLeft.y + h * 0.55, w * 0.8, h * 0.45);
+  // Same rubble-base-to-lab visual language the Mound uses, now as a baked
+  // sprite in the boulders' own lit/rimmed style (SeabedArt.js's
+  // bakeLabSprite), per direct request — a steel base with a door/portholes
+  // under a glass dome holding a flask, so it still reads as "lab," not "dirt
+  // mound," at a glance. Same footprint as before.
+  if (!labSprite) labSprite = bakeLabSprite(MOUND_WIDTH_PX, MOUND_HEIGHT_PX + TILE_SIZE);
+  const z = camera.zoom / labSprite.scale;
+  ctx.drawImage(labSprite.canvas, topLeft.x - labSprite.pad * camera.zoom, topLeft.y - labSprite.pad * camera.zoom, labSprite.canvas.width * z, labSprite.canvas.height * z);
 
   // Shimmer, clipped to the Lab's own silhouette (the base rect plus the
   // dome's upper half-circle, traced as one path) so the sweep can't paint

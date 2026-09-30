@@ -12,7 +12,8 @@ import {
   FOOD_STATIONARY_MOVE_TOLERANCE_PX,
   COIN_RADIUS,
   COIN_CLICK_RADIUS_MULTIPLIER,
-  COIN_SPIN_IDLE_MS,
+  COIN_SPIN_IDLE_MIN_MS,
+  COIN_SPIN_IDLE_MAX_MS,
   COIN_SPIN_STATIONARY_TOLERANCE_PX,
   COIN_SPIN_COOLDOWN_MIN_MS,
   COIN_SPIN_COOLDOWN_MAX_MS,
@@ -561,6 +562,7 @@ export function createCoin(x, y, value) {
     spinStationaryOriginX: x,
     spinStationaryOriginY: y,
     spinIdleTimerMs: 0,
+    spinIdleThresholdMs: 0, // this coin's own randomized idle wait (COIN_SPIN_IDLE_MIN_MS..MAX_MS), rolled lazily by updateCoinSpin — 0 means "not rolled yet"
     spinCooldownMs: 0,
     spinAngleRad: 0, // current in-progress rotation angle this burst, 0 while not spinning — also read directly by main.js's coinSpinScaleX during the settle phase below (frozen at whatever it was when the rotation itself stopped)
     spinTargetRad: 0, // how far (in radians) the CURRENT spin burst's rotation phase goes before it stops, 0 while not actively rotating
@@ -2129,6 +2131,7 @@ function updateCoinSpin(item, dtMs) {
     item.spinStationaryOriginX = item.x;
     item.spinStationaryOriginY = item.y;
     item.spinIdleTimerMs = 0;
+    item.spinIdleThresholdMs = 0; // re-rolled next tick, so each rest period gets a fresh random wait
     item.spinCooldownMs = 0;
     item.spinAngleRad = 0;
     item.spinTargetRad = 0;
@@ -2157,7 +2160,8 @@ function updateCoinSpin(item, dtMs) {
     return;
   }
   item.spinIdleTimerMs += dtMs;
-  if (item.spinIdleTimerMs >= COIN_SPIN_IDLE_MS) {
+  if (!item.spinIdleThresholdMs) item.spinIdleThresholdMs = COIN_SPIN_IDLE_MIN_MS + Math.random() * (COIN_SPIN_IDLE_MAX_MS - COIN_SPIN_IDLE_MIN_MS); // lazy so coins from older saves (no field) get one too
+  if (item.spinIdleTimerMs >= item.spinIdleThresholdMs) {
     item.spinTargetRad = (COIN_SPIN_ROTATIONS_MIN + Math.random() * (COIN_SPIN_ROTATIONS_MAX - COIN_SPIN_ROTATIONS_MIN)) * Math.PI * 2;
     item.spinAngleRad = 0;
   }

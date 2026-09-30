@@ -293,6 +293,266 @@ export function bakeMoundSprite(w, h, scale = 2) {
   return { canvas, scale, pad, outline };
 }
 
+// One lit, rimmed, grained shape — the shared building block for the sand
+// castle and Science Lab sprites below, and the same recipe drawBoulder and
+// bakeMoundSprite use (lit gradient across the piece, speckle grain clipped to
+// it, darker rim). `trace` re-traces the piece's own path (called three times:
+// fill, clip, rim); bx/by/bw/bh is its bounding box (gradient + grain extent).
+function shadedPiece(ctx, c, bx, by, bw, bh, trace, { rim = 1.2, lit = 12, dark = -14, grainDensity = 1 } = {}) {
+  trace();
+  const g = ctx.createLinearGradient(bx, 0, bx + bw, 0);
+  g.addColorStop(0, shade(c, lit));
+  g.addColorStop(1, shade(c, dark));
+  ctx.fillStyle = g;
+  ctx.fill();
+  ctx.save();
+  ctx.clip();
+  const n = Math.max(3, Math.round((bw * bh) / 70 * grainDensity));
+  for (let i = 0; i < n; i++) {
+    ctx.fillStyle = Math.random() < 0.5 ? shade(c, 20, 0.35) : shade(c, -22, 0.4);
+    ctx.beginPath();
+    ctx.arc(bx + Math.random() * bw, by + Math.random() * bh, rand(0.5, 1.6), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+  trace();
+  ctx.strokeStyle = shade(c, -24, 0.7);
+  ctx.lineWidth = rim;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+}
+
+// Bakes one Sand Castle to a reusable sprite, per direct request ("give the
+// science lab and sand castles a visual rework... so it fits the aesthetic of
+// the game better, matching the mound/boulders/seaweed") — the flat polygons
+// it used to be are now lit, rimmed, grained pieces (keep, merlons, towers,
+// cone roofs, a sand skirt at the base) with a door and arrow slits so it still
+// reads as an obvious castle. Layout is the same as before (a keep flanked by
+// 2-3 towers at the same proportions); brightness is the castle's own
+// per-instance shade. Returns { canvas, scale, anchorX, anchorY } with the
+// anchor at the castle's base centre, in sprite pixels.
+export function bakeSandCastleSprite(w, h, brightness, towerCount, scale = 2) {
+  const pad = 6;
+  const halfW = w * 0.64;
+  const up = Math.max(h * 1.14, h * 0.7 + w * 0.16);
+  const down = h * 0.14;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.ceil((halfW * 2 + pad * 2) * scale);
+  canvas.height = Math.ceil((up + down + pad * 2) * scale);
+  const ctx = canvas.getContext('2d');
+  ctx.scale(scale, scale);
+  ctx.translate(halfW + pad, up + pad); // origin = base centre of the castle
+  const c = { h: rand(34, 40), s: rand(32, 40), l: 46 + (brightness - 0.9) * 28 };
+  const roof = { h: c.h, s: c.s + 4, l: c.l - 8 };
+  const rim = Math.max(0.7, Math.min(1.4, w * 0.011));
+  const slit = shade(c, -38, 0.85);
+
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
+  ctx.beginPath();
+  ctx.ellipse(3, 0, w * 0.6, h * 0.1, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Central keep: a trapezoid, wider at the base than the top.
+  const keepPts = [[-w * 0.28, 0], [-w * 0.22, -h], [w * 0.22, -h], [w * 0.28, 0]];
+  shadedPiece(ctx, c, -w * 0.28, -h, w * 0.56, h, () => {
+    ctx.beginPath();
+    keepPts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+    ctx.closePath();
+  }, { rim });
+
+  // Crenellations along the keep's top edge.
+  const teeth = 4;
+  const toothW = (w * 0.44) / (teeth * 2 - 1);
+  for (let i = 0; i < teeth; i++) {
+    const tx = -w * 0.22 + i * toothW * 2;
+    shadedPiece(ctx, c, tx, -h * 1.1, toothW, h * 0.12, () => {
+      ctx.beginPath();
+      ctx.roundRect(tx, -h * 1.1, toothW, h * 0.12, Math.min(2, toothW * 0.25));
+    }, { rim: rim * 0.8, grainDensity: 0.5 });
+  }
+
+  // Doorway (2-tower castles, where the keep's face is clear) or arrow slits
+  // (3-tower castles, where the centre tower covers it).
+  if (towerCount === 2) {
+    const dw = w * 0.11, dh = h * 0.3;
+    ctx.fillStyle = shade(c, -42);
+    ctx.beginPath();
+    ctx.moveTo(-dw / 2, 0);
+    ctx.lineTo(-dw / 2, -dh + dw / 2);
+    ctx.arc(0, -dh + dw / 2, dw / 2, Math.PI, 0);
+    ctx.lineTo(dw / 2, 0);
+    ctx.closePath();
+    ctx.fill();
+  } else {
+    ctx.fillStyle = slit;
+    for (const sx of [-0.15, 0.15]) ctx.fillRect(w * sx - w * 0.012, -h * 0.72, w * 0.024, h * 0.14);
+  }
+
+  // Towers: a lit cylinder topped with a cone roof. Centre tower (3-tower
+  // castles) is drawn last so it sits in front of the keep.
+  const towerXs = towerCount === 3 ? [-0.42, 0.42, 0] : [-0.42, 0.42];
+  for (const tf of towerXs) {
+    const tx = tf * w;
+    const tw = w * 0.16;
+    const th = h * (tf === 0 ? 0.55 : 0.7);
+    shadedPiece(ctx, c, tx - tw / 2, -th, tw, th, () => {
+      ctx.beginPath();
+      ctx.rect(tx - tw / 2, -th, tw, th);
+    }, { rim, lit: 14, dark: -18 });
+    ctx.fillStyle = slit;
+    ctx.fillRect(tx - tw * 0.07, -th * 0.6, tw * 0.14, th * 0.2);
+    shadedPiece(ctx, roof, tx - tw * 0.65, -th - tw * 0.9, tw * 1.3, tw * 0.9, () => {
+      ctx.beginPath();
+      ctx.moveTo(tx - tw * 0.65, -th);
+      ctx.lineTo(tx + tw * 0.65, -th);
+      ctx.lineTo(tx, -th - tw * 0.9);
+      ctx.closePath();
+    }, { rim, grainDensity: 0.6 });
+  }
+
+  // Sand skirt: the castle sits in a little drift of sand rather than on a
+  // hard line; the half below the floor line is hidden by the seabed.
+  const skirtRx = w * 0.58, skirtRy = h * 0.09;
+  shadedPiece(ctx, c, -skirtRx, -skirtRy, skirtRx * 2, skirtRy * 2, () => {
+    ctx.beginPath();
+    ctx.ellipse(0, 0, skirtRx, skirtRy, 0, 0, Math.PI * 2);
+  }, { rim, lit: 8, dark: -10, grainDensity: 0.8 });
+
+  return { canvas, scale, anchorX: (halfW + pad) * scale, anchorY: (up + pad) * scale };
+}
+
+// Bakes the Science Lab once, per direct request (same rework as the sand
+// castle/Mound) — a riveted, panelled steel base with a door and glowing
+// portholes under a lit glass dome with a bubbling flask inside, so it still
+// reads as an unmistakable lab. Same footprint as before (base rect from 10%
+// to 90% of the width, bottom 45% of the height; dome radius 32% of the width
+// centred on the base's top edge), so Mound.js's shimmer clip and hit-test
+// are unchanged. Returns { canvas, scale, pad }; the lab's top-left sits `pad`
+// world px in from the sprite's top-left.
+export function bakeLabSprite(w, h, scale = 2) {
+  const pad = 6, extra = 4;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.ceil((w + pad * 2) * scale);
+  canvas.height = Math.ceil((h + extra + pad * 2) * scale);
+  const ctx = canvas.getContext('2d');
+  ctx.scale(scale, scale);
+  ctx.translate(pad, pad);
+  const steel = { h: 240, s: 11, l: 40 };
+  const glow = '#7ad4e8';
+  const bx = w * 0.1, bw = w * 0.8, by = h * 0.55, bh = h * 0.45;
+  const cx = w / 2, domeR = w * 0.32;
+
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
+  ctx.beginPath();
+  ctx.ellipse(cx + 3, h - 1, bw * 0.56, 6, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Steel base, then its detail: a collar under the dome, panel seams, rivets.
+  shadedPiece(ctx, steel, bx, by, bw, bh, () => {
+    ctx.beginPath();
+    ctx.roundRect(bx, by, bw, bh, 3);
+  }, { rim: 1.6, lit: 12, dark: -16, grainDensity: 0.5 });
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(bx, by, bw, bh);
+  ctx.clip();
+  ctx.fillStyle = shade(steel, -16, 0.6);
+  ctx.fillRect(bx, by, bw, 6); // collar
+  for (const sf of [0.27, 0.73]) {
+    ctx.fillStyle = shade(steel, -24, 0.5);
+    ctx.fillRect(bx + bw * sf, by + 6, 1.2, bh - 6);
+    ctx.fillStyle = shade(steel, 16, 0.3);
+    ctx.fillRect(bx + bw * sf + 1.2, by + 6, 1, bh - 6);
+  }
+  ctx.fillStyle = shade(steel, 22, 0.55);
+  for (let i = 0; i < 9; i++) {
+    const rx = bx + 6 + (i * (bw - 12)) / 8;
+    ctx.beginPath(); ctx.arc(rx, by + 3, 0.9, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(rx, by + bh - 3, 0.9, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+
+  // Door (centre) and two glowing portholes.
+  const doorW = bw * 0.2, doorH = bh * 0.62;
+  ctx.fillStyle = shade(steel, -30);
+  ctx.beginPath();
+  ctx.roundRect(cx - doorW / 2, by + bh - doorH, doorW, doorH, [3, 3, 0, 0]);
+  ctx.fill();
+  ctx.strokeStyle = shade(steel, -40, 0.8);
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = glow;
+  ctx.fillRect(cx - doorW * 0.3, by + bh - doorH + 4, doorW * 0.6, 3); // lit slit in the door
+  for (const pf of [0.15, 0.85]) {
+    const px = bx + bw * pf, py = by + bh * 0.55, pr = bh * 0.2;
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(px, py, pr, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+    ctx.beginPath(); ctx.arc(px - pr * 0.3, py - pr * 0.3, pr * 0.35, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = shade(steel, -34, 0.85);
+    ctx.lineWidth = 1.4;
+    ctx.beginPath(); ctx.arc(px, py, pr, 0, Math.PI * 2); ctx.stroke();
+  }
+
+  // Glass dome: same cyan family as before, now lit (radial highlight), with
+  // a flask of bubbling green liquid inside, a rim and a specular streak.
+  const domePath = () => { ctx.beginPath(); ctx.arc(cx, by, domeR, Math.PI, 0); ctx.closePath(); };
+  const dg = ctx.createRadialGradient(cx - domeR * 0.35, by - domeR * 0.6, domeR * 0.1, cx, by - domeR * 0.2, domeR * 1.1);
+  dg.addColorStop(0, '#e8fbff');
+  dg.addColorStop(0.35, '#9be6f4');
+  dg.addColorStop(1, '#4fb6cf');
+  domePath();
+  ctx.fillStyle = dg;
+  ctx.fill();
+  ctx.save();
+  domePath();
+  ctx.clip();
+  // Erlenmeyer flask sitting on the collar.
+  const fh = domeR * 0.78, fbw = domeR * 0.62, fnw = domeR * 0.2, fy = by - 1;
+  const flaskPath = () => {
+    ctx.beginPath();
+    ctx.moveTo(cx - fnw / 2, fy - fh);
+    ctx.lineTo(cx - fnw / 2, fy - fh * 0.55);
+    ctx.lineTo(cx - fbw / 2, fy);
+    ctx.lineTo(cx + fbw / 2, fy);
+    ctx.lineTo(cx + fnw / 2, fy - fh * 0.55);
+    ctx.lineTo(cx + fnw / 2, fy - fh);
+    ctx.closePath();
+  };
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+  flaskPath();
+  ctx.fill();
+  ctx.save();
+  flaskPath();
+  ctx.clip();
+  const lg = ctx.createLinearGradient(0, fy - fh * 0.45, 0, fy);
+  lg.addColorStop(0, '#9af07a');
+  lg.addColorStop(1, '#3fb35a');
+  ctx.fillStyle = lg;
+  ctx.fillRect(cx - fbw / 2, fy - fh * 0.45, fbw, fh * 0.45);
+  ctx.restore();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.8)';
+  for (const [bxo, byo, br] of [[-0.12, -0.25, 1.6], [0.1, -0.15, 1.2], [0.02, -0.38, 1]]) {
+    ctx.beginPath(); ctx.arc(cx + fbw * bxo, fy + fh * byo, br, 0, Math.PI * 2); ctx.fill();
+  }
+  flaskPath();
+  ctx.strokeStyle = 'rgba(30, 90, 110, 0.7)';
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+  ctx.restore();
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)'; // specular streak along the upper-left of the glass
+  ctx.lineWidth = 2.2;
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.arc(cx, by, domeR * 0.82, Math.PI * 1.15, Math.PI * 1.5);
+  ctx.stroke();
+  domePath();
+  ctx.strokeStyle = 'rgba(32, 98, 118, 0.85)';
+  ctx.lineWidth = 1.6;
+  ctx.stroke();
+  return { canvas, scale, pad };
+}
+
 function drawShell(ctx) {
   const r = rand(5, 11);
   ctx.fillStyle = hsl(rand(32, 42), rand(25, 40), rand(58, 72), 0.9);

@@ -26,7 +26,7 @@
 // — see the job-list construction near the bottom of this file.
 import { WORLD_W, SEABED_FLOOR_Y } from './Config.js';
 import { worldToScreen } from './Engine.js';
-import { bakeBoulderSprite } from './SeabedArt.js';
+import { bakeBoulderSprite, bakeSandCastleSprite } from './SeabedArt.js';
 
 let elapsed = 0; // seconds, drives every sway/wobble phase below
 
@@ -103,8 +103,8 @@ for (let i = 0; i < SEAWEED_COUNT; i++) {
     height: SEAWEED_MIN_HEIGHT + (SEAWEED_MAX_HEIGHT - SEAWEED_MIN_HEIGHT) * sizeT,
     width: SEAWEED_MIN_WIDTH + (SEAWEED_MAX_WIDTH - SEAWEED_MIN_WIDTH) * sizeT,
     blurFactor: 0.6 + 0.55 * sizeT, // 0.6x (crisper) at the smallest, 1.15x (slightly blurrier) at the biggest, vs. the old fixed 1.0x
-    sway: 16 + Math.random() * 24, // was 10 + rand*16 — bumped up per direct request for more noticeable background seaweed movement
-    freq: 0.5 + Math.random() * 0.6, // was 0.35 + rand*0.45 — faster sway to match the wider amplitude above
+    sway: 16 + Math.random() * 20, // max was 40 (16 + rand*24), cut 10% to 36 per direct request ("10% less max sway amount") — min untouched
+    freq: 0.5 + Math.random() * 0.435, // max was 1.1 (0.5 + rand*0.6), cut 15% to 0.935 per direct request ("15% slower max sway speed") — min untouched
     phase: Math.random() * Math.PI * 2,
     hue: 90 + Math.random() * 35,
     depth: 15 + Math.random() * 20, // always < LAB_DEPTH_THRESHOLD — seaweed never draws in front of the Science Lab
@@ -594,9 +594,10 @@ function drawOneSeaweed(ctx, camera, canvasWidth, w, floorY = SEABED_FLOOR_Y) {
 // its own fixed spot. Always behind the Science Lab, same as seaweed.
 // Bumped 7 -> 9 (25% more, rounded up) per direct request ("increase the
 // amount of... boulders by 25%").
-const BOULDER_COUNT = 9;
+const BOULDER_COUNT = 14; // was 9 — +50% (13.5, rounded up) per direct request
 function randomBoulder() {
-  const size = 26 + Math.random() * 30;
+  // Min halved (26 -> 13), max untouched (56), per direct request ("boulder min size 50% of what it is currently... so they look more like stones instead of boulders").
+  const size = 13 + Math.random() * 43;
   return {
     x: Math.random() * WORLD_W,
     size,
@@ -643,7 +644,7 @@ function drawOneBoulder(ctx, camera, canvasWidth, b, floorY = SEABED_FLOOR_Y) {
 // always draws behind boulders (and, being in the same behind-Lab band as
 // boulders/seaweed, also always behind coral/urchins/the Science Lab too) —
 // same static "no per-frame animation, no gameplay effect" rule as Boulders.
-const SAND_CASTLE_COUNT = 3;
+const SAND_CASTLE_COUNT = 4; // was 3 — +1 per direct request
 const SAND_CASTLE_MIN_WIDTH = 35; // was 55 — now noticeably below a Boulder's own smallest footprint
 const SAND_CASTLE_MAX_WIDTH = 180; // was 140 (~ the Mound's own width) — now bigger than the Mound
 function randomSandCastle() {
@@ -660,62 +661,18 @@ function randomSandCastle() {
 const sandCastles = [];
 for (let i = 0; i < SAND_CASTLE_COUNT; i++) sandCastles.push(randomSandCastle());
 
+// Drawn from a one-off baked sprite in the boulders' own lit/rimmed/grained
+// style (SeabedArt.js's bakeSandCastleSprite), per direct request — same
+// lazy-bake-per-instance pattern drawOneBoulder uses, so each castle keeps
+// its own stable, unique grain.
 function drawOneSandCastle(ctx, camera, canvasWidth, sc, floorY = SEABED_FLOOR_Y) {
   const screen = worldToScreen(sc.x, floorY, camera);
   const w = sc.width * camera.zoom;
-  const h = sc.height * camera.zoom;
   if (screen.x < -w || screen.x > canvasWidth + w) return;
-  ctx.save();
-  const base = Math.round(200 * sc.shade);
-  const sandColor = `rgb(${base}, ${Math.round(base * 0.86)}, ${Math.round(base * 0.6)})`;
-  const sandDark = `rgb(${Math.round(base * 0.8)}, ${Math.round(base * 0.68)}, ${Math.round(base * 0.46)})`;
-  const baseY = screen.y;
-  const topY = baseY - h;
-
-  // Central keep — a trapezoid block, wider at the base than the top.
-  ctx.fillStyle = sandColor;
-  ctx.beginPath();
-  ctx.moveTo(screen.x - w * 0.28, baseY);
-  ctx.lineTo(screen.x - w * 0.22, topY);
-  ctx.lineTo(screen.x + w * 0.22, topY);
-  ctx.lineTo(screen.x + w * 0.28, baseY);
-  ctx.closePath();
-  ctx.fill();
-
-  // Crenellations along the keep's own top edge.
-  ctx.fillStyle = sandDark;
-  const teeth = 4;
-  const toothW = (w * 0.44) / (teeth * 2 - 1);
-  for (let i = 0; i < teeth; i++) {
-    const tx = screen.x - w * 0.22 + i * toothW * 2;
-    ctx.fillRect(tx, topY - h * 0.1, toothW, h * 0.12);
-  }
-
-  // Side (and sometimes center) towers flanking the keep — a cylindrical
-  // base topped with a pointed cone roof.
-  const towerXs = sc.towerCount === 3 ? [-0.42, 0, 0.42] : [-0.42, 0.42];
-  for (const tf of towerXs) {
-    const tx = screen.x + tf * w;
-    const towerW = w * 0.16;
-    const towerH = h * (tf === 0 ? 0.55 : 0.7);
-    const towerTopY = baseY - towerH;
-    ctx.fillStyle = sandColor;
-    ctx.fillRect(tx - towerW / 2, towerTopY, towerW, towerH);
-    ctx.beginPath();
-    ctx.moveTo(tx - towerW * 0.65, towerTopY);
-    ctx.lineTo(tx + towerW * 0.65, towerTopY);
-    ctx.lineTo(tx, towerTopY - towerW * 0.9);
-    ctx.closePath();
-    ctx.fillStyle = sandDark;
-    ctx.fill();
-  }
-
-  // Soft contact shadow where it meets the floor, same trick Boulder uses.
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
-  ctx.beginPath();
-  ctx.ellipse(screen.x, baseY, w * 0.55, h * 0.12, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
+  if (!sc.sprite) sc.sprite = bakeSandCastleSprite(sc.width, sc.height, sc.shade, sc.towerCount);
+  const sp = sc.sprite;
+  const z = camera.zoom / sp.scale;
+  ctx.drawImage(sp.canvas, screen.x - sp.anchorX * z, screen.y - sp.anchorY * z, sp.canvas.width * z, sp.canvas.height * z);
 }
 
 // ---- Sea Urchins ----
@@ -780,11 +737,12 @@ function drawOneSeaUrchin(ctx, camera, canvasWidth, u, floorY = SEABED_FLOOR_Y) 
 // browns/greys. Same "no gameplay effect" rule, static like boulders/urchins.
 // Always in front of the Science Lab, per direct request.
 // Bumped 9 -> 14 (50% more, rounded) per direct request ("increase the
-// amount of coral by 50%").
-const CORAL_COUNT = 14;
+// amount of coral by 50%"), then 14 -> 19 (33% more, rounded) per a later
+// direct request ("increase the amount of coral by 33%").
+const CORAL_COUNT = 19;
 const CORAL_HUES = [340, 20, 280, 45]; // pink, orange, purple, golden-yellow
 function randomCoral() {
-  const size = 22 + Math.random() * 26;
+  const size = 24.2 + Math.random() * 28.6; // was 22-48, both ends +10% (24.2-52.8) per direct request ("increase the min and max size of the coral by 10%")
   const hue = CORAL_HUES[Math.floor(Math.random() * CORAL_HUES.length)];
   const branchCount = 4 + Math.floor(Math.random() * 4);
   return {
@@ -852,8 +810,8 @@ function randomKelp() {
     x: Math.random() * WORLD_W,
     height: 160 + Math.random() * 110,
     width: 10 + Math.random() * 6,
-    sway: 20 + Math.random() * 18,
-    freq: 0.3 + Math.random() * 0.35,
+    sway: 20 + Math.random() * 14.2, // max was 38 (20 + rand*18), cut 10% to 34.2 per direct request ("both seaweeds... 10% less max sway amount")
+    freq: 0.3 + Math.random() * 0.2525, // max was 0.65 (0.3 + rand*0.35), cut 15% to 0.5525 per direct request ("15% slower max sway speed")
     phase: Math.random() * Math.PI * 2,
     hue: 40 + Math.random() * 20,
     depth: 15 + Math.random() * 20, // always < LAB_DEPTH_THRESHOLD — same band as seaweed/boulders
@@ -1779,8 +1737,8 @@ const bgSeaweeds = Array.from({ length: BG_PARALLAX_SEAWEED_COUNT }, () => ({
   width: (SEAWEED_MIN_WIDTH + Math.random() * (SEAWEED_MAX_WIDTH - SEAWEED_MIN_WIDTH)) * BG_PARALLAX_SIZE_SCALE,
   blurFactor: 0.6 + Math.random() * 0.55,
   // Live-animated (drawn every frame through renderLivePixelatedLayer), same sway ranges as the foreground strands.
-  sway: 16 + Math.random() * 24,
-  freq: 0.5 + Math.random() * 0.6,
+  sway: 16 + Math.random() * 20,
+  freq: 0.5 + Math.random() * 0.435,
   phase: Math.random() * Math.PI * 2,
   hue: 90 + Math.random() * 35,
 }));

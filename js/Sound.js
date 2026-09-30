@@ -692,18 +692,37 @@ const MUSIC_CROSSFADE_S = ALIEN_MUSIC_BATTLE_LEAD_MS / 1000; // matches the 3-se
 // itself), well before the first real crossfade ever makes Battle audible.
 const MUSIC_RESYNC_INTERVAL_MS = 1000;
 const MUSIC_RESYNC_TOLERANCE_S = 0.04;
+// Real bug fix, per direct report ("the game music will constantly restart
+// the first second over and over sometimes") — Game.mp3 is 184.81s but
+// Battle.mp3 is only 184.05s, so they DON'T loop in lockstep: Battle wraps
+// ~0.76s before Game does. During that last stretch of Game's loop, the old
+// check below saw a huge wrapped diff and "corrected" it by seeking Battle to
+// Game's currentTime — a timestamp PAST Battle's own end, which just makes
+// Battle wrap back to 0 and replay its first second (then the next check,
+// 1s later, could fire again). Two guards: skip any check where Game's clock
+// is too close to Battle's end for the snap target to be valid, and cap how
+// often a snap can happen at all, so even a seek that doesn't take (e.g. a
+// server without Range support, where seeking an unbuffered spot drops the
+// element back to 0) can't re-trigger every second.
+const MUSIC_RESYNC_LOOP_EDGE_S = 2;
+const MUSIC_RESYNC_MIN_GAP_MS = 8000;
 let musicResyncTimer = null;
+let lastMusicResyncAt = -Infinity;
 
 function resyncMusicTracks() {
   if (!gameMusicEl || !battleMusicEl || gameMusicEl.paused || battleMusicEl.paused) return;
   const duration = gameMusicEl.duration;
-  if (!duration || !isFinite(duration)) return;
+  const battleDuration = battleMusicEl.duration;
+  if (!duration || !isFinite(duration) || !battleDuration || !isFinite(battleDuration)) return;
+  if (gameMusicEl.currentTime > battleDuration - MUSIC_RESYNC_LOOP_EDGE_S) return;
+  if (performance.now() - lastMusicResyncAt < MUSIC_RESYNC_MIN_GAP_MS) return;
   let diff = battleMusicEl.currentTime - gameMusicEl.currentTime;
   // Wrap into [-duration/2, duration/2] so a check landing right at a loop
   // boundary (one track already wrapped to ~0, the other still near the end)
   // doesn't misread a genuinely tiny, correct offset as a huge one.
   diff = ((diff + duration / 2) % duration + duration) % duration - duration / 2;
   if (Math.abs(diff) > MUSIC_RESYNC_TOLERANCE_S) {
+    lastMusicResyncAt = performance.now();
     battleMusicEl.currentTime = gameMusicEl.currentTime;
   }
 }

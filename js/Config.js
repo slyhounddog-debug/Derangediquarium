@@ -757,7 +757,9 @@ export const DIAMOND_GEM_COLOR_EDGE = '#7fd0e8';
 // around its vertical axis) — item.radius/mass/x/y and the real collision
 // circle two items are resolved against (Grid.js's resolveItemCollisions)
 // are never touched by any of this.
-export const COIN_SPIN_IDLE_MS = 3000; // how long a coin must sit within COIN_SPIN_STATIONARY_TOLERANCE_PX of its own last-moved spot before its first idle spin
+// How long a coin must sit within COIN_SPIN_STATIONARY_TOLERANCE_PX of its own last-moved spot before its first idle spin. Per direct request ("that initial 3 seconds needs to be randomized to 2-5 seconds") — each coin rolls its own value in this range (re-rolled every time it moves), instead of every coin waiting the same flat 3000ms.
+export const COIN_SPIN_IDLE_MIN_MS = 2000;
+export const COIN_SPIN_IDLE_MAX_MS = 5000;
 export const COIN_SPIN_STATIONARY_TOLERANCE_PX = 2; // tighter than Food's own FOOD_STATIONARY_MOVE_TOLERANCE_PX — a coin doesn't sway once truly at rest, so this only needs to absorb float rounding, not real drift
 export const COIN_SPIN_COOLDOWN_MIN_MS = 4000;
 export const COIN_SPIN_COOLDOWN_MAX_MS = 8000; // real ms between spins once a coin has already done its first one, for as long as it keeps sitting still

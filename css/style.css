@@ -2014,6 +2014,13 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
   transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.18s ease;
 }
 #fish-info-menu.fish-info-menu-closed { transform: scale(0.05); opacity: 0; }
+/* Alternate placements, per direct request (fish too close to the top of the
+   tank for the default above-the-fish card) — see UI.js's updateFishInfoMenuPosition.
+   Same card, anchored from a different edge so the fly-out grows from the fish. */
+#fish-info-anchor.fish-info-right { transform: translate(0, -50%); }
+#fish-info-anchor.fish-info-right #fish-info-menu { transform-origin: 0% 50%; }
+#fish-info-anchor.fish-info-below { transform: translate(-50%, 0); }
+#fish-info-anchor.fish-info-below #fish-info-menu { transform-origin: 50% 0%; }
 #fish-info-header-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
 #fish-info-icon-canvas { width: 60px; height: 60px; flex: none; }
 #fish-info-name { font-size: 15px; font-weight: 800; color: #c25f8f; }

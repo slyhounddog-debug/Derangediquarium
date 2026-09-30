@@ -55,6 +55,7 @@ import {
   TILE_STORAGE_CHEST,
   STORAGE_CHEST_CAPACITY,
   SPECIES,
+  FISH_BASE_SIZE,
   WASTE_POOP_INTERVAL_MS,
   FISH_SPEED_MULTIPLIER,
   ALIEN_COUNTDOWN_START_MS,
@@ -1165,10 +1166,44 @@ export function closeFishInfoMenu(state) {
 // gap (not zoom-scaled, same convention every other one of these popups
 // already uses) clears a typical adult fish's sprite comfortably.
 const FISH_INFO_MENU_GAP_PX = 34;
+// Per direct request ("make that fish modal placement dynamic (either the top,
+// right side, or underneath the fish) based on the vertical height of the
+// fish, so that none of the fish modal is cut off by the top of the tank") —
+// the modal still prefers sitting ABOVE the fish, but a fish swimming near the
+// top of the tank leaves no room up there: it then tries the fish's RIGHT side
+// (vertically centered on it), and failing that drops UNDERNEATH. The modal's
+// height isn't fixed (the merge list grows/shrinks), so this measures the
+// real rendered card each call rather than assuming a size. Class on the
+// anchor picks the matching CSS transform/fly-out origin.
+const FISH_INFO_MENU_EDGE_MARGIN_PX = 8; // keeps the card off the very edge of the screen, not flush against it
+const FISH_INFO_MENU_SIDE_GAP_PX = 14; // breathing room beyond the fish's own body for the right-side placement
 function updateFishInfoMenuPosition(state) {
   const screen = worldToScreen(state.ui.fishInfoModalFrozenX, state.ui.fishInfoModalFrozenY, state.camera);
-  els.fishInfoAnchor.style.left = `${screen.x}px`;
-  els.fishInfoAnchor.style.top = `${screen.y - FISH_INFO_MENU_GAP_PX}px`;
+  const menuW = els.fishInfoMenu.offsetWidth;
+  const menuH = els.fishInfoMenu.offsetHeight;
+  const fish = state.level.entities.find((e) => e.id === state.ui.fishInfoModalFishId && e.type === 'fish');
+  const fishHalfW = fish ? FISH_BASE_SIZE * SPECIES[fish.speciesId].growthStages[fish.stage].scale * state.camera.zoom : FISH_INFO_MENU_GAP_PX;
+  const fitsAbove = screen.y - FISH_INFO_MENU_GAP_PX - menuH >= FISH_INFO_MENU_EDGE_MARGIN_PX;
+  const sideX = screen.x + fishHalfW + FISH_INFO_MENU_SIDE_GAP_PX;
+  const fitsRight = screen.y - menuH / 2 >= FISH_INFO_MENU_EDGE_MARGIN_PX
+    && sideX + menuW <= window.innerWidth - FISH_INFO_MENU_EDGE_MARGIN_PX
+    && screen.y + menuH / 2 <= window.innerHeight - FISH_INFO_MENU_EDGE_MARGIN_PX;
+  const placement = fitsAbove ? 'top' : (fitsRight ? 'right' : 'below');
+  els.fishInfoAnchor.classList.toggle('fish-info-right', placement === 'right');
+  els.fishInfoAnchor.classList.toggle('fish-info-below', placement === 'below');
+  // Top/below center the card on the fish, so a fish hugging a side wall would
+  // push half of it off-screen — clamp that axis into the viewport too.
+  const centeredX = Math.max(menuW / 2 + FISH_INFO_MENU_EDGE_MARGIN_PX, Math.min(window.innerWidth - menuW / 2 - FISH_INFO_MENU_EDGE_MARGIN_PX, screen.x));
+  if (placement === 'top') {
+    els.fishInfoAnchor.style.left = `${centeredX}px`;
+    els.fishInfoAnchor.style.top = `${screen.y - FISH_INFO_MENU_GAP_PX}px`;
+  } else if (placement === 'right') {
+    els.fishInfoAnchor.style.left = `${sideX}px`;
+    els.fishInfoAnchor.style.top = `${screen.y}px`;
+  } else {
+    els.fishInfoAnchor.style.left = `${centeredX}px`;
+    els.fishInfoAnchor.style.top = `${screen.y + FISH_INFO_MENU_GAP_PX}px`;
+  }
 }
 
 function fishStatRowHtml(label, perMin, penaltyPerMin) {
