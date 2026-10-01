@@ -1156,6 +1156,13 @@ export const FISH_GROWTH_ABSORB_DURATION_MS = 350;
 // same particle animation whenever a fish eats mutagen paste"). Tracked in
 // state.level.fishGrowthEffects, same push/age/cull/render shape as
 // alienDeathEffects/coinSparkleEffects elsewhere in this file.
+// Per direct request ("when a fish eats a 3rd time quickly in a row... the
+// visual feedback needs to be more... a particle effect like when picking up
+// coins except larger for the fish") — the coin-pickup sparkle (see main.js's
+// coinSparkleEffects render), scaled up by this factor and given more glints,
+// played on the fish itself the instant its 3-feed streak pays out, whether
+// that's growth or a bonus coin.
+export const FISH_STREAK_SPARKLE_SCALE = 2.4;
 export const FISH_GROWTH_EFFECT_DURATION_MS = 550;
 export const FISH_GROWTH_EFFECT_COLOR = { r: 130, g: 230, b: 160 }; // soft "growth" green, distinct from the coin sparkle's gold and the alien burst's red/tier colors
 // Same idea, for a non-Scavenger fish's Waste poop timer — per direct

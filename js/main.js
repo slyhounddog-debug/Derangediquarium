@@ -817,11 +817,19 @@ const WASTE_VISUAL_Y_OFFSET_FRACTION = 0.1;
 
 // Fills/strokes/textures tracePoopBlobPath's outline into a full waste item
 // — the actual reusable "draw one poop" call every render site below uses.
-function drawWastePoop(ctx, cx, cy, r) {
+// `color` defaults to Waste's own; Bio-Sludge (alien_dna) reuses this exact
+// shape with its own acid-green and its own radius, per direct request
+// ("change the bio-sludge object visually to look very similar to waste with
+// the circular poop look, while retaining the size and color of bio-sludge...
+// inherit the visual scaling factor and the height adjustments that waste
+// has") — so it picks up WASTE_VISUAL_SCALE and the Y offset above for free,
+// applied to ITS radius (ALIEN_DNA_RADIUS), not Waste's. Purely visual: the
+// real collision radius is untouched, same as for Waste.
+function drawWastePoop(ctx, cx, cy, r, color = WASTE_COLOR) {
   r *= WASTE_VISUAL_SCALE;
   cy += r * WASTE_VISUAL_Y_OFFSET_FRACTION;
   tracePoopBlobPath(ctx, cx, cy, r);
-  ctx.fillStyle = WASTE_COLOR;
+  ctx.fillStyle = color;
   ctx.fill();
   ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
   ctx.lineWidth = Math.max(1, r * 0.12);
@@ -5301,6 +5309,10 @@ function render() {
       drawWastePoop(ctx, pos.x, pos.y, item.radius);
       continue;
     }
+    if (item.type === 'alien_dna') {
+      drawWastePoop(ctx, pos.x, pos.y, item.radius, ALIEN_DNA_COLOR);
+      continue;
+    }
 
     // Coins have their own dedicated flat-coin branch above now (and the
     // diamond tier its own gem branch above that) — this shared fallback is
@@ -6040,16 +6052,21 @@ function render() {
     if (pos.x < -30 || pos.x > canvas.width + 30 || pos.y < -30 || pos.y > canvas.height + 30) continue;
     const t = effect.age / COIN_SPARKLE_EFFECT_DURATION_MS; // 0 -> 1
     const alpha = 1 - t;
-    const dist = (4 + t * 16) * state.camera.zoom;
+    // A fish's 3-feed-streak payout reuses this same effect, larger (and with
+    // more glints) — see FISH_STREAK_SPARKLE_SCALE; a plain coin pickup has no
+    // `scale` and renders exactly as before.
+    const sparkleScale = effect.scale || 1;
+    const glints = sparkleScale > 1 ? 8 : 5;
+    const dist = (4 + t * 16) * sparkleScale * state.camera.zoom;
     const sc = COIN_SPARKLE_COLOR;
     ctx.save();
     ctx.globalAlpha = alpha;
     ctx.fillStyle = `rgb(${sc.r}, ${sc.g}, ${sc.b})`;
-    for (let i = 0; i < 5; i++) {
-      const angle = (i / 5) * Math.PI * 2 + t * 1.5;
+    for (let i = 0; i < glints; i++) {
+      const angle = (i / glints) * Math.PI * 2 + t * 1.5;
       const px = pos.x + Math.cos(angle) * dist;
       const py = pos.y + Math.sin(angle) * dist;
-      const s = Math.max(1, 3.5 * state.camera.zoom * (1 - t));
+      const s = Math.max(1, 3.5 * sparkleScale * state.camera.zoom * (1 - t));
       ctx.save();
       ctx.translate(px, py);
       ctx.rotate(angle);
@@ -6063,7 +6080,7 @@ function render() {
       ctx.restore();
     }
     ctx.globalCompositeOperation = 'lighter';
-    const coreR = 14 * state.camera.zoom * (1 - t * 0.6);
+    const coreR = 14 * sparkleScale * state.camera.zoom * (1 - t * 0.6);
     const grad = ctx.createRadialGradient(pos.x, pos.y, 0, pos.x, pos.y, coreR);
     grad.addColorStop(0, `rgba(255, 255, 255, ${alpha * 0.8})`);
     grad.addColorStop(1, 'rgba(255, 255, 255, 0)');

@@ -3094,7 +3094,7 @@ function drawItemIconCanvas(canvas, itemType) {
     ctx.fill();
     return;
   }
-  if (itemType === 'waste') {
+  if (itemType === 'waste' || itemType === 'alien_dna') { // Bio-Sludge shares Waste's poop shape in its own color, per direct request
     // A gently 3-lobed blobby outline (quadratic curves through alternating
     // near/far control points off one base radius, not stacked separate
     // circles — keeps it one seamless fillable/strokeable path) — per
@@ -3120,7 +3120,7 @@ function drawItemIconCanvas(canvas, itemType) {
       ctx.quadraticCurveTo(pts[i].x, pts[i].y, (pts[i].x + next.x) / 2, (pts[i].y + next.y) / 2);
     }
     ctx.closePath();
-    ctx.fillStyle = WASTE_COLOR;
+    ctx.fillStyle = itemType === 'alien_dna' ? ALIEN_DNA_COLOR : WASTE_COLOR;
     ctx.fill();
     ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
     ctx.lineWidth = Math.max(1, r * 0.12);

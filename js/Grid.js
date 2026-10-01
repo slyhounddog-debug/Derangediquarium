@@ -4335,8 +4335,14 @@ function renderRecipeItemIcon(ctx, itemType, cx, cy, r) {
     ctx.stroke();
     return;
   }
-  // Bio-Sludge (alien_dna), Mutagen Paste, or Food — a plain flat-filled
-  // circle plus a dark rim and a small glossy highlight.
+  // Bio-Sludge (alien_dna) now shares Waste's poop shape in its own color,
+  // per direct request (see main.js's drawWastePoop).
+  if (itemType === 'alien_dna') {
+    drawWastePoopIcon(ctx, cx, cy, r, ALIEN_DNA_COLOR);
+    return;
+  }
+  // Mutagen Paste or Food — a plain flat-filled circle plus a dark rim and a
+  // small glossy highlight.
   const flatColor = itemType === 'mutagen_paste' ? MUTAGEN_PASTE_COLOR
     : itemType === 'alien_dna' ? ALIEN_DNA_COLOR
     : FOOD_COLOR;
@@ -4397,7 +4403,7 @@ function renderChestContentsIcon(ctx, itemType, cx, cy, r) {
 // contents badge) — main.js's own version stays a separate trace-then-fill
 // pair since it also needs the bare outline for the tutorial ghost-Waste
 // animation.
-function drawWastePoopIcon(ctx, cx, cy, r) {
+function drawWastePoopIcon(ctx, cx, cy, r, color = WASTE_COLOR) {
   const lobes = 3;
   const steps = lobes * 2;
   const pts = [];
@@ -4415,7 +4421,7 @@ function drawWastePoopIcon(ctx, cx, cy, r) {
     ctx.quadraticCurveTo(pts[i].x, pts[i].y, (pts[i].x + next.x) / 2, (pts[i].y + next.y) / 2);
   }
   ctx.closePath();
-  ctx.fillStyle = WASTE_COLOR;
+  ctx.fillStyle = color;
   ctx.fill();
   ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
   ctx.lineWidth = Math.max(1, r * 0.14);

@@ -131,6 +131,7 @@ import {
   TURRET_MUZZLE_FLASH_DURATION_MS,
   TURRET_IMPACT_EFFECT_DURATION_MS,
   COIN_SPARKLE_EFFECT_DURATION_MS,
+  FISH_STREAK_SPARKLE_SCALE,
   ALIEN_HIT_FLASH_MS,
   TURRET_PROJECTILE_SPEED,
   TURRET_PROJECTILE_HIT_RADIUS,
@@ -3051,6 +3052,8 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
                 { fishId: fish.id, startX: p0.x, startY: p0.y, age: 0 },
                 { fishId: fish.id, startX: p1.x, startY: p1.y, age: 0 }
               );
+              // The coin-pickup sparkle, bigger — see FISH_STREAK_SPARKLE_SCALE.
+              state.level.coinSparkleEffects.push({ x: fish.x, y: fish.y, age: 0, scale: FISH_STREAK_SPARKLE_SCALE });
               if (isAlreadyAdult) {
                 // Adult: the 3 quick feeds buy an immediate coin (spawned in the coin block
                 // below) instead of growth. dropTimer is left untouched.
