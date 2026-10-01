@@ -715,12 +715,9 @@ export function createAlien(x, y, hp, archetypeId) {
     glow: archetype.glow,
     wanderTimer: 0, // 0 so the very first tick immediately picks a heading, same as fish's own wanderTimer
     hitFlashMs: 0, // counts down from ALIEN_HIT_FLASH_MS whenever damage is applied (Grid.js's Turret branch, main.js's click handler) — drives the red-flash/bounce read by main.js's render
-    spawnProtectionUntilMs: 0, // Alien-Egg-hatched aliens only — see updateAlienEgg; a normal wave-spawned alien never has this set past 0, so every damage-site check below is a no-op for it
-    risingToSurface: false, // Alien-Egg-hatched aliens only, and only when the egg hatched inside the seabed city — overrides all normal AI/movement in updateAlien until it clears SEABED_FLOOR_Y
     isBoss: false, // Mother Alien Fish only — see createMotherAlienFish below; drives updateAlien's minion-spawn timer, main.js's top-middle boss health bar instead of a per-alien one, and the special death sequence
     minionSpawnTimerMs: 0, // Mother Alien Fish only
     reservedDamage: 0, // sum of damage from turret shots already fired at this alien but still in flight (not yet landed) — see Grid.js's turret-targeting search and updateTurretProjectiles below. Lets every OTHER turret see "this alien is already going to die from shots in flight" and skip it instead of piling on more, per direct request
-    hatchedFromEgg: false, // set true only by updateAlienEgg's own hatch branch — distinguishes an Alien-Egg-hatched Tier 1 from an ordinary wave-spawned one. Only an alien with this flag still true AND still within its spawnProtectionUntilMs invulnerability window is eligible for the Bio Fish splice (see isXenoOctopusAlienTarget) or gets the "no negative effects while invulnerable" treatment in updateAlien
   };
 }
 
@@ -746,7 +743,7 @@ export function createMotherAlienFish(x, y) {
     // fixed visual-distinction fields instead of copying an archetype's —
     // biggest spike count, bulkiest body, always glowing.
     spikes: 6, bodyWidthMul: 1.2, bodyHeightMul: 1.2, glow: true,
-    wanderTimer: 0, hitFlashMs: 0, spawnProtectionUntilMs: 0, risingToSurface: false,
+    wanderTimer: 0, hitFlashMs: 0,
     isBoss: true, minionSpawnTimerMs: 0,
     reservedDamage: 0, // see createAlien's own comment
   };
@@ -761,8 +758,8 @@ export function createMotherAlienFish(x, y) {
 // without needing an exclusion at each of those sites.
 // wasteTimerMs starts one full interval in the red so the first Waste takes
 // 2x the interval to show up, per direct request.
-// risingToSurface: same slow ascent a hostile hatchling got when the egg
-// hatched inside the seabed city (see updateFriendlyAlien).
+// risingToSurface: a slow ascent when the egg hatched inside the seabed city
+// (see updateFriendlyAlien).
 export function createFriendlyAlien(x, y, risingToSurface) {
   const archetype = ALIEN_ARCHETYPES[0];
   return {
@@ -792,20 +789,11 @@ function findNearestFishWithin(entities, x, y, radius) {
 // Mirror of findNearestFishWithin, targeting living aliens instead — used by
 // updateFish for both the flee-bias (wander) and the coin-production-block/
 // gray-tint check.
-// `nowMs` excludes any alien still within its own spawnProtectionUntilMs
-// invulnerability window (Alien-Egg hatchlings only) — per direct spec, a
-// still-invulnerable alien has "no negative effects at all" on nearby fish,
-// and every one of updateFish's alienNearby-driven effects (the gray tint,
-// the coin-production block, the halved hunger/production-rate effects on
-// Suckerfish/Feeder Fish/Bio Fish/Generators) all derive from this one
-// search, so excluding it here is what makes all of those simultaneously
-// inert while true, with no separate check needed at each of those sites.
-function findNearestAlienWithin(entities, x, y, radius, nowMs) {
+function findNearestAlienWithin(entities, x, y, radius) {
   let best = null;
   let bestDistSq = radius * radius;
   for (const e of entities) {
     if (e.type !== 'alien' || e.hp <= 0) continue;
-    if (e.spawnProtectionUntilMs > nowMs) continue;
     const dx = e.x - x;
     const dy = e.y - y;
     const d = dx * dx + dy * dy;
@@ -927,26 +915,6 @@ function updateAlien(alien, state, dtMs) {
 
   if (alien.hitFlashMs > 0) alien.hitFlashMs = Math.max(0, alien.hitFlashMs - dtMs);
 
-  // Alien-Egg hatch: a freshly-hatched alien that started inside the seabed
-  // city rises straight up at a slow, fixed speed until it clears the
-  // surface, per direct spec ("have it slowly swim up... when it first
-  // spawns") — completely overrides wander/chase/eat/poop for as long as
-  // this is true, since the normal SEABED_FLOOR_Y clamp further down would
-  // otherwise snap it up to the boundary INSTANTLY the very first tick
-  // (fine for a wave-spawned alien, which is never placed below that line in
-  // the first place, but would defeat the whole point of a visible slow
-  // ascent here).
-  if (alien.risingToSurface) {
-    alien.vx = 0;
-    alien.vy = -ALIEN_EGG_RISE_SPEED;
-    alien.y += alien.vy * dt;
-    if (alien.y <= SEABED_FLOOR_Y) {
-      alien.y = SEABED_FLOOR_Y;
-      alien.risingToSurface = false;
-    }
-    return true;
-  }
-
   alien.wanderTimer -= dt;
   if (alien.wanderTimer <= 0) {
     alien.wanderTimer = ALIEN_WANDER_INTERVAL_MIN_S + Math.random() * (ALIEN_WANDER_INTERVAL_MAX_S - ALIEN_WANDER_INTERVAL_MIN_S);
@@ -1023,21 +991,12 @@ function updateAlien(alien, state, dtMs) {
     }
   }
 
-  // Per direct request ("make aliens not produce any waste at all") — aliens
-  // used to poop out a real Waste item every ALIEN_POOP_INTERVAL_MS (with a
-  // grace period right after an Alien-Egg hatch); that whole mechanic is
-  // gone now. `stillProtected` survives below — the fish-damage grace period
-  // a few lines down still needs it.
-  const stillProtected = alien.spawnProtectionUntilMs > state.level.elapsed;
-
   // Aliens can now hurt and kill fish, per direct request/bug report — at
   // most once per second (ALIEN_FISH_DAMAGE_INTERVAL_MS) to EVERY fish this
   // alien is currently touching, at a flat rate that climbs by tier
   // (alien.fishDamagePerSec, copied from its archetype — or
   // BOSS_FISH_DAMAGE_PER_SEC for the Mother Alien Fish — by
-  // createAlien/createMotherAlienFish). Same hatch-grace-period exemption as
-  // the poop timer above — a still-protected Alien-Egg hatchling doesn't
-  // attack yet either. This only ever mutates a fish's own hp; the actual
+  // createAlien/createMotherAlienFish). This only ever mutates a fish's own hp; the actual
   // removal (hp <= 0) is checked at the top of that fish's own updateFish
   // call, whether that lands later this same tick or the next one depending
   // on entities.filter's iteration order — never here.
@@ -1063,7 +1022,7 @@ function updateAlien(alien, state, dtMs) {
   // resets, giving "roughly once per second while touching" without ever
   // depending on a lucky coincidence between contact and an arbitrary clock.
   if (alien.fishDamageTimerMs > 0) alien.fishDamageTimerMs = Math.max(0, alien.fishDamageTimerMs - dtMs);
-  if (!stillProtected && alien.fishDamageTimerMs <= 0) {
+  if (alien.fishDamageTimerMs <= 0) {
     let dealtDamage = false;
     for (const entity of state.level.entities) {
       if (entity.type !== 'fish' || entity.hp <= 0 || entity.dying) continue; // a starved fish can still have hp > 0 while it's dying (see updateDyingFish) — already dead for gameplay purposes, so it's not a valid target either
@@ -2800,7 +2759,7 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
   // accumulation, halves how often the Feeder Fish/Bio Fish hybrids
   // produce Food/Bio-Sludge, and halves electricity production for every
   // Generator fish/hybrid — see each of those sites' own comments.
-  const nearbyAlien = findNearestAlienWithin(state.level.entities, fish.x, fish.y, ALIEN_AWARENESS_RADIUS, state.level.elapsed);
+  const nearbyAlien = findNearestAlienWithin(state.level.entities, fish.x, fish.y, ALIEN_AWARENESS_RADIUS);
   fish.alienNearby = !!(nearbyAlien && Math.hypot(nearbyAlien.x - fish.x, nearbyAlien.y - fish.y) <= ALIEN_INCOME_BLOCK_RADIUS);
   if (fish.capBlockedTintRemainingMs > 0) fish.capBlockedTintRemainingMs = Math.max(0, fish.capBlockedTintRemainingMs - dtMs);
 
@@ -3486,14 +3445,6 @@ function updateTurretProjectiles(state, dtMs) {
   state.level.turretProjectiles = state.level.turretProjectiles.filter((shot) => {
     const target = state.level.entities.find((e) => e.id === shot.targetId && e.type === 'alien' && e.hp > 0);
     if (!target) return false; // target already gone — fizzle, no damage, no error
-    // Defensive — Grid.js's own targeting search already excludes an
-    // invulnerable (Alien-Egg-hatch grace period) alien, so a shot should
-    // never actually be aimed at one in practice; still fizzle harmlessly
-    // rather than apply damage if it somehow is.
-    if (target.spawnProtectionUntilMs > state.level.elapsed) {
-      target.reservedDamage = Math.max(0, (target.reservedDamage || 0) - shot.damage); // release the reservation — this shot is never landing, see createAlien's own comment
-      return false;
-    }
     const dx = target.x - shot.x;
     const dy = target.y - shot.y;
     const dist = Math.hypot(dx, dy);

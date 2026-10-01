@@ -2619,11 +2619,7 @@ input.clickHandlers.push((sx, sy) => {
   // Checked first so it can't be shadowed by a build tool's own early-return
   // branches.
   for (const entity of state.level.entities) {
-    // spawnProtectionUntilMs: a freshly Alien-Egg-hatched alien is
-    // invulnerable to clicks too during its grace period — see
-    // Entities.js's updateAlienEgg/createAlien.
     if (entity.type !== 'alien' || entity.hp <= 0) continue;
-    if (entity.spawnProtectionUntilMs > state.level.elapsed) continue;
     if (Math.hypot(entity.x - world.x, entity.y - world.y) <= (entity.radius ?? ALIEN_RADIUS) * ALIEN_CLICK_RADIUS_MULTIPLIER) {
       entity.hp -= ALIEN_CLICK_DAMAGE;
       entity.lastDamageSource = 'click'; // turret_kills_25 achievement — see Entities.js's updateAlien death branch, checked only at the moment of an actual kill
@@ -3855,13 +3851,10 @@ function updateBossSequence(state, dtMs) {
 // tick is cheap and never restarts an in-flight crossfade.
 function updateBattleMusic(state) {
   // Per direct request ("make it so the battle music only plays during the
-  // alien waves, not when an alien egg hatches") — excludes a living alien
-  // with `hatchedFromEgg` true (Entities.js's updateAlienEgg is the only
-  // place that ever sets it) from counting toward battle music at all, so a
-  // single Alien-Egg-hatched alien wandering around (or waiting to be
-  // spliced into a Bio Fish) never triggers it on its own; only a genuine
-  // wave alien does.
-  const aliensAlive = state.level.entities.some((e) => e.type === 'alien' && !e.hatchedFromEgg);
+  // alien waves, not when an alien egg hatches") — an Alien-Egg-hatched
+  // friendly_alien is its own entity type, so only a genuine wave alien
+  // ever counts here.
+  const aliensAlive = state.level.entities.some((e) => e.type === 'alien');
   const msUntilNextWave = state.level.alienNextWaveAtMs - state.level.elapsed;
   const withinPreBattleWindow = !state.level.alienWaveActive && msUntilNextWave > 0 && msUntilNextWave <= ALIEN_MUSIC_BATTLE_LEAD_MS;
   setBattleMusicActive(aliensAlive || withinPreBattleWindow);
@@ -5536,18 +5529,6 @@ function render() {
     }
     const gazeAngle = nearestFish ? Math.atan2(nearestFish.y - alien.y, nearestFish.x - alien.x) : (facing > 0 ? 0 : Math.PI);
     drawAlienBody(ctx, pos.x, pos.y, radius, facing, color, gazeAngle, alien.spikes, alien.bodyWidthMul, alien.bodyHeightMul, alien.glow, alienBaseColor, alien.id);
-
-    // Alien-Egg hatch grace period — a soft pulsing shield ring, so a click
-    // or turret shot doing nothing to it doesn't read as broken.
-    if (alien.spawnProtectionUntilMs > state.level.elapsed) {
-      ctx.save();
-      ctx.strokeStyle = 'rgba(140, 220, 255, 0.7)';
-      ctx.lineWidth = Math.max(1, 2 * state.camera.zoom);
-      ctx.beginPath();
-      ctx.arc(pos.x, pos.y, baseRadius + 6 * state.camera.zoom, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-    }
 
     // Per direct spec ("when mother alien fish is on screen, have a
     // universal boss health bar at the top middle of the screen instead of

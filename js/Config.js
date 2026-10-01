@@ -957,21 +957,14 @@ export const ALIEN_EGG_RING_COLOR = '#7cff5a'; // the countdown-to-hatch progres
 // with a bounded lifetime, not a source of runaway item-count growth the way
 // alien_dna/waste bursts are.
 export const ALIEN_EGG_HATCH_MS = 30000;
-// The hatched alien's own grace period, per direct spec ("an invulnerability
-// buffer for 20 seconds... and 20 seconds of it not generating waste") —
-// both halves share this one duration (Entities.js's createAlien sets
-// alien.spawnProtectionUntilMs = elapsed + this, checked by every damage
-// site — main.js's click handler, Grid.js's turret targeting,
-// updateTurretProjectiles' impact — and by updateAlien's own poop timer).
-export const ALIEN_EGG_HATCH_INVULN_MS = 20000;
 // A hatched egg that started inside the seabed city (the Manufacturer that
 // laid it is a city building) can't just teleport into open water — aliens
 // are otherwise hard-clamped out of the city entirely (see updateAlien's own
 // SEABED_FLOOR_Y clamp). Per direct spec ("have it slowly swim up... when it
 // first spawns"), a freshly-hatched alien instead rises at this flat speed
 // (px/sec, deliberately slow/gentle) until it clears the seabed line, fully
-// overriding its normal wander/chase AI for that short window — see
-// updateAlien's own alien.risingToSurface branch.
+// overriding its normal wander AI for that short window — see
+// updateFriendlyAlien's own alien.risingToSurface branch.
 export const ALIEN_EGG_RISE_SPEED = 40;
 // Per direct request, an Alien Egg now hatches into a harmless "friendly"
 // alien instead of a hostile Tier 1 (Entities.js's createFriendlyAlien/

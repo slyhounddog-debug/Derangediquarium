@@ -2693,12 +2693,7 @@ export function updateBuildings(state, dtMs) {
       let nearestAlien = null;
       let nearestDist = Infinity;
       for (const entity of state.level.entities) {
-        // spawnProtectionUntilMs: a freshly Alien-Egg-hatched alien is
-        // invulnerable for its first ALIEN_EGG_HATCH_INVULN_MS (see
-        // Entities.js's updateAlienEgg/createAlien) — turrets don't waste
-        // shots targeting something they can't hurt.
         if (entity.type !== 'alien' || entity.hp <= 0) continue;
-        if (entity.spawnProtectionUntilMs > state.level.elapsed) continue;
         // Per direct request — a target already covered by damage from
         // shots OTHER turrets (or this same one, an earlier cycle) already
         // have in flight isn't a valid target any more, so every turret
