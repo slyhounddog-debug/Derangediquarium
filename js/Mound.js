@@ -372,9 +372,12 @@ let crackGrowStartMs = -Infinity;
 
 // Per direct request ("slightly change the visuals of the mound so it stands
 // out as a clearly interactable object") — a softly pulsing gold rim along the
-// dome plus a small gold arrow bobbing above it. The arrow is baked once; the
-// rim is one polyline of the sprite's own outline arc, so this adds a couple
-// of draw calls per frame and nothing else.
+// dome (always on), plus a small gold arrow bobbing above it. Per a later
+// direct request, the arrow only shows while the gold pulse glow does (2x the
+// next purchase's cost banked — shouldPulseMound/shouldPulseScienceLab), and
+// the Science Lab gets it too. The arrow is baked once; the rim is one
+// polyline of the sprite's own outline arc, so this adds a couple of draw
+// calls per frame and nothing else.
 const RIM_PERIOD_MS = 2400;
 const ARROW_BOB_PERIOD_MS = 900;
 let moundArrowSprite = null;
@@ -397,7 +400,7 @@ function bakeMoundArrow() {
   c.stroke();
   return canvas;
 }
-function drawMoundInteractCue(ctx, state, topLeft, w) {
+function drawMoundRim(ctx, state, topLeft) {
   const { camera } = state;
   const zoom = camera.zoom;
   const t = state.level.elapsed;
@@ -422,11 +425,16 @@ function drawMoundInteractCue(ctx, state, topLeft, w) {
   ctx.lineWidth = Math.max(1, 1.6 * zoom);
   ctx.stroke();
   ctx.restore();
+}
 
+// The bobbing arrow, centered on screen x `cx`, sitting just above `topY` (the
+// top of the dome it points at).
+function drawInteractArrow(ctx, state, cx, topY) {
+  const zoom = state.camera.zoom;
   if (!moundArrowSprite) moundArrowSprite = bakeMoundArrow();
   const arrowSize = 22 * zoom;
-  const bob = Math.sin((t / ARROW_BOB_PERIOD_MS) * Math.PI * 2) * 4 * zoom;
-  ctx.drawImage(moundArrowSprite, topLeft.x + w / 2 - arrowSize / 2, topLeft.y - arrowSize - 6 * zoom + bob, arrowSize, arrowSize);
+  const bob = Math.sin((state.level.elapsed / ARROW_BOB_PERIOD_MS) * Math.PI * 2) * 4 * zoom;
+  ctx.drawImage(moundArrowSprite, cx - arrowSize / 2, topY - arrowSize - 6 * zoom + bob, arrowSize, arrowSize);
 }
 
 export function renderMound(ctx, state) {
@@ -445,12 +453,14 @@ export function renderMound(ctx, state) {
   const w = MOUND_WIDTH_PX * camera.zoom;
   const h = (MOUND_HEIGHT_PX + TILE_SIZE) * camera.zoom;
 
-  if (shouldPulseMound(state)) drawPulseGlow(ctx, topLeft.x + w / 2, topLeft.y + h / 2, w, h, state.level.elapsed);
+  const pulsing = shouldPulseMound(state);
+  if (pulsing) drawPulseGlow(ctx, topLeft.x + w / 2, topLeft.y + h / 2, w, h, state.level.elapsed);
 
   if (!moundSprite) moundSprite = bakeMoundSprite(MOUND_WIDTH_PX, MOUND_HEIGHT_PX + TILE_SIZE);
   const z = camera.zoom / moundSprite.scale;
   ctx.drawImage(moundSprite.canvas, topLeft.x - moundSprite.pad * camera.zoom, topLeft.y - moundSprite.pad * camera.zoom, moundSprite.canvas.width * z, moundSprite.canvas.height * z);
-  drawMoundInteractCue(ctx, state, topLeft, w);
+  drawMoundRim(ctx, state, topLeft);
+  if (pulsing) drawInteractArrow(ctx, state, topLeft.x + w / 2, topLeft.y);
 
   ctx.save();
   // Constrains EVERYTHING drawn until ctx.restore() below (the crack
@@ -642,7 +652,8 @@ export function renderScienceLab(ctx, state) {
   const h = (MOUND_HEIGHT_PX + TILE_SIZE) * camera.zoom;
   const cx = topLeft.x + w / 2;
 
-  if (shouldPulseScienceLab(state)) drawPulseGlow(ctx, cx, topLeft.y + h / 2, w, h, state.level.elapsed);
+  const pulsing = shouldPulseScienceLab(state);
+  if (pulsing) drawPulseGlow(ctx, cx, topLeft.y + h / 2, w, h, state.level.elapsed);
 
   // Same rubble-base-to-lab visual language the Mound uses, now as a baked
   // sprite in the boulders' own lit/rimmed style (SeabedArt.js's
@@ -667,6 +678,8 @@ export function renderScienceLab(ctx, state) {
   ctx.clip();
   drawShimmerSweep(ctx, updateShimmerTimer(labShimmer, state.level.elapsed), topLeft.x, topLeft.y, w, h);
   ctx.restore();
+
+  if (pulsing) drawInteractArrow(ctx, state, cx, baseY - domeRadius); // the glass dome's top, same anchor the clip above traces
 
   // The shattering Mound's pieces, over the Lab they're revealing — see startMoundShatter. The Mound sat 1 tile lower than the Lab does, hence the different anchor.
   if (shatter) renderMoundShatter(ctx, state, worldToScreen(MOUND_X - MOUND_WIDTH_PX / 2, SEABED_FLOOR_Y - MOUND_HEIGHT_PX - MOUND_LIFT_PX, camera));
