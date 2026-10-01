@@ -121,11 +121,20 @@ const LAB_MENU_TRANSITION_MS = 220; // must match #lab-modal's CSS transition du
 // click rather than a UI.js button handler.)
 const FOUND_THE_CHAT_MESSAGE = 'You found the chat, you curious little fish.';
 
+// Per direct request (empty-tank performance): updateHUD and friends run every
+// frame, and assigning textContent/title/disabled (or re-adding a class that's
+// already there) — even with the value it already has — still makes the browser
+// queue a layout/repaint for that element, ~20 of them per frame in an idle
+// tank. These only touch the DOM when the value actually changed.
+function setText(el, text) { if (el.textContent !== text) el.textContent = text; }
+function setHidden(el, hidden) { if (el.classList.contains('hidden') !== hidden) el.classList.toggle('hidden', hidden); }
+
 let els = null;
 let currentPreviewSpecies = null; // species currently shown in the in-panel preview, if any
 let currentPreviewBuilding = null; // building currently shown in the in-panel preview, if any — mutually exclusive with currentPreviewSpecies
 let lastMoney = null; // previous frame's money, to detect gain vs spend for the flash animation
 let lastCleanliness = null; // previous frame's cleanliness, same purpose
+let lastCleanlinessColor = null; // last color actually written to the cleanliness readout — see setText's comment
 let lastScienceCapCount = null; // previous frame's live Science Bubble count, to detect a rise for the shake-red cue below
 let notificationLogExpanded = false;
 let lastRenderedNotificationCount = -1; // rebuild the log list only when it actually changes, not every frame
@@ -2794,7 +2803,7 @@ function updateToolbar(state) {
   // mergeable fish changing takes effect immediately, not just the next
   // time the tool happens to be picked.
   const mergeAvailable = isMergeToolAvailable(state);
-  els.toolMergeBtn.disabled = !mergeAvailable;
+  if (els.toolMergeBtn.disabled === mergeAvailable) els.toolMergeBtn.disabled = !mergeAvailable;
   // Merge deliberately does NOT auto-revert to Food the moment it becomes
   // unavailable — per direct request ("don't force the player off the tool
   // if they merge the last mergeable fish"). The button above still reads
@@ -2818,7 +2827,8 @@ function updateToolbar(state) {
   // this tool (see main.js's updateKeyDDelete), per direct request
   // ("Remove the demolish tool... have it built into the food cursor tool
   // via the D hotkey").
-  els.toolFoodBtn.title = `Food — $${FOOD_COST} (1) — hover a building and press D (or hold D and drag) to delete it for a full refund`;
+  const foodTitle = `Food — $${FOOD_COST} (1) — hover a building and press D (or hold D and drag) to delete it for a full refund`;
+  if (els.toolFoodBtn.title !== foodTitle) els.toolFoodBtn.title = foodTitle;
 
   for (const btn of els.buildToolGrid.children) {
     btn.classList.toggle('selected', state.ui.selectedTool === btn.dataset.tool);
@@ -4671,15 +4681,16 @@ export function updateHUD(state) {
   // times, including while either panel is open.
   const money = state.level.money;
   const moneyText = `💰 $${Math.floor(money)}`;
-  els.money.textContent = moneyText;
+  setText(els.money, moneyText);
   // Per direct request, the Shop panel gets its own live money readout back
   // — the one exception to "the main #hud is the only copy of everything"
   // above — inline with the "Shop" title (see style.css's #shop-header-row).
-  els.shopMoney.textContent = moneyText;
+  setText(els.shopMoney, moneyText);
   const cleanliness = state.level.cleanliness;
   const cleanlinessText = `✨ ${Math.round(cleanliness)}%`;
-  els.cleanliness.textContent = cleanlinessText;
-  els.cleanliness.style.color = cleanlinessColor(cleanliness);
+  setText(els.cleanliness, cleanlinessText);
+  const cleanlinessCol = cleanlinessColor(cleanliness);
+  if (cleanlinessCol !== lastCleanlinessColor) { lastCleanlinessColor = cleanlinessCol; els.cleanliness.style.color = cleanlinessCol; } // cached copy, since reading style.color back returns the browser-normalized form
   // Same cross-module-flag pattern — see main.js's state.ui declaration for
   // why Grid.js can't call advanceTutorialFlow directly. Calling both is
   // safe: each is a no-op unless that exact flow/step is the one currently
@@ -4876,7 +4887,7 @@ export function updateHUD(state) {
   } else if (state.ui.selectedTool.startsWith('fish:')) {
     buildLegendText = `Cost: $${getFishPurchaseCost(state, state.ui.selectedTool.slice('fish:'.length))}`;
   }
-  els.buildLegend.textContent = buildLegendText;
+  setText(els.buildLegend, buildLegendText);
   els.buildLegend.classList.toggle('hidden', !buildLegendVisible);
   els.buildReplaceLegend.classList.toggle('hidden', !(buildLegendVisible && showReplaceLabel));
   // Ctrl + Click: Snap Placement's own hint pill, per direct request ("add
@@ -4962,12 +4973,12 @@ export function updateHUD(state) {
   // switch from 'Close Menu' to 'Pause Menu'") — mirrors main.js's own
   // Escape handler condition exactly (labMenuOpen is this same module's own
   // transient, no cross-module flag needed).
-  els.hotkeyLegendEsc.textContent = `Esc: ${(labMenuOpen || !state.ui.shopCollapsed || !state.ui.tankPanelCollapsed) ? 'Close Menu' : 'Pause Menu'}`;
+  setText(els.hotkeyLegendEsc, `Esc: ${(labMenuOpen || !state.ui.shopCollapsed || !state.ui.tankPanelCollapsed) ? 'Close Menu' : 'Pause Menu'}`);
   // Persistent E/Q hotkey reminder, bottom-left corner — per direct
   // request, always visible (unlike the two legends above), re-worded live
   // to match what each key actually does right now. `toolIsPurchasable` is
   // already computed above (a build:/fish: tool armed).
-  els.hotkeyLegendE.textContent = `E: ${state.ui.shopCollapsed ? 'Open Shop' : 'Close Shop'}`;
+  setText(els.hotkeyLegendE, `E: ${state.ui.shopCollapsed ? 'Open Shop' : 'Close Shop'}`);
   // Q is a genuine toggle, per direct request — Clear Cursor while ANY tool
   // is already armed ("something is being held" — build:/fish:, but also
   // Merge/Blueprint/Food per a later direct follow-up, not just
@@ -4977,14 +4988,14 @@ export function updateHUD(state) {
   // over both — main.js's KeyQ handler checks it first too (see that
   // handler's own comment) — via state.ui.blueprintClipboardActive, written
   // fresh every render() frame.
-  els.hotkeyLegendQ.textContent = state.ui.blueprintClipboardActive
+  setText(els.hotkeyLegendQ, state.ui.blueprintClipboardActive
     ? 'Q: Clear Blueprint'
-    : (state.ui.selectedTool !== 'cursor' ? 'Q: Clear Cursor' : 'Q: Pipette/ Last-used Tool');
+    : (state.ui.selectedTool !== 'cursor' ? 'Q: Clear Cursor' : 'Q: Pipette/ Last-used Tool'));
   // Ctrl+Z — shown only while there's actually something to undo (main.js
   // writes state.ui.undoAvailable/undoLabel every time its own undo stack
   // changes — see that file's pushUndoEntry/performUndo).
   els.hotkeyLegendUndo.classList.toggle('hidden', !state.ui.undoAvailable);
-  if (state.ui.undoAvailable) els.hotkeyLegendUndo.textContent = `Ctrl+Z: ${state.ui.undoLabel}`;
+  if (state.ui.undoAvailable) setText(els.hotkeyLegendUndo, `Ctrl+Z: ${state.ui.undoLabel}`);
   // The SEPARATE "(Esc) to skip tutorial" hint (#tutorial-skip-legend) is
   // untouched by the Esc line above — that's still real, distinct Escape
   // behavior during a guided tutorial (and the two never show at once, see
@@ -5123,8 +5134,8 @@ function updateScrollHint(state) {
     (state.level.elapsed >= SCROLL_HINT_DELAY_MS && !state.level.tutorialFlags.hasScrolledDown && somethingInCity);
   els.scrollHint.classList.toggle('hidden', !shouldShow);
   const pointUp = !forcedByPostAlienScrollStep && autoScrollDirection === 'up';
-  els.scrollHintText.textContent = pointUp ? 'Scroll up' : 'Scroll down';
-  for (const arrow of els.scrollHintArrows) arrow.textContent = pointUp ? '⬆️' : '⬇️';
+  setText(els.scrollHintText, pointUp ? 'Scroll up' : 'Scroll down');
+  for (const arrow of els.scrollHintArrows) setText(arrow, pointUp ? '⬆️' : '⬇️');
 }
 
 // ---- Guided tutorial flows ----
@@ -5515,8 +5526,8 @@ export function tutorialScrollDirectionNeeded(state) {
 function updateTutorialOverlay(state) {
   const flow = state.level.tutorialFlow;
   if (!flow) {
-    els.tutorialOverlay.classList.add('hidden');
-    els.tutorialText.classList.add('hidden');
+    setHidden(els.tutorialOverlay, true);
+    setHidden(els.tutorialText, true);
     return;
   }
   const stepDef = TUTORIAL_FLOWS[flow.id].find((s) => s.id === flow.step);
@@ -5596,7 +5607,7 @@ function updateAlienCountdown(state) {
     els.alienCountdownWave.textContent = String(state.level.alienWavesSpawned + 1);
     els.alienCountdownSeconds.textContent = String(Math.ceil(msRemaining / 1000));
   } else {
-    els.alienCountdown.classList.add('hidden');
+    setHidden(els.alienCountdown, true);
   }
 }
 
@@ -5609,7 +5620,7 @@ export function updateBossHealthBar(state) {
   const boss = state.level.bossEntityId === null
     ? null
     : state.level.entities.find((e) => e.id === state.level.bossEntityId && e.type === 'alien' && e.hp > 0);
-  if (!boss) { els.bossHealthBarWrap.classList.add('hidden'); return; }
+  if (!boss) { setHidden(els.bossHealthBarWrap, true); return; }
   els.bossHealthBarWrap.classList.remove('hidden');
   const frac = Math.max(0, Math.min(1, boss.hp / boss.maxHp));
   els.bossHealthBarFill.style.width = `${frac * 100}%`;
@@ -5684,7 +5695,7 @@ export function updateDebugOverlay(state, stats) {
 export function updateNotificationTicker(state) {
   const notifications = state.level.notifications;
   const latest = notifications[notifications.length - 1];
-  els.notificationLatest.textContent = latest ? latest.text : 'Welcome to the tank.';
+  setText(els.notificationLatest, latest ? latest.text : 'Welcome to the tank.');
 
   // Bounce + shimmer the pill on every genuinely NEW message — per direct
   // request. lastPillNotificationCount starts null so the level's opening

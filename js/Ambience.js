@@ -703,31 +703,50 @@ function randomSeaUrchin() {
 const seaUrchins = [];
 for (let i = 0; i < SEA_URCHIN_COUNT; i++) seaUrchins.push(randomSeaUrchin());
 
-function drawOneSeaUrchin(ctx, camera, canvasWidth, u, floorY = SEABED_FLOOR_Y) {
-  const screen = worldToScreen(u.x, floorY, camera);
-  const r = u.radius * camera.zoom;
-  if (screen.x < -r * 4 || screen.x > canvasWidth + r * 4) return;
-  ctx.save();
-  const bob = Math.sin(elapsed * u.bobFreq + u.bobPhase) * u.bobAmp * camera.zoom;
-  const cy = screen.y - r * 0.6 - Math.abs(bob);
-  ctx.strokeStyle = `hsl(${u.hue}, 45%, 22%)`;
-  ctx.lineWidth = Math.max(1, camera.zoom);
+// Per direct request (empty-tank performance), the spikes + body are baked once
+// into a sprite (the urchin itself never changes shape — only the bob below
+// moves it vertically), so each frame is a single drawImage instead of ~10
+// strokes. Visual-only; no physics involved.
+const SEA_URCHIN_SPRITE_SCALE = 2;
+function bakeSeaUrchinSprite(u) {
+  const scale = SEA_URCHIN_SPRITE_SCALE;
+  const r = u.radius;
+  const reach = r * 2.2 + 3;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = Math.ceil(reach * 2 * scale);
+  const sctx = canvas.getContext('2d');
+  sctx.scale(scale, scale);
+  sctx.translate(reach, reach);
+  sctx.strokeStyle = `hsl(${u.hue}, 45%, 22%)`;
+  sctx.lineWidth = 1;
   for (let i = 0; i < u.spikeCount; i++) {
     const angle = (i / u.spikeCount) * Math.PI * 2;
     // Spikes only fan out through the upper half-ish (never straight down
     // into the floor) — a real urchin's spines don't grow into the rock
     // it's sitting on.
     if (Math.sin(angle) > 0.7) continue;
-    ctx.beginPath();
-    ctx.moveTo(screen.x, cy);
-    ctx.lineTo(screen.x + Math.cos(angle) * r * 2.2, cy + Math.sin(angle) * r * 2.2);
-    ctx.stroke();
+    sctx.beginPath();
+    sctx.moveTo(0, 0);
+    sctx.lineTo(Math.cos(angle) * r * 2.2, Math.sin(angle) * r * 2.2);
+    sctx.stroke();
   }
-  ctx.fillStyle = `hsl(${u.hue}, 40%, 16%)`;
-  ctx.beginPath();
-  ctx.arc(screen.x, cy, r, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.restore();
+  sctx.fillStyle = `hsl(${u.hue}, 40%, 16%)`;
+  sctx.beginPath();
+  sctx.arc(0, 0, r, 0, Math.PI * 2);
+  sctx.fill();
+  return { canvas, scale, anchor: reach * scale };
+}
+
+function drawOneSeaUrchin(ctx, camera, canvasWidth, u, floorY = SEABED_FLOOR_Y) {
+  const screen = worldToScreen(u.x, floorY, camera);
+  const r = u.radius * camera.zoom;
+  if (screen.x < -r * 4 || screen.x > canvasWidth + r * 4) return;
+  if (!u.sprite) u.sprite = bakeSeaUrchinSprite(u);
+  const sp = u.sprite;
+  const z = camera.zoom / sp.scale;
+  const bob = Math.sin(elapsed * u.bobFreq + u.bobPhase) * u.bobAmp * camera.zoom;
+  const cy = screen.y - r * 0.6 - Math.abs(bob);
+  ctx.drawImage(sp.canvas, screen.x - sp.anchor * z, cy - sp.anchor * z, sp.canvas.width * z, sp.canvas.height * z);
 }
 
 // ---- Coral ----
@@ -778,31 +797,34 @@ for (let i = 0; i < CORAL_COUNT; i++) corals.push(randomCoral());
 // overlapping branches merge instead of each rim cutting into its neighbour),
 // a highlight down each branch's upper-left side, and a few grain specks.
 // Sway math, branch geometry and sizes are unchanged.
-function drawOneCoral(ctx, camera, canvasWidth, c, floorY = SEABED_FLOOR_Y) {
-  const screen = worldToScreen(c.x, floorY, camera);
-  const size = c.size * camera.zoom;
-  if (screen.x < -size * 2 || screen.x > canvasWidth + size * 2) return;
-  if (!c.baseSprite) c.baseSprite = bakeCoralBaseSprite(c.size * 0.3, c.hue);
-  const sp = c.baseSprite;
-  const z = camera.zoom / sp.scale;
-  ctx.drawImage(sp.canvas, screen.x - sp.anchorX * z, screen.y - sp.ry * 0.35 * camera.zoom - sp.anchorY * z, sp.canvas.width * z, sp.canvas.height * z);
+//
+// Per direct request (empty-tank performance — the ~770 canvas ops/frame the
+// live limbs cost were the single biggest item in an empty tank), the limbs
+// are baked ONCE into a sprite at sway 0 (drawCoralLimbs, the same drawing code
+// as before) and each frame the sprite is just rotated about the coral's root
+// by the current sway angle — every limb starts at that one root point and
+// sways by the same angle, so this is the same motion. Visual-only: nothing
+// here touches physics/collision. The one visible difference is that each
+// limb's upper-left highlight side is decided at the baked angle rather than
+// re-flipping mid-sway.
+const CORAL_SPRITE_SCALE = 2;
+function drawCoralLimbs(ctx, c, ox, oy, zoom, sway) {
   ctx.save();
   ctx.lineCap = 'round';
-  const sway = Math.sin(elapsed * c.swayFreq + c.swayPhase) * c.swayAmp;
-  const rimPx = Math.max(1, 1.3 * camera.zoom);
+  const rimPx = Math.max(1, 1.3 * zoom);
   const limbs = c.branches.map((br) => {
     const angle = br.angle + sway;
-    const len = br.length * camera.zoom;
-    const w = Math.max(1.5, br.width * camera.zoom);
+    const len = br.length * zoom;
+    const w = Math.max(1.5, br.width * zoom);
     if (!br.specks) br.specks = [0, 1].map(() => ({ t: 0.25 + Math.random() * 0.55, side: Math.random() * 2 - 1, light: Math.random() < 0.5 }));
-    return { br, angle, w, endX: screen.x + Math.cos(angle) * len, endY: screen.y + Math.sin(angle) * len, tipR: Math.max(1.5, br.width * 0.6 * camera.zoom) };
+    return { br, angle, w, endX: ox + Math.cos(angle) * len, endY: oy + Math.sin(angle) * len, tipR: Math.max(1.5, br.width * 0.6 * zoom) };
   });
   ctx.strokeStyle = `hsl(${c.hue}, 55%, 30%)`;
   ctx.fillStyle = `hsl(${c.hue}, 55%, 30%)`;
   for (const l of limbs) {
     ctx.lineWidth = l.w + rimPx * 2;
     ctx.beginPath();
-    ctx.moveTo(screen.x, screen.y);
+    ctx.moveTo(ox, oy);
     ctx.lineTo(l.endX, l.endY);
     ctx.stroke();
     ctx.beginPath();
@@ -813,7 +835,7 @@ function drawOneCoral(ctx, camera, canvasWidth, c, floorY = SEABED_FLOOR_Y) {
     ctx.strokeStyle = `hsl(${c.hue}, 60%, 55%)`;
     ctx.lineWidth = l.w;
     ctx.beginPath();
-    ctx.moveTo(screen.x, screen.y);
+    ctx.moveTo(ox, oy);
     ctx.lineTo(l.endX, l.endY);
     ctx.stroke();
     ctx.fillStyle = `hsl(${c.hue}, 65%, 62%)`;
@@ -826,7 +848,7 @@ function drawOneCoral(ctx, camera, canvasWidth, c, floorY = SEABED_FLOOR_Y) {
     ctx.strokeStyle = `hsla(${c.hue}, 75%, 80%, 0.6)`;
     ctx.lineWidth = Math.max(1, l.w * 0.28);
     ctx.beginPath();
-    ctx.moveTo(screen.x + nx * off, screen.y + ny * off);
+    ctx.moveTo(ox + nx * off, oy + ny * off);
     ctx.lineTo(l.endX + nx * off, l.endY + ny * off);
     ctx.stroke();
     ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
@@ -837,10 +859,47 @@ function drawOneCoral(ctx, camera, canvasWidth, c, floorY = SEABED_FLOOR_Y) {
       const t = sk.t;
       ctx.fillStyle = sk.light ? `hsla(${c.hue}, 75%, 82%, 0.55)` : `hsla(${c.hue}, 60%, 26%, 0.4)`;
       ctx.beginPath();
-      ctx.arc(screen.x + (l.endX - screen.x) * t + nx * sk.side * l.w * 0.22, screen.y + (l.endY - screen.y) * t + ny * sk.side * l.w * 0.22, Math.max(0.6, l.w * 0.11), 0, Math.PI * 2);
+      ctx.arc(ox + (l.endX - ox) * t + nx * sk.side * l.w * 0.22, oy + (l.endY - oy) * t + ny * sk.side * l.w * 0.22, Math.max(0.6, l.w * 0.11), 0, Math.PI * 2);
       ctx.fill();
     }
   }
+  ctx.restore();
+}
+
+// Square-ish canvas centred on the root so the sprite can be rotated about it
+// by any sway without clipping — the limbs only ever point upward, so the
+// bottom only needs a small pad for the root's round cap.
+function bakeCoralLimbsSprite(c) {
+  const scale = CORAL_SPRITE_SCALE;
+  const pad = 10;
+  let reach = 0;
+  for (const br of c.branches) reach = Math.max(reach, br.length);
+  const R = reach + pad;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.ceil(R * 2 * scale);
+  canvas.height = Math.ceil((R + pad) * scale);
+  const sctx = canvas.getContext('2d');
+  sctx.scale(scale, scale);
+  sctx.translate(R, R);
+  drawCoralLimbs(sctx, c, 0, 0, 1, 0);
+  return { canvas, scale, anchorX: R * scale, anchorY: R * scale };
+}
+
+function drawOneCoral(ctx, camera, canvasWidth, c, floorY = SEABED_FLOOR_Y) {
+  const screen = worldToScreen(c.x, floorY, camera);
+  const size = c.size * camera.zoom;
+  if (screen.x < -size * 2 || screen.x > canvasWidth + size * 2) return;
+  if (!c.baseSprite) c.baseSprite = bakeCoralBaseSprite(c.size * 0.3, c.hue);
+  const sp = c.baseSprite;
+  const z = camera.zoom / sp.scale;
+  ctx.drawImage(sp.canvas, screen.x - sp.anchorX * z, screen.y - sp.ry * 0.35 * camera.zoom - sp.anchorY * z, sp.canvas.width * z, sp.canvas.height * z);
+  if (!c.limbsSprite) c.limbsSprite = bakeCoralLimbsSprite(c);
+  const ls = c.limbsSprite;
+  const lz = camera.zoom / ls.scale;
+  ctx.save();
+  ctx.translate(screen.x, screen.y);
+  ctx.rotate(Math.sin(elapsed * c.swayFreq + c.swayPhase) * c.swayAmp);
+  ctx.drawImage(ls.canvas, -ls.anchorX * lz, -ls.anchorY * lz, ls.canvas.width * lz, ls.canvas.height * lz);
   ctx.restore();
 }
 
@@ -1081,14 +1140,23 @@ function updateCrabs(dt, list = crabs, targetArray = cursorBubbles, floorY = SEA
 // grain specks and a darker rim, and rimmed lit claws. The scuttle/leg-swing
 // animation, size and position are unchanged. Grain positions are fixed per
 // crab (c.specks, rolled lazily) so they ride the shell instead of shimmering.
-function drawOneCrab(ctx, camera, canvasWidth, c, floorY = SEABED_FLOOR_Y) {
-  const screen = worldToScreen(c.x, floorY, camera);
-  const size = c.size * camera.zoom;
-  if (screen.x < -size * 3 || screen.x > canvasWidth + size * 3) return;
+// Per direct request (empty-tank performance), each crab is drawn from a small
+// atlas of pre-baked leg-swing poses instead of ~30 canvas ops (3 gradients, a
+// clip) per crab per frame. The swing is a smooth sine, so it's quantized to
+// CRAB_POSE_STEPS steps either side of centre — a step is 0.04 rad, under
+// ~0.6px of leg-tip movement on the biggest crab, below what's visible — and
+// each pose is baked lazily the first time it's needed. The scuttle, size and
+// position are unchanged (position is applied at draw time, not baked).
+// Visual-only; nothing here touches physics.
+const CRAB_LEG_SWING_MAX = 0.4;
+const CRAB_POSE_STEPS = 10;
+const CRAB_SPRITE_SCALE = 2;
+function drawCrabPose(ctx, sx, sy, zoom, c, legSwing) {
+  const screen = { x: sx, y: sy };
+  const size = c.size * zoom;
   if (!c.specks) c.specks = Array.from({ length: 7 }, () => ({ u: Math.random() * 2 - 1, v: Math.random() * 2 - 1, r: 0.04 + Math.random() * 0.06, light: Math.random() < 0.5 }));
   ctx.save();
-  const legSwing = c.pauseTimer > 0 ? 0 : Math.sin(elapsed * c.legPhaseFreq) * 0.4;
-  const rim = Math.max(1, 0.9 * camera.zoom);
+  const rim = Math.max(1, 0.9 * zoom);
 
   ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
   ctx.beginPath();
@@ -1098,7 +1166,7 @@ function drawOneCrab(ctx, camera, canvasWidth, c, floorY = SEABED_FLOOR_Y) {
   ctx.lineCap = 'round';
   for (const pass of [0, 1]) { // dark rim pass under, lit leg color over
     ctx.strokeStyle = pass === 0 ? `hsl(${c.hue}, 55%, 22%)` : `hsl(${c.hue}, 55%, 38%)`;
-    ctx.lineWidth = Math.max(1, camera.zoom) + (pass === 0 ? rim : 0);
+    ctx.lineWidth = Math.max(1, zoom) + (pass === 0 ? rim : 0);
     for (let side = -1; side <= 1; side += 2) {
       for (let i = 0; i < 3; i++) {
         const legAngle = Math.PI * 0.22 * (i - 1) + legSwing * side;
@@ -1150,6 +1218,41 @@ function drawOneCrab(ctx, camera, canvasWidth, c, floorY = SEABED_FLOOR_Y) {
   ctx.ellipse(bx, by, size, size * 0.7, 0, 0, Math.PI * 2);
   ctx.stroke();
   ctx.restore();
+}
+
+function bakeCrabPoseAtlas(c) {
+  const scale = CRAB_SPRITE_SCALE;
+  const pad = 3;
+  const halfW = c.size * 1.9 + pad;
+  const above = c.size * 1.1 + pad;
+  const below = c.size * 1.0 + pad;
+  const cellW = Math.ceil(halfW * 2 * scale);
+  const cellH = Math.ceil((above + below) * scale);
+  const canvas = document.createElement('canvas');
+  canvas.width = cellW * (CRAB_POSE_STEPS * 2 + 1);
+  canvas.height = cellH;
+  return { canvas, ctx: canvas.getContext('2d'), cellW, cellH, scale, anchorX: halfW * scale, anchorY: above * scale, halfW, above, baked: [] };
+}
+
+function drawOneCrab(ctx, camera, canvasWidth, c, floorY = SEABED_FLOOR_Y) {
+  const screen = worldToScreen(c.x, floorY, camera);
+  const size = c.size * camera.zoom;
+  if (screen.x < -size * 3 || screen.x > canvasWidth + size * 3) return;
+  const legSwing = c.pauseTimer > 0 ? 0 : Math.sin(elapsed * c.legPhaseFreq) * CRAB_LEG_SWING_MAX;
+  const pose = Math.round((legSwing / CRAB_LEG_SWING_MAX) * CRAB_POSE_STEPS);
+  if (!c.poseAtlas) c.poseAtlas = bakeCrabPoseAtlas(c);
+  const at = c.poseAtlas;
+  const cell = pose + CRAB_POSE_STEPS;
+  if (!at.baked[cell]) {
+    at.baked[cell] = true;
+    at.ctx.save();
+    at.ctx.translate(cell * at.cellW, 0);
+    at.ctx.scale(at.scale, at.scale);
+    drawCrabPose(at.ctx, at.halfW, at.above, 1, c, (pose / CRAB_POSE_STEPS) * CRAB_LEG_SWING_MAX);
+    at.ctx.restore();
+  }
+  const z = camera.zoom / at.scale;
+  ctx.drawImage(at.canvas, cell * at.cellW, 0, at.cellW, at.cellH, screen.x - at.anchorX * z, screen.y - at.anchorY * z, at.cellW * z, at.cellH * z);
 }
 
 // ---- Treasure Chest ----
@@ -1273,7 +1376,39 @@ function updateTreasureChest(dt, c = treasureChest, targetArray = cursorBubbles,
 // wood carry grain specks (c.specks, rolled once so they stay put), and a
 // contact shadow sits under the pile. The open/close animation, treasure
 // reveal, bubbles and dimensions are unchanged.
+// Per direct request (empty-tank performance), the CLOSED chest — which is its
+// state nearly all the time (see CHEST_WAIT_MIN_S/MAX_S) — is baked once into a
+// sprite instead of redrawing ~90 canvas ops every frame; the open/close
+// animation (lidT > 0) still draws live below, unchanged. Visual-only.
+const CHEST_SPRITE_SCALE = 2;
+function bakeClosedChestSprite(c) {
+  const scale = CHEST_SPRITE_SCALE;
+  const pad = 4;
+  const halfW = c.size * 1.35 + pad; // sand pile (2.4 * size wide) plus its shadow/rim
+  const above = c.size * 1.8 + pad; // pile + body + closed lid
+  const below = c.size * 0.3 + pad;
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.ceil(halfW * 2 * scale);
+  canvas.height = Math.ceil((above + below) * scale);
+  const sctx = canvas.getContext('2d');
+  sctx.scale(scale, scale);
+  // A 1:1 camera that lands the chest's own floor point at (halfW, above).
+  drawTreasureChestLive(sctx, { x: c.x - halfW, y: SEABED_FLOOR_Y - above, zoom: 1 }, Infinity, c, SEABED_FLOOR_Y);
+  return { canvas, scale, anchorX: halfW * scale, anchorY: above * scale };
+}
+
 function drawOneTreasureChest(ctx, camera, canvasWidth, c, floorY = SEABED_FLOOR_Y) {
+  if (c.lidT > 0) { drawTreasureChestLive(ctx, camera, canvasWidth, c, floorY); return; }
+  const screen = worldToScreen(c.x, floorY, camera);
+  const size = c.size * camera.zoom;
+  if (screen.x < -size * 3 || screen.x > canvasWidth + size * 3) return;
+  if (!c.closedSprite) c.closedSprite = bakeClosedChestSprite(c);
+  const sp = c.closedSprite;
+  const z = camera.zoom / sp.scale;
+  ctx.drawImage(sp.canvas, screen.x - sp.anchorX * z, screen.y - sp.anchorY * z, sp.canvas.width * z, sp.canvas.height * z);
+}
+
+function drawTreasureChestLive(ctx, camera, canvasWidth, c, floorY = SEABED_FLOOR_Y) {
   const screen = worldToScreen(c.x, floorY, camera);
   const size = c.size * camera.zoom;
   if (screen.x < -size * 3 || screen.x > canvasWidth + size * 3) return;
