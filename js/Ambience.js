@@ -1008,14 +1008,38 @@ const CRAB_COUNT = 8; // was 5 — +50% (7.5, rounded up) per direct request
 // when they are moving") — timer range a moving crab waits between bubbles.
 const CRAB_BUBBLE_MIN_S = 2;
 const CRAB_BUBBLE_MAX_S = 5;
+// Per direct request ("more variation in their scuttling... 4x the width"):
+// a crab's roam zone is 4x what it used to be (60-160px either side of home,
+// now 240-640px, clamped to the tank walls), and instead of oscillating
+// edge-to-edge each scuttle runs to a freshly picked random point in that
+// zone, at least CRAB_MIN_SCUTTLE_FRACTION of the zone's full width away. So
+// a crab can end up anywhere in its zone with no fixed route. Cheap by
+// design: the target is rolled once per scuttle (on arrival), so the
+// per-step cost is still one add and one compare per crab.
+const CRAB_ROAM_RANGE_MULTIPLIER = 4;
+const CRAB_MIN_SCUTTLE_FRACTION = 0.15;
+function pickCrabTarget(c) {
+  const room = (dir) => (dir > 0 ? c.maxX - c.x : c.x - c.minX);
+  let dir = Math.random() < 0.5 ? 1 : -1;
+  // The zone is at least 2x the minimum scuttle wide, so if one side is too
+  // cramped for a minimum-length scuttle the other side always has room.
+  if (room(dir) < c.minScuttle) dir = -dir;
+  c.dir = dir;
+  c.targetX = c.x + dir * (c.minScuttle + Math.random() * (room(dir) - c.minScuttle));
+}
 function randomCrab() {
   const homeX = Math.random() * WORLD_W;
+  const range = (60 + Math.random() * 100) * CRAB_ROAM_RANGE_MULTIPLIER;
   const depth = Math.random() < 0.75 ? 55 + Math.random() * 20 : 44 + Math.random() * 10;
-  return {
+  const minX = Math.max(0, homeX - range);
+  const maxX = Math.min(WORLD_W, homeX + range);
+  const crab = {
     x: homeX,
-    homeX,
-    range: 60 + Math.random() * 100,
-    dir: Math.random() < 0.5 ? 1 : -1,
+    minX,
+    maxX,
+    minScuttle: (maxX - minX) * CRAB_MIN_SCUTTLE_FRACTION,
+    targetX: homeX,
+    dir: 1,
     speed: 10 + Math.random() * 14,
     size: 8 + Math.random() * 7.4, // max was 14 (8 + rand*6), +10% to 15.4 per direct request — min untouched
     legPhaseFreq: 6 + Math.random() * 3,
@@ -1024,6 +1048,8 @@ function randomCrab() {
     bubbleTimer: CRAB_BUBBLE_MIN_S + Math.random() * (CRAB_BUBBLE_MAX_S - CRAB_BUBBLE_MIN_S),
     depth,
   };
+  pickCrabTarget(crab);
+  return crab;
 }
 const crabs = [];
 for (let i = 0; i < CRAB_COUNT; i++) crabs.push(randomCrab());
@@ -1121,9 +1147,10 @@ function updateCrabs(dt, list = crabs, targetArray = cursorBubbles, floorY = SEA
       continue;
     }
     c.x += c.speed * c.dir * dt;
-    if (Math.abs(c.x - c.homeX) > c.range) {
-      c.dir *= -1;
+    if ((c.x - c.targetX) * c.dir >= 0) {
+      c.x = c.targetX;
       c.pauseTimer = 0.4 + Math.random() * 1.2;
+      pickCrabTarget(c);
     }
     // Only bubbles while actually moving (i.e. not during the pause above).
     c.bubbleTimer -= dt;

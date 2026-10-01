@@ -108,7 +108,7 @@ import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
 import { playUpgrade, setMusicVolume, setSfxVolume, getMusicVolume, getSfxVolume, playPanelOpen, playPanelClose, playInsufficientFunds, setMusicUnderwaterMuffle, setMusicSpeedBoost, setMusicPaused } from './Sound.js';
-import { hasSaveGame, saveGame, loadSaveGame } from './Save.js';
+import { hasSaveGame, saveGame, loadSaveGame, isGuidedTutorialsEnabled, setGuidedTutorialsEnabled } from './Save.js';
 import { pushGameNotification } from './Notifications.js';
 
 const MOUND_MENU_GAP_PX = 12; // screen px of breathing room between the popup's bottom edge and the Mound's top edge
@@ -417,6 +417,7 @@ export function initUI(state) {
     pauseSettingsBackBtn: document.getElementById('pause-settings-back-btn'),
     musicVolumeSlider: document.getElementById('music-volume-slider'),
     sfxVolumeSlider: document.getElementById('sfx-volume-slider'),
+    guidedTutorialToggle: document.getElementById('guided-tutorial-toggle'),
     debugOverlay: document.getElementById('debug-overlay'),
     debugLines: document.getElementById('debug-lines'),
     notificationLatest: document.getElementById('notification-latest'),
@@ -728,6 +729,9 @@ export function initUI(state) {
   els.sfxVolumeSlider.value = String(Math.round(getSfxVolume() * 100));
   els.musicVolumeSlider.addEventListener('input', () => setMusicVolume(Number(els.musicVolumeSlider.value) / 100));
   els.sfxVolumeSlider.addEventListener('input', () => setSfxVolume(Number(els.sfxVolumeSlider.value) / 100));
+  // Per direct request — persisted across sessions by Save.js (main.js's
+  // applyGuidedTutorialPreference is what actually enforces it).
+  els.guidedTutorialToggle.addEventListener('change', () => setGuidedTutorialsEnabled(els.guidedTutorialToggle.checked));
 
   // Belt-and-suspenders alongside the defensive strip in updateShopCollapse:
   // clean up the flash class as soon as the animation actually finishes, so
@@ -2493,6 +2497,7 @@ function showPauseSettings() {
   els.pauseMain.classList.add('hidden');
   els.pauseSettings.classList.remove('hidden');
   els.pauseLoadSaveBtn.disabled = !hasSaveGame(); // re-checked every open — a save could exist now that didn't the last time this was shown
+  els.guidedTutorialToggle.checked = isGuidedTutorialsEnabled(); // re-synced every open — Save.js can switch it off by itself once every tutorial has been seen
 }
 
 // True for exactly as long as the pause overlay's Settings sub-view is

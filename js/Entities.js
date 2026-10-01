@@ -181,8 +181,8 @@ import {
   SCIENCE_ALIEN_DNA_INTERVAL_MS,
   ALIEN_EGG_RADIUS,
   ALIEN_EGG_HATCH_MS,
-  ALIEN_EGG_HATCH_INVULN_MS,
   ALIEN_EGG_RISE_SPEED,
+  FRIENDLY_ALIEN_WASTE_INTERVAL_MS,
   ALIEN_MAX_ALIVE,
   BOSS_HP_MULTIPLIER,
   BOSS_RADIUS,
@@ -752,6 +752,27 @@ export function createMotherAlienFish(x, y) {
   };
 }
 
+// What an Alien Egg hatches into, per direct request — a harmless, unshootable
+// "friendly" alien that just swims around forever (no food, no waste of its
+// own to clean up, no fish damage) until it's spliced into a Bio Fish, and
+// spits out Waste on a timer as a source for the player. Its own entity type
+// rather than a flagged 'alien' so every hostile-alien scan (turret targeting,
+// click damage, wave caps, the fish income block, battle music) skips it
+// without needing an exclusion at each of those sites.
+// wasteTimerMs starts one full interval in the red so the first Waste takes
+// 2x the interval to show up, per direct request.
+// risingToSurface: same slow ascent a hostile hatchling got when the egg
+// hatched inside the seabed city (see updateFriendlyAlien).
+export function createFriendlyAlien(x, y, risingToSurface) {
+  const archetype = ALIEN_ARCHETYPES[0];
+  return {
+    id: nextId(), type: 'friendly_alien', x, y, vx: 0, vy: 0,
+    speed: archetype.speed, radius: archetype.radius,
+    bodyWidthMul: archetype.bodyWidthMul, bodyHeightMul: archetype.bodyHeightMul,
+    wanderTimer: 0, wasteTimerMs: -FRIENDLY_ALIEN_WASTE_INTERVAL_MS, risingToSurface,
+  };
+}
+
 // Same idea as findNearestFood/findNearestWaste, but scoped to a max radius
 // (aliens shouldn't "sense" a fish clear across the tank) and targeting
 // live fish entities instead of items.
@@ -1057,6 +1078,45 @@ function updateAlien(alien, state, dtMs) {
     if (dealtDamage) alien.fishDamageTimerMs = ALIEN_FISH_DAMAGE_INTERVAL_MS;
   }
 
+  return true;
+}
+
+// A friendly (Alien-Egg-hatched) alien's whole life: wander at random, and
+// spit a Waste every FRIENDLY_ALIEN_WASTE_INTERVAL_MS. Deliberately no
+// chasing, eating, damage or hp — see createFriendlyAlien. Same wander
+// cadence/clamps as updateAlien so it moves like a Tier 1.
+function updateFriendlyAlien(alien, state, dtMs) {
+  const dt = dtMs / 1000;
+  alien.wasteTimerMs += dtMs;
+  if (alien.wasteTimerMs >= FRIENDLY_ALIEN_WASTE_INTERVAL_MS) {
+    alien.wasteTimerMs -= FRIENDLY_ALIEN_WASTE_INTERVAL_MS;
+    if (canSpawnMoreWaste(state)) state.level.items.push(createWaste(alien.x, alien.y));
+  }
+
+  if (alien.risingToSurface) {
+    alien.vx = 0;
+    alien.vy = -ALIEN_EGG_RISE_SPEED;
+    alien.y += alien.vy * dt;
+    if (alien.y <= SEABED_FLOOR_Y) {
+      alien.y = SEABED_FLOOR_Y;
+      alien.risingToSurface = false;
+    }
+    return true;
+  }
+
+  alien.wanderTimer -= dt;
+  if (alien.wanderTimer <= 0) {
+    alien.wanderTimer = ALIEN_WANDER_INTERVAL_MIN_S + Math.random() * (ALIEN_WANDER_INTERVAL_MAX_S - ALIEN_WANDER_INTERVAL_MIN_S);
+    const angle = Math.random() * Math.PI * 2;
+    alien.vx = Math.cos(angle) * alien.speed;
+    alien.vy = Math.sin(angle) * alien.speed * FISH_VERTICAL_DAMPING;
+  }
+  alien.x += alien.vx * dt;
+  alien.y += alien.vy * dt;
+  if (alien.x < FISH_MIN_X) { alien.x = FISH_MIN_X; alien.vx = Math.abs(alien.vx); }
+  if (alien.x > FISH_MAX_X) { alien.x = FISH_MAX_X; alien.vx = -Math.abs(alien.vx); }
+  if (alien.y < ALIEN_SPAWN_MIN_Y) { alien.y = ALIEN_SPAWN_MIN_Y; alien.vy = Math.abs(alien.vy); }
+  if (alien.y > SEABED_FLOOR_Y) { alien.y = SEABED_FLOOR_Y; alien.vy = -Math.abs(alien.vy); }
   return true;
 }
 
@@ -1858,7 +1918,7 @@ export function spliceFish(state, utilityFish, targetFish) {
   return hybrid;
 }
 
-// ---- Bio Fish splice (Octopus + a Tier-1 Alien-Egg-hatched alien) ----
+// ---- Bio Fish splice (Octopus + an Alien-Egg-hatched friendly alien) ----
 // Per direct spec ("this fish is another hybrid of an Alien and an Octopus,
 // but only the tier 1 aliens spawned from alien eggs work for the hybrid...
 // you shouldn't be able to purchase it from the shop, it's strictly a
@@ -1874,12 +1934,10 @@ export function spliceFish(state, utilityFish, targetFish) {
 export function canSpliceOctopusWithAlien(state, octopusFish, alien) {
   if (!octopusFish || !alien) return false;
   if (!isSpliceSource(state, octopusFish) || octopusFish.speciesId !== 'octopus') return false;
-  if (alien.type !== 'alien' || alien.hp <= 0) return false;
   // "Only the tier 1 aliens spawned from alien eggs work for the hybrid" —
-  // an ordinary wave-spawned Tier 1 (same archetype, no hatchedFromEgg flag)
-  // does NOT qualify, only one that actually came from createAlienEgg's own
-  // hatch branch (see createAlien/updateAlienEgg).
-  if (alien.archetypeId !== 'alien_t1' || !alien.hatchedFromEgg) return false;
+  // an Alien Egg now hatches into a dedicated friendly_alien (see
+  // createFriendlyAlien), so a hostile wave alien never qualifies.
+  if (alien.type !== 'friendly_alien') return false;
   return state.meta.speciesUnlocked.includes('xeno_octopus');
 }
 
@@ -1935,7 +1993,7 @@ export function hasAnyMergeOpportunity(state) {
   for (const f of fish) {
     if (f.speciesId !== 'octopus') continue;
     for (const entity of state.level.entities) {
-      if (entity.type === 'alien' && canSpliceOctopusWithAlien(state, f, entity)) return true;
+      if (entity.type === 'friendly_alien' && canSpliceOctopusWithAlien(state, f, entity)) return true;
     }
   }
   return false;
@@ -2378,11 +2436,11 @@ function updateBiomass(item, state, dtMs) {
 // The Manufacturer's Alien Egg recipe output — see createAlienEgg. Falls/
 // routes/drags exactly like a coin (Class 3), but also counts up its own
 // hatchTimer every tick regardless of resting state; once it crosses
-// ALIEN_EGG_HATCH_MS it hatches into a real, live Tier-1 alien at its
-// current position instead of continuing as an item — spliced out of
-// state.level.items (return false) the same tick the alien is pushed into
-// state.level.entities. See Config.js's ALIEN_EGG_HATCH_MS/
-// _HATCH_INVULN_MS/_RISE_SPEED for the exact numbers/rationale.
+// ALIEN_EGG_HATCH_MS it hatches into a friendly alien (see
+// createFriendlyAlien) at its current position instead of continuing as an
+// item — spliced out of state.level.items (return false) the same tick the
+// alien is pushed into state.level.entities. See Config.js's
+// ALIEN_EGG_HATCH_MS/_RISE_SPEED for the exact numbers/rationale.
 function updateAlienEgg(item, state, dtMs) {
   const dt = dtMs / 1000;
   const physics = { gravity: GRAVITY, maxFallSpeed: MAX_FALL_SPEED };
@@ -2399,17 +2457,11 @@ function updateAlienEgg(item, state, dtMs) {
   }
   item.hatchTimer += dtMs;
   if (item.hatchTimer >= ALIEN_EGG_HATCH_MS) {
-    const archetype = ALIEN_ARCHETYPES[0]; // always a Tier 1 alien, per direct spec
-    const hp = Math.round(archetype.hpMin + Math.random() * (archetype.hpMax - archetype.hpMin));
-    const alien = createAlien(item.x, item.y, hp, archetype.id);
-    alien.spawnProtectionUntilMs = state.level.elapsed + ALIEN_EGG_HATCH_INVULN_MS;
-    alien.hatchedFromEgg = true; // per direct spec — only THIS specific alien (not an ordinary wave-spawned Tier 1) is ever eligible for the Bio Fish splice
     // Only needs to rise if it hatched while still inside the seabed city
     // (the Manufacturer that laid the egg is a city building) — an egg
     // dragged up into open water first just hatches there normally, no rise
     // needed.
-    alien.risingToSurface = item.y > SEABED_FLOOR_Y;
-    state.level.entities.push(alien);
+    state.level.entities.push(createFriendlyAlien(item.x, item.y, item.y > SEABED_FLOOR_Y));
     return false;
   }
   return true;
@@ -3850,6 +3902,7 @@ export function updateEntities(state, dtMs) {
   state.level.entities = state.level.entities.filter((entity) => {
     if (entity.type === 'fish') return fishAliensFrozenForTutorial || updateFish(entity, state, dtMs, anyAlienAlive);
     if (entity.type === 'alien') return fishAliensFrozenForTutorial || updateAlien(entity, state, dtMs);
+    if (entity.type === 'friendly_alien') return fishAliensFrozenForTutorial || updateFriendlyAlien(entity, state, dtMs);
     return true;
   });
   perfMark('e: fish + alien update');

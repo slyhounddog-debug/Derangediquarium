@@ -105,6 +105,7 @@ import {
   ALIEN_EGG_COLOR,
   ALIEN_EGG_RING_COLOR,
   ALIEN_EGG_HATCH_MS,
+  FRIENDLY_ALIEN_COLOR,
   BOSS_INTRO_MESSAGE_AT_MS,
   BOSS_INTRO_MESSAGE,
   BOSS_WHITE_FADE_IN_MS,
@@ -147,6 +148,7 @@ import {
 } from './Config.js';
 import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop } from './Engine.js';
 import { pushGameNotification } from './Notifications.js';
+import { isGuidedTutorialsEnabled, noteTutorialFlowStarted, noteTutorialFlowEnded } from './Save.js';
 import { loadLevel, LEVELS } from './Levels.js';
 import { updateStoryTriggers, updateAutosave } from './Systems.js';
 import { updateAmbience, renderAmbienceBehindLab, renderAmbienceFrontLab, spawnCursorBubbles, renderWaterSurface, spawnSeaTurtleBubble, renderBackgroundParallaxDecor, renderShadowFish, renderDecorMask } from './Ambience.js';
@@ -1466,13 +1468,13 @@ input.mouseUpHandlers.push((sx, sy) => {
       spliceFish(state, target, dragged);
     }
   } else if (dragged) {
-    // Bio Fish's own one-off splice target is an alien, not a fish —
+    // Bio Fish's own one-off splice target is a friendly alien, not a fish —
     // findFishAt (fish-only) never matches it, so this only runs as a
     // fallback once no fish target was found, reusing the same hit-test
     // radius the click-damage loop above already uses for aliens.
     let alienTarget = null;
     for (const entity of state.level.entities) {
-      if (entity.type !== 'alien' || entity.hp <= 0) continue;
+      if (entity.type !== 'friendly_alien') continue;
       if (Math.hypot(entity.x - world.x, entity.y - world.y) <= (entity.radius ?? ALIEN_RADIUS) * ALIEN_CLICK_RADIUS_MULTIPLIER) { alienTarget = entity; break; }
     }
     if (alienTarget && canSpliceOctopusWithAlien(state, dragged, alienTarget)) {
@@ -4221,7 +4223,7 @@ function drawAlienShadow(ctx, x, y, radius, bodyWidthMul, bodyHeightMul) {
 function renderFishShadowsOnDecor(ctx, state) {
   const casters = [];
   for (const e of state.level.entities) {
-    if (e.type !== 'fish' && !(e.type === 'alien' && e.hp > 0)) continue;
+    if (e.type !== 'fish' && !(e.type === 'alien' && e.hp > 0) && e.type !== 'friendly_alien') continue;
     const pos = worldToScreen(e.x, e.y, state.camera);
     if (pos.x < -60 || pos.x > canvas.width + 60 || pos.y < -60 || pos.y > canvas.height + 60) continue;
     casters.push({ e, pos });
@@ -4307,7 +4309,7 @@ function seededRandom(seed) {
 // nearest fish — see the render loop below) drives the single cyclops eye's
 // pupil, per direct request ("one eye like a cyclops... with a pupil that
 // looks at the closest fish"). `seed` (the alien's id) fixes its grain.
-function drawAlienBody(ctx, x, y, radius, facing, color, gazeAngle, spikes = 3, bodyWidthMul = 1, bodyHeightMul = 1, glow = false, glowHex = null, seed = 0) {
+function drawAlienBody(ctx, x, y, radius, facing, color, gazeAngle, spikes = 3, bodyWidthMul = 1, bodyHeightMul = 1, glow = false, glowHex = null, seed = 0, friendly = false) {
   ctx.save();
 
   const bodyRx = radius * 1.05 * bodyWidthMul;
@@ -4407,6 +4409,41 @@ function drawAlienBody(ctx, x, y, radius, facing, color, gazeAngle, spikes = 3, 
   ctx.ellipse(x, y, bodyRx, bodyRy, 0, 0, Math.PI * 2);
   ctx.stroke();
 
+  // Friendly (Alien-Egg-hatched) variant, per direct request — a smile and
+  // rosy cheeks under the eye below, plus a pair of bobble antennae in place
+  // of the dorsal spikes it's passed 0 of. Everything else (body, shading,
+  // tail, cyclops eye) is shared with the hostile look on purpose, so it
+  // reads as "a Tier 1, but nice."
+  if (friendly) {
+    ctx.strokeStyle = rimColor;
+    ctx.fillStyle = toneColor(color, -0.1);
+    ctx.lineWidth = rimWidth * 0.7;
+    ctx.lineCap = 'round';
+    for (const side of [-1, 1]) {
+      const ax = x + side * bodyRx * 0.4;
+      const ay = y - bodyRy * 1.0;
+      ctx.beginPath();
+      ctx.moveTo(ax, ay);
+      ctx.quadraticCurveTo(ax + side * radius * 0.1, ay - radius * 0.35, ax + side * radius * 0.28, ay - radius * 0.5);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(ax + side * radius * 0.28, ay - radius * 0.5, radius * 0.11, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.fillStyle = 'rgba(255, 130, 150, 0.45)';
+    for (const side of [-1, 1]) {
+      ctx.beginPath();
+      ctx.ellipse(x + side * bodyRx * 0.55, y + bodyRy * 0.2, radius * 0.16, radius * 0.1, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.strokeStyle = rimColor;
+    ctx.lineWidth = rimWidth * 0.8;
+    ctx.beginPath();
+    ctx.arc(x, y + bodyRy * 0.12, radius * 0.3, 0.2 * Math.PI, 0.8 * Math.PI);
+    ctx.stroke();
+  }
+
   // A single cyclops eye, centered where the two separate eyes used to sit
   // and bigger than either of them was — per direct request. A dark pupil
   // sits inside it, offset toward gazeAngle (the nearest fish, computed by
@@ -4415,7 +4452,7 @@ function drawAlienBody(ctx, x, y, radius, facing, color, gazeAngle, spikes = 3, 
   const eyeX = x;
   const eyeY = y - radius * 0.15;
   const eyeRadius = radius * 0.34;
-  ctx.fillStyle = '#ff5b5b';
+  ctx.fillStyle = friendly ? '#fffdf2' : '#ff5b5b';
   ctx.beginPath();
   ctx.arc(eyeX, eyeY, eyeRadius, 0, Math.PI * 2);
   ctx.fill();
@@ -4834,7 +4871,32 @@ function renderSeaTurtle(ctx, state, canvasWidth, canvasHeight) {
   for (const m of visibleMembers) drawOneSeaTurtleMember(ctx, m.x, m.y, m.r, m.bobAngle);
 }
 
+// Applies the Settings "Guided Tutorial" toggle (Save.js) to whichever flow
+// just started, and tells Save.js when a flow starts/ends so it can track
+// which tutorials the player has now encountered. Run from render() rather
+// than update() so a flow that a setTimeout/click handler/Systems.js trigger
+// set since the last frame is cleared before updateHUD ever draws its
+// overlay — update() alone would let it flash for a frame. A disabled flow
+// is cleared exactly like the Escape-to-skip handler does. Toggling the
+// setting off mid-flow ends the running one the same way.
+let lastTutorialFlow = null;
+function applyGuidedTutorialPreference(state) {
+  let flow = state.level.tutorialFlow;
+  if (flow && !isGuidedTutorialsEnabled()) {
+    state.level.tutorialFlow = null;
+    state.level.wasteDragTutorialTargetId = null;
+    state.level.mergeTutorialTargetIds = null;
+    flow = null;
+  }
+  if (flow === lastTutorialFlow) return;
+  const ended = lastTutorialFlow;
+  lastTutorialFlow = flow;
+  if (flow) noteTutorialFlowStarted(flow.id);
+  else if (ended) noteTutorialFlowEnded();
+}
+
 function render() {
+  applyGuidedTutorialPreference(state);
   if (state.ui.replaySplashPending) {
     state.ui.replaySplashPending = false;
     triggerSplash();
@@ -5519,6 +5581,16 @@ function render() {
       }
       ctx.restore();
     }
+  }
+
+  // Friendly (Alien-Egg-hatched) aliens — no hit flash, health bar or
+  // shield ring, they can't be hurt. See Entities.js's createFriendlyAlien.
+  for (const alien of state.level.entities) {
+    if (alien.type !== 'friendly_alien') continue;
+    const pos = worldToScreen(alien.x, alien.y, state.camera);
+    if (pos.x < -40 || pos.x > canvas.width + 40 || pos.y < -40 || pos.y > canvas.height + 40) continue;
+    const facing = alien.vx >= 0 ? 1 : -1;
+    drawAlienBody(ctx, pos.x, pos.y, alien.radius * state.camera.zoom, facing, FRIENDLY_ALIEN_COLOR, facing > 0 ? 0 : Math.PI, 0, alien.bodyWidthMul, alien.bodyHeightMul, false, null, alien.id, true);
   }
 
   perfMark('r: shadow pass + aliens', ctx);

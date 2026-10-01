@@ -973,6 +973,15 @@ export const ALIEN_EGG_HATCH_INVULN_MS = 20000;
 // overriding its normal wander/chase AI for that short window — see
 // updateAlien's own alien.risingToSurface branch.
 export const ALIEN_EGG_RISE_SPEED = 40;
+// Per direct request, an Alien Egg now hatches into a harmless "friendly"
+// alien instead of a hostile Tier 1 (Entities.js's createFriendlyAlien/
+// updateFriendlyAlien) — it can't be shot or clicked, never blocks fish
+// income, needs no food, and lives until it's spliced into a Bio Fish. Its
+// one other use is a Waste source: it spits one out every interval below,
+// with the very first timer skipped on spawn (the counter starts one
+// interval in the red), so the first Waste arrives after 2x this.
+export const FRIENDLY_ALIEN_COLOR = '#8fe3a2';
+export const FRIENDLY_ALIEN_WASTE_INTERVAL_MS = 12000;
 // Fish prioritize Mutagen Paste over standard Food when hungry, per direct
 // spec — Entities.js's findNearestFoodOrMutagen checks for ANY Mutagen
 // Paste in the tank first (not just a nearby one) and only falls back to
@@ -1642,12 +1651,12 @@ export const SPECIES = {
   // getHybridSpeciesId/createHybridFish fish+fish pipeline (an alien entity
   // has no speciesId/starTier for that pipeline to carry over), so this
   // field is never actually read by that reverse lookup in practice.
-  // Obtained by dragging a grown Science Octopus onto a living Tier 1 alien
-  // that specifically hatched from an Alien Egg (Entities.js's own
-  // hatchedFromEgg flag) — an ordinary wave-spawned Tier 1 does NOT qualify.
+  // Obtained by dragging a grown Science Octopus onto a friendly alien that
+  // hatched from an Alien Egg (Entities.js's 'friendly_alien' entity type) —
+  // a hostile wave alien can't be spliced.
   xeno_octopus: {
     id: 'xeno_octopus', name: 'Bio Fish', tier: 4, unlockPhase: 4, cost: 100, parents: ['octopus', 'alien_t1'], // renamed from 'Xeno Octopus' per direct request; id left alone, same precedent as eel_blimp's own rename
-    description: 'A hybrid of an Alien and a Science Octopus — not purchasable directly. Drag a grown Octopus onto a Tier 1 alien that hatched from an Alien Egg (an ordinary wave-spawned alien won\'t do) to splice them together. Right-click it to toggle Bio-Sludge mode (single-click opens its info instead) — while on, it brews and spits out Bio-Sludge every 8 seconds instead of Science Bubbles. Still needs to be fed like any other fish.',
+    description: 'A hybrid of an Alien and a Science Octopus — not purchasable directly. Drag a grown Octopus onto the friendly alien an Alien Egg hatches into (a hostile wave alien won\'t do) to splice them together. Right-click it to toggle Bio-Sludge mode (single-click opens its info instead) — while on, it brews and spits out Bio-Sludge every 8 seconds instead of Science Bubbles. Still needs to be fed like any other fish.',
     behavior: ['RESEARCHER'], dropType: 'science_blue',
     swimSpeed: 25, lifespan: 300000, hungerRate: 0.468,
     growthStages: [
@@ -2653,7 +2662,7 @@ export const SCIENCE_LAB_UPGRADES = {
   // that production chain rather than raw research depth. Feeder Fish
   // (Electric Eel × Suckerfish) is spliced like the hybrid above it (both
   // parents are real fish, via the standard getHybridSpeciesId pipeline);
-  // Bio Fish (Octopus × a Tier 1 Alien-Egg-hatched alien) is spliced too,
+  // Bio Fish (Octopus × an Alien-Egg-hatched friendly alien) is spliced too,
   // per a later direct request, just via its own bespoke alien-aware
   // splice pair (Entities.js's canSpliceOctopusWithAlien/
   // spliceOctopusWithAlien) rather than that standard fish+fish pipeline —
@@ -3130,6 +3139,13 @@ export const FIRST_BIOMASS_MESSAGE = "Ooh, fresh Biomass. That'd go nicely with 
 // time, on top of the existing manual pause-menu Save button. See
 // Systems.js's updateAutosave/Levels.js's nextAutosaveAtMs.
 export const AUTOSAVE_INTERVAL_MS = 300000; // 5 minutes
+
+// ---- Guided tutorial preference (Save.js) ----
+// Every guided-tutorial flow id UI.js's TUTORIAL_FLOWS can start. Once the
+// player has encountered all of them (finished or skipped, it counts either
+// way) the Settings toggle switches itself off for future sessions — see
+// Save.js's noteTutorialFlowEnded.
+export const GUIDED_TUTORIAL_IDS = ['start', 'chest', 'alienintro', 'mergefish', 'postalien', 'wastedrag'];
 
 // ---- Alien Invasion (Aliens.js) ----
 // A "wave" is one spawn burst — a handful of aliens emerging from portals at

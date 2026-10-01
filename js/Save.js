@@ -7,9 +7,73 @@
 // deliberately NOT saved — they're session-local (camera pan position, which
 // tool is selected, debug overlay state), not campaign progress.
 
-import { WORLD_TILES_H, WORLD_TILES_W, TILE_EMPTY, SEA_TURTLE_SPAWN_MIN_MS, SEA_TURTLE_SPAWN_MAX_MS } from './Config.js';
+import { WORLD_TILES_H, WORLD_TILES_W, TILE_EMPTY, SEA_TURTLE_SPAWN_MIN_MS, SEA_TURTLE_SPAWN_MAX_MS, GUIDED_TUTORIAL_IDS } from './Config.js';
 
 const SAVE_KEY = 'finsanity_save_v1';
+const PREFS_KEY = 'finsanity_prefs_v1';
+
+// ---- Player preferences (Guided Tutorial toggle) ----
+// Deliberately NOT part of the campaign save above: the toggle has to
+// survive New Game/Restart and carry across sessions, and the set of
+// tutorials already encountered is a property of the player, not of any one
+// playthrough (state.level.tutorialFlags resets with every new level).
+// Read from localStorage once at module load and cached, so the per-frame
+// callers in main.js never touch storage.
+//   guidedTutorials: whether new tutorial flows are allowed to start.
+//   guidedTutorialsUserSet: true once the player has touched the toggle —
+//     from then on their choice is final and the auto-off below never
+//     overrides it.
+//   tutorialsSeen: GUIDED_TUTORIAL_IDS the player has encountered so far.
+const prefs = loadPrefs();
+
+function loadPrefs() {
+  const fresh = { guidedTutorials: true, guidedTutorialsUserSet: false, tutorialsSeen: [] };
+  try {
+    const parsed = JSON.parse(localStorage.getItem(PREFS_KEY));
+    if (!parsed || typeof parsed !== 'object') return fresh;
+    if (typeof parsed.guidedTutorials === 'boolean') fresh.guidedTutorials = parsed.guidedTutorials;
+    if (typeof parsed.guidedTutorialsUserSet === 'boolean') fresh.guidedTutorialsUserSet = parsed.guidedTutorialsUserSet;
+    if (Array.isArray(parsed.tutorialsSeen)) fresh.tutorialsSeen = parsed.tutorialsSeen.filter((id) => GUIDED_TUTORIAL_IDS.includes(id));
+  } catch {
+    // no stored prefs, or localStorage is unavailable — the defaults above are fine
+  }
+  return fresh;
+}
+
+function savePrefs() {
+  try {
+    localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+  } catch {
+    // locked-down/private-browsing context — the preference just won't outlive this page
+  }
+}
+
+export function isGuidedTutorialsEnabled() {
+  return prefs.guidedTutorials;
+}
+
+export function setGuidedTutorialsEnabled(on) {
+  prefs.guidedTutorials = on;
+  prefs.guidedTutorialsUserSet = true;
+  savePrefs();
+}
+
+export function noteTutorialFlowStarted(id) {
+  if (prefs.tutorialsSeen.includes(id)) return;
+  prefs.tutorialsSeen.push(id);
+  savePrefs();
+}
+
+// Called when a tutorial flow finishes or is skipped (either counts as
+// having encountered it). Evaluated at the END of a flow rather than its
+// start so the last tutorial isn't cut off mid-lesson by turning itself off.
+// Never overrides a toggle the player has touched.
+export function noteTutorialFlowEnded() {
+  if (prefs.guidedTutorialsUserSet || !prefs.guidedTutorials) return;
+  if (!GUIDED_TUTORIAL_IDS.every((id) => prefs.tutorialsSeen.includes(id))) return;
+  prefs.guidedTutorials = false;
+  savePrefs();
+}
 
 export function hasSaveGame() {
   try {
