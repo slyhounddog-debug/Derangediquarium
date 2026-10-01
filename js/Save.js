@@ -7,7 +7,7 @@
 // deliberately NOT saved — they're session-local (camera pan position, which
 // tool is selected, debug overlay state), not campaign progress.
 
-import { WORLD_TILES_H, WORLD_TILES_W, TILE_EMPTY, SEA_TURTLE_SPAWN_MIN_MS, SEA_TURTLE_SPAWN_MAX_MS, GUIDED_TUTORIAL_IDS } from './Config.js';
+import { WORLD_TILES_H, WORLD_TILES_W, TILE_EMPTY, TILE_REFINERY, SEA_TURTLE_SPAWN_MIN_MS, SEA_TURTLE_SPAWN_MAX_MS, GUIDED_TUTORIAL_IDS } from './Config.js';
 
 const SAVE_KEY = 'finsanity_save_v1';
 const PREFS_KEY = 'finsanity_prefs_v1';
@@ -105,6 +105,10 @@ export function loadSaveGame() {
     migrateTurretAmmoFields(parsed.level);
     migrateChestCoinFields(parsed.level);
     migrateGridSize(parsed.level);
+    // The Solar Refinery moved from the Mound's $500 crack to its $75 purchase — a save that already made the $75 purchase (but not the $500 one) never received it.
+    if (parsed.level.moundTeased && Array.isArray(parsed.meta.buildingsUnlocked) && !parsed.meta.buildingsUnlocked.includes(TILE_REFINERY)) {
+      parsed.meta.buildingsUnlocked.push(TILE_REFINERY);
+    }
     // A save written before Shift-click Replace won't have this array at
     // all — Grid.js's applyReplacementMutation pushes straight into it with
     // no existence check of its own (every other transient level array is

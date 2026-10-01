@@ -89,6 +89,7 @@ import {
   ALIEN_DNA_COLOR,
   COIN_TIERS,
   PLATFORM_FILTER_ITEM_TYPES,
+  MAGNET_FISH_FILTER_ITEM_TYPES,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings, loadLevel } from './Levels.js';
 import {
@@ -101,7 +102,7 @@ import {
   getTile, worldToTile, getBuildingCost, FAN_STATS,
   findNearestWasteTurretAndWaste, getRecipeBuildingKeyAt, renderTileShape,
   getBuildingCurrentPowerDraw, getBuildingUptimeFraction, applyRecipeToBuilding,
-  getChestKeyAt, armChestTrickle, toggleChestTrickle,
+  getChestKeyAt, armChestTrickle, toggleChestTrickle, findPlacedChestKey,
   getUnlockedWorldH,
 } from './Grid.js';
 import { worldToScreen } from './Engine.js';
@@ -158,7 +159,6 @@ let platformFilterMenuOpen = false;
 let platformFilterMenuClosing = false;
 let platformFilterMenuCloseTimer = null;
 let platformFilterTileKey = null; // "row,col" key of whichever placed Platform/Fan this item-filter pop-up is currently open for
-let platformFilterFishId = null; // Magnet Fish's own use of this SAME pop-up (its magnetFilterItems, not a building's filterItems) — mutually exclusive with platformFilterTileKey, see openMagnetFishFilterMenu
 let storageChestMenuOpen = false;
 let storageChestMenuClosing = false;
 let storageChestMenuCloseTimer = null;
@@ -448,6 +448,9 @@ export function initUI(state) {
     fishInfoName: document.getElementById('fish-info-name'),
     fishInfoDesc: document.getElementById('fish-info-desc'),
     fishInfoStats: document.getElementById('fish-info-stats'),
+    fishInfoFilter: document.getElementById('fish-info-filter'),
+    fishInfoFilterClearBtn: document.getElementById('fish-info-filter-clear-btn'),
+    fishInfoFilterItems: document.getElementById('fish-info-filter-items'),
     fishInfoMergeTitle: document.getElementById('fish-info-merge-title'),
     fishInfoMergeLines: document.getElementById('fish-info-merge-lines'),
     platformFilterOverlay: document.getElementById('platform-filter-overlay'),
@@ -533,9 +536,10 @@ export function initUI(state) {
     if (e.target === els.fishInfoOverlay) closeFishInfoMenu(state); // same "click anywhere else closes it" precedent as every other fly-out pop-up here
   });
   els.platformFilterOverlay.addEventListener('click', (e) => {
-    if (e.target === els.platformFilterOverlay) closePlatformFilterMenu(state); // same "click anywhere else closes it" precedent as every other fly-out pop-up here
+    if (e.target === els.platformFilterOverlay) closePlatformFilterMenu(); // same "click anywhere else closes it" precedent as every other fly-out pop-up here
   });
   els.platformFilterClearBtn.addEventListener('click', () => clearPlatformFilter(state));
+  els.fishInfoFilterClearBtn.addEventListener('click', () => clearFishInfoFilter(state));
   els.storageChestOverlay.addEventListener('click', (e) => {
     if (e.target === els.storageChestOverlay) closeStorageChestModal(); // same "click anywhere else closes it" precedent as every other fly-out pop-up here
   });
@@ -555,7 +559,7 @@ export function initUI(state) {
       closeRecipeMenu();
       closeBuildingInfoMenu(state);
       closeFishInfoMenu(state);
-      closePlatformFilterMenu(state);
+      closePlatformFilterMenu();
       closeStorageChestModal();
     });
   }
@@ -1135,7 +1139,8 @@ export function openFishInfoMenu(state, fishId) {
   closeSidePanels(state);
   els.fishInfoOverlay.classList.remove('hidden');
   refreshFishInfoMenu(state);
-  updateFishInfoMenuPosition(state);
+  if (fish.speciesId === 'buffer_fish') refreshFishInfoFilterGrid(state, fish);
+  updateFishInfoMenuPosition(state); // after the filter grid exists, so the measured card height includes it
 
   els.fishInfoMenu.classList.add('fish-info-menu-closed');
   void els.fishInfoMenu.offsetWidth;
@@ -1258,6 +1263,8 @@ export function refreshFishInfoMenu(state) {
   if (stats.generatedMwLastSec != null) rows.push(`<div>⚡ Electricity generated: <b>${stats.generatedMwLastSec}mw</b></div>`);
   els.fishInfoStats.innerHTML = rows.join('');
 
+  els.fishInfoFilter.classList.toggle('hidden', fish.speciesId !== 'buffer_fish'); // the Magnet Fish's own filter lives in this modal; its grid is built on open/mutation only
+
   const mergeLines = describeFishMergeOptions(state, fish);
   els.fishInfoMergeTitle.classList.toggle('hidden', mergeLines == null);
   els.fishInfoMergeLines.classList.toggle('hidden', mergeLines == null);
@@ -1290,7 +1297,6 @@ export function openPlatformFilterMenu(state, tileKey) {
   platformFilterMenuOpen = true;
   platformFilterMenuClosing = false;
   platformFilterTileKey = tileKey;
-  platformFilterFishId = null; // mutually exclusive with a Magnet Fish's own use of this same pop-up
   if (platformFilterMenuCloseTimer !== null) { clearTimeout(platformFilterMenuCloseTimer); platformFilterMenuCloseTimer = null; }
   closeSidePanels(state); // keep the Shop/Tank Upgrades panel from sitting open behind this, same as every other fly-out pop-up
   els.platformFilterOverlay.classList.remove('hidden');
@@ -1303,62 +1309,11 @@ export function openPlatformFilterMenu(state, tileKey) {
   playPanelOpen();
 }
 
-// Magnet Fish's own use of the exact same filter pop-up — per direct
-// request ("right click on the buffer fish, bring up a filter modal like on
-// platforms to allow which object(s) the buffer fish attracts"). Reuses
-// every DOM element/transition/position-tracking mechanism
-// openPlatformFilterMenu already has; refreshPlatformFilterMenu/
-// updatePlatformFilterMenuPosition/togglePlatformFilterItem/
-// clearPlatformFilter each branch on platformFilterFishId vs
-// platformFilterTileKey to read/write fish.magnetFilterItems instead of a
-// building's data.filterItems.
-export function openMagnetFishFilterMenu(state, fishId) {
-  platformFilterMenuOpen = true;
-  platformFilterMenuClosing = false;
-  platformFilterFishId = fishId;
-  platformFilterTileKey = null;
-  // Freezes the fish in place while this pop-up is open, same as the fish
-  // info modal — per direct request. state.ui.magnetFishFilterModalFishId is
-  // main.js's own cross-module flag to read (it owns state.level.entities,
-  // UI.js doesn't reach in and mutate fish position itself) — see
-  // updateFishInfoModalFreeze's sibling handling for this field.
-  const fish = state.level.entities.find((e) => e.id === fishId && e.type === 'fish');
-  if (fish) {
-    state.ui.magnetFishFilterModalFishId = fishId;
-    state.ui.magnetFishFilterModalFrozenX = fish.x;
-    state.ui.magnetFishFilterModalFrozenY = fish.y;
-  }
-  if (platformFilterMenuCloseTimer !== null) { clearTimeout(platformFilterMenuCloseTimer); platformFilterMenuCloseTimer = null; }
-  closeSidePanels(state);
-  els.platformFilterOverlay.classList.remove('hidden');
-  refreshPlatformFilterMenu(state);
-  updatePlatformFilterMenuPosition(state);
-
-  els.platformFilterMenu.classList.add('platform-filter-menu-closed');
-  void els.platformFilterMenu.offsetWidth;
-  els.platformFilterMenu.classList.remove('platform-filter-menu-closed');
-  playPanelOpen();
-}
-
-export function closePlatformFilterMenu(state) {
+export function closePlatformFilterMenu() {
   if (!platformFilterMenuOpen) return;
   platformFilterMenuOpen = false;
   platformFilterMenuClosing = true;
-  // Per direct request ("Make it so the magnet fish stops when the filter
-  // modal is open just like when the info modal is open") — unfreezes the
-  // Magnet Fish here (a plain Platform/Fan filter target has no fish to
-  // unfreeze, so this is a no-op for those). Also resets wanderTimer, same
-  // real bug fix the fish info modal's own closeFishInfoMenu already needed
-  // (see its own comment) — without it, the fish would sit motionless for
-  // up to WANDER_INTERVAL_MAX_S after this closes, not "just like" the info
-  // modal's own immediate resume.
-  if (platformFilterFishId != null && state) {
-    const fish = state.level.entities.find((e) => e.id === platformFilterFishId && e.type === 'fish');
-    if (fish) fish.wanderTimer = 0;
-    state.ui.magnetFishFilterModalFishId = null;
-  }
   platformFilterTileKey = null;
-  platformFilterFishId = null;
   els.platformFilterMenu.classList.add('platform-filter-menu-closed');
   platformFilterMenuCloseTimer = setTimeout(() => {
     els.platformFilterOverlay.classList.add('hidden');
@@ -1368,27 +1323,14 @@ export function closePlatformFilterMenu(state) {
   playPanelClose();
 }
 
-// Resolves whichever target (a Platform/Fan tile, or a Magnet Fish) this
-// shared pop-up is currently open for — a fish's own worldX/worldY are read
-// LIVE every call (not cached), so a Magnet Fish's popup genuinely follows
-// it around while it keeps swimming, the same way a building's popup
-// already tracks camera pans (both go through this same position function,
-// called every frame while open — see updateHUD). Returns null if the
-// underlying fish/building is gone (dead, demolished, moved).
+// Resolves which placed Platform/Fan tile this pop-up is currently open for.
+// Returns null if the underlying building is gone (demolished, moved).
 function activeFilterTarget(state) {
-  if (platformFilterFishId != null) {
-    const fish = state.level.entities.find((e) => e.id === platformFilterFishId && e.type === 'fish' && !e.dying);
-    if (!fish) return null;
-    if (!fish.magnetFilterItems) fish.magnetFilterItems = ['waste']; // lazy-migrate a fish loaded from a save written before this field existed
-    return { kind: 'fish', array: fish.magnetFilterItems, worldX: fish.x, worldY: fish.y - 24 };
-  }
-  if (platformFilterTileKey != null) {
-    const data = state.level.buildingData[platformFilterTileKey];
-    if (!data) return null;
-    const [row, col] = platformFilterTileKey.split(',').map(Number);
-    return { kind: 'building', array: data.filterItems, isFan: BUILDING_FAMILIES.fan.includes(data.type), worldX: col * TILE_SIZE + TILE_SIZE / 2, worldY: row * TILE_SIZE };
-  }
-  return null;
+  if (platformFilterTileKey == null) return null;
+  const data = state.level.buildingData[platformFilterTileKey];
+  if (!data) return null;
+  const [row, col] = platformFilterTileKey.split(',').map(Number);
+  return { array: data.filterItems, isFan: BUILDING_FAMILIES.fan.includes(data.type), worldX: col * TILE_SIZE + TILE_SIZE / 2, worldY: row * TILE_SIZE };
 }
 
 function updatePlatformFilterMenuPosition(state) {
@@ -1399,44 +1341,63 @@ function updatePlatformFilterMenuPosition(state) {
   els.platformFilterAnchor.style.top = `${screen.y - MOUND_MENU_GAP_PX}px`;
 }
 
-// Rebuilds the item grid for whichever Platform/Fan/Magnet Fish this pop-up
-// is currently open for — called only on open and after a mutation (item
+// One filter-grid button (real item art + label + check/X badge) — shared by
+// this pop-up and the Magnet Fish's own filter grid inside the fish info modal
+// (refreshFishInfoFilterGrid), so the two can never drift apart visually.
+// Real item art instead of the plain emoji — per direct request ("change
+// the filter icons in the filter modal to match the actual object in
+// the game rather than use emojis") — same drawItemIconCanvas every
+// Science Lab item-recipe node already uses for its own real-art icon.
+// The emoji is still meaningfully used, as this button's own hover tooltip.
+function buildFilterItemButton(itemDef, affected, onClick) {
+  const btn = document.createElement('button');
+  btn.className = 'platform-filter-item' + (affected ? ' pass' : ' block');
+  const icon = document.createElement('canvas');
+  icon.className = 'platform-filter-item-icon';
+  icon.width = PLATFORM_FILTER_ICON_CANVAS_SIZE;
+  icon.height = PLATFORM_FILTER_ICON_CANVAS_SIZE;
+  drawItemIconCanvas(icon, itemDef.id);
+  btn.title = `${itemDef.icon} ${itemDef.label}`;
+  const label = document.createElement('div');
+  label.className = 'platform-filter-item-label';
+  label.textContent = itemDef.label;
+  const badge = document.createElement('div');
+  badge.className = 'platform-filter-item-badge';
+  badge.textContent = affected ? '✅' : '❌';
+  btn.appendChild(icon);
+  btn.appendChild(label);
+  btn.appendChild(badge);
+  btn.addEventListener('click', onClick);
+  return btn;
+}
+
+// Rebuilds the item grid for whichever Platform/Fan this pop-up is currently
+// open for — called only on open and after a mutation (item
 // toggle, clear all, or a drag-copy landing on this exact tile — see
 // copyPlatformFilter below), NOT every frame, same "don't tear down the DOM
 // under a real click" fix the recipe menu's own refreshRecipeMenu comment
 // documents. The much lighter per-frame check in updateHUD just closes the
-// popup if the underlying tile/fish is gone, without touching this DOM at all.
+// popup if the underlying tile is gone, without touching this DOM at all.
 function refreshPlatformFilterMenu(state) {
   const target = activeFilterTarget(state);
-  if (!target) { closePlatformFilterMenu(state); return; }
+  if (!target) { closePlatformFilterMenu(); return; }
 
   // Per direct request ("make fans work as filters the same as
   // platforms") — the pop-up itself is fully shared (same fields, same
-  // buttons), but a Platform "blocks" an item (collision), a Fan "blows"
-  // one (force), and a Magnet Fish "attracts" one (per a later direct
-  // request, "bring up a filter modal like on platforms to allow which
-  // object(s) the buffer fish attracts") — different enough verbs that a
-  // single static copy would read oddly reused verbatim across all three.
-  // A Magnet Fish is also the one INCLUDE-list case (checked = attracted,
-  // starting from NOTHING attracted) rather than an EXCLUDE-list (checked =
-  // let through/not blown, starting from EVERYTHING affected) — the
-  // checkbox mechanics underneath (a plain array of item-type ids) are
-  // identical either way, only the wording differs.
-  els.platformFilterTitle.textContent = target.kind === 'fish' ? 'Magnet Filter' : target.isFan ? 'Fan Filter' : 'Item Filter';
+  // buttons), but a Platform "blocks" an item (collision) and a Fan "blows"
+  // one (force) — different enough verbs that a single static copy would
+  // read oddly reused verbatim across both.
+  els.platformFilterTitle.textContent = target.isFan ? 'Fan Filter' : 'Item Filter';
   // Per direct request, the hint also notes the drag-and-drop copy shortcut
   // (main.js's platformFilterDragSourceKey/copyPlatformFilter above) — same
   // "drag one placed tile onto another" gesture the Blueprint tool's own
   // recipe-copy uses, not obvious from the pop-up alone.
-  els.platformFilterHint.textContent = target.kind === 'fish'
-    ? 'Nothing is attracted by default — click an item to have this fish\'s magnet pull it in too.'
-    : target.isFan
-      ? 'Everything is blown by default — click an item to exclude it from this fan’s force. Drag this fan onto another to copy its filter.'
-      : 'Everything is blocked by default — click an item to let it pass through. Drag this platform onto another to copy its filter.';
-  els.platformFilterClearBtn.title = target.kind === 'fish'
-    ? 'Back to attracting Waste only'
-    : target.isFan
-      ? 'Back to a plain Fan — blows everything again'
-      : 'Back to a plain, always-solid Platform — everything blocked';
+  els.platformFilterHint.textContent = target.isFan
+    ? 'Everything is blown by default — click an item to exclude it from this fan’s force. Drag this fan onto another to copy its filter.'
+    : 'Everything is blocked by default — click an item to let it pass through. Drag this platform onto another to copy its filter.';
+  els.platformFilterClearBtn.title = target.isFan
+    ? 'Back to a plain Fan — blows everything again'
+    : 'Back to a plain, always-solid Platform — everything blocked';
   // Per direct request — a reminder that G toggles every placed Fan's own
   // cone/arrow visuals (main.js's KeyG handler), only relevant while this
   // popup is actually open for a Fan.
@@ -1447,40 +1408,50 @@ function refreshPlatformFilterMenu(state) {
     const isListed = target.array.includes(itemDef.id);
     // A Fan's array is an EXCLUDE list (Grid.js's computeFanForce skips an
     // item in it — "everything is blown by default, click to exclude"), the
-    // opposite sense of a Platform's/Magnet Fish's own INCLUDE list — so
-    // "this item is actively affected" (blown/passes/attracted) is isListed
-    // for those two but !isListed for a Fan. Per direct bug report, the
-    // checkmark/red-X and green/red border below were both still keying off
-    // the raw isListed for a Fan too, so a freshly-placed Fan (empty
-    // exclude array, "blows everything") showed every item as a red ❌
-    // "blocked" instead of the intended all-green ✅ "blown."
+    // opposite sense of a Platform's own INCLUDE list — so "this item is
+    // actively affected" (blown/passes) is isListed for a Platform but
+    // !isListed for a Fan. Per direct bug report, the checkmark/red-X and
+    // green/red border were both once still keying off the raw isListed for
+    // a Fan too, so a freshly-placed Fan (empty exclude array, "blows
+    // everything") showed every item as a red ❌ "blocked" instead of the
+    // intended all-green ✅ "blown."
     const affected = target.isFan ? !isListed : isListed;
-    const btn = document.createElement('button');
-    btn.className = 'platform-filter-item' + (affected ? ' pass' : ' block');
-    // Real item art instead of the plain emoji — per direct request ("change
-    // the filter icons in the filter modal to match the actual object in
-    // the game rather than use emojis") — same drawItemIconCanvas every
-    // Science Lab item-recipe node already uses for its own real-art icon.
-    // The emoji is still meaningfully used, as this button's own hover
-    // tooltip.
-    const icon = document.createElement('canvas');
-    icon.className = 'platform-filter-item-icon';
-    icon.width = PLATFORM_FILTER_ICON_CANVAS_SIZE;
-    icon.height = PLATFORM_FILTER_ICON_CANVAS_SIZE;
-    drawItemIconCanvas(icon, itemDef.id);
-    btn.title = `${itemDef.icon} ${itemDef.label}`;
-    const label = document.createElement('div');
-    label.className = 'platform-filter-item-label';
-    label.textContent = itemDef.label;
-    const badge = document.createElement('div');
-    badge.className = 'platform-filter-item-badge';
-    badge.textContent = affected ? '✅' : '❌';
-    btn.appendChild(icon);
-    btn.appendChild(label);
-    btn.appendChild(badge);
-    btn.addEventListener('click', () => togglePlatformFilterItem(state, itemDef.id));
-    els.platformFilterItems.appendChild(btn);
+    els.platformFilterItems.appendChild(buildFilterItemButton(itemDef, affected, () => togglePlatformFilterItem(state, itemDef.id)));
   }
+}
+
+// Magnet Fish's item filter, embedded in its own fish info modal — per direct
+// request ("the fish modal IS the magnet filter modal, not two separate
+// things"). An INCLUDE-list (checked = attracted, starting from just Waste),
+// listing MAGNET_FISH_FILTER_ITEM_TYPES (no blue/green Science or Alien Eggs).
+// Like refreshPlatformFilterMenu, only rebuilt on open and after a mutation —
+// never from the per-frame refreshFishInfoMenu, which would tear the buttons
+// down under a real click.
+function refreshFishInfoFilterGrid(state, fish) {
+  if (!fish.magnetFilterItems) fish.magnetFilterItems = ['waste']; // lazy-migrate a fish loaded from a save written before this field existed
+  els.fishInfoFilterItems.innerHTML = '';
+  for (const itemDef of MAGNET_FISH_FILTER_ITEM_TYPES) {
+    els.fishInfoFilterItems.appendChild(buildFilterItemButton(itemDef, fish.magnetFilterItems.includes(itemDef.id), () => toggleFishInfoFilterItem(state, itemDef.id)));
+  }
+}
+
+function toggleFishInfoFilterItem(state, itemId) {
+  const fish = state.level.entities.find((e) => e.id === state.ui.fishInfoModalFishId && e.type === 'fish');
+  if (!fish) return;
+  const idx = fish.magnetFilterItems.indexOf(itemId);
+  if (idx === -1) fish.magnetFilterItems.push(itemId);
+  else fish.magnetFilterItems.splice(idx, 1);
+  refreshFishInfoFilterGrid(state, fish);
+}
+
+// Back to attracting Waste only (the Magnet Fish's original fixed behavior),
+// not an empty list — "clear" on an opt-IN filter reading as "attract nothing
+// at all" would be a strange reset for a magnet fish the player just turned on.
+function clearFishInfoFilter(state) {
+  const fish = state.level.entities.find((e) => e.id === state.ui.fishInfoModalFishId && e.type === 'fish');
+  if (!fish) return;
+  fish.magnetFilterItems = ['waste'];
+  refreshFishInfoFilterGrid(state, fish);
 }
 
 // ---- Storage Chest popup ----
@@ -1589,20 +1560,10 @@ function togglePlatformFilterItem(state, itemId) {
 }
 
 // Back to a plain, always-solid Platform/Fan (every item red-X again,
-// nothing whitelisted) — or, for a Magnet Fish, back to attracting Waste
-// only (its original fixed behavior), not an empty list, since "clear" on
-// an opt-IN filter reading as "attract nothing at all" would be a strange
-// reset for a magnet fish the player just turned on.
+// nothing whitelisted).
 function clearPlatformFilter(state) {
-  const target = activeFilterTarget(state);
-  if (!target) return;
-  if (target.kind === 'fish') {
-    const fish = state.level.entities.find((e) => e.id === platformFilterFishId && e.type === 'fish');
-    if (fish) fish.magnetFilterItems = ['waste'];
-  } else {
-    const data = state.level.buildingData[platformFilterTileKey];
-    if (data) data.filterItems = [];
-  }
+  const data = state.level.buildingData[platformFilterTileKey];
+  if (data) data.filterItems = [];
   refreshPlatformFilterMenu(state);
 }
 
@@ -4265,7 +4226,7 @@ function buildingStatsHtml(buildingId) {
     const dnaS = (r.foodProcessMs * ALIEN_DNA_REFINERY_TIME_MULTIPLIER) / 1000;
     return (
       `<div class="building-stat">${itemIconImgHtml('waste')}➜${itemIconImgHtml('food')} <b>${r.foodProcessMs / 1000}s</b> · ${itemIconImgHtml('alien_dna')}➜${itemIconImgHtml('biomass')} <b>${dnaS}s</b></div>` +
-      `<div class="building-stat">⚡ <b>${r.powerCostPerSec}</b> mw/sec</div>`
+      (r.powerCostPerSec > 0 ? `<div class="building-stat">⚡ <b>${r.powerCostPerSec}</b> mw/sec</div>` : `<div class="building-stat">☀️ <b>No electricity needed</b></div>`)
     );
   }
   if (MANUFACTURER_STATS[buildingId]) {
@@ -4380,7 +4341,7 @@ function renderPreviewCanvas() {
 }
 
 // Re-checked every frame (from updateHUD) — the price itself used to be
-// appended right here ("Electric Refinery — $30"), but per direct request
+// appended right here ("Solar Refinery — $30"), but per direct request
 // ("remove all the prices from the titles of the shop items, since it
 // already shows the price below in the item list") that's gone now — the
 // icon grid's own per-item price-tag badge (speciesPriceTags/the building
@@ -4796,10 +4757,8 @@ export function updateHUD(state) {
   // Same lighter per-frame check as the recipe/building-info pop-ups above —
   // the item grid's own DOM is only ever rebuilt on open or after a real
   // mutation (see refreshPlatformFilterMenu's own comment), never every
-  // frame; this just closes the popup if the underlying tile/fish is gone.
-  // activeFilterTarget covers both this pop-up's building and Magnet Fish
-  // uses in one check.
-  if (platformFilterMenuOpen && !activeFilterTarget(state)) closePlatformFilterMenu(state);
+  // frame; this just closes the popup if the underlying tile is gone.
+  if (platformFilterMenuOpen && !activeFilterTarget(state)) closePlatformFilterMenu();
   if (platformFilterMenuOpen || platformFilterMenuClosing) updatePlatformFilterMenuPosition(state);
   if (storageChestMenuOpen && !state.level.buildingData[storageChestTileKey]) closeStorageChestModal(); // the tile it's showing got demolished (or moved) out from under it
   // Unlike the Platform filter menu above, this DOES refresh every frame
@@ -5219,15 +5178,26 @@ function startTutorialFishSpotWorld(state) {
 function getPostAlienTurretSpot(state) {
   return { x: WORLD_W / 2, y: getUnlockedWorldH(state) - TILE_SIZE * 3 };
 }
-// Where the 'chest' guided flow's own Storage Chest gets placed — per direct
-// design, deliberately near the Mound itself (MOUND_X, already imported for
-// the Mound's own click-target/camera-centering) rather than the bottom of
-// the tank like POST_ALIEN_TURRET_SPOT above, since the camera is already
-// centered there right as this flow fires (Mound.js's crackMound) and there
-// is nothing to scroll to first — this flow has no 'scroll' step at all.
-// Offset clear of the Mound's own MOUND_WIDTH_TILES (4.4, so ~2.2 tiles
-// either side of MOUND_X) footprint so the two click targets never overlap.
+// Where the 'chest' guided flow's own Storage Chest gets placed (the full
+// walkthrough's 'place' step only) — per direct design, deliberately near the
+// Mound itself (MOUND_X, already imported for the Mound's own click-target/
+// camera-centering) rather than the bottom of the tank like
+// POST_ALIEN_TURRET_SPOT above, so there's little to scroll to — this flow has
+// no 'scroll' step at all. Offset clear of the Mound's own MOUND_WIDTH_TILES
+// (4.4, so ~2.2 tiles either side of MOUND_X) footprint so the two click
+// targets never overlap.
 const POST_MOUND_CHEST_SPOT = { x: MOUND_X + TILE_SIZE * 4, y: SEABED_FLOOR_Y + TILE_SIZE * 2 };
+
+// Where the flow's later steps ('feedwaste'/'trickle') point: the chest
+// actually on the grid, since a player-placed chest (the flow can now start
+// from just its second half) can be anywhere — falling back to the fixed spot
+// when none exists yet.
+function chestTutorialSpot(state) {
+  const key = findPlacedChestKey(state);
+  if (!key) return POST_MOUND_CHEST_SPOT;
+  const [row, col] = key.split(',').map(Number);
+  return { x: col * TILE_SIZE + TILE_SIZE / 2, y: row * TILE_SIZE + TILE_SIZE / 2 };
+}
 
 // Shared by the post-alien flow's final step AND the standalone 'wastedrag'
 // flow below (used when a Waste Turret already existed before the tutorial
@@ -5241,15 +5211,15 @@ const POST_MOUND_CHEST_SPOT = { x: MOUND_X + TILE_SIZE * 4, y: SEABED_FLOOR_Y + 
 // The 'chest' flow's own "drag Waste into the Chest" step spotlight — same
 // "one circle encompassing both endpoints" shape as wasteDragStepCircle
 // below, simplified since both endpoints here are fixed, known constants
-// (POST_MOUND_CHEST_SPOT and the deterministic Waste spawned by
-// Entities.js's spawnChestTutorialWaste) rather than needing a "nearest"
-// search — there's always exactly one chest and one Waste this flow could
-// mean. Returns null (hides the spotlight) if the locked Waste is somehow
-// already gone.
+// (the placed chest and the deterministic Waste spawned by Entities.js's
+// spawnChestTutorialWaste) rather than needing a "nearest" search — there's
+// always exactly one chest and one Waste this flow could mean. Returns null
+// (hides the spotlight) if the locked Waste is somehow already gone.
 function chestDragStepCircle(state) {
   const waste = state.level.items.find((it) => it.id === state.level.chestDragTutorialTargetId && it.type === 'waste');
   if (!waste) return null;
-  const a = worldToScreen(POST_MOUND_CHEST_SPOT.x, POST_MOUND_CHEST_SPOT.y, state.camera);
+  const spot = chestTutorialSpot(state);
+  const a = worldToScreen(spot.x, spot.y, state.camera);
   const b = worldToScreen(waste.x, waste.y, state.camera);
   const r = Math.hypot(a.x - b.x, a.y - b.y) / 2 + 40;
   return { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, r };
@@ -5368,12 +5338,13 @@ const TUTORIAL_FLOWS = {
     { id: 'switch', text: 'Two matching fish! Switch to the Merge tool.', tool: 'food', getCircle: () => tutorialCircleForDom(els.toolMergeBtn) },
     { id: 'drag', text: 'Drag one fish onto the other to merge them!', tool: 'merge', getCircle: mergeFishStepCircle },
   ],
-  // Fires once, directly from Mound.js's crackMound, the instant the $75
-  // Mound "tease" grants the Tier 1 Storage Chest — per direct request
-  // ("have a chest tutorial start that's like the turret tutorial"). Same
-  // shop -> select -> place -> drag shape as 'postalien' above, minus its
-  // 'scroll' step — the camera's already centered on the Mound right where
-  // this fires, so there's nothing to scroll to first. 'trickle' is the one
+  // Started by Systems.js's updateChestTutorialTrigger — per direct request
+  // ("have a chest tutorial start that's like the turret tutorial"), then
+  // reworked so it no longer fires from the $75 Mound purchase: the full flow
+  // once the chest is unlocked and 20+ of any one non-Food item type are in
+  // the tank, or just its second half ('feedwaste' onward) if the player
+  // places a chest first. Same shop -> select -> place -> drag shape as
+  // 'postalien' above, minus its 'scroll' step. 'trickle' is the one
   // step advanced directly from main.js (its own chest-aim drag gesture
   // calls advanceTutorialFlow itself, same as every OTHER non-drag click in
   // this game already does) rather than through a cross-module flag.
@@ -5405,7 +5376,8 @@ const TUTORIAL_FLOWS = {
       // shrink the real clickable area below what the overlay still shows
       // as open.
       getCircle: (state) => {
-        const screen = worldToScreen(POST_MOUND_CHEST_SPOT.x, POST_MOUND_CHEST_SPOT.y, state.camera);
+        const spot = chestTutorialSpot(state);
+        const screen = worldToScreen(spot.x, spot.y, state.camera);
         return { cx: screen.x, cy: screen.y, r: CHEST_TUTORIAL_DRAG_CLICK_RADIUS_TILES * TILE_SIZE * state.camera.zoom };
       },
     },

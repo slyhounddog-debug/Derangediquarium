@@ -21,6 +21,7 @@ import {
   MOUND_HEIGHT_PX,
   TIER_UNLOCKS,
   TILE_STORAGE_CHEST,
+  TILE_REFINERY,
   SCIENCE_LAB_UPGRADES,
 } from './Config.js';
 import { worldToScreen } from './Engine.js';
@@ -74,26 +75,25 @@ export function centerCameraOnMound(camera) {
   camera.x = Math.max(0, Math.min(MOUND_X - camera.viewWidth / 2, maxX));
 }
 
-// The Tier 1.5 "tease" — per direct request ("no more trick mound upgrades,
-// they all should unlock something"), this is no longer a pure joke: it now
-// grants the Tier 1 Storage Chest and kicks off its own guided tutorial
-// (UI.js's TUTORIAL_FLOWS.chest). The Rudimentary Fan is still granted from
-// level start (BUILDING_TYPES[TILE_FAN_T2].unlockedByDefault, alongside
-// Platform/Waste Turret — see Config.js), so there's no separate paid
-// "Tier 1.75" step for it — this step exists purely for the Chest now, at
-// the same MOUND_TEASE_COST ($75, cut from $150 per direct request, back
-// when it really was a joke).
-const MOUND_TEASE_MESSAGE = "Now there's a way to clean up your tank! Check your Chest! (In the Shop)";
+// The Tier 1.5 "tease" ($75, MOUND_TEASE_COST) — per direct request ("no more
+// trick mound upgrades, they all should unlock something"), it grants the
+// Tier 1 Storage Chest and, per a later direct request, the Solar Refinery
+// (the base Refinery tier — it uses no electricity, so it works from the very
+// start). The Rudimentary Fan is still granted from level start
+// (BUILDING_TYPES[TILE_FAN_T2].unlockedByDefault, alongside Platform/Waste
+// Turret — see Config.js), so there's no separate paid "Tier 1.75" step for
+// it. The Chest's guided tutorial no longer starts from here — see Systems.js's
+// updateChestTutorialTrigger.
+const MOUND_TEASE_MESSAGE = "The mound cracks! A Storage Chest and a Solar Refinery tumble out — check the Shop. The Refinery runs on sunlight, so try refining some Bio-Sludge into Biomass for turret ammo!";
 
 // Per direct request, the Mound is a short on-ramp now, not the game's
-// whole arc — it only ever grants Electric Eel/Collector/Electric Refinery
-// (Tier 2, see BUILDING_TYPES' own comment on each one's display name)
-// before shattering outright at MOUND_MAX_TIER (3) into
-// the Science Lab, where the REAL progression (Suckerfish, Science Octopus,
-// every Advanced/Bio building) lives from then on. See SCIENCE_LAB_UPGRADES
-// in Config.js.
+// whole arc — it only ever grants the Solar Refinery and Storage Chest ($75),
+// then the Collector and Electric Eel ($500), before shattering outright at
+// MOUND_MAX_TIER (3) into the Science Lab, where the REAL progression
+// (Suckerfish, Science Octopus, every Advanced/Bio building) lives from then
+// on. See SCIENCE_LAB_UPGRADES in Config.js.
 const TIER_CRACK_MESSAGES = {
-  2: 'Another crack spreads wider. A Collector and an Electric Refinery tumble out, closely followed by an Electric Eel that looks personally offended by the mess.',
+  2: 'Another crack spreads wider. A Collector tumbles out, closely followed by an Electric Eel that looks personally offended by the mess.',
   3: 'The mound stops cracking and just gives up, shattering completely. Underneath: a Science Lab that has apparently been there the whole time, humming with unfinished research. Everything from here on out is going to cost Science.',
 };
 
@@ -108,22 +108,23 @@ function pushNotification(state, text) {
 // Two steps sit across the first real tier, per direct request (the old
 // paid "Tier 1.75" Fan-unlock sub-step is gone entirely — the Rudimentary
 // Fan is free from level start now, see Config.js's BUILDING_TYPES):
-// (1) the Tier 1.5 "tease" (MOUND_TEASE_COST, a pure joke — does nothing),
-// then (2) the real Tier 1->2 crack (MOUND_CRACK_COST[1], grants the
-// Collector + Electric Refinery + Electric Eel). The real Tier
-// 2->3 crack (MOUND_CRACK_COST[2]) follows directly after that.
+// (1) the Tier 1.5 "tease" (MOUND_TEASE_COST, grants the Storage Chest and
+// Solar Refinery), then (2) the real Tier 1->2 crack (MOUND_CRACK_COST[1],
+// grants the Collector + Electric Eel). The real Tier 2->3 crack
+// (MOUND_CRACK_COST[2]) follows directly after that.
 export function getMoundNextCost(state) {
   const tier = state.level.tier;
   if (tier === 1 && !state.level.moundTeased) return MOUND_TEASE_COST;
   return MOUND_CRACK_COST[tier];
 }
 
-// How many crack lines should currently be visible on the dome. Driven by
-// every real money-spend milestone EXCEPT the pure-joke tease (which grants
-// nothing and shouldn't visibly damage the mound at all) — the real Tier
-// 1->2 crack is the only one left now that the Fan-unlock sub-step is gone.
-export function getMoundCrackCount(state) {
-  return state.level.tier >= 2 ? 1 : 0;
+// How cracked the dome looks, per direct request: 0 = intact, 1 = the first
+// crack (the $75 tease purchase), 2 = that crack grown into a much bigger one
+// (the $500 Tier 1->2 purchase). The final $1500 purchase shatters it
+// outright instead (see startMoundShatter).
+function getMoundCrackStage(state) {
+  if (state.level.tier >= 2) return 2;
+  return state.level.moundTeased ? 1 : 0;
 }
 
 export function canCrackMound(state) {
@@ -197,24 +198,12 @@ export function crackMound(state) {
   if (state.level.tier === 1 && !state.level.moundTeased) {
     state.level.moundTeased = true;
     // Tier itself still does NOT advance — this remains a sub-step within
-    // Tier 1, not a real crack (see getMoundCrackCount's own comment on why
-    // the dome's crack lines don't count it either). Only the GRANT changed,
-    // per direct request.
-    if (!state.meta.buildingsUnlocked.includes(TILE_STORAGE_CHEST)) {
-      state.meta.buildingsUnlocked.push(TILE_STORAGE_CHEST);
+    // Tier 1, not a real crack. The dome still gets its first visible crack
+    // (see getMoundCrackStage), per direct request.
+    for (const id of [TILE_STORAGE_CHEST, TILE_REFINERY]) {
+      if (!state.meta.buildingsUnlocked.includes(id)) state.meta.buildingsUnlocked.push(id);
     }
     pushNotification(state, MOUND_TEASE_MESSAGE);
-    // Kicks off the 'chest' guided-tutorial flow directly, the same plain-
-    // data cross-module flag pattern Systems.js's own tutorial triggers
-    // already use (Mound.js can't import UI.js — see this file's own header
-    // comment — but state.level.tutorialFlow is just data main.js/UI.js poll
-    // every frame regardless of who set it). Naturally one-shot: this whole
-    // branch can never run again once moundTeased is true.
-    if (!state.level.tutorialFlow) {
-      // Per direct request, skip the 'shop' step if the shop is already open.
-      const step = state.ui.shopCollapsed ? 'shop' : 'select';
-      state.level.tutorialFlow = { id: 'chest', step };
-    }
     return true;
   }
 
@@ -230,6 +219,7 @@ export function crackMound(state) {
     }
   }
 
+  if (state.level.tier >= MOUND_MAX_TIER) startMoundShatter(state);
   pushNotification(state, TIER_CRACK_MESSAGES[state.level.tier] || `Tier ${state.level.tier} reached.`);
   return true;
 }
@@ -253,38 +243,204 @@ export function isPointOnMound(state, worldX, worldY) {
 let moundSprite = null;
 let labSprite = null; // the Science Lab's equivalent, see renderScienceLab
 
-// A fixed set of jagged multi-segment crack shapes, generated once at module
-// load (not per-render — a fresh Math.random() every frame would make the
-// cracks visibly jitter) and reused/repositioned by renderMound below.
-// MOUND_MAX_TIER-1 is the most cracks that can ever be showing at once.
-// Per-point jitter (dx) is deliberately tight (±5px, was ±8px) — several
-// independent random points in a row landing on the same side used to be
-// able to compound into a crack that visibly bowed hard toward one edge of
-// the dome ("the cracks are shifted left" bug report), even though each
-// crack's BASE x-position (see renderMound's cx below) is itself centered/
-// evenly spread. branchDir is a real coin flip now, not always-positive —
-// the old fixed `25 + random(-10..10)` range meant every branch's sin()
-// always came out positive, so every crack's fork always leaned the exact
-// same direction (right) regardless of which crack it was.
-const CRACK_SHAPES = [];
-for (let i = 0; i < 4; i++) {
-  const segments = 5 + (i % 2);
-  const points = [];
-  for (let s = 0; s <= segments; s++) {
-    points.push({ t: s / segments, dx: (Math.random() - 0.5) * 10 });
+// ---- Cracks ----
+// Per direct request, the $75 purchase shows the first crack (the one that
+// used to appear at $500) and the $500 purchase grows a much bigger one out of
+// it. Geometry lives in unzoomed dome-local px (origin = the dome's top-left,
+// the same frame as the sprite's outline points), generated once at module
+// load — a fresh Math.random() every frame would make the cracks visibly
+// jitter. Drawn live inside the dome-silhouette clip (renderMound) rather than
+// baked into the sprite, so a growth animation can reveal them progressively.
+const CRACK_W = MOUND_WIDTH_PX;
+const CRACK_H = MOUND_HEIGHT_PX + TILE_SIZE;
+const CRACK_GROW_MS = 1400; // how long a crack takes to grow after the purchase
+
+// A jagged polyline from (x0,y0) to (x1,y1): segs segments with each interior
+// point jittered sideways by up to +-jit px.
+function jaggedPath(x0, y0, x1, y1, segs, jit) {
+  const dx = x1 - x0;
+  const dy = y1 - y0;
+  const len = Math.hypot(dx, dy) || 1;
+  const nx = -dy / len;
+  const ny = dx / len;
+  const pts = [{ x: x0, y: y0 }];
+  for (let i = 1; i < segs; i++) {
+    const j = (Math.random() - 0.5) * 2 * jit;
+    pts.push({ x: x0 + dx * (i / segs) + nx * j, y: y0 + dy * (i / segs) + ny * j });
   }
-  // A short branch forking off partway down — reads as a real fracture, not
-  // just a wiggly line, per direct request for "more interesting" cracks.
-  const branchAt = 0.35 + Math.random() * 0.3;
-  const branchDir = Math.random() < 0.5 ? -1 : 1;
-  const branchAngle = branchDir * (25 + Math.random() * 10);
-  CRACK_SHAPES.push({ points, branchAt, branchAngle });
+  pts.push({ x: x1, y: y1 });
+  return pts;
+}
+
+// Crack 1 (stage 1): a vertical fracture down the middle with a short fork.
+const CRACK_MAIN = jaggedPath(CRACK_W * 0.5, CRACK_H * 0.12, CRACK_W * 0.5, CRACK_H * 0.88, 6, 5);
+const CRACK_FORK_DIR = Math.random() < 0.5 ? -1 : 1;
+const CRACK_FORK = jaggedPath(CRACK_MAIN[3].x, CRACK_MAIN[3].y, CRACK_MAIN[3].x + CRACK_FORK_DIR * CRACK_W * 0.12, CRACK_MAIN[3].y + CRACK_H * 0.16, 3, 2);
+
+// Stage 2: limbs that grow out of crack 1 — t0/t1 are when each starts/finishes
+// within the growth animation (0..1), so they spread outward in sequence.
+function crackLimb(from, toX, toY, segs, jit, t0, t1) {
+  return { pts: jaggedPath(from.x, from.y, toX, toY, segs, jit), t0, t1 };
+}
+const CRACK_LIMBS = [
+  crackLimb(CRACK_MAIN[0], CRACK_W * 0.44, -CRACK_H * 0.05, 2, 3, 0.0, 0.25), // out through the top of the dome
+  crackLimb(CRACK_MAIN[6], CRACK_W * 0.56, CRACK_H * 1.03, 2, 3, 0.0, 0.25), // down into the base
+  crackLimb(CRACK_MAIN[2], CRACK_W * 0.05, CRACK_H * 0.46, 6, 5, 0.1, 0.65),
+  crackLimb(CRACK_MAIN[3], CRACK_W * 0.96, CRACK_H * 0.54, 6, 5, 0.15, 0.7),
+  crackLimb(CRACK_MAIN[4], CRACK_W * 0.16, CRACK_H * 0.97, 5, 4, 0.3, 0.85),
+  crackLimb(CRACK_MAIN[1], CRACK_W * 0.84, CRACK_H * 0.14, 5, 4, 0.35, 0.9),
+];
+for (const limb of CRACK_LIMBS.slice(2)) { // a small fork off the middle of each side limb
+  const mid = limb.pts[Math.floor(limb.pts.length / 2)];
+  const dir = Math.random() < 0.5 ? -1 : 1;
+  CRACK_LIMBS.push(crackLimb(mid, mid.x + dir * CRACK_W * 0.09, mid.y + CRACK_H * 0.14, 3, 2, limb.t0 + (limb.t1 - limb.t0) * 0.5, Math.min(1, limb.t1 + 0.1)));
+}
+
+// Appends the first `p` (0-1) of a polyline's length to the current path.
+function pathPolylineProgress(ctx, pts, ox, oy, k, p) {
+  if (p <= 0) return;
+  const n = pts.length - 1;
+  const upto = p * n;
+  ctx.moveTo(ox + pts[0].x * k, oy + pts[0].y * k);
+  for (let i = 1; i <= n; i++) {
+    if (upto >= i) {
+      ctx.lineTo(ox + pts[i].x * k, oy + pts[i].y * k);
+    } else {
+      const f = upto - (i - 1);
+      if (f > 0) ctx.lineTo(ox + (pts[i - 1].x + (pts[i].x - pts[i - 1].x) * f) * k, oy + (pts[i - 1].y + (pts[i].y - pts[i - 1].y) * f) * k);
+      break;
+    }
+  }
+}
+
+// Draws the cracks for `stage` onto ctx, which must already be clipped to the
+// dome silhouette. (ox, oy) is the dome's top-left on ctx and k its scale
+// (the camera zoom on screen, or the sprite's bake scale offscreen). p1/p2
+// (0-1) are how far crack 1 / the stage-2 growth have grown. Each pass batches
+// its polylines into one path, so this is a handful of stroke calls total.
+// Each crack is a dark fracture line with a thin offset highlight alongside
+// for a carved/engraved look instead of a flat scribble.
+function drawMoundCracks(ctx, ox, oy, k, stage, p1, p2) {
+  if (stage < 1) return;
+  const widen = stage >= 2 ? p2 : 0; // crack 1 itself gets fatter as the big crack grows out of it
+  const strokeGroup = (lines, width, core) => {
+    const trace = () => {
+      ctx.beginPath();
+      for (const line of lines) pathPolylineProgress(ctx, line.pts, ox, oy, k, line.p);
+    };
+    ctx.strokeStyle = 'rgba(255, 244, 224, 0.35)';
+    ctx.lineWidth = Math.max(1, width * 0.75);
+    ctx.save();
+    ctx.translate(k, k);
+    trace();
+    ctx.stroke();
+    ctx.restore();
+    ctx.strokeStyle = '#4a3c2c';
+    ctx.lineWidth = Math.max(1, width);
+    trace();
+    ctx.stroke();
+    if (core) { // the bigger crack reads as a real gap, not just a line
+      ctx.strokeStyle = '#1f1810';
+      ctx.lineWidth = Math.max(1, width * 0.4);
+      trace();
+      ctx.stroke();
+    }
+  };
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  const forkP = stage >= 2 ? 1 : Math.max(0, (p1 - 0.45) / 0.55); // the fork starts once the main crack is about halfway down
+  strokeGroup(
+    [{ pts: CRACK_MAIN, p: stage >= 2 ? 1 : p1 }, { pts: CRACK_FORK, p: forkP }],
+    (2 + 1.8 * widen) * k,
+    widen > 0.3
+  );
+  if (stage >= 2) {
+    strokeGroup(
+      CRACK_LIMBS.map((limb) => ({ pts: limb.pts, p: Math.max(0, Math.min(1, (p2 - limb.t0) / (limb.t1 - limb.t0))) })),
+      2 * k,
+      false
+    );
+  }
+}
+
+// What stage the dome was last drawn at, and when it last stepped up — so a
+// purchase plays the crack-growth animation, while a freshly loaded/restarted
+// level (first render, or a stage going backwards) just shows its cracks as-is.
+let crackStageDrawn = null;
+let crackGrowFromStage = 0;
+let crackGrowStartMs = -Infinity;
+
+// Per direct request ("slightly change the visuals of the mound so it stands
+// out as a clearly interactable object") — a softly pulsing gold rim along the
+// dome plus a small gold arrow bobbing above it. The arrow is baked once; the
+// rim is one polyline of the sprite's own outline arc, so this adds a couple
+// of draw calls per frame and nothing else.
+const RIM_PERIOD_MS = 2400;
+const ARROW_BOB_PERIOD_MS = 900;
+let moundArrowSprite = null;
+function bakeMoundArrow() {
+  const size = 36;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const c = canvas.getContext('2d');
+  c.beginPath();
+  c.moveTo(size * 0.12, size * 0.2);
+  c.lineTo(size * 0.88, size * 0.2);
+  c.lineTo(size * 0.5, size * 0.84);
+  c.closePath();
+  c.fillStyle = '#ffd76b';
+  c.fill();
+  c.lineJoin = 'round';
+  c.lineWidth = 3;
+  c.strokeStyle = '#8a5a14';
+  c.stroke();
+  return canvas;
+}
+function drawMoundInteractCue(ctx, state, topLeft, w) {
+  const { camera } = state;
+  const zoom = camera.zoom;
+  const t = state.level.elapsed;
+  const pulse = 0.5 + 0.5 * Math.sin((t / RIM_PERIOD_MS) * Math.PI * 2);
+  const outline = moundSprite.outline;
+  const arcEnd = outline.length - 2; // the last two points are the base corners dipping under the floor — not part of the visible arc
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = '#ffd76b';
+  ctx.beginPath();
+  for (let i = 0; i < arcEnd; i++) {
+    const x = topLeft.x + outline[i].x * zoom;
+    const y = topLeft.y + outline[i].y * zoom;
+    if (i === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  }
+  ctx.globalAlpha = 0.1 + 0.1 * pulse;
+  ctx.lineWidth = 7 * zoom;
+  ctx.stroke();
+  ctx.globalAlpha = 0.4 + 0.3 * pulse;
+  ctx.lineWidth = Math.max(1, 1.6 * zoom);
+  ctx.stroke();
+  ctx.restore();
+
+  if (!moundArrowSprite) moundArrowSprite = bakeMoundArrow();
+  const arrowSize = 22 * zoom;
+  const bob = Math.sin((t / ARROW_BOB_PERIOD_MS) * Math.PI * 2) * 4 * zoom;
+  ctx.drawImage(moundArrowSprite, topLeft.x + w / 2 - arrowSize / 2, topLeft.y - arrowSize - 6 * zoom + bob, arrowSize, arrowSize);
 }
 
 export function renderMound(ctx, state) {
-  if (state.level.tier >= MOUND_MAX_TIER) return; // shattered — nothing to draw (Science Lab render is Phase 4)
+  if (state.level.tier >= MOUND_MAX_TIER) return; // shattered — nothing to draw (the shatter pieces and the Science Lab render in renderScienceLab)
+  shatter = null; // a level restarted back below the shatter tier
   const { camera } = state;
-  const crackCount = getMoundCrackCount(state);
+  const stage = getMoundCrackStage(state);
+  if (stage !== crackStageDrawn) {
+    const stepped = crackStageDrawn !== null && stage > crackStageDrawn;
+    crackGrowFromStage = stepped ? crackStageDrawn : stage;
+    crackGrowStartMs = stepped ? state.level.elapsed : -Infinity;
+    crackStageDrawn = stage;
+  }
+  const grow = Math.max(0, Math.min(1, (state.level.elapsed - crackGrowStartMs) / CRACK_GROW_MS));
   const topLeft = worldToScreen(MOUND_X - MOUND_WIDTH_PX / 2, SEABED_FLOOR_Y - MOUND_HEIGHT_PX - MOUND_LIFT_PX, camera);
   const w = MOUND_WIDTH_PX * camera.zoom;
   const h = (MOUND_HEIGHT_PX + TILE_SIZE) * camera.zoom;
@@ -294,66 +450,21 @@ export function renderMound(ctx, state) {
   if (!moundSprite) moundSprite = bakeMoundSprite(MOUND_WIDTH_PX, MOUND_HEIGHT_PX + TILE_SIZE);
   const z = camera.zoom / moundSprite.scale;
   ctx.drawImage(moundSprite.canvas, topLeft.x - moundSprite.pad * camera.zoom, topLeft.y - moundSprite.pad * camera.zoom, moundSprite.canvas.width * z, moundSprite.canvas.height * z);
+  drawMoundInteractCue(ctx, state, topLeft, w);
 
   ctx.save();
-  // Constrains EVERYTHING drawn until ctx.restore() below (the crack/branch
+  // Constrains EVERYTHING drawn until ctx.restore() below (the crack
   // strokes and the shimmer) to the dome's own silhouette — the same outline
-  // the sprite above was baked from — so a branch's jittered endpoint can't
+  // the sprite above was baked from — so a limb's jittered endpoint can't
   // poke through the dome's edge into the water above it.
   traceMoundPath(ctx, moundSprite.outline, topLeft.x, topLeft.y, camera.zoom);
   ctx.clip();
 
-  // Crack lines scale with how many times it's already been cracked. Each
-  // one is a jagged multi-segment fracture with a short forking branch (see
-  // CRACK_SHAPES above) rather than a plain 3-point zigzag, plus a thin
-  // offset highlight stroke alongside the dark line for a carved/engraved
-  // look instead of a flat scribble. cx is spread evenly across a band well
-  // clear of the dome's tapering edges (35%-65% width, was 50%-90% — the old
-  // range crept close enough to the right edge at higher tiers to read as
-  // "everything is bunched toward one side" against the mostly-blank rest of
-  // the dome).
-  for (let i = 1; i <= crackCount; i++) {
-    const shape = CRACK_SHAPES[(i - 1) % CRACK_SHAPES.length];
-    const spreadT = crackCount > 1 ? (i - 1) / (crackCount - 1) : 0.5; // 0..1 across however many cracks are actually showing
-    const cx = topLeft.x + w * (0.35 + 0.3 * spreadT);
-    const topY = topLeft.y + h * 0.12;
-    const bottomY = topLeft.y + h * 0.88;
-
-    const drawMainCrack = () => {
-      ctx.beginPath();
-      shape.points.forEach((p, idx) => {
-        const x = cx + p.dx * camera.zoom;
-        const y = topY + (bottomY - topY) * p.t;
-        if (idx === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      });
-      ctx.stroke();
-    };
-
-    ctx.strokeStyle = 'rgba(255, 244, 224, 0.35)';
-    ctx.lineWidth = Math.max(1, 1.5 * camera.zoom);
-    ctx.save();
-    ctx.translate(1 * camera.zoom, 1 * camera.zoom);
-    drawMainCrack();
-    ctx.restore();
-
-    ctx.strokeStyle = '#4a3c2c';
-    ctx.lineWidth = Math.max(1, 2 * camera.zoom);
-    ctx.lineCap = 'round';
-    drawMainCrack();
-
-    // The branch: forks off the main line partway down, at branchAngle
-    // degrees off the main crack's own local direction.
-    const branchPoint = shape.points.find((p) => p.t >= shape.branchAt) || shape.points[shape.points.length - 1];
-    const bx = cx + branchPoint.dx * camera.zoom;
-    const by = topY + (bottomY - topY) * branchPoint.t;
-    const branchLen = h * 0.18;
-    const angleRad = (shape.branchAngle * Math.PI) / 180;
-    ctx.beginPath();
-    ctx.moveTo(bx, by);
-    ctx.lineTo(bx + Math.sin(angleRad) * branchLen, by + Math.cos(angleRad) * branchLen);
-    ctx.stroke();
-  }
+  drawMoundCracks(
+    ctx, topLeft.x, topLeft.y, camera.zoom, stage,
+    crackGrowFromStage < 1 ? grow : 1, // crack 1 grows in only if it's the one that just appeared
+    crackGrowFromStage < 2 ? grow : 1
+  );
   // Drawn last, still inside the dome-silhouette clip, so the sweep never
   // paints outside the Mound's own shape. Per direct request, tuned to match
   // the DOM ".sheen-target" UI-button sweep specifically (1.1s duration,
@@ -365,7 +476,127 @@ export function renderMound(ctx, state) {
     topLeft.x, topLeft.y, w, h,
     { peakAlpha: 0.7, ease: true }
   );
-  ctx.restore(); // lifts the dome-silhouette clip set above, now that every crack/branch and the shimmer have been drawn through it
+  ctx.restore(); // lifts the dome-silhouette clip set above, now that every crack and the shimmer have been drawn through it
+}
+
+// ---- Shatter (the final $1500 purchase) ----
+// Per direct request, the last purchase shatters the Mound into pieces that fly
+// off and fade away, revealing the Science Lab. The tier flips to 3 in
+// crackMound at once (the Lab is already there, and clickable, underneath); this
+// is purely a cosmetic overlay drawn on top of it by renderScienceLab.
+// The pieces are baked ONCE here, on the purchase: the fully-cracked dome is
+// composited, then cut into Voronoi-style shards (each a small canvas), so
+// every frame afterwards is just one transformed drawImage per piece for
+// SHATTER_DURATION_MS — no clipping, path work or allocation while it plays.
+const SHATTER_DURATION_MS = 1500;
+const SHATTER_PIECE_COLS = 5;
+const SHATTER_PIECE_ROWS = 3;
+const SHATTER_GRAVITY = 200; // px/s^2
+const SHATTER_FADE_START = 0.3; // fraction of the duration the pieces hold fully opaque before fading
+let shatter = null; // { startMs, pieces } while playing, else null
+
+// Sutherland-Hodgman clip of a convex polygon to the half-plane nx*x + ny*y <= d.
+function clipPolygonHalfPlane(poly, nx, ny, d) {
+  const out = [];
+  for (let i = 0; i < poly.length; i++) {
+    const a = poly[i];
+    const b = poly[(i + 1) % poly.length];
+    const da = nx * a.x + ny * a.y - d;
+    const db = nx * b.x + ny * b.y - d;
+    if (da <= 0) out.push(a);
+    if ((da < 0 && db > 0) || (da > 0 && db < 0)) {
+      const t = da / (da - db);
+      out.push({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t });
+    }
+  }
+  return out;
+}
+
+function startMoundShatter(state) {
+  if (!moundSprite) moundSprite = bakeMoundSprite(MOUND_WIDTH_PX, MOUND_HEIGHT_PX + TILE_SIZE);
+  const { canvas, scale, pad, outline } = moundSprite;
+  // The dome as it looked right before breaking — sprite plus its biggest crack.
+  const full = document.createElement('canvas');
+  full.width = canvas.width;
+  full.height = canvas.height;
+  const fctx = full.getContext('2d');
+  fctx.drawImage(canvas, 0, 0);
+  fctx.save();
+  traceMoundPath(fctx, outline, pad * scale, pad * scale, scale);
+  fctx.clip();
+  drawMoundCracks(fctx, pad * scale, pad * scale, scale, 2, 1, 1);
+  fctx.restore();
+
+  const seeds = [];
+  for (let r = 0; r < SHATTER_PIECE_ROWS; r++) {
+    for (let c = 0; c < SHATTER_PIECE_COLS; c++) {
+      seeds.push({
+        x: CRACK_W * ((c + 0.2 + Math.random() * 0.6) / SHATTER_PIECE_COLS),
+        y: CRACK_H * ((r + 0.2 + Math.random() * 0.6) / SHATTER_PIECE_ROWS),
+      });
+    }
+  }
+  const pieces = [];
+  for (const seed of seeds) {
+    // This seed's Voronoi cell: the sprite's bounds clipped by the perpendicular bisector against every other seed.
+    let poly = [{ x: -pad, y: -pad }, { x: CRACK_W + pad, y: -pad }, { x: CRACK_W + pad, y: CRACK_H + pad + 8 }, { x: -pad, y: CRACK_H + pad + 8 }];
+    for (const other of seeds) {
+      if (other === seed) continue;
+      poly = clipPolygonHalfPlane(poly, other.x - seed.x, other.y - seed.y, (other.x * other.x + other.y * other.y - seed.x * seed.x - seed.y * seed.y) / 2);
+    }
+    if (poly.length < 3) continue;
+    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity, cx = 0, cy = 0;
+    for (const p of poly) {
+      minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
+      maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y);
+      cx += p.x / poly.length; cy += p.y / poly.length;
+    }
+    const pc = document.createElement('canvas');
+    pc.width = Math.max(1, Math.ceil((maxX - minX) * scale));
+    pc.height = Math.max(1, Math.ceil((maxY - minY) * scale));
+    const pctx = pc.getContext('2d');
+    pctx.beginPath();
+    poly.forEach((p, i) => {
+      if (i === 0) pctx.moveTo((p.x - minX) * scale, (p.y - minY) * scale);
+      else pctx.lineTo((p.x - minX) * scale, (p.y - minY) * scale);
+    });
+    pctx.closePath();
+    pctx.clip();
+    pctx.drawImage(full, -(minX + pad) * scale, -(minY + pad) * scale);
+    // Flies outward from the dome's base-center and kicks upward.
+    const dx = cx - CRACK_W / 2;
+    const dy = cy - CRACK_H * 0.9;
+    const dist = Math.hypot(dx, dy) || 1;
+    const speed = 50 + Math.random() * 90;
+    pieces.push({
+      canvas: pc, minX, minY, w: maxX - minX, h: maxY - minY, cx, cy,
+      vx: (dx / dist) * speed + (Math.random() - 0.5) * 30,
+      vy: (dy / dist) * speed * 0.6 - (60 + Math.random() * 110),
+      spin: (Math.random() - 0.5) * 7, // rad/s
+      delayMs: Math.random() * 120,
+    });
+  }
+  shatter = { startMs: state.level.elapsed, pieces };
+}
+
+function renderMoundShatter(ctx, state, topLeft) {
+  const t = state.level.elapsed - shatter.startMs;
+  if (t < 0 || t >= SHATTER_DURATION_MS + 150) { shatter = null; return; } // finished — or the level restarted under it
+  const zoom = state.camera.zoom;
+  for (const piece of shatter.pieces) {
+    const pt = Math.max(0, t - piece.delayMs) / 1000;
+    const u = Math.max(0, Math.min(1, (t - piece.delayMs) / SHATTER_DURATION_MS));
+    const alpha = u < SHATTER_FADE_START ? 1 : 1 - (u - SHATTER_FADE_START) / (1 - SHATTER_FADE_START);
+    if (alpha <= 0) continue;
+    const px = topLeft.x + (piece.cx + piece.vx * pt) * zoom;
+    const py = topLeft.y + (piece.cy + piece.vy * pt + 0.5 * SHATTER_GRAVITY * pt * pt) * zoom;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(px, py);
+    ctx.rotate(piece.spin * pt);
+    ctx.drawImage(piece.canvas, (piece.minX - piece.cx) * zoom, (piece.minY - piece.cy) * zoom, piece.w * zoom, piece.h * zoom);
+    ctx.restore();
+  }
 }
 
 // ---- Science Lab (Phase 4) ----
@@ -436,4 +667,7 @@ export function renderScienceLab(ctx, state) {
   ctx.clip();
   drawShimmerSweep(ctx, updateShimmerTimer(labShimmer, state.level.elapsed), topLeft.x, topLeft.y, w, h);
   ctx.restore();
+
+  // The shattering Mound's pieces, over the Lab they're revealing — see startMoundShatter. The Mound sat 1 tile lower than the Lab does, hence the different anchor.
+  if (shatter) renderMoundShatter(ctx, state, worldToScreen(MOUND_X - MOUND_WIDTH_PX / 2, SEABED_FLOOR_Y - MOUND_HEIGHT_PX - MOUND_LIFT_PX, camera));
 }

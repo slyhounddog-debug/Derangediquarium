@@ -958,7 +958,10 @@ export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDire
     : FISH_COLORS[speciesId] || '#ffffff';
   let color = baseColor;
   if (sickness > 0 || grayed > 0) {
-    let rgb = hexToRgb(baseColor);
+    // parseColor, not hexToRgb — a hybrid's baseColor is blendHexColors's
+    // "rgb(...)" string, which hexToRgb mis-parsed into NaN (a near-black
+    // fish whenever hungry/grayed), per direct report that hybrids get too dark.
+    let rgb = parseColor(baseColor);
     if (sickness > 0) rgb = mixRgb(rgb, SICK_GREEN, sickness);
     if (grayed > 0) rgb = mixRgb(rgb, ALIEN_BLOCKED_GRAY, grayed);
     color = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;

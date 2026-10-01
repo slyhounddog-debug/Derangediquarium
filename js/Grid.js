@@ -742,6 +742,29 @@ export function hasWasteTurretPlaced(state) {
   return false;
 }
 
+// The first placed Storage Chest (any tier), or null — the 'chest' guided
+// flow's own target, since a player-placed chest (see Systems.js's
+// updateChestTutorialTrigger) can be anywhere, not just the fixed spot the
+// full walkthrough asks for.
+export function findPlacedChestKey(state) {
+  for (const key in state.level.buildingData) {
+    if (STORAGE_CHEST_TILES.has(state.level.buildingData[key].type)) return key;
+  }
+  return null;
+}
+
+// Where the 'chest' flow's own deterministic Waste spawns, relative to
+// whichever chest it's teaching with: the first empty tile 2-4 columns to
+// either side of it (so it never lands in a building or straight into the
+// chest itself, which would complete the step instantly), falling back to 2
+// columns right if every candidate is occupied.
+export function findChestTutorialWasteSpot(state, chestKey) {
+  const [row, col] = chestKey.split(',').map(Number);
+  const candidates = [2, -2, 3, -3, 4, -4].map((dx) => col + dx);
+  const open = candidates.find((c) => c >= 0 && c < WORLD_TILES_W && state.level.grid[row][c] === TILE_EMPTY) ?? col + 2;
+  return { x: open * TILE_SIZE + TILE_SIZE / 2, y: row * TILE_SIZE + TILE_SIZE / 2 };
+}
+
 // Finds the nearest Waste Turret (first one found — there's realistically
 // only ever one during the tutorial this feeds) and its target Waste item —
 // shared by UI.js's guided-tutorial spotlight (which needs both positions to
@@ -3228,7 +3251,7 @@ export function computeCurrentPowerDemand(state) {
       );
       if (activeItem) demand += getCollectorPowerCostForItem(PROCESSOR_STATS[data.type], activeItem.type);
     } else if (REFINERY_TILES.has(data.type)) {
-      // Every tier — including the base (now "Electric Refinery") — only
+      // Every tier — including the base (the Solar Refinery, which costs 0) — only
       // draws while actively processing a locked recipe, same "only while
       // actually doing something" rule.
       if (data.lockedRecipe !== null) demand += REFINERY_STATS[data.type].powerCostPerSec;

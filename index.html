@@ -321,6 +321,17 @@
       </div>
       <div id="fish-info-desc"></div>
       <div id="fish-info-stats"></div>
+      <!-- Magnet Fish only — per direct request ("the fish modal IS the magnet
+           filter modal"), its item filter lives here instead of a separate
+           pop-up. Hidden for every other species (UI.js's refreshFishInfoMenu). -->
+      <div id="fish-info-filter" class="hidden">
+        <div id="fish-info-filter-header">
+          <div id="fish-info-filter-title">Magnet Filter</div>
+          <button id="fish-info-filter-clear-btn" title="Back to attracting Waste only">Clear All</button>
+        </div>
+        <div id="fish-info-filter-items"></div>
+        <div id="fish-info-filter-hint">Click an item to have this fish's magnet pull it in too.</div>
+      </div>
       <div id="fish-info-merge-title">Available Merges/Splices</div>
       <div id="fish-info-merge-lines"></div>
     </div>

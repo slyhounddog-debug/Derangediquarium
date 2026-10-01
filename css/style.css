@@ -2016,11 +2016,28 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
 #fish-info-desc { font-size: 12px; line-height: 1.4; opacity: 0.85; margin-bottom: 8px; }
 #fish-info-stats { display: flex; flex-direction: column; gap: 3px; font-size: 12px; font-weight: 700; }
 #fish-info-stats .fish-info-penalty { color: #e0392b; font-weight: 800; }
+/* Magnet Fish's item filter, embedded in its fish info modal — reuses the
+   Platform filter's own .platform-filter-item button look below. */
+#fish-info-filter { margin-top: 10px; padding-top: 8px; border-top: 1px dashed rgba(107, 76, 107, 0.25); }
+#fish-info-filter.hidden { display: none; }
+#fish-info-filter-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+#fish-info-filter-title { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em; opacity: 0.65; }
+#fish-info-filter-clear-btn {
+  font-size: 10px; font-weight: 800; color: #6b4c6b;
+  background: #f3e9dd; border: 2px solid transparent; border-radius: 12px;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+#fish-info-filter-clear-btn:hover { background: #ebdccb; }
+#fish-info-filter-items { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 8px; }
+#fish-info-filter-hint { font-size: 10px; color: #8a7a8a; line-height: 1.3; }
 #fish-info-merge-title {
   font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em;
   opacity: 0.65; margin-top: 10px; padding-top: 8px; border-top: 1px dashed rgba(107, 76, 107, 0.25);
 }
 #fish-info-merge-lines { font-size: 12px; line-height: 1.5; margin-top: 4px; }
+/* UI.js's refreshFishInfoMenu toggles .hidden on these when a fish has no merge/splice options at all — without a rule, the title kept showing over nothing. */
+#fish-info-merge-title.hidden, #fish-info-merge-lines.hidden { display: none; }
 
 /* Platform item-filter pop-up — "like the recipe modals," per direct
    request: same fly-out-of-its-anchor mechanic as #recipe-menu/

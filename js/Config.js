@@ -203,8 +203,8 @@ export const STORAGE_CHEST_CAPACITY = {
 
 // ---- Bio-Building production chain (Bio-Sludge -> Biomass -> Mutagen Paste / Blue Science) ----
 // Four new buildings, each a single standalone tier (no family stacking).
-// Granted two different ways: the Refinery via the real Tier 1->2 Mound
-// crack (TIER_UNLOCKS[2]) — it's the foundational recycler the rest of the
+// Granted two different ways: the Refinery via the Mound's $75 purchase
+// (Mound.js's crackMound) — it's the foundational recycler the rest of the
 // chain builds on, and its own two recipes (Waste->Food, a straight
 // alternative to the Auto-Feeder; Bio-Sludge->Biomass) are both usable well
 // before the Science Lab exists, so there's no reason to gate it behind the
@@ -214,7 +214,7 @@ export const STORAGE_CHEST_CAPACITY = {
 // possible recipes (Waste->Food, Bio-Sludge->Biomass, Bio-Sludge taking
 // ALIEN_DNA_REFINERY_TIME_MULTIPLIER longer than the Waste recipe) — see
 // Grid.js's updateBuildings and REFINERY_STATS below. The base tier is
-// granted at the real Tier 1->2 Mound crack (unchanged); Electric/Advanced
+// granted at the Mound's $75 purchase (was the $500 crack); Electric/Advanced
 // are Science Lab purchases (see SCIENCE_LAB_UPGRADES). The old 4th tier,
 // Ultra Refinery (TILE_REFINERY_BIO), is removed entirely per direct
 // request ("remove the Ultra Refinery from the game") — Bio Refinery
@@ -605,6 +605,14 @@ export const PLATFORM_FILTER_ITEM_TYPES = [
   { id: 'mutagen_paste', label: 'Mutagen Paste', icon: '🩷' },
   { id: 'alien_egg', label: 'Alien Egg', icon: '🥚' },
 ];
+// Per direct request ("make it so the magnet fish cannot attract blue or green
+// science, or alien eggs") — those 3 types are never attractable by a Magnet
+// Fish, and are dropped from its (now fish-info-modal-embedded) filter grid
+// to make room for the combined modal. A Platform/Fan filter still lists all 9.
+// Entities.js's computeBufferFishMagnetForce also reads this set directly, so a
+// save written before this change with one of them already ticked stops pulling it too.
+export const MAGNET_FISH_EXCLUDED_ITEM_TYPES = new Set(['science', 'science_green', 'alien_egg']);
+export const MAGNET_FISH_FILTER_ITEM_TYPES = PLATFORM_FILTER_ITEM_TYPES.filter((t) => !MAGNET_FISH_EXCLUDED_ITEM_TYPES.has(t.id));
 // vx decays by this factor every tick — without damping, a single bump
 // would leave an item drifting sideways forever instead of a jostled pile
 // settling back down, the way real friction would.
@@ -1048,12 +1056,12 @@ export const CLEANLINESS_WARNING_MESSAGE =
   'Looking a little dirty in there champ. The dirtier your tank is, the less money your fish produce. If only there was a way to clean it......';
 // The first-ever Bio-Sludge (alien_dna) item, per direct request — worded
 // differently depending on whether the Refinery is already unlocked (it's
-// granted by the Mound's real Tier 1->2 crack), since a player who hasn't
+// granted by the Mound's $75 purchase), since a player who hasn't
 // reached that yet has nothing to actually DO with the Bio-Sludge yet, and
 // should be nudged back toward the Mound instead of toward a building they
 // don't have. See Entities.js's maybeAnnounceFirstBioSludge.
 export const FIRST_BIO_SLUDGE_WITH_REFINERY_MESSAGE =
-  "Ooh, fresh Bio-Sludge! You've already got a Refinery sitting there looking useful — throw it in and see what dribbles out the other end.";
+  "Ooh, fresh Bio-Sludge! You've already got a Solar Refinery sitting there looking useful — throw it in and see what dribbles out the other end.";
 export const FIRST_BIO_SLUDGE_NO_REFINERY_MESSAGE =
   "You've got yourself some Bio-Sludge and absolutely nothing to do with it yet. That mound sitting in your seabed looks suspiciously like it's hiding the answer.";
 // The #hud-cleanliness/#shop-cleanliness readout's text color is a live
@@ -1541,7 +1549,8 @@ export const SPECIES = {
     growthStages: [
       { feedsRequired: 0, scale: 0.5, pixelsPerMW: 1 },
       { feedsRequired: 2, scale: 0.75, pixelsPerMW: 1 },
-      { feedsRequired: 4, scale: 1.0, pixelsPerMW: 0.5 },
+      // Adult 1.0 -> 0.8 (a 25% size reduction, 1/1.25), per direct request ("The electric eel adult and its hybrids are 25% too big") — also shrinks its hit/eat radius, since size is the single source for both.
+      { feedsRequired: 4, scale: 0.8, pixelsPerMW: 0.5 },
     ],
     unlockedByDefault: false,
   },
@@ -1595,7 +1604,7 @@ export const SPECIES = {
     // pixelsPerMW drives its own bespoke power-generation mechanic (see
     // updateFish's speciesId==='eel_blimp' branch) — same distance-traveled
     // formula the Electric Eel itself uses, at its adult rate.
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropValue: 0, pixelsPerMW: 0.5 }],
+    growthStages: [{ feedsRequired: 0, scale: 0.8, dropValue: 0, pixelsPerMW: 0.5 }], // 1.0 -> 0.8, same 25% eel-hybrid size cut as the Electric Eel's adult stage
     unlockedByDefault: false,
   },
   // Renamed 'Buffer Fish' -> 'Magnet Fish' per direct request — the id
@@ -1604,10 +1613,10 @@ export const SPECIES = {
   // Waste-only either, per that same direct request ("make it so the buffer
   // fish can attract any object the same way they attract waste, when
   // turned on in the modal") — see Entities.js's fish.magnetFilterItems and
-  // main.js's right-click filter modal (openMagnetFishFilterMenu).
+  // the filter grid inside UI.js's fish info modal (refreshFishInfoFilterGrid).
   buffer_fish: {
     id: 'buffer_fish', name: 'Magnet Fish', tier: 4, unlockPhase: 4, cost: 70,
-    description: 'Suckerfish × Guppy — right-click it to toggle its magnet on/off (single-click opens its info instead), then hold a long left-click on it to choose what it attracts (Waste by default). Still eats Waste like a Suckerfish, but converts what it eats into Food instead of just relieving its own hunger.',
+    description: 'Suckerfish × Guppy — right-click it to toggle its magnet on/off, and pick what it attracts in the filter in its info modal (Waste by default; never Science or Alien Eggs). Still eats Waste like a Suckerfish, but converts what it eats into Food instead of just relieving its own hunger.',
     behavior: ['SCAVENGER'], dropType: 'waste_to_food', parents: ['suckerfish', 'guppy'],
     swimSpeed: 33, lifespan: 300000, hungerRate: 0.914,
     // dropInterval is this pure Scavenger's eat cooldown, same "up to 3
@@ -1631,7 +1640,7 @@ export const SPECIES = {
     // pixelsPerMW (Generator half) and dropInterval (Scavenger eat-cooldown
     // half) both reuse the exact fields the two parent mechanics already
     // read — see updateFish's isPureGenerator/isPureScavenger branches.
-    growthStages: [{ feedsRequired: 0, scale: 1.0, dropInterval: 20000, dropValue: 0, pixelsPerMW: 1 }],
+    growthStages: [{ feedsRequired: 0, scale: 0.8, dropInterval: 20000, dropValue: 0, pixelsPerMW: 1 }], // 1.0 -> 0.8, same 25% eel-hybrid size cut as the Electric Eel's adult stage
     unlockedByDefault: false,
   },
   // `parents: ['octopus', 'alien_t1']` — per direct request ("you shouldn't
@@ -1793,10 +1802,11 @@ export const BUILDING_TYPES = {
     color: '#c9a8ff', unlockedByDefault: false,
   },
   // Renamed per direct request, same reasoning/shift as the Collector family
-  // above — the base tier now draws real power (see
-  // REFINERY_STATS[TILE_REFINERY].powerCostPerSec), so it's "Electric" now;
-  // every tier above it shifted up one name (old Electric -> Advanced, old
-  // Advanced -> Bio). The tier that used to exist above THAT ("Ultra
+  // above — the base tier was "Electric" for a while (it drew real power),
+  // and every tier above it shifted up one name (old Electric -> Advanced, old
+  // Advanced -> Bio). It's now the "Solar Refinery" and draws no power at all
+  // (see REFINERY_STATS[TILE_REFINERY].powerCostPerSec), granted by the
+  // Mound's $75 purchase. The tier that used to exist above THAT ("Ultra
   // Refinery," gated behind Green Science Tech) is gone entirely per a later
   // direct request ("remove the Ultra Refinery from the game") — Bio
   // Refinery (TILE_REFINERY_ADVANCED) now occupies its old slot/cost/stats
@@ -1804,13 +1814,13 @@ export const BUILDING_TYPES = {
   // SCIENCE_LAB_UPGRADES' bio_refinery node. Base cost cut 80 -> 30 per
   // direct request.
   [TILE_REFINERY]: {
-    id: TILE_REFINERY, name: 'Electric Refinery', icon: '⚗️', cost: 30,
-    description: 'Refines Waste -> Food, or Bio-Sludge -> Biomass. One item at a time.',
+    id: TILE_REFINERY, name: 'Solar Refinery', icon: '⚗️', cost: 30,
+    description: 'Refines Waste -> Food, or Bio-Sludge -> Biomass. One item at a time. Runs on sunlight — uses no electricity.',
     color: '#b8a888', unlockedByDefault: false,
   },
   [TILE_REFINERY_ELECTRIC]: {
     id: TILE_REFINERY_ELECTRIC, name: 'Advanced Refinery', icon: '⚗️', cost: 140,
-    description: 'Processes Waste (and Bio-Sludge) faster than the Electric Refinery. Draws power while working.',
+    description: 'Processes Waste (and Bio-Sludge) faster than the Solar Refinery. Draws power while working.',
     color: '#4fd6e0', unlockedByDefault: false,
   },
   [TILE_REFINERY_ADVANCED]: {
@@ -2140,12 +2150,12 @@ export const SEA_TURTLE_COIN_VALUE_PER_COLLECT = 50;
 // DNA->Biomass recipe takes ALIEN_DNA_REFINERY_TIME_MULTIPLIER times as long
 // on the SAME tile (Grid.js's updateBuildings computes this at runtime
 // rather than storing a second constant per tier, since it's always a flat
-// 50% multiple of the food time). The base tier (now "Electric Refinery")
-// draws 5mw while refining, per direct request — the same generic
-// `stats.powerCostPerSec > 0` gate every other tier already uses (see
-// updateBuildings/computeCurrentPowerDemand) applies here automatically,
-// needing no code change; every tier draws power only while actively
-// processing an absorbed item.
+// 50% multiple of the food time). The base tier (now the "Solar Refinery")
+// draws no power at all, per direct request — powerCostPerSec 0 is handled by
+// the same generic `stats.powerCostPerSec > 0` gate every other tier already
+// uses (see updateBuildings/computeCurrentPowerDemand), needing no code
+// change; every OTHER tier draws power only while actively processing an
+// absorbed item.
 export const ALIEN_DNA_REFINERY_TIME_MULTIPLIER = 1.5;
 // Per direct request: Advanced Refinery's own waste time cut 14s -> 10s
 // (its Bio-Sludge time falls out of the same ALIEN_DNA_REFINERY_TIME_MULTIPLIER
@@ -2154,7 +2164,7 @@ export const ALIEN_DNA_REFINERY_TIME_MULTIPLIER = 1.5;
 // raised 10 -> 15mw/sec. Bio Refinery inherits the old Ultra Refinery's
 // exact stats (5000ms/30mw) now that it occupies Ultra's old top-tier slot.
 export const REFINERY_STATS = {
-  [TILE_REFINERY]: { foodProcessMs: 20000, powerCostPerSec: 5 },
+  [TILE_REFINERY]: { foodProcessMs: 20000, powerCostPerSec: 0 }, // Solar Refinery — no electricity, per direct request (was 5)
   [TILE_REFINERY_ELECTRIC]: { foodProcessMs: 10000, powerCostPerSec: 15 },
   [TILE_REFINERY_ADVANCED]: { foodProcessMs: 5000, powerCostPerSec: 30 },
 };
@@ -2352,12 +2362,12 @@ export const BUILDING_UPTIME_SAMPLE_COUNT = 36;
 // tied to Mound progress at all. MOUND_MAX_TIER dropped from 4 to 3
 // accordingly.
 export const MOUND_MAX_TIER = 3; // reaching this shatters the Mound completely into the Science Lab instead of cracking further
-export const MOUND_TEASE_COST = 75; // cut from 150 per direct request — still a pure Tier 1 no-op joke, just cheaper
+export const MOUND_TEASE_COST = 75; // cut from 150 per direct request — grants the Storage Chest and Solar Refinery, and shows the dome's first crack
 // The old paid "Tier 1.75" step (FAN_UNLOCK_COST, $500, granted ONLY the
 // Rudimentary Fan) is gone entirely, per direct request — the Rudimentary
 // Fan is unlocked from level start now instead (BUILDING_TYPES'
 // unlockedByDefault, alongside Platform/Waste Turret, below).
-export const MOUND_CRACK_COST = { 1: 500, 2: 1500 }; // 1: Tier 1->2 (Collector + Refinery + Octopus), cut from 1000 per direct request; 2: Tier 2->3 (shatters into the Science Lab, grants nothing directly), cut from 5000 per a later direct request
+export const MOUND_CRACK_COST = { 1: 500, 2: 1500 }; // 1: Tier 1->2 (Collector + Electric Eel; grows the dome's crack), cut from 1000 per direct request; 2: Tier 2->3 (shatters into the Science Lab, grants nothing directly), cut from 5000 per a later direct request
 export const MOUND_WIDTH_TILES = 4.4; // how many seabed tiles wide its clickable footprint is — 10% bigger than the original 4
 export const MOUND_HEIGHT_PX = 62; // how far it mounds up above the seabed surface — 10% bigger than the original 56
 // Platform, the Waste Turret, and the Rudimentary Fan are all NOT tier-gated
@@ -2373,12 +2383,9 @@ export const TIER_UNLOCKS = {
     // own `eel` purchase now requires Bubble Cap 20 instead (see that
     // section's own comment for the full reasoning).
     species: ['electric_eel'],
-    // The base Refinery is granted here rather than through the Science Lab
-    // (unlike its Electric/Advanced/Bio tiers) — it's the foundational
-    // recycler the whole chain is built on, and both its recipes (Waste->
-    // Food; Bio-Sludge->Biomass) are usable well before the Lab exists, so
-    // gating it behind Lab research would just waste it.
-    buildings: [TILE_COLLECTOR, TILE_REFINERY],
+    // The base (Solar) Refinery used to be granted here too, but moved to
+    // the Mound's $75 purchase per direct request — see Mound.js's crackMound.
+    buildings: [TILE_COLLECTOR],
   },
   // Tier 3 has no entry here at all — the real Tier 2->3 crack's only
   // effect is shattering the Mound (state.level.tier >= MOUND_MAX_TIER),
@@ -3072,21 +3079,22 @@ export const WASTE_DRAG_TUTORIAL_WAIT_MS = 1000; // per direct request — if th
 export const WASTE_DRAG_GHOST_CYCLE_MS = 1400; // one full waste->turret sweep of the "drag me here" ghost animation shown during that tutorial step — see main.js's render()
 export const POST_ALIEN_TUTORIAL_MESSAGE = "Now that's I'm talking about. A little firepower never hurt no one."; // per direct request's exact wording — posted once the player finishes placing the guided Waste Turret
 // ---- Storage Chest guided tutorial ("chest" flow, UI.js's TUTORIAL_FLOWS) ----
-// Triggered once, directly from Mound.js's crackMound the moment the $75
-// tease grants the Tier 1 chest — same "shop -> select -> place -> drag"
-// shape as the postalien/turret tutorial, minus its 'scroll' step (the
-// player's camera is already centered on the Mound right where this fires,
-// so there's nothing to scroll to first). See UI.js's POST_MOUND_CHEST_SPOT
-// for where the tutorial's own chest gets placed.
+// Per direct request, no longer fired by the $75 Mound purchase itself.
+// Systems.js's updateChestTutorialTrigger starts it once the chest is unlocked
+// AND CHEST_TUTORIAL_ITEM_THRESHOLD or more of any one non-Food item type are
+// in the tank (the full "shop -> select -> place -> drag" walkthrough, same
+// shape as the postalien/turret tutorial minus its 'scroll' step) — or, if the
+// player places a chest before that, with just its second half ("drag Waste
+// into the Chest" -> "drag away to trickle"). See UI.js's POST_MOUND_CHEST_SPOT
+// for where the full walkthrough's own chest gets placed.
+export const CHEST_TUTORIAL_ITEM_THRESHOLD = 20;
+export const CHEST_TUTORIAL_CHECK_INTERVAL_MS = 1000; // how often that item-count scan runs — it walks every item, so not every tick
 export const CHEST_TUTORIAL_GOLD_GRANT = 20; // per direct request — matches the Tier 1 chest's own $20 cost exactly, same "always affordable regardless of how the player already spent their starting money" reasoning TURRET_TUTORIAL_GOLD_GRANT uses
 export const CHEST_TUTORIAL_GOLD_GRANT_MESSAGE = "Here's 20 gold — go place that chest.";
-// A few tiles left of POST_MOUND_CHEST_SPOT (UI.js) — same "deterministic
-// spawn, locked as the tutorial's own drag target" reasoning as
-// TURRET_TUTORIAL_WASTE_X/Y above, so the "drag Waste into the Chest" step
-// always has something real to grab regardless of whether organic Waste
-// happens to be nearby.
-export const CHEST_TUTORIAL_WASTE_X = WORLD_W / 2 + TILE_SIZE;
-export const CHEST_TUTORIAL_WASTE_Y = SEABED_FLOOR_Y + TILE_SIZE * 2;
+// The "drag Waste into the Chest" step's Waste is deterministic too (spawned
+// beside the chest — Grid.js's findChestTutorialWasteSpot, same reasoning as
+// TURRET_TUTORIAL_WASTE_X/Y above), so it always has something real to grab
+// regardless of whether organic Waste happens to be nearby.
 export const CHEST_TUTORIAL_MESSAGE = "Now you've got somewhere to stash the overflow — drag away from any chest and let go whenever you want it trickling back out.";
 // Per direct request ("make the clickable area 8 full tiles around the
 // placed chest") — only during the 'trickle' step's own aim-drag mousedown

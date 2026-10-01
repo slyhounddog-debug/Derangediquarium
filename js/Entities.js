@@ -42,8 +42,6 @@ import {
   PRODUCTION_LAUNCH_MASS_MIN,
   PRODUCTION_LAUNCH_MASS_MAX,
   STORAGE_CHEST_SCATTER_LAUNCH_SPEED,
-  CHEST_TUTORIAL_WASTE_X,
-  CHEST_TUTORIAL_WASTE_Y,
   FOOD_SWAY_AMPLITUDE,
   FOOD_SWAY_FREQUENCY,
   FOOD_SWAY_ENVELOPE_FREQUENCY,
@@ -171,6 +169,7 @@ import {
   EEL_BLIMP_BATTERY_CAPACITY_MUTAGEN_MW,
   EEL_BLIMP_MUTAGEN_PRODUCTION_MULTIPLIER,
   BUFFER_FISH_MAGNET_RADIUS,
+  MAGNET_FISH_EXCLUDED_ITEM_TYPES,
   BUFFER_FISH_MAGNET_FORCE,
   CLEANLINESS_MIN_MONEY_FRACTION,
   REFINERY_STATS,
@@ -193,7 +192,7 @@ import {
   BOSS_DEATH_SCIENCE_COUNT,
   BOSS_DEATH_SCIENCE_GREEN_COUNT,
 } from './Config.js';
-import { beginItemPhysicsStep, stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemForces, updateBuildings } from './Grid.js';
+import { beginItemPhysicsStep, stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemForces, updateBuildings, findChestTutorialWasteSpot } from './Grid.js';
 import { spawnCoinPickupBubbles } from './Ambience.js';
 import { pushGameNotification } from './Notifications.js';
 // Sound is a fire-and-forget side effect at the moment something already
@@ -598,11 +597,13 @@ export function spawnTurretTutorialWaste(state) {
 
 // Same deterministic-spawn-plus-locked-target precedent as
 // spawnTurretTutorialWaste above, for the 'chest' guided flow's own
-// "drag Waste into the Chest" step — see UI.js's TUTORIAL_FLOWS.chest and
-// Config.js's CHEST_TUTORIAL_WASTE_X/Y (a few tiles left of the tutorial's
-// own fixed chest spot, POST_MOUND_CHEST_SPOT).
-export function spawnChestTutorialWaste(state) {
-  const item = createWaste(CHEST_TUTORIAL_WASTE_X, CHEST_TUTORIAL_WASTE_Y);
+// "drag Waste into the Chest" step — see UI.js's TUTORIAL_FLOWS.chest. Spawns
+// beside whichever chest the flow is teaching with (chestKey), since that
+// chest can now be anywhere the player put it — see Grid.js's
+// findChestTutorialWasteSpot.
+export function spawnChestTutorialWaste(state, chestKey) {
+  const spot = findChestTutorialWasteSpot(state, chestKey);
+  const item = createWaste(spot.x, spot.y);
   state.level.items.push(item);
   state.level.chestDragTutorialTargetId = item.id;
 }
@@ -1179,7 +1180,7 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
     capBlockedTintRemainingMs: 0, // counts down from FISH_BLOCKED_TINT_MS whenever a science drop is blocked by the Bubble Cap — the OTHER (timed) source of the gray tint, see triggerProductionBlocked
     mutagenBuffActive: false, // Adult-only Mutagen Paste buff — see updateFish's eat branch; cleared once hunger crosses back into HUNGER_CRITICAL_THRESHOLD
     magnetOn: false, // Magnet Fish (buffer_fish) only — toggled by DOUBLE-clicking the fish (main.js's click handler); pulls nearby items whose type is in magnetFilterItems toward it while true, see computeBufferFishMagnetForce
-    magnetFilterItems: ['waste'], // Magnet Fish only — which item types its magnet attracts, toggled via main.js's right-click filter modal (openMagnetFishFilterMenu), same checkbox UI a Platform's own filterItems uses. Defaults to Waste only, matching the original fixed behavior.
+    magnetFilterItems: ['waste'], // Magnet Fish only — which item types its magnet attracts, toggled in the Magnet Fish's own fish info modal (UI.js's refreshFishInfoFilterGrid), same checkbox UI a Platform's own filterItems uses. Defaults to Waste only, matching the original fixed behavior.
     // Shared by every toggleable hybrid (Magnet Fish/Feeder Fish/Xeno
     // Octopus) — per direct request ("shimmer and bounce animation anytime
     // a hybrid fish with an ability is toggled on... during the time the
@@ -1821,6 +1822,25 @@ export function isSpliceTargetCandidate(state, fish) {
 // as small icons instead of names, per a later direct request ("use just
 // the icons of the fish instead of the names... Keep the fish info modal
 // text for the available merges as it is now").
+// The merge/splice outcome of pairing `fish` with `other` (or null if they
+// don't pair), shared by describeFishMergeOptions below and
+// findFishMergePartners — the combineSource/spliceSource/spliceTarget flags are
+// `fish`'s own eligibility, computed once by the caller.
+function mergePairOutcome(state, fish, other, combineSource, spliceSource, spliceTarget) {
+  if (combineSource && canCombineFish(state, fish, other)) {
+    return { resultSpeciesId: fish.speciesId, text: `Merge with ${SPECIES[other.speciesId].name} → Tier ${(fish.starTier || 1) + 1} ${SPECIES[fish.speciesId].name}` };
+  }
+  if (spliceSource && canSpliceFish(state, fish, other)) {
+    const resultSpeciesId = getHybridSpeciesId(other.speciesId, fish.speciesId);
+    return { resultSpeciesId, text: `Splice with ${SPECIES[other.speciesId].name} → ${SPECIES[resultSpeciesId].name}` };
+  }
+  if (spliceTarget && canSpliceFish(state, other, fish)) {
+    const resultSpeciesId = getHybridSpeciesId(fish.speciesId, other.speciesId);
+    return { resultSpeciesId, text: `Splice with ${SPECIES[other.speciesId].name} → ${SPECIES[resultSpeciesId].name}` };
+  }
+  return null;
+}
+
 export function describeFishMergeOptions(state, fish) {
   const combineSource = isCombinableFish(state, fish);
   const spliceSource = isSpliceSource(state, fish);
@@ -1830,20 +1850,27 @@ export function describeFishMergeOptions(state, fish) {
   const seen = new Set();
   for (const other of state.level.entities) {
     if (other.type !== 'fish' || other.id === fish.id || other.dying) continue;
-    let text = null, resultSpeciesId = null;
-    if (combineSource && canCombineFish(state, fish, other)) {
-      resultSpeciesId = fish.speciesId;
-      text = `Merge with ${SPECIES[other.speciesId].name} → Tier ${(fish.starTier || 1) + 1} ${SPECIES[fish.speciesId].name}`;
-    } else if (spliceSource && canSpliceFish(state, fish, other)) {
-      resultSpeciesId = getHybridSpeciesId(other.speciesId, fish.speciesId);
-      text = `Splice with ${SPECIES[other.speciesId].name} → ${SPECIES[resultSpeciesId].name}`;
-    } else if (spliceTarget && canSpliceFish(state, other, fish)) {
-      resultSpeciesId = getHybridSpeciesId(fish.speciesId, other.speciesId);
-      text = `Splice with ${SPECIES[other.speciesId].name} → ${SPECIES[resultSpeciesId].name}`;
-    }
-    if (text && !seen.has(text)) { seen.add(text); entries.push({ text, otherSpeciesId: other.speciesId, resultSpeciesId }); }
+    const outcome = mergePairOutcome(state, fish, other, combineSource, spliceSource, spliceTarget);
+    if (outcome && !seen.has(outcome.text)) { seen.add(outcome.text); entries.push({ text: outcome.text, otherSpeciesId: other.speciesId, resultSpeciesId: outcome.resultSpeciesId }); }
   }
   return entries.length > 0 ? entries : [{ text: 'No available fish to merge.', otherSpeciesId: null, resultSpeciesId: null }];
+}
+
+// Every living fish `fish` could currently merge or splice with — the same
+// pairing rules as describeFishMergeOptions, but the fish themselves (not
+// deduped text), so main.js's Merge-tool hover highlight can draw a glow on
+// each and a line out to it.
+export function findFishMergePartners(state, fish) {
+  const combineSource = isCombinableFish(state, fish);
+  const spliceSource = isSpliceSource(state, fish);
+  const spliceTarget = isSpliceTargetCandidate(state, fish);
+  const partners = [];
+  if (!combineSource && !spliceSource && !spliceTarget) return partners;
+  for (const other of state.level.entities) {
+    if (other.type !== 'fish' || other.id === fish.id || other.dying) continue;
+    if (mergePairOutcome(state, fish, other, combineSource, spliceSource, spliceTarget)) partners.push(other);
+  }
+  return partners;
 }
 
 const FIRST_SPLICE_MESSAGE =
@@ -2274,9 +2301,9 @@ function updateScience(item, state, dtMs) {
 // Per direct request ("make it so the buffer fish can attract any object the
 // same way they attract waste, when turned on in the modal"), no longer
 // hardcoded to Waste — each fish now carries its OWN magnetFilterItems
-// whitelist (default ['waste'], toggled via main.js's right-click filter
-// modal, same UI/semantics as a Platform's own filterItems — see
-// openMagnetFishFilterMenu), and only pulls an item whose type is checked
+// whitelist (default ['waste'], toggled in its own fish info modal,
+// same UI/semantics as a Platform's own filterItems — see UI.js's
+// refreshFishInfoFilterGrid), and only pulls an item whose type is checked
 // into that list. Open-water-only, unchanged — a Magnet Fish can never swim
 // into the seabed city any more than any other fish can, so anything
 // already settled down there is just as unreachable to this as before.
@@ -2285,6 +2312,9 @@ function updateScience(item, state, dtMs) {
 function computeBufferFishMagnetForce(state, item) {
   let fx = 0;
   let fy = 0;
+  // Per direct request, blue/green Science and Alien Eggs can never be pulled,
+  // whatever an older save's magnetFilterItems says — one Set lookup per item.
+  if (MAGNET_FISH_EXCLUDED_ITEM_TYPES.has(item.type)) return { fx, fy };
   for (const entity of state.level.entities) {
     if (entity.type !== 'fish' || entity.speciesId !== 'buffer_fish' || !entity.magnetOn) continue;
     // A fish loaded from a save written before magnetFilterItems existed

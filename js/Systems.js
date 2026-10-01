@@ -14,6 +14,9 @@ import {
   TURRET_TUTORIAL_DELAY_MS,
   ALIEN_INTRO_DELAY_MS,
   WASTE_DRAG_TUTORIAL_WAIT_MS,
+  CHEST_TUTORIAL_ITEM_THRESHOLD,
+  CHEST_TUTORIAL_CHECK_INTERVAL_MS,
+  TILE_STORAGE_CHEST,
   ALIEN_WAVE_INTERVAL_EARLY_MS,
   ALIEN_WAVE_INTERVAL_LATE_MS,
   ALIEN_WAVE_DIFFICULTY_RAMP_WAVES,
@@ -53,8 +56,8 @@ import {
   IDLE_PURCHASE_HINT_MESSAGE,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings } from './Levels.js';
-import { getFishPurchaseCost, findCombinablePair, spawnTurretTutorialWaste } from './Entities.js';
-import { hasWasteTurretPlaced, countPlacedOfType } from './Grid.js';
+import { getFishPurchaseCost, findCombinablePair, spawnTurretTutorialWaste, spawnChestTutorialWaste } from './Entities.js';
+import { hasWasteTurretPlaced, countPlacedOfType, findPlacedChestKey } from './Grid.js';
 import { saveGame } from './Save.js';
 import { pushGameNotification } from './Notifications.js';
 
@@ -197,7 +200,14 @@ function updateTurretTutorialTrigger(state) {
 function updatePostAlienTutorial(state) {
   const flags = state.level.tutorialFlags;
   if (state.level.tutorialFlow) return;
-  if (!flags.postAlienTutorialShown) return;
+  if (!flags.postAlienTutorialShown) {
+    // Per direct request — a Turret placed BEFORE the turret tutorial's own
+    // first-alien trigger goes straight to this "drag Waste into the Turret"
+    // half, and marks the full walkthrough as already consumed so
+    // updateTurretTutorialTrigger skips offering it again at the first alien.
+    if (!hasWasteTurretPlaced(state)) return;
+    flags.postAlienTutorialShown = true;
+  }
   if (flags.wasteDragTutorialShown) return;
   if (!hasWasteTurretPlaced(state)) return;
   // Per direct request, this no longer waits for a real fish to have
@@ -214,6 +224,39 @@ function updatePostAlienTutorial(state) {
   }
   if (state.level.elapsed - state.level.wasteDragTutorialWaitStartMs < WASTE_DRAG_TUTORIAL_WAIT_MS) return;
   state.level.tutorialFlow = { id: 'wastedrag', step: 'drag' };
+}
+
+// Starts the Storage Chest guided tutorial (UI.js's TUTORIAL_FLOWS.chest), once
+// per level, per direct request (it no longer fires from the $75 Mound
+// purchase): once the chest is unlocked, if the player has already placed one
+// it runs just its second half ('feedwaste' — drag Waste in — then 'trickle' —
+// drag away to pour it back out); otherwise the full walkthrough starts once
+// CHEST_TUTORIAL_ITEM_THRESHOLD or more of any one non-Food item type are
+// sitting in the tank. Throttled, since the item-count scan walks every item.
+function updateChestTutorialTrigger(state) {
+  const flags = state.level.tutorialFlags;
+  if (flags.chestTutorialShown || state.level.tutorialFlow) return;
+  if (!state.meta.buildingsUnlocked.includes(TILE_STORAGE_CHEST)) return;
+  if (state.level.elapsed < state.level.chestTutorialNextCheckMs) return;
+  state.level.chestTutorialNextCheckMs = state.level.elapsed + CHEST_TUTORIAL_CHECK_INTERVAL_MS;
+  const chestKey = findPlacedChestKey(state);
+  if (chestKey) {
+    flags.chestTutorialShown = true;
+    spawnChestTutorialWaste(state, chestKey);
+    state.level.tutorialFlow = { id: 'chest', step: 'feedwaste' };
+    return;
+  }
+  const counts = {};
+  for (const item of state.level.items) {
+    if (item.type === 'food') continue;
+    counts[item.type] = (counts[item.type] || 0) + 1;
+    if (counts[item.type] >= CHEST_TUTORIAL_ITEM_THRESHOLD) {
+      flags.chestTutorialShown = true;
+      // Per direct request, skip the 'shop' step if the shop is already open.
+      state.level.tutorialFlow = { id: 'chest', step: state.ui.shopCollapsed ? 'shop' : 'select' };
+      return;
+    }
+  }
 }
 
 // Per direct request, deterministically ramped — not randomized — from
@@ -560,6 +603,7 @@ export function updateStoryTriggers(state, dtMs) {
   updateTurretTutorialTrigger(state);
   updatePostAlienTutorial(state);
   updateMergeTutorialTrigger(state);
+  updateChestTutorialTrigger(state);
   updateRecipeCopyTip(state);
   // updateAutosave(state) now runs from main.js directly, ahead of the pause
   // gate this whole function is scoped behind — see its own comment.

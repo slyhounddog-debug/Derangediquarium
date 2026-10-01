@@ -175,6 +175,7 @@ import {
   canSpliceFish,
   spliceFish,
   describeFishMergeOptions,
+  findFishMergePartners,
   canSpliceOctopusWithAlien,
   spliceOctopusWithAlien,
   createMotherAlienFish,
@@ -244,8 +245,6 @@ import {
   openRecipeMenu,
   openBuildingInfoMenu,
   openPlatformFilterMenu,
-  openMagnetFishFilterMenu,
-  closePlatformFilterMenu,
   openFishInfoMenu,
   closeFishInfoMenu,
   copyPlatformFilter,
@@ -1323,15 +1322,6 @@ const state = {
     // live figure that would just decay to 0 the instant the freeze above
     // stops it from swimming (and thus producing) any further.
     fishInfoModalFrozenGeneratedMw: 0,
-    // Same locked-in-place freeze as the fish info modal above, for a Magnet
-    // Fish's own item-filter modal — per direct request ("Make it so the
-    // magnet fish stops when the filter modal is open just like when the
-    // info modal is open"). Written by UI.js's openMagnetFishFilterMenu/
-    // closePlatformFilterMenu; applied every tick by main.js's
-    // updateMagnetFishFilterModalFreeze.
-    magnetFishFilterModalFishId: null,
-    magnetFishFilterModalFrozenX: 0,
-    magnetFishFilterModalFrozenY: 0,
     // Mirrors the module-local fanAimingCell every render frame so Grid.js's
     // renderFanIndicators can skip drawing that fan's OWN fixed-angle cone
     // while renderFanAimGhost is drawing its live cursor-following one on
@@ -1504,6 +1494,68 @@ function isCtrlHeld() {
 let draggedFishId = null;
 let fishDragArmed = false;
 
+// Merge-tool partner highlight — per direct request, while the Merge/hybrid
+// tool is selected and the cursor hovers a fish that can merge or splice, every
+// fish it could pair with pulses a soft glow, with a faint line out to each
+// from the hovered fish that fades in and out in step with the glow. Kept
+// cheap: the partner list is recomputed only when the hovered fish changes or
+// every MERGE_HOVER_REFRESH_MS (not per frame — pairing rules don't change
+// that fast), the glow is one pre-baked sprite drawn with drawImage, and the
+// lines are a single batched path — so the per-frame cost is a handful of draw
+// calls, and exactly zero whenever the Merge tool isn't the one in hand.
+const MERGE_HOVER_REFRESH_MS = 300;
+const MERGE_HOVER_PULSE_PERIOD_MS = 1200;
+let mergeHoverSubjectId = null;
+let mergeHoverPartners = [];
+let mergeHoverRefreshAtMs = 0;
+let mergeHoverGlowSprite = null;
+function bakeMergeHoverGlow() {
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const c = canvas.getContext('2d');
+  const g = c.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  g.addColorStop(0, 'rgba(255, 236, 150, 0.85)');
+  g.addColorStop(0.55, 'rgba(255, 214, 90, 0.35)');
+  g.addColorStop(1, 'rgba(255, 200, 70, 0)');
+  c.fillStyle = g;
+  c.fillRect(0, 0, size, size);
+  return canvas;
+}
+function renderMergeToolPartnerHighlight(ctx, state, subject, nowMs) {
+  if (subject.id !== mergeHoverSubjectId || nowMs >= mergeHoverRefreshAtMs) {
+    mergeHoverSubjectId = subject.id;
+    mergeHoverPartners = findFishMergePartners(state, subject);
+    mergeHoverRefreshAtMs = nowMs + MERGE_HOVER_REFRESH_MS;
+  }
+  if (mergeHoverPartners.length === 0) return;
+  if (!mergeHoverGlowSprite) mergeHoverGlowSprite = bakeMergeHoverGlow();
+  const pulse = 0.5 + 0.5 * Math.sin((nowMs / MERGE_HOVER_PULSE_PERIOD_MS) * Math.PI * 2);
+  const subjectPos = worldToScreen(subject.x, subject.y, state.camera);
+  ctx.save();
+  // Lines first (so the glows sit over their ends), one path for all of them.
+  ctx.globalAlpha = 0.12 + 0.3 * pulse;
+  ctx.strokeStyle = '#ffe27a';
+  ctx.lineWidth = Math.max(1, 1.5 * state.camera.zoom);
+  ctx.beginPath();
+  for (const partner of mergeHoverPartners) {
+    if (partner.dying) continue;
+    const p = worldToScreen(partner.x, partner.y, state.camera);
+    ctx.moveTo(subjectPos.x, subjectPos.y);
+    ctx.lineTo(p.x, p.y);
+  }
+  ctx.stroke();
+  ctx.globalAlpha = 0.35 + 0.55 * pulse;
+  for (const partner of mergeHoverPartners) {
+    if (partner.dying) continue;
+    const p = worldToScreen(partner.x, partner.y, state.camera);
+    const r = FISH_BASE_SIZE * SPECIES[partner.speciesId].growthStages[partner.stage].scale * state.camera.zoom * (1.5 + 0.2 * pulse);
+    ctx.drawImage(mergeHoverGlowSprite, p.x - r, p.y - r, r * 2, r * 2);
+  }
+  ctx.restore();
+}
+
 // Which hybrids have a real on/off ability toggle — Magnet Fish (magnet),
 // Feeder Fish (auto-Food dispenser), Bio Fish (Bio-Sludge mode) — per direct
 // request, all 3 now flip on a genuine RIGHT-click (see the rightClickHandlers
@@ -1513,22 +1565,6 @@ let fishDragArmed = false;
 const TOGGLEABLE_FISH_SPECIES = ['buffer_fish', 'zap_sucker', 'xeno_octopus'];
 const FISH_TOGGLE_BOUNCE_DURATION_MS = 400;
 const FISH_TOGGLE_BOUNCE_AMOUNT = 0.22;
-// Magnet Fish's own filter modal (which items its magnet attracts) now
-// opens on a LONG left-click instead of a right-click — per direct request
-// ("make it take a long left-click to bring up the filter modal... this
-// will prevent the delay that happens on hybrid fish when you single click
-// them"). Held on mousedown, fired via setTimeout if still held/hasn't
-// dragged away by MAGNET_FISH_LONG_PRESS_MS; magnetFishLongPressFired is
-// checked at the top of the click handler below to swallow the click that
-// follows the same press/release gesture, so it doesn't ALSO open the info
-// modal on release.
-const MAGNET_FISH_LONG_PRESS_MS = 280; // cut from 500 per direct follow-up request ("make the long press take less time")
-const MAGNET_FISH_LONG_PRESS_MOVE_TOLERANCE_PX = 8;
-let magnetFishLongPressTimeout = null;
-let magnetFishLongPressStartX = 0;
-let magnetFishLongPressStartY = 0;
-let magnetFishLongPressFired = false;
-
 // Per direct request ("Add in a shimmer and bounce animation anytime a
 // hybrid fish with an ability is toggled on. During the time the fish
 // ability is on, have the fish shimmer slightly") — toggling ON restarts
@@ -1550,31 +1586,6 @@ function toggleFishAbility(state, fish) {
     fish.toggleBounceStartedAt = state.level.elapsed;
   }
 }
-
-input.mouseDownHandlers.push((sx, sy) => {
-  if (state.ui.paused || state.level.tutorialFlow) return;
-  const world = screenToWorld(sx, sy, state.camera);
-  const fish = findFishAt(state, world.x, world.y);
-  if (!fish || fish.speciesId !== 'buffer_fish') return;
-  magnetFishLongPressStartX = sx;
-  magnetFishLongPressStartY = sy;
-  const fishId = fish.id;
-  if (magnetFishLongPressTimeout != null) clearTimeout(magnetFishLongPressTimeout);
-  magnetFishLongPressTimeout = setTimeout(() => {
-    magnetFishLongPressTimeout = null;
-    if (!input.mouseDown) return; // already released — a plain short click, let the ordinary click handler open the info modal
-    const moved = Math.hypot(input.mouse.x - magnetFishLongPressStartX, input.mouse.y - magnetFishLongPressStartY);
-    if (moved > MAGNET_FISH_LONG_PRESS_MOVE_TOLERANCE_PX) return; // dragged, not a genuine long-press-in-place
-    const stillThere = state.level.entities.find((e) => e.id === fishId && e.type === 'fish');
-    if (!stillThere) return;
-    magnetFishLongPressFired = true;
-    openMagnetFishFilterMenu(state, fishId);
-  }, MAGNET_FISH_LONG_PRESS_MS);
-});
-
-input.mouseUpHandlers.push(() => {
-  if (magnetFishLongPressTimeout != null) { clearTimeout(magnetFishLongPressTimeout); magnetFishLongPressTimeout = null; }
-});
 
 input.mouseDownHandlers.push((sx, sy) => {
   fishDragArmed = false;
@@ -2673,7 +2684,6 @@ function effectiveToolAt(worldY) {
 }
 
 input.clickHandlers.push((sx, sy) => {
-  if (magnetFishLongPressFired) { magnetFishLongPressFired = false; return; } // this click is the tail end of the same press/release that just opened the Magnet Fish filter modal via a long-press — don't also open its info modal
   if (fishDragArmed) { fishDragArmed = false; return; } // this click followed a fish-combine drag gesture — don't also bank/feed/mound-click at the release point
   if (itemDragMoved) { itemDragMoved = false; return; } // this click followed a genuine item-drag gesture — don't also bank/feed/place at the release point. An unmoved press-release leaves itemDragMoved false, so a plain click on a Coin/Science item still banks it normally
   if (recipeDragMoved) { recipeDragMoved = false; return; } // this click followed a genuine Manufacturer/Power Plant recipe-copy drag — don't also open the recipe pop-up at the release point
@@ -3751,7 +3761,7 @@ function updateBuildDrag() {
       // Guarantee the very next step ("drag the Waste into the Chest") has
       // something real to drag — same reasoning/precedent as
       // spawnTurretTutorialWaste above.
-      spawnChestTutorialWaste(state);
+      spawnChestTutorialWaste(state, `${row},${col}`);
     }
   }
 }
@@ -3924,22 +3934,6 @@ function updateFishInfoModalFreeze() {
   if (!fish || fish.dying) { closeFishInfoMenu(state); return; } // the fish it's showing died/despawned out from under it
   fish.x = state.ui.fishInfoModalFrozenX;
   fish.y = state.ui.fishInfoModalFrozenY;
-  fish.vx = 0;
-  fish.vy = 0;
-}
-
-// Same freeze, for a Magnet Fish's own item-filter modal — per direct
-// request ("Make it so the magnet fish stops when the filter modal is open
-// just like when the info modal is open"). closePlatformFilterMenu already
-// resets wanderTimer on close, same "resume immediately, don't wait out a
-// stale timer" fix updateFishInfoModalFreeze's own closeFishInfoMenu needed.
-function updateMagnetFishFilterModalFreeze() {
-  const fishId = state.ui.magnetFishFilterModalFishId;
-  if (fishId == null) return;
-  const fish = state.level.entities.find((e) => e.id === fishId && e.type === 'fish');
-  if (!fish || fish.dying) { closePlatformFilterMenu(state); return; } // the fish it's showing died/despawned out from under it
-  fish.x = state.ui.magnetFishFilterModalFrozenX;
-  fish.y = state.ui.magnetFishFilterModalFrozenY;
   fish.vx = 0;
   fish.vy = 0;
 }
@@ -4223,7 +4217,6 @@ function update(dtMs) {
   if (!state.ui.timePaused) updateBuildingBubbles(dtMs);
   updateFishDrag();
   updateFishInfoModalFreeze();
-  updateMagnetFishFilterModalFreeze();
   updateItemDrag();
   updateChestAimDrag();
   updateRecipeDrag();
@@ -5608,6 +5601,12 @@ function render() {
   }
 
   perfMark('r: shadow pass + aliens', ctx);
+  // Merge-tool partner highlight, drawn under the fish below — see renderMergeToolPartnerHighlight.
+  if (state.ui.selectedTool === 'merge' && hoverWorld && !state.ui.paused && draggedFishId == null) {
+    const mergeHoverFish = findFishAt(state, hoverWorld.x, hoverWorld.y);
+    if (mergeHoverFish) renderMergeToolPartnerHighlight(ctx, state, mergeHoverFish, performance.now());
+    else mergeHoverSubjectId = null;
+  }
   for (const fish of state.level.entities) {
     if (fish.type !== 'fish') continue; // state.level.entities also holds Alien Invasion aliens now — rendered separately above, BEFORE this loop, so fish (and their health bars) always draw on top and never disappear behind an alien
     const pos = worldToScreen(fish.x, fish.y, state.camera);
