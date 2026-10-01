@@ -3,7 +3,8 @@
 // per-tick behavior. Forbidden: no rendering (main.js's render pass owns
 // that), no tile placement (Grid.js owns that).
 
-import { perfMark } from './PerfOverlay.js';
+import { perfMark, perfNote } from './PerfOverlay.js';
+import { LOAD_MODE_ON_ITEM_COUNT, LOAD_MODE_OFF_ITEM_COUNT, LOAD_MODE_COLLISION_ITERATIONS, LOAD_MODE_FAR_MARGIN_PX } from './Config.js';
 import {
   SPECIES,
   SPECIES_LIST,
@@ -192,7 +193,7 @@ import {
   BOSS_DEATH_SCIENCE_COUNT,
   BOSS_DEATH_SCIENCE_GREEN_COUNT,
 } from './Config.js';
-import { stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemForces, updateBuildings } from './Grid.js';
+import { beginItemPhysicsStep, stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemForces, updateBuildings } from './Grid.js';
 import { spawnCoinPickupBubbles } from './Ambience.js';
 import { pushGameNotification } from './Notifications.js';
 // Sound is a fire-and-forget side effect at the moment something already
@@ -3677,7 +3678,28 @@ export function materializeChestSpawnPoints(state, points) {
   }
 }
 
+// ---- Item load mode ----
+// See Config.js's LOAD_MODE_* comment. Hysteresis on the item count; the mode
+// only ever makes the item pass cheaper (fewer collision passes, far-away
+// items updated every other tick at 2x dt), never changes what any item does.
+let loadMode = false;
+let loadModeStep = 0;
+function updateLoadMode(state) {
+  const n = state.level.items.length;
+  if (!loadMode && n > LOAD_MODE_ON_ITEM_COUNT) loadMode = true;
+  else if (loadMode && n <= LOAD_MODE_OFF_ITEM_COUNT) loadMode = false;
+  loadModeStep++;
+  perfNote('loadmode', `item load mode: ${loadMode ? 'ON' : 'off'} (${LOAD_MODE_ON_ITEM_COUNT} on / ${LOAD_MODE_OFF_ITEM_COUNT} off, ${n} items)`);
+}
+function isItemFarFromView(item, camera) {
+  if (!(camera.viewWidth > 0)) return false;
+  return item.x < camera.x - LOAD_MODE_FAR_MARGIN_PX || item.x > camera.x + camera.viewWidth + LOAD_MODE_FAR_MARGIN_PX
+    || item.y < camera.y - LOAD_MODE_FAR_MARGIN_PX || item.y > camera.y + camera.viewHeight + LOAD_MODE_FAR_MARGIN_PX;
+}
+
 export function updateEntities(state, dtMs) {
+  updateLoadMode(state);
+  beginItemPhysicsStep(state); // per-step prep for item sleeping + the fan cache — see Grid.js
   maybeWarnBioSludgePile(state);
   updateAlienPortals(state);
   updateAlienDeathEffects(state, dtMs);
@@ -3690,16 +3712,26 @@ export function updateEntities(state, dtMs) {
   updateFishBubbleEffects(state, dtMs);
   perfMark('e: effect timers');
   pendingFoodToWasteSpawns.length = 0; // updateFood (below) fills this — see its own comment for why it can't push into state.level.items directly
+  const itemCamera = state.camera;
   state.level.items = state.level.items.filter((item) => {
-    if (item.type === 'food') return updateFood(item, state, dtMs);
-    if (item.type === 'coin') return updateCoin(item, state, dtMs);
-    if (item.type === 'science') return updateScience(item, state, dtMs);
-    if (item.type === 'science_green') return updateScienceGreen(item, state, dtMs);
-    if (item.type === 'waste') return updateWaste(item, state, dtMs);
-    if (item.type === 'alien_dna') return updateAlienDna(item, state, dtMs);
-    if (item.type === 'biomass') return updateBiomass(item, state, dtMs);
-    if (item.type === 'mutagen_paste') return updateMutagenPaste(item, state, dtMs);
-    if (item.type === 'alien_egg') return updateAlienEgg(item, state, dtMs);
+    // Load mode: a far-from-view item (not one a building is mid-processing)
+    // skips every other tick and takes a doubled step on the ticks it runs —
+    // the swept tile collision is built for large steps, and per-item timers
+    // receive the doubled dtMs so they still run at real speed.
+    let stepMs = dtMs;
+    if (loadMode && item.collectorProgressMs == null && item.heldByKey == null && isItemFarFromView(item, itemCamera)) {
+      if (((loadModeStep + item.id) & 1) === 1) return true;
+      stepMs = dtMs * 2;
+    }
+    if (item.type === 'food') return updateFood(item, state, stepMs);
+    if (item.type === 'coin') return updateCoin(item, state, stepMs);
+    if (item.type === 'science') return updateScience(item, state, stepMs);
+    if (item.type === 'science_green') return updateScienceGreen(item, state, stepMs);
+    if (item.type === 'waste') return updateWaste(item, state, stepMs);
+    if (item.type === 'alien_dna') return updateAlienDna(item, state, stepMs);
+    if (item.type === 'biomass') return updateBiomass(item, state, stepMs);
+    if (item.type === 'mutagen_paste') return updateMutagenPaste(item, state, stepMs);
+    if (item.type === 'alien_egg') return updateAlienEgg(item, state, stepMs);
     return true;
   });
 
@@ -3788,7 +3820,7 @@ export function updateEntities(state, dtMs) {
   updateTurretProjectiles(state, dtMs);
 
   perfMark('e: buildings + spawns + turret shots');
-  resolveItemCollisions(state); perfMark('e: item-item collisions'); // items in the seabed band can't overlap — see Grid.js's module comment
+  resolveItemCollisions(state, loadMode ? LOAD_MODE_COLLISION_ITERATIONS : undefined); perfMark('e: item-item collisions'); // items in the seabed band can't overlap — see Grid.js's module comment
 
   state.level.floatingTexts = state.level.floatingTexts.filter((ft) => updatePickupText(ft, dtMs));
 

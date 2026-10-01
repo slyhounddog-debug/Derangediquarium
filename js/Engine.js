@@ -188,9 +188,24 @@ export function updateCamera(camera, input, canvas, dtMs, worldBottomY = WORLD_H
 // always advances by exactly simDtMs so physics never sees a variable delta.
 // getTimeScale() scales how much sim time each rendered frame accumulates,
 // not the size of a single step — this keeps physics stable at 10x speed.
+//
+// Catch-up cap: when a frame takes longer than one 60Hz step the loop runs
+// extra update() steps to catch up — which, when update() itself is the slow
+// part, makes the NEXT frame slower still (a spiral; seen as single-digit fps
+// with hundreds of items). So the number of steps per frame is capped by a
+// time budget: it tracks a smoothed ms-per-step and allows only as many steps
+// as fit in UPDATE_BUDGET_MS (never fewer than MIN_STEPS_PER_FRAME, nor fewer
+// than the current speed setting needs — 2x/10x speed legitimately run
+// several steps a frame). When the cap bites, the leftover backlog is dropped,
+// so an overloaded game runs in slow motion instead of spiraling. Every step
+// is still exactly simDtMs, so the physics itself is unchanged; with a cheap
+// update() the cap is simply never reached.
+const UPDATE_BUDGET_MS = 50;
+const MIN_STEPS_PER_FRAME = 2;
 export function createGameLoop({ update, render, getTimeScale, simDtMs, maxFrameSkip }) {
   let accumulator = 0;
   let lastTime = performance.now();
+  let emaStepMs = 0;
 
   function frame(now) {
     requestAnimationFrame(frame);
@@ -201,13 +216,18 @@ export function createGameLoop({ update, render, getTimeScale, simDtMs, maxFrame
 
     accumulator += frameTime * getTimeScale();
 
+    const budgetSteps = Math.floor(UPDATE_BUDGET_MS / Math.max(emaStepMs, 0.5));
+    const stepCap = Math.min(maxFrameSkip, Math.max(MIN_STEPS_PER_FRAME, Math.ceil(getTimeScale()), budgetSteps));
     let steps = 0;
-    while (accumulator >= simDtMs && steps < maxFrameSkip) {
+    while (accumulator >= simDtMs && steps < stepCap) {
+      const t0 = performance.now();
       update(simDtMs);
+      const took = performance.now() - t0;
+      emaStepMs = emaStepMs === 0 ? took : emaStepMs * 0.9 + took * 0.1;
       accumulator -= simDtMs;
       steps++;
     }
-    if (steps >= maxFrameSkip) accumulator = 0; // drop backlog rather than spiral after a stall
+    if (steps >= stepCap) accumulator = 0; // drop backlog rather than spiral after a stall (or when update() is too heavy to keep up)
 
     render();
   }

@@ -1844,14 +1844,31 @@ export function cyclePlatformAt(state, worldX, worldY) {
 // force decaying linearly to 0 at maxRange. No occlusion: a Platform or
 // another building between the fan and the item doesn't block the cone
 // (a deliberate simplification, not an oversight).
-export function computeFanForce(state, item) {
-  let fx = 0;
-  let fy = 0;
-  const efficiency = state.level.powerEfficiency;
+// Performance: this used to walk EVERY building (and re-parse its key) for
+// EVERY item every tick just to find the few fans — ~15% of all time with a few
+// hundred items. The fans are now collected once per sim step
+// (beginItemPhysicsStep) into a small list holding a reference to each fan's
+// own live buildingData entry, so aim/filter edits still apply immediately and
+// the math below is unchanged.
+let fanCache = { state: null, step: -1, fans: [] };
+function refreshFanCache(state) {
+  const fans = [];
   for (const key in state.level.buildingData) {
     const data = state.level.buildingData[key];
     const stats = FAN_STATS[data.type];
     if (!stats) continue; // not a fan (e.g. the Auto-Feeder's own buildingData entry)
+    const [row, col] = key.split(',').map(Number);
+    fans.push({ data, stats, fanX: col * TILE_SIZE + TILE_SIZE / 2, fanY: row * TILE_SIZE + TILE_SIZE / 2 });
+  }
+  fanCache = { state, step: sleepStepCounter, fans };
+}
+export function computeFanForce(state, item) {
+  let fx = 0;
+  let fy = 0;
+  const efficiency = state.level.powerEfficiency;
+  if (fanCache.state !== state || fanCache.step !== sleepStepCounter) refreshFanCache(state);
+  for (const fan of fanCache.fans) {
+    const { data, stats } = fan;
     // Per direct request ("make fans work as filters the same as
     // platforms") — a Fan whitelists which item types it IGNORES, same
     // filterItems shape/semantics as a Platform's own (see
@@ -1859,11 +1876,8 @@ export function computeFanForce(state, item) {
     // exactly like a Fan always has), and an item type only stops being
     // affected once the player explicitly checks it into the pop-up.
     if (data.filterItems && data.filterItems.includes(item.type)) continue;
-    const [row, col] = key.split(',').map(Number);
-    const fanX = col * TILE_SIZE + TILE_SIZE / 2;
-    const fanY = row * TILE_SIZE + TILE_SIZE / 2;
-    const dx = item.x - fanX;
-    const dy = item.y - fanY;
+    const dx = item.x - fan.fanX;
+    const dy = item.y - fan.fanY;
     const dist = Math.hypot(dx, dy);
     if (dist > stats.maxRange) continue;
     const angleToItem = Math.atan2(dy, dx);
@@ -2218,14 +2232,91 @@ export function renderDisintegrateEffect(ctx, x, y, radius, color, fraction, ite
 // side/top walls every item now respects — see clampItemToWorldWalls in
 // Entities.js) rather than ever being deleted for falling somewhere
 // unreachable.
+// ---- Item sleeping ----
+// Performance (always on, no visible effect): an ISOLATED item — one touching
+// no other item — that has sat perfectly still on a tile for SLEEP_AFTER_STEPS
+// ticks stops running its swept tile physics each tick and just reports
+// 'resting'. Items in a pile are deliberately never put to sleep: a pile's items
+// press on each other every tick, so freezing one would subtly change how the
+// rest settle (tested — it did), and piles must behave exactly as before. A
+// sleeper wakes — and goes back to full physics — the moment anything could
+// matter: it was moved by something else (position off its sleep spot), has any
+// velocity, another item comes within touching range, a fan's force reaches it,
+// anything about the grid or a platform/fan filter changed (the epoch below), a
+// real collision hit it (resolveItemCollisions), or its staggered refresh tick
+// comes up (every SLEEP_REFRESH_STEPS ticks, offset by id, as a backstop).
+// Callers' own per-item timers (Food going stale, coin spin, ...) are
+// untouched — only the tile physics is skipped.
+const SLEEP_AFTER_STEPS = 20;
+const SLEEP_REFRESH_STEPS = 20;
+const SLEEP_MOVE_EPSILON_PX = 0.5;
+const SLEEP_SPEED_EPSILON = 0.05;
+const SLEEP_STABLE_EPSILON_PX = 0.02;
+const SLEEP_NEIGHBOR_RANGE_PX = 3;
+let sleepStepCounter = 0;
+let sleepEpoch = 0;
+let sleepLastSignature = null;
+function computeSleepSignature(state) {
+  let h = computeGridSignature(state.level.grid);
+  // Platform/fan item filters change what a resting item should do without
+  // touching the grid itself, so they're part of the signature too.
+  for (const key in state.level.buildingData) {
+    const data = state.level.buildingData[key];
+    const f = data.filterItems;
+    if (!f || f.length === 0) continue;
+    for (let i = 0; i < key.length; i++) h = Math.imul(h ^ key.charCodeAt(i), 16777619);
+    for (const t of f) for (let i = 0; i < t.length; i++) h = Math.imul(h ^ t.charCodeAt(i), 16777619);
+  }
+  return h >>> 0;
+}
+// Called once at the top of every sim step (Entities.js's updateEntities).
+export function beginItemPhysicsStep(state) {
+  sleepStepCounter++;
+  const sig = computeSleepSignature(state);
+  if (sig !== sleepLastSignature) { sleepLastSignature = sig; sleepEpoch++; }
+  refreshFanCache(state);
+}
+
 export function stepItemOnGrid(item, state, dt, physics) {
-  if (item.collectorProgressMs != null) return stepCollectorProcessing(item, state, dt);
+  if (item.collectorProgressMs != null) { item.sleeping = false; item.restTicks = 0; return stepCollectorProcessing(item, state, dt); }
   // A Refinery/Manufacturer-held item never reports 'consumed' from here —
   // updateBuildings' own Refinery/Manufacturer branch is what actually
   // splices it out of state.level.items, the instant ITS OWN progress timer
   // (tracked on the building, not the item) completes. See stepHeldItem's
   // own comment for why the two mechanisms differ.
-  if (item.heldByKey != null) return stepHeldItem(item, state, dt);
+  if (item.heldByKey != null) { item.sleeping = false; item.restTicks = 0; return stepHeldItem(item, state, dt); }
+
+  if (item.sleeping) {
+    const stillThere = Math.abs(item.x - item.sleepX) <= SLEEP_MOVE_EPSILON_PX && Math.abs(item.y - item.sleepY) <= SLEEP_MOVE_EPSILON_PX;
+    const calm = (item.vx || 0) < SLEEP_SPEED_EPSILON && (item.vx || 0) > -SLEEP_SPEED_EPSILON && (item.vy || 0) < SLEEP_SPEED_EPSILON && (item.vy || 0) > -SLEEP_SPEED_EPSILON;
+    const refreshDue = (sleepStepCounter + item.id) % SLEEP_REFRESH_STEPS === 0;
+    if (stillThere && calm && item.sleepEpoch === sleepEpoch && !item.touching) {
+      const f = computeFanForce(state, item);
+      if (f.fx === 0 && f.fy === 0) {
+        if (!refreshDue) return 'resting';
+        // Backstop refresh: run one full step, but stay one tick short of
+        // sleeping so that, if it's still resting afterwards, it drops
+        // straight back to sleep instead of waiting another SLEEP_AFTER_STEPS.
+        item.sleeping = false;
+        item.restTicks = SLEEP_AFTER_STEPS - 1;
+      } else {
+        item.sleeping = false;
+        item.restTicks = 0;
+      }
+    } else {
+      item.sleeping = false;
+      item.restTicks = 0;
+    }
+  }
+
+  // Has it ended up exactly where it started the previous step? Measured at the
+  // START of the step (i.e. after the last step's collision resolution), so an
+  // item held up by a pile — whose own gravity and the pile's push cancel out
+  // every tick, leaving it with a constant small velocity — still counts as
+  // still, which a velocity test would miss.
+  const stable = item.stepX !== undefined && Math.abs(item.x - item.stepX) < SLEEP_STABLE_EPSILON_PX && Math.abs(item.y - item.stepY) < SLEEP_STABLE_EPSILON_PX;
+  item.stepX = item.x;
+  item.stepY = item.y;
 
   const fanForce = computeFanForce(state, item);
   integrateItemForces(item, dt, physics, fanForce);
@@ -2246,6 +2337,23 @@ export function stepItemOnGrid(item, state, dt, physics) {
   // contact along the way, once per substep — see sweepVertical/
   // resolveRampCollision).
   const result = sweepVertical(item, state, item.vy * dt);
+
+  // Fall asleep after SLEEP_AFTER_STEPS consecutive still steps (see above) —
+  // only when it's isolated, resting on a tile, and effectively motionless.
+  if (stable && result.landed && !item.touching && Math.abs(item.vx || 0) < SLEEP_SPEED_EPSILON && fanForce.fx === 0 && fanForce.fy === 0) {
+    item.restTicks = (item.restTicks || 0) + 1;
+    if (item.restTicks >= SLEEP_AFTER_STEPS) {
+      item.sleeping = true;
+      item.sleepX = item.x;
+      item.sleepY = item.y;
+      item.sleepEpoch = sleepEpoch;
+      item.vx = 0;
+      item.vy = 0;
+    }
+  } else {
+    item.restTicks = 0;
+  }
+
   if (result.landed) {
     return handleLanding();
   }
@@ -3264,19 +3372,72 @@ function pushDirection(a, b, dx, dy, dist) {
 // to compare each item against every other one, not just tiles. Runs over
 // every item in state.level.items, open water or seabed alike — see the
 // module comment above for why this isn't seabed-only any more.
-export function resolveItemCollisions(state) {
+// Performance: this used to compare EVERY item against every other item, 4
+// times a tick (O(n^2) — ~38ms a step at ~540 items, the single biggest cost
+// in the whole game when items pile up). Most of those pairs are nowhere near
+// each other and bail on the very first check, so a uniform grid now supplies
+// each item only the items in its own and the 8 surrounding cells. The result
+// is meant to be IDENTICAL to the all-pairs version, not merely close: for
+// each item i the candidates j > i are visited in ascending order, exactly the
+// order the nested loop would have reached the pairs that can actually overlap
+// (so a push chain down a long row still propagates the same way, pair by
+// pair), and the grid is rebuilt every iteration. Cells are sized from the
+// largest item radius plus a margin (COLLISION_GRID_MARGIN_PX) covering how
+// far items can be shoved WITHIN one iteration (ITEM_MAX_PUSH_PER_STEP per
+// pair), so a pair that only becomes overlapping mid-iteration is still found.
+const COLLISION_GRID_MARGIN_PX = 8 * ITEM_MAX_PUSH_PER_STEP; // verified exact vs the all-pairs version even in absurdly overcrowded piles (a 12px margin was not)
+const collisionGridCells = []; // flat grid of arrays of item indices, reused call to call
+let collisionGridTouched = [];
+const collisionCandidates = [];
+export function resolveItemCollisions(state, iterations = ITEM_COLLISION_ITERATIONS) {
   const items = state.level.items;
+  const n = items.length;
+  let maxRadius = 0;
+  for (let i = 0; i < n; i++) { items[i].touching = false; if (items[i].radius > maxRadius) maxRadius = items[i].radius; }
+  if (n < 2) return;
+  const cell = 2 * maxRadius + COLLISION_GRID_MARGIN_PX;
+  const cols = Math.ceil((WORLD_TILES_W * TILE_SIZE) / cell) + 3;
+  const rows = Math.ceil((WORLD_TILES_H * TILE_SIZE) / cell) + 3;
+  const cellX = (x) => Math.min(cols - 2, Math.max(1, Math.floor(x / cell) + 1));
+  const cellY = (y) => Math.min(rows - 2, Math.max(1, Math.floor(y / cell) + 1));
 
-  for (let iter = 0; iter < ITEM_COLLISION_ITERATIONS; iter++) {
-    for (let i = 0; i < items.length; i++) {
+  for (let iter = 0; iter < iterations; iter++) {
+    for (let t = 0; t < collisionGridTouched.length; t++) collisionGridCells[collisionGridTouched[t]].length = 0;
+    collisionGridTouched.length = 0;
+    for (let i = 0; i < n; i++) {
+      const idx = cellY(items[i].y) * cols + cellX(items[i].x);
+      let bucket = collisionGridCells[idx];
+      if (bucket === undefined) bucket = collisionGridCells[idx] = [];
+      if (bucket.length === 0) collisionGridTouched.push(idx);
+      bucket.push(i);
+    }
+
+    for (let i = 0; i < n; i++) {
       const a = items[i];
-      for (let j = i + 1; j < items.length; j++) {
-        const b = items[j];
+      const cx = cellX(a.x);
+      const cy = cellY(a.y);
+      collisionCandidates.length = 0;
+      for (let oy = -1; oy <= 1; oy++) {
+        for (let ox = -1; ox <= 1; ox++) {
+          const bucket = collisionGridCells[(cy + oy) * cols + (cx + ox)];
+          if (bucket === undefined) continue;
+          for (let k = 0; k < bucket.length; k++) if (bucket[k] > i) collisionCandidates.push(bucket[k]);
+        }
+      }
+      if (collisionCandidates.length > 1) collisionCandidates.sort((p, q) => p - q);
+
+      for (let c = 0; c < collisionCandidates.length; c++) {
+        const b = items[collisionCandidates[c]];
 
         const dx = b.x - a.x;
         const dy = b.y - a.y;
         let dist = Math.hypot(dx, dy);
         const minDist = a.radius + b.radius;
+        // Anything within touching range of another item is never allowed to sleep
+        // (and a sleeper that gets a neighbor wakes) — see the sleep notes at
+        // stepItemOnGrid. Marked for touching-or-nearly pairs, not just
+        // overlapping ones, since a support moving AWAY leaves a gap.
+        if (dist < minDist + SLEEP_NEIGHBOR_RANGE_PX) { a.touching = true; b.touching = true; }
         if (dist >= minDist) continue;
         if (dist < 0.001) dist = 0.001; // centers coincide — nudge along an arbitrary stable axis instead of dividing by zero
 
@@ -3295,6 +3456,9 @@ export function resolveItemCollisions(state) {
         const bFrac = a.mass / totalMass;
         applyItemPush(state, a, -nx * overlap * aFrac, -ny * overlap * aFrac, aFrac * 2, rawOverlap);
         applyItemPush(state, b, nx * overlap * bFrac, ny * overlap * bFrac, bFrac * 2, rawOverlap);
+        // A fresh hit (not resting-contact noise) wakes a sleeping item — see
+        // the sleep notes at stepItemOnGrid.
+        if (rawOverlap >= ITEM_PUSH_IMPULSE_MIN_OVERLAP) { a.sleeping = false; a.restTicks = 0; b.sleeping = false; b.restTicks = 0; }
       }
     }
   }

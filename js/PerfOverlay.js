@@ -71,6 +71,11 @@ export function perfMark(label, flushCtx) {
   lastMark = t;
 }
 
+// A one-line note other modules can set for the overlay to show (e.g. whether
+// the item load mode is on) — cheap and ignored while the overlay is off.
+let notes = {};
+export function perfNote(key, text) { if (mode !== 0) notes[key] = text; }
+
 export function perfUpdateBegin() {
   if (mode === 0) return;
   stepStart = lastMark = performance.now();
@@ -124,6 +129,7 @@ function report(state, windowMs, canvasW, canvasH) {
   lines.push(`render: ${(renderMs / f).toFixed(1)}ms/frame`);
   const c = countObjects(state);
   const itemStr = Object.entries(c.items).map(([k, v]) => `${k} ${v}`).join(', ');
+  for (const k of Object.keys(notes)) lines.push(notes[k]);
   lines.push(`objects: fish ${c.fish}, aliens ${c.aliens}, items ${c.itemTotal} (${itemStr}), buildings ${c.buildings}`);
   lines.push('');
   lines.push('ms per frame by phase (update phases are summed over all steps):');

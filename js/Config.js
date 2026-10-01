@@ -614,6 +614,19 @@ export const ITEM_HORIZONTAL_DAMPING = 0.82;
 // tick instead of only one layer moving per tick (which would make a tall
 // pile feel unresponsive/laggy to a new arrival).
 export const ITEM_COLLISION_ITERATIONS = 4;
+// Item "load mode" — a performance safety net on top of the always-on spatial
+// grid/sleeping (see Grid.js / Entities.js's updateLoadMode). Switches ON once
+// there are more than LOAD_MODE_ON_ITEM_COUNT items and OFF again only when
+// back at or below LOAD_MODE_OFF_ITEM_COUNT (the gap stops it flickering on and
+// off around the threshold). While on: the collision resolver runs
+// LOAD_MODE_COLLISION_ITERATIONS passes instead of ITEM_COLLISION_ITERATIONS
+// (piles settle a touch softer), and items more than LOAD_MODE_FAR_MARGIN_PX
+// (world px) outside the camera's view update every other tick with a doubled
+// timestep instead of every tick.
+export const LOAD_MODE_ON_ITEM_COUNT = 200;
+export const LOAD_MODE_OFF_ITEM_COUNT = 150;
+export const LOAD_MODE_COLLISION_ITERATIONS = 2;
+export const LOAD_MODE_FAR_MARGIN_PX = 300;
 // A collision resolved exactly along the true center-to-center line is what
 // makes an off-center landing roll toward whichever side it's actually
 // leaning, proportional to how far off-center it landed — that continuity
