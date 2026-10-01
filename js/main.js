@@ -225,6 +225,7 @@ import {
 } from './Grid.js';
 import { isPointOnMound, crackMound, renderMound, centerCameraOnMound, isPointOnScienceLab, renderScienceLab, renderMoundMask } from './Mound.js';
 import { drawFish, drawFishShadow } from './FishRenderer.js';
+import { perfMark, perfUpdateBegin, perfUpdateEnd, perfRenderBegin, perfRenderEnd } from './PerfOverlay.js';
 import { oneShotShimmerProgress, drawShimmerSweep, shimmerFadeAlpha, createShimmerTimer, updateShimmerTimer } from './Shimmer.js';
 import {
   initUI,
@@ -4047,7 +4048,9 @@ function update(dtMs) {
   // money/waste/science and aliens don't spawn and buildings don't accept
   // objects") and the level clock, while update() keeps running every real
   // frame so the drag/move functions below stay responsive.
+  perfMark('u: ambience, camera, input');
   if (!state.ui.timePaused) updateEntities(state, dtMs);
+  perfMark('u: updateEntities tail');
   if (!state.ui.timePaused) updateBuildingBubbles(dtMs);
   updateFishDrag();
   updateFishInfoModalFreeze();
@@ -4866,6 +4869,7 @@ function render() {
   // behind the duplicated background decorations"). See Ambience.js's own
   // header comment on renderShadowFish for why this is its own explicit
   // call now instead of folding into renderAmbienceBehindLab below.
+  perfMark('r: water fill + surface', ctx);
   renderShadowFish(ctx, state, canvas.width, canvas.height);
 
   // A blurred, desaturated, raised-up duplicate of the floor decor — see
@@ -4873,6 +4877,7 @@ function render() {
   // before every real ambience/decor layer so it reads as sitting further
   // back/behind them, giving the floor a sense of depth the same way the
   // water column already has via sun rays/caustics.
+  perfMark('r: shadow-fish silhouettes', ctx);
   renderBackgroundParallaxDecor(ctx, state.camera, canvas.width, canvas.height);
 
   // Ambience (bubbles/seaweed/boulders/etc.) renders immediately after the
@@ -4882,6 +4887,7 @@ function render() {
   // before. Split into two calls (this one, and renderAmbienceFrontLab
   // below) with renderScienceLab sandwiched between them — see Ambience.js's
   // header comment for why.
+  perfMark('r: parallax background decor', ctx);
   renderAmbienceBehindLab(ctx, state, canvas.width, canvas.height);
 
   // ---- Step 1 done: background layer + background fish are on the main
@@ -4892,6 +4898,7 @@ function render() {
   // or passes `ctx` as an argument, unchanged, but it now targets the
   // offscreen layer that the caustic video will be clipped to. Restored back
   // to mainCtx right after compositeCausticForeground() runs, further down.
+  perfMark('r: ambience behind lab', ctx);
   foregroundCtx.clearRect(0, 0, canvas.width, canvas.height);
   ctx = foregroundCtx;
 
@@ -4919,6 +4926,7 @@ function render() {
   renderMound(ctx, state);
   renderScienceLab(ctx, state);
   renderAmbienceFrontLab(ctx, state, canvas.width, canvas.height);
+  perfMark('r: mound/lab + front ambience', ctx);
   renderSeabedGrid(ctx, state, canvas.width, canvas.height);
 
   // Shared by every ghost-preview branch below, and — via effectiveToolAt —
@@ -5134,6 +5142,7 @@ function render() {
   // Ambience.js's spawnSeaTurtleBubble.
   renderSeaTurtle(ctx, state, canvas.width, canvas.height);
 
+  perfMark('r: seabed + buildings + ghosts', ctx);
   for (const item of state.level.items) {
     const pos = worldToScreen(item.x, item.y, state.camera);
     if (pos.x < -20 || pos.x > canvas.width + 20 || pos.y < -20 || pos.y > canvas.height + 20) continue; // cull offscreen
@@ -5347,6 +5356,7 @@ function render() {
     ctx.fill();
   }
 
+  perfMark('r: items', ctx);
   for (const ft of state.level.floatingTexts) {
     const pos = worldToScreen(ft.x, ft.y, state.camera);
     if (pos.x < -40 || pos.x > canvas.width + 40 || pos.y < -20 || pos.y > canvas.height + 20) continue; // cull offscreen
@@ -5425,6 +5435,7 @@ function render() {
 
   // Drop shadows for every fish/alien, drawn under all of them but only where a
   // seafloor decoration is behind — see renderFishShadowsOnDecor.
+  perfMark('r: pickup text + effects', ctx);
   renderFishShadowsOnDecor(ctx, state);
 
   for (const alien of state.level.entities) {
@@ -5510,6 +5521,7 @@ function render() {
     }
   }
 
+  perfMark('r: shadow pass + aliens', ctx);
   for (const fish of state.level.entities) {
     if (fish.type !== 'fish') continue; // state.level.entities also holds Alien Invasion aliens now — rendered separately above, BEFORE this loop, so fish (and their health bars) always draw on top and never disappear behind an alien
     const pos = worldToScreen(fish.x, fish.y, state.camera);
@@ -6440,6 +6452,7 @@ function render() {
   // flash, HUD, minimap) goes back to drawing on the real, visible canvas —
   // full-screen effects like that flash need to cover the background too, so
   // they must run after this composite, not be clipped inside it.
+  perfMark('r: fish + overlays', ctx);
   compositeCausticForeground();
   ctx = mainCtx;
 
@@ -6473,6 +6486,7 @@ function render() {
   updateBossHealthBar(state);
   updateHUD(state);
   updateNotificationTicker(state);
+  perfMark('r: caustic composite', ctx);
   renderMinimap(state);
   state.debug.cursorWorld = cursorWorld;
   updateDebugOverlay(state, {
@@ -6484,8 +6498,8 @@ function render() {
 }
 
 createGameLoop({
-  update,
-  render,
+  update: (dtMs) => { perfUpdateBegin(); update(dtMs); perfUpdateEnd(); },
+  render: () => { perfRenderBegin(); render(); perfRenderEnd(state, canvas.width, canvas.height); },
   // state.ui.speedX2 (the player-facing 2x speed button/hotkey) stacks
   // multiplicatively on top of the debug time-scale cheat rather than
   // replacing it — the debug +/- keys are a dev tool independent of this

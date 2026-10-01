@@ -3,6 +3,7 @@
 // per-tick behavior. Forbidden: no rendering (main.js's render pass owns
 // that), no tile placement (Grid.js owns that).
 
+import { perfMark } from './PerfOverlay.js';
 import {
   SPECIES,
   SPECIES_LIST,
@@ -3687,6 +3688,7 @@ export function updateEntities(state, dtMs) {
   updateFishGrowthEffects(state, dtMs);
   updateProductionBlockedEffects(state, dtMs);
   updateFishBubbleEffects(state, dtMs);
+  perfMark('e: effect timers');
   pendingFoodToWasteSpawns.length = 0; // updateFood (below) fills this — see its own comment for why it can't push into state.level.items directly
   state.level.items = state.level.items.filter((item) => {
     if (item.type === 'food') return updateFood(item, state, dtMs);
@@ -3713,6 +3715,7 @@ export function updateEntities(state, dtMs) {
   // router) so it needs no spawn-point handling here. All of this returns
   // spawn points rather than constructing the items itself, to avoid a
   // circular import (createFood/createWaste/etc. live here).
+  perfMark('e: per-item update (food/coin/waste...)');
   const { foodSpawnPoints, wasteSpawnPoints, turretShots, bioSpawnPoints, chestSpawnPoints } = updateBuildings(state, dtMs);
   for (const point of foodSpawnPoints) state.level.items.push(createFood(point.x, point.y));
   // canSpawnMoreWaste checked per-item (not once before the loop) so a
@@ -3784,7 +3787,8 @@ export function updateEntities(state, dtMs) {
   // the same tick rather than lingering a frame at 0 hp.
   updateTurretProjectiles(state, dtMs);
 
-  resolveItemCollisions(state); // items in the seabed band can't overlap — see Grid.js's module comment
+  perfMark('e: buildings + spawns + turret shots');
+  resolveItemCollisions(state); perfMark('e: item-item collisions'); // items in the seabed band can't overlap — see Grid.js's module comment
 
   state.level.floatingTexts = state.level.floatingTexts.filter((ft) => updatePickupText(ft, dtMs));
 
@@ -3810,11 +3814,13 @@ export function updateEntities(state, dtMs) {
   // freeze. The 'mergefish' flow is the one exception, for both its own
   // steps: its whole point is dragging one live fish onto another.
   const fishAliensFrozenForTutorial = state.level.tutorialFlow != null && state.level.tutorialFlow.id !== 'mergefish';
+  perfMark('e: floating text + alien checks');
   state.level.entities = state.level.entities.filter((entity) => {
     if (entity.type === 'fish') return fishAliensFrozenForTutorial || updateFish(entity, state, dtMs, anyAlienAlive);
     if (entity.type === 'alien') return fishAliensFrozenForTutorial || updateAlien(entity, state, dtMs);
     return true;
   });
+  perfMark('e: fish + alien update');
   for (const spawn of pendingBossMinionSpawns) {
     state.level.entities.push(createAlien(spawn.x, spawn.y, spawn.hp, spawn.archetypeId));
   }
