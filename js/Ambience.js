@@ -1812,21 +1812,23 @@ export function renderDecorMask(ctx, state, canvasWidth, canvasHeight) {
 // immediately after, since those originate from the same back-of-the-tank
 // layer.
 const SHADOW_FISH_DOWNSCALE = 4;
-const shadowFishCanvas = document.createElement('canvas');
-const shadowFishCtx = shadowFishCanvas.getContext('2d');
 const shadowFishSmallCanvas = document.createElement('canvas');
 const shadowFishSmallCtx = shadowFishSmallCanvas.getContext('2d');
 export function renderShadowFish(ctx, state, canvasWidth, canvasHeight) {
   // Same pixelation as the background decor layer: draw to a scratch canvas,
   // shrink it, and stretch it back up.
+  // Performance: the fish are drawn straight into the small canvas under a
+  // 1/SHADOW_FISH_DOWNSCALE transform, instead of into a full-resolution
+  // scratch canvas that was then shrunk — same pixelated result, without the
+  // full-screen clear/draw/downscale.
   const w = Math.ceil(canvasWidth), h = Math.ceil(canvasHeight);
   const sw = Math.max(1, Math.ceil(w / SHADOW_FISH_DOWNSCALE)), sh = Math.max(1, Math.ceil(h / SHADOW_FISH_DOWNSCALE));
-  if (shadowFishCanvas.width !== w || shadowFishCanvas.height !== h) { shadowFishCanvas.width = w; shadowFishCanvas.height = h; }
   if (shadowFishSmallCanvas.width !== sw || shadowFishSmallCanvas.height !== sh) { shadowFishSmallCanvas.width = sw; shadowFishSmallCanvas.height = sh; }
-  shadowFishCtx.clearRect(0, 0, w, h);
-  for (const f of shadowFish) drawOneShadowFish(shadowFishCtx, state.camera, canvasWidth, canvasHeight, f);
+  shadowFishSmallCtx.setTransform(1, 0, 0, 1, 0, 0);
   shadowFishSmallCtx.clearRect(0, 0, sw, sh);
-  shadowFishSmallCtx.drawImage(shadowFishCanvas, 0, 0, w, h, 0, 0, sw, sh);
+  shadowFishSmallCtx.setTransform(1 / SHADOW_FISH_DOWNSCALE, 0, 0, 1 / SHADOW_FISH_DOWNSCALE, 0, 0);
+  for (const f of shadowFish) drawOneShadowFish(shadowFishSmallCtx, state.camera, canvasWidth, canvasHeight, f);
+  shadowFishSmallCtx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.drawImage(shadowFishSmallCanvas, 0, 0, sw, sh, 0, 0, w, h);
   renderShadowBubbles(ctx, state.camera, canvasWidth, canvasHeight);
 }
@@ -2162,6 +2164,8 @@ const liveLayerCanvas = document.createElement('canvas');
 const liveLayerCtx = liveLayerCanvas.getContext('2d');
 const liveLayerSmallCanvas = document.createElement('canvas');
 const liveLayerSmallCtx = liveLayerSmallCanvas.getContext('2d');
+let liveLayerKey = null;
+let liveLayerFrame = 0;
 function renderLivePixelatedLayer(destCtx, camera, canvasWidth, destY, destH) {
   const w = Math.ceil(canvasWidth);
   const h = Math.ceil(destH);
@@ -2170,6 +2174,18 @@ function renderLivePixelatedLayer(destCtx, camera, canvasWidth, destY, destH) {
   const sh = Math.max(1, Math.ceil(h / LIVE_LAYER_DOWNSCALE));
   if (liveLayerCanvas.width !== w || liveLayerCanvas.height !== h) { liveLayerCanvas.width = w; liveLayerCanvas.height = h; }
   if (liveLayerSmallCanvas.width !== sw || liveLayerSmallCanvas.height !== sh) { liveLayerSmallCanvas.width = sw; liveLayerSmallCanvas.height = sh; }
+  // Performance: this layer (swaying background seaweed, castles, urchins,
+  // crabs — redrawn, tinted and down/up-sampled) is heavy and moves slowly, so
+  // it's only re-rendered every other frame, or at once if the camera/size
+  // changed; the cached small result is simply re-blitted on the frames in
+  // between.
+  const liveKey = w + ',' + h + ',' + camera.x + ',' + camera.zoom;
+  if (liveKey === liveLayerKey && (liveLayerFrame++ & 1) === 1) {
+    destCtx.drawImage(liveLayerSmallCanvas, 0, 0, sw, sh, 0, destY, w, h);
+    return;
+  }
+  liveLayerKey = liveKey;
+  liveLayerFrame = 1;
   liveLayerCtx.clearRect(0, 0, w, h);
   // Same x pan/zoom as the real camera, but y anchored to the top of this band.
   const bandCamera = { x: camera.x, y: BG_STATIC_TOP_WORLD_Y, zoom: camera.zoom };

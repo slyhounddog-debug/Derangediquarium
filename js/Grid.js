@@ -3566,6 +3566,14 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
   // past its own tile, so it shouldn't disappear just because this culled
   // loop found nothing to draw.
   if (rowStart <= rowEnd) {
+    renderStaticTileLayer(ctx, state);
+    // One scan of the items per frame for every Collector's "is something
+    // mid-hold on me" lookup (computeProcessDotsInfo), instead of a fresh
+    // items.find() per Collector tile — that was O(items x collectors).
+    const collectorItems = new Map();
+    for (const it of state.level.items) {
+      if (it.collectorProgressMs != null) collectorItems.set(it.collectorCenterX + ',' + it.collectorCenterY, it);
+    }
     for (let row = rowStart; row <= rowEnd; row++) {
       for (let col = colStart; col <= colEnd; col++) {
         const type = grid[row][col];
@@ -3575,7 +3583,7 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
         const screen = worldToScreen(col * TILE_SIZE, row * TILE_SIZE, camera);
         const size = TILE_SIZE * camera.zoom;
         const data = state.level.buildingData[buildingKey(col, row)];
-        renderTileShape(ctx, type, building.color, screen.x, screen.y, size, data, state.level.elapsed, ((col * 73856093) ^ (row * 19349663)) >>> 0);
+        renderTileDynamic(ctx, type, building.color, screen.x, screen.y, size, data, state.level.elapsed);
         // Fans are drawn separately below (renderFanIndicators), over EVERY
         // fan in state.level.buildingData rather than just the on-screen-tile-
         // culled ones this loop already skipped past — a Fan's cone can reach
@@ -3585,7 +3593,7 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
         // renderDirectionIndicator's own comment on why (they suck in
         // anything touching them from any side now, no "input side" any more).
         if (data) {
-          const dotsInfo = computeProcessDotsInfo(state, type, data, col * TILE_SIZE + TILE_SIZE / 2, row * TILE_SIZE + TILE_SIZE / 2);
+          const dotsInfo = computeProcessDotsInfo(state, type, data, col * TILE_SIZE + TILE_SIZE / 2, row * TILE_SIZE + TILE_SIZE / 2, collectorItems);
           if (dotsInfo) {
             renderProcessDots(ctx, screen.x, screen.y, size, camera.zoom, dotsInfo.fraction, dotsInfo.mode);
             // A gentle pulsing outline whenever a Refinery/Collector/
@@ -4622,12 +4630,15 @@ function renderTileStatic(ctx, type, color, x, y, size) {
     ctx.strokeStyle = shadeHexColor(color, -0.4);
     ctx.lineWidth = Math.max(1, size * 0.03);
     ctx.stroke();
+    renderTierBadge(ctx, type, x, y, size);
   } else if (TURRET_TILES.has(type)) {
     renderTurretBase(ctx, x, y, size, color);
   } else if (FAN_TILES.has(type)) {
     renderFanVentBase(ctx, x, y, size, color);
+    renderTierBadge(ctx, type, x, y, size);
   } else if (REFINERY_TILES.has(type)) {
     renderRefineryIcon(ctx, x, y, size, color);
+    renderTierBadge(ctx, type, x, y, size);
   } else if (type === TILE_MANUFACTURER) {
     renderManufacturerIcon(ctx, x, y, size, color);
   } else if (type === TILE_POWER_PLANT) {
@@ -4636,6 +4647,7 @@ function renderTileStatic(ctx, type, color, x, y, size) {
     renderChestBase(ctx, x, y, size, color);
   } else {
     renderPolishedBase(ctx, x, y, size, color);
+    renderTierBadge(ctx, type, x, y, size);
   }
 }
 
@@ -4676,28 +4688,34 @@ function getTileSprite(type, color, variant) {
 // Turret's own aim-arm angle reads it, defaulting to straight up).
 // `variantSeed` (a per-tile position hash from the real tile loop) picks which
 // of the baked grain variants this tile uses; omitted (shop/Lab icons, ghosts)
-// it's just variant 0.
+// it's just variant 0. The full single-tile draw: the baked static art, then
+// the live layer on top (renderTileDynamic).
 export function renderTileShape(ctx, type, color, x, y, size, data, elapsedMs, variantSeed = 0) {
   const variant = Math.abs(variantSeed) % TILE_SPRITE_VARIANTS;
   if (size < 48) { ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high'; } // small icons downscale the 96px bake by a lot
   ctx.drawImage(getTileSprite(type, color, variant), x, y, size, size);
+  renderTileDynamic(ctx, type, color, x, y, size, data, elapsedMs);
+}
+
+// Everything on a tile that isn't baked into its sprite — the live state
+// layered over it: the turret's aim arm and tier badge, a chest's fill bar/
+// icon/arrow, the Manufacturer/Power Plant recipe icon, and the platform/fan
+// filter checkmark. (Every other family's tier badge is part of the baked
+// sprite now.) The real tile loop (renderSeabedGrid) calls just this per
+// frame, over the cached static tile layer — see renderStaticTileLayer.
+function renderTileDynamic(ctx, type, color, x, y, size, data, elapsedMs) {
   if (type === TILE_PLATFORM || RAMP_TRIANGLE_LOCAL_VERTS[type]) {
     renderPlatformFilterBadge(ctx, x, y, size, data);
-  } else if (COLLECTOR_TILES.has(type)) {
-    renderTierBadge(ctx, type, x, y, size);
   } else if (TURRET_TILES.has(type)) {
     renderTurretArm(ctx, x, y, size, color, data && data.aimAngle);
     renderTierBadge(ctx, type, x, y, size);
   } else if (FAN_TILES.has(type)) {
-    renderTierBadge(ctx, type, x, y, size);
     // Per direct request ("add a matching visual to the fans that are
     // filtering items") — the exact same green-checkmark badge a filtering
     // Platform already gets; renderPlatformFilterBadge is a pure function of
     // data.filterItems, nothing Platform-specific in it, so it works
     // unchanged here.
     renderPlatformFilterBadge(ctx, x, y, size, data);
-  } else if (REFINERY_TILES.has(type)) {
-    renderTierBadge(ctx, type, x, y, size);
   } else if (type === TILE_MANUFACTURER || type === TILE_POWER_PLANT) {
     renderRecipeIcon(ctx, type, x, y, size, data);
   } else if (STORAGE_CHEST_TILES.has(type)) {
@@ -4706,9 +4724,66 @@ export function renderTileShape(ctx, type, color, x, y, size, data, elapsedMs, v
     // distinct from its own BUILDING_TYPES color (bronze/steel/purple)
     // without needing one.
     renderChestIcon(ctx, x, y, size, color, data, elapsedMs);
-  } else {
-    renderTierBadge(ctx, type, x, y, size);
   }
+}
+
+// ---- Cached static tile layer ----
+// Performance: measured at ~0.13ms PER TILE just to blit its baked sprite, so
+// a few hundred buildings cost tens of ms a frame by themselves. Since a
+// tile's static art never changes while the grid doesn't, every placed tile's
+// sprite is drawn ONCE into one world-space layer canvas (TILE_LAYER_SCALE px
+// per world px), re-baked only when a cheap per-frame signature of the grid
+// (type + position of every non-empty cell) changes — placing/demolishing/
+// moving/undoing, level load. renderSeabedGrid then blits that single canvas
+// per frame and only runs renderTileDynamic per tile.
+const TILE_LAYER_SCALE = 2;
+let tileLayerCanvas = null;
+let tileLayerSig = null;
+const tileTypeCodes = new Map();
+function computeGridSignature(grid) {
+  let h = 2166136261;
+  for (let r = SEABED_ROW_START; r < WORLD_TILES_H; r++) {
+    const row = grid[r];
+    for (let c = 0; c < WORLD_TILES_W; c++) {
+      const t = row[c];
+      if (t === TILE_EMPTY) continue;
+      let code = tileTypeCodes.get(t);
+      if (code === undefined) { code = tileTypeCodes.size + 1; tileTypeCodes.set(t, code); }
+      h = Math.imul(h ^ (code + (r * WORLD_TILES_W + c) * 64), 16777619);
+    }
+  }
+  return h >>> 0;
+}
+function renderStaticTileLayer(ctx, state) {
+  const grid = state.level.grid;
+  const sig = computeGridSignature(grid);
+  const rows = WORLD_TILES_H - SEABED_ROW_START;
+  if (!tileLayerCanvas) {
+    tileLayerCanvas = document.createElement('canvas');
+    tileLayerCanvas.width = WORLD_TILES_W * TILE_SIZE * TILE_LAYER_SCALE;
+    tileLayerCanvas.height = rows * TILE_SIZE * TILE_LAYER_SCALE;
+    tileLayerSig = null;
+  }
+  if (sig !== tileLayerSig) {
+    const lctx = tileLayerCanvas.getContext('2d');
+    lctx.clearRect(0, 0, tileLayerCanvas.width, tileLayerCanvas.height);
+    lctx.imageSmoothingQuality = 'high';
+    const px = TILE_SIZE * TILE_LAYER_SCALE;
+    for (let r = SEABED_ROW_START; r < WORLD_TILES_H; r++) {
+      for (let c = 0; c < WORLD_TILES_W; c++) {
+        const type = grid[r][c];
+        if (type === TILE_EMPTY) continue;
+        const building = BUILDING_TYPES[type];
+        if (!building) continue;
+        const variant = (((c * 73856093) ^ (r * 19349663)) >>> 0) % TILE_SPRITE_VARIANTS;
+        lctx.drawImage(getTileSprite(type, building.color, variant), c * px, (r - SEABED_ROW_START) * px, px, px);
+      }
+    }
+    tileLayerSig = sig;
+  }
+  const { camera } = state;
+  const topLeft = worldToScreen(0, SEABED_ROW_START * TILE_SIZE, camera);
+  ctx.drawImage(tileLayerCanvas, topLeft.x, topLeft.y, WORLD_TILES_W * TILE_SIZE * camera.zoom, rows * TILE_SIZE * camera.zoom);
 }
 
 // A column of PROCESS_DOTS_COUNT (4) dots down the left edge of a
@@ -4722,11 +4797,13 @@ const PROCESS_DOT_THRESHOLDS = [0.2, 0.4, 0.6, 0.8];
 // state.level.items directly for the Collector case, mirroring
 // computeCurrentPowerDemand's own identical "find the item mid-hold on this
 // exact tile" scan.
-function computeProcessDotsInfo(state, type, data, centerX, centerY) {
+function computeProcessDotsInfo(state, type, data, centerX, centerY, collectorItems = null) {
   if (COLLECTOR_TILES.has(type)) {
-    const activeItem = state.level.items.find(
-      (it) => it.collectorProgressMs != null && it.collectorCenterX === centerX && it.collectorCenterY === centerY
-    );
+    const activeItem = collectorItems
+      ? collectorItems.get(centerX + ',' + centerY)
+      : state.level.items.find(
+        (it) => it.collectorProgressMs != null && it.collectorCenterX === centerX && it.collectorCenterY === centerY
+      );
     if (!activeItem) return null;
     return { fraction: activeItem.collectorProgressMs / activeItem.collectorTargetMs, mode: 'fill' };
   }

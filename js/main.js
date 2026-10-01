@@ -327,14 +327,35 @@ function updateCausticVideoLoop() {
   if (causticVideo.duration && causticVideo.currentTime >= causticVideo.duration * CAUSTIC_LOOP_KEEP_FRACTION) {
     causticVideo.currentTime = 0;
   }
-  if (!causticVideo.seeking && causticVideo.readyState >= 2 && causticVideo.videoWidth > 0) {
+  // Performance: the video only advances ~24-30 times a second, so re-copying
+  // it every render frame (at 60+) was wasted work — only copy when its
+  // currentTime actually moved. The grayscale the light layer needs (see
+  // compositeCausticForeground) is applied HERE, once per new video frame at
+  // the video's own small size, instead of as a ctx.filter on every
+  // full-screen tile draw every frame (canvas filters are a slow path).
+  if (!causticVideo.seeking && causticVideo.readyState >= 2 && causticVideo.videoWidth > 0 && causticVideo.currentTime !== causticLastCachedTime && performance.now() - causticLastCacheAt >= CAUSTIC_CACHE_MIN_INTERVAL_MS) {
     if (causticFrameCache.width !== causticVideo.videoWidth || causticFrameCache.height !== causticVideo.videoHeight) {
       causticFrameCache.width = causticVideo.videoWidth;
       causticFrameCache.height = causticVideo.videoHeight;
     }
+    causticLastCachedTime = causticVideo.currentTime;
+    causticLastCacheAt = performance.now();
     causticFrameCacheCtx.drawImage(causticVideo, 0, 0);
+    // Grayscale via a saturation blend (keeps each pixel's luminosity, zeroes
+    // its saturation) rather than ctx.filter = 'grayscale(1)' — same result for
+    // this soft light texture, but the canvas filter path measured far slower.
+    causticFrameCacheCtx.globalCompositeOperation = 'saturation';
+    causticFrameCacheCtx.fillStyle = '#808080';
+    causticFrameCacheCtx.fillRect(0, 0, causticFrameCache.width, causticFrameCache.height);
+    causticFrameCacheCtx.globalCompositeOperation = 'source-over';
   }
 }
+let causticLastCachedTime = -1;
+// Also capped to ~20 copies a second: extracting a video frame is the single
+// priciest step of this effect, and a slowly drifting light texture looks the
+// same at 20fps as at 30+.
+const CAUSTIC_CACHE_MIN_INTERVAL_MS = 50;
+let causticLastCacheAt = -Infinity;
 
 // Step 2's target — every foreground element (foreground decor, active fish,
 // coins, soil bed) is drawn here instead of straight to the main canvas, so
@@ -347,6 +368,10 @@ const foregroundCanvas = document.createElement('canvas');
 const foregroundCtx = foregroundCanvas.getContext('2d');
 const causticMaskCanvas = document.createElement('canvas');
 const causticMaskCtx = causticMaskCanvas.getContext('2d');
+const CAUSTIC_LIGHT_SCALE = 0.5;
+const causticLightCanvas = document.createElement('canvas');
+const causticLightCtx = causticLightCanvas.getContext('2d');
+let causticLightKey = null;
 
 function resizeForegroundCanvases() {
   foregroundCanvas.width = canvas.width;
@@ -368,62 +393,84 @@ function compositeCausticForeground() {
   // fresh copy of the foreground (not the foreground canvas itself) is used
   // as the clip mask, since 'source-in' would otherwise destroy the real
   // fish/decor artwork it's clipping against.
-  causticMaskCtx.clearRect(0, 0, w, h);
-  causticMaskCtx.globalCompositeOperation = 'source-over';
-  causticMaskCtx.drawImage(foregroundCanvas, 0, 0);
   if (causticFrameCache.width > 0) {
-    // Reads from causticFrameCache, never causticVideo directly — see that
-    // cache's own comment for why (a raw video element can hand back a
-    // blank/garbage frame for a few frames around every manual seek).
-    //
-    // Desaturated per direct request — the source footage's own color cast
-    // otherwise tints whatever it lands on; grayscale keeps this a pure
-    // brightness effect instead.
-    causticMaskCtx.filter = 'grayscale(1)';
-    causticMaskCtx.globalCompositeOperation = 'source-in';
-
-    // Tiled and positioned entirely in world space — per direct request, the
-    // effect must stay constant relative to the world (both its scale and
-    // its scroll position), not the screen/canvas. One tile is exactly
-    // WORLD_W wide (matching the tank), so it scales with zoom exactly like
-    // every other world object instead of always stretching to fill whatever
-    // the current canvas width happens to be; world (0,0) always lands
-    // exactly on a tile's top-left corner, so tiles track the camera 1:1 on
-    // both axes, vertical tiling repeating the same way for a tank taller
-    // than one tile.
+    // (The foreground copy that serves as the clip mask only happens when
+    // there's actually a light frame to clip — with no caustic video (e.g. the
+    // file isn't served) this whole branch, a full-screen clear + copy +
+    // blend, is skipped.)
+    // Performance: the light itself (video tiles + the vertical fade) only
+    // changes when the video advances a frame or the camera moves, so it's
+    // built into causticLightCanvas only then, at half resolution (it's a soft
+    // texture, so the lower resolution is invisible) — instead of redrawing
+    // every tile and the full-screen fade every single frame. Per frame, all
+    // that's left is clipping it to the foreground's silhouette (below).
     const camera = state.camera;
-    const videoAspect = causticFrameCache.height / causticFrameCache.width;
-    const tileWorldW = WORLD_W;
-    const tileWorldH = tileWorldW * videoAspect;
-    const tileScreenW = tileWorldW * camera.zoom;
-    const tileScreenH = tileWorldH * camera.zoom;
-    const tileScreenX = -camera.x * camera.zoom;
-    const camScreenOffsetY = camera.y * camera.zoom;
-    let tileScreenY = -(((camScreenOffsetY % tileScreenH) + tileScreenH) % tileScreenH);
-    while (tileScreenY < h) {
-      causticMaskCtx.drawImage(causticFrameCache, tileScreenX, tileScreenY, tileScreenW, tileScreenH);
-      tileScreenY += tileScreenH;
-    }
-    causticMaskCtx.filter = 'none';
-
-    // Step 4: vertical fade — brightest near the water's top, reaching 0%
-    // opacity 20% of the tank's height up from the bottom (i.e. 80% of the
-    // way down) and staying at 0% the rest of the way down. Anchored to
-    // world Y (getUnlockedWorldH(state), the tank's current real height),
-    // converted to screen space here, rather than a fixed screen-height
-    // fraction — per direct request, this must stay pinned to the same
-    // depth in the tank regardless of window size/zoom, not shift around
-    // with the screen.
-    causticMaskCtx.globalCompositeOperation = 'destination-in';
-    const CAUSTIC_FADE_TANK_FRACTION = 0.8;
     const tankWorldH = getUnlockedWorldH(state);
-    const fadeTopScreenY = (0 - camera.y) * camera.zoom;
-    const fadeBottomScreenY = (tankWorldH * CAUSTIC_FADE_TANK_FRACTION - camera.y) * camera.zoom;
-    const gradient = causticMaskCtx.createLinearGradient(0, fadeTopScreenY, 0, fadeBottomScreenY);
-    gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
-    gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
-    causticMaskCtx.fillStyle = gradient;
-    causticMaskCtx.fillRect(0, 0, w, h);
+    const lightKey = causticLastCachedTime + ',' + w + ',' + h + ',' + camera.x + ',' + camera.y + ',' + camera.zoom + ',' + tankWorldH;
+    const lw = Math.max(1, Math.ceil(w * CAUSTIC_LIGHT_SCALE));
+    const lh = Math.max(1, Math.ceil(h * CAUSTIC_LIGHT_SCALE));
+    if (lightKey !== causticLightKey) {
+      if (causticLightCanvas.width !== lw || causticLightCanvas.height !== lh) {
+        causticLightCanvas.width = lw;
+        causticLightCanvas.height = lh;
+      }
+      causticLightCtx.setTransform(1, 0, 0, 1, 0, 0);
+      causticLightCtx.clearRect(0, 0, lw, lh);
+      causticLightCtx.setTransform(CAUSTIC_LIGHT_SCALE, 0, 0, CAUSTIC_LIGHT_SCALE, 0, 0); // everything below is in full-resolution screen coordinates
+
+      // Tiled and positioned entirely in world space — per direct request, the
+      // effect must stay constant relative to the world (both its scale and
+      // its scroll position), not the screen/canvas. One tile is exactly
+      // WORLD_W wide (matching the tank), so it scales with zoom exactly like
+      // every other world object instead of always stretching to fill whatever
+      // the current canvas width happens to be; world (0,0) always lands
+      // exactly on a tile's top-left corner, so tiles track the camera 1:1 on
+      // both axes, vertical tiling repeating the same way for a tank taller
+      // than one tile. Reads from causticFrameCache, never causticVideo
+      // directly (see that cache's own comment), which is already grayscale.
+      const videoAspect = causticFrameCache.height / causticFrameCache.width;
+      const tileWorldW = WORLD_W;
+      const tileWorldH = tileWorldW * videoAspect;
+      const tileScreenW = tileWorldW * camera.zoom;
+      const tileScreenH = tileWorldH * camera.zoom;
+      const tileScreenX = -camera.x * camera.zoom;
+      const camScreenOffsetY = camera.y * camera.zoom;
+      let tileScreenY = -(((camScreenOffsetY % tileScreenH) + tileScreenH) % tileScreenH);
+      while (tileScreenY < h) {
+        causticLightCtx.drawImage(causticFrameCache, tileScreenX, tileScreenY, tileScreenW, tileScreenH);
+        tileScreenY += tileScreenH;
+      }
+
+      // Step 4: vertical fade — brightest near the water's top, reaching 0%
+      // opacity 20% of the tank's height up from the bottom (i.e. 80% of the
+      // way down) and staying at 0% the rest of the way down. Anchored to
+      // world Y (getUnlockedWorldH(state), the tank's current real height),
+      // converted to screen space here, rather than a fixed screen-height
+      // fraction — per direct request, this must stay pinned to the same
+      // depth in the tank regardless of window size/zoom, not shift around
+      // with the screen.
+      causticLightCtx.globalCompositeOperation = 'destination-in';
+      const CAUSTIC_FADE_TANK_FRACTION = 0.8;
+      const fadeTopScreenY = (0 - camera.y) * camera.zoom;
+      const fadeBottomScreenY = (tankWorldH * CAUSTIC_FADE_TANK_FRACTION - camera.y) * camera.zoom;
+      const gradient = causticLightCtx.createLinearGradient(0, fadeTopScreenY, 0, fadeBottomScreenY);
+      gradient.addColorStop(0, 'rgba(255, 255, 255, 1)');
+      gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+      causticLightCtx.fillStyle = gradient;
+      causticLightCtx.fillRect(0, 0, w, h);
+      causticLightCtx.globalCompositeOperation = 'source-over';
+      causticLightCtx.setTransform(1, 0, 0, 1, 0, 0);
+      causticLightKey = lightKey;
+    }
+
+    // Step 3: clip that light to the foreground's own silhouette. A fresh copy
+    // of the foreground (not the foreground canvas itself) is the clip mask,
+    // since 'source-in' would otherwise destroy the real fish/decor artwork
+    // it's clipping against.
+    causticMaskCtx.globalCompositeOperation = 'copy'; // replaces the old clear + draw pair with one full-screen pass
+    causticMaskCtx.drawImage(foregroundCanvas, 0, 0);
+    causticMaskCtx.globalCompositeOperation = 'source-in';
+    causticMaskCtx.drawImage(causticLightCanvas, 0, 0, lw, lh, 0, 0, w, h);
     causticMaskCtx.globalCompositeOperation = 'source-over';
 
     // Screen-blend the clipped, gradient-masked light back onto the real
@@ -4153,6 +4200,9 @@ function lerpRgbToString(from, to, t) {
 // are soft blobs, so half-res is invisible and keeps this cheap. Skipped
 // entirely on frames with no fish/alien on screen.
 const SHADOW_MASK_SCALE = 0.5;
+const SHADOW_MASK_REFRESH_FRAMES = 4;
+let shadowMaskKey = null;
+let shadowMaskAge = 0;
 const decorMaskCanvas = document.createElement('canvas');
 const decorMaskCtx = decorMaskCanvas.getContext('2d');
 const shadowLayerCanvas = document.createElement('canvas');
@@ -4180,11 +4230,24 @@ function renderFishShadowsOnDecor(ctx, state) {
     decorMaskCanvas.width = w; decorMaskCanvas.height = h;
     shadowLayerCanvas.width = w; shadowLayerCanvas.height = h;
   }
-  decorMaskCtx.setTransform(1, 0, 0, 1, 0, 0);
-  decorMaskCtx.clearRect(0, 0, w, h);
-  decorMaskCtx.setTransform(SHADOW_MASK_SCALE, 0, 0, SHADOW_MASK_SCALE, 0, 0);
-  renderDecorMask(decorMaskCtx, state, canvas.width, canvas.height);
-  renderMoundMask(decorMaskCtx, state);
+  // Performance: the mask (every decoration redrawn) was the single most
+  // expensive part of this pass, but decorations barely move (slow sway, the
+  // odd crab), so it's only refreshed every SHADOW_MASK_REFRESH_FRAMES frames —
+  // or immediately if the camera/canvas changed — while the shadows
+  // themselves, which follow fast-moving fish, are redrawn and re-clipped every
+  // frame against whichever mask is current.
+  const cam = state.camera;
+  const maskKey = w + ',' + h + ',' + cam.x + ',' + cam.y + ',' + cam.zoom + ',' + state.level.tier;
+  if (maskKey !== shadowMaskKey || shadowMaskAge >= SHADOW_MASK_REFRESH_FRAMES) {
+    decorMaskCtx.setTransform(1, 0, 0, 1, 0, 0);
+    decorMaskCtx.clearRect(0, 0, w, h);
+    decorMaskCtx.setTransform(SHADOW_MASK_SCALE, 0, 0, SHADOW_MASK_SCALE, 0, 0);
+    renderDecorMask(decorMaskCtx, state, canvas.width, canvas.height);
+    renderMoundMask(decorMaskCtx, state);
+    shadowMaskKey = maskKey;
+    shadowMaskAge = 0;
+  }
+  shadowMaskAge++;
 
   shadowLayerCtx.setTransform(1, 0, 0, 1, 0, 0);
   shadowLayerCtx.clearRect(0, 0, w, h);
@@ -6432,3 +6495,4 @@ createGameLoop({
   simDtMs: SIM_DT_MS,
   maxFrameSkip: MAX_FRAME_SKIP,
 });
+
