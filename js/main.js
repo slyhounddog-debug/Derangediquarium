@@ -149,7 +149,7 @@ import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop
 import { pushGameNotification } from './Notifications.js';
 import { loadLevel, LEVELS } from './Levels.js';
 import { updateStoryTriggers, updateAutosave } from './Systems.js';
-import { updateAmbience, renderAmbienceBehindLab, renderAmbienceFrontLab, spawnCursorBubbles, renderWaterSurface, spawnSeaTurtleBubble, renderBackgroundParallaxDecor, renderShadowFish } from './Ambience.js';
+import { updateAmbience, renderAmbienceBehindLab, renderAmbienceFrontLab, spawnCursorBubbles, renderWaterSurface, spawnSeaTurtleBubble, renderBackgroundParallaxDecor, renderShadowFish, renderDecorMask } from './Ambience.js';
 import { resumeAudio, startGameMusic, playAlienHit, setBattleMusicActive, triggerBossMusic, playBuildPlace, playDemolish } from './Sound.js';
 import {
   updateEntities,
@@ -223,8 +223,8 @@ import {
   computeSnapLine,
   getUnlockedWorldH,
 } from './Grid.js';
-import { isPointOnMound, crackMound, renderMound, centerCameraOnMound, isPointOnScienceLab, renderScienceLab } from './Mound.js';
-import { drawFish } from './FishRenderer.js';
+import { isPointOnMound, crackMound, renderMound, centerCameraOnMound, isPointOnScienceLab, renderScienceLab, renderMoundMask } from './Mound.js';
+import { drawFish, drawFishShadow } from './FishRenderer.js';
 import { oneShotShimmerProgress, drawShimmerSweep, shimmerFadeAlpha, createShimmerTimer, updateShimmerTimer } from './Shimmer.js';
 import {
   initUI,
@@ -1744,7 +1744,7 @@ function updateItemDrag() {
   // object into the side glass panels or into the toolbar at the bottom").
   // The glass panels and the bottom tool-bar are purely screen-space
   // dressing sitting just outside the world's real x=0/WORLD_W and
-  // y=getUnlockedWorldH(state) edges (see main.js's renderTankWalls and
+  // y=getUnlockedWorldH(state) edges (the side glass panels, since removed, were drawn by main.js's renderTankWalls; see also
   // Grid.js's renderCameraBottomBuffer) — clamping to those same world coordinates,
   // the exact ones Entities.js's clampItemToWorldWalls/Grid.js's
   // sweepVertical already enforce for ordinary (non-dragged) physics, keeps
@@ -4117,130 +4117,6 @@ function waterBackgroundGradient(ctx, canvasHeight) {
   return gradient;
 }
 
-// Glass tank walls at the world's left/right edges — per direct request
-// ("so it's obvious where objects will stop on the sides"). Items already
-// clamp their own position flush against x=0/WORLD_W when they drift into
-// them (Entities.js's clampItemToWorldWalls), so the wall's inner seam sits
-// at those exact same coordinates — a resting item visually touches the
-// glass, not an arbitrary nearby line. Spans the full vertical scroll range
-// (world y=0 down through the camera's bottom-buffer strip) so it's always
-// present regardless of how far the player has panned. Rendered right after
-// the seabed grid/Mound, before any fish/item/alien — a background
-// structural element the tank's contents sit in front of.
-//
-// Reworked per direct follow-up report ("I don't like the glass walls...
-// make the frosted part extend all the way to the outermost edges... so it
-// looks like [you're] inside a glass tank, rather than the tank being on
-// both sides of a random glass wall"). The original version drew a fixed-
-// width band a short distance out from the boundary, leaving plain water
-// color still visible beyond it out to the screen edge — reading as a thin
-// glass PILLAR floating in open water with tank on both sides of it, not
-// the actual edge of the tank. Now the glass fill spans the ENTIRE gap from
-// the true boundary out to the real screen edge, however wide that happens
-// to be for the current viewport — nothing but glass is ever visible past
-// the inner seam, so the screen edge itself reads as the outside of the
-// tank.
-// Reworked a second time into a "glassmorphism" treatment, per direct
-// request ("modern glassmorphic look... inner box shadow, thin white
-// translucent borders, and a subtle linear gradient to make them look like
-// thick, refractive glass panels facing sideways"). Canvas has no native
-// box-shadow, so the inset look is faked with two short gradient strips
-// hugging each edge that darken slightly before fading back into the main
-// fill — the same trick an inset CSS box-shadow produces, just hand-drawn.
-// The old hard-edged diagonal "shine stroke" from the previous pass is
-// gone, replaced by a soft brightness bump built into the main fill's own
-// gradient stops instead — reads as light refracting through the glass's
-// thickness rather than a painted-on streak.
-const TANK_WALL_MIN_WIDTH = 22; // world px — the guaranteed-minimum glass width, used as a fallback when the true boundary would otherwise be off-screen (see renderTankWalls) or nearly flush with the screen edge
-const TANK_WALL_INSET_SHADOW_FRACTION = 0.3; // how much of the panel's own width each inset-shadow strip reaches in from its edge
-function renderGlassWall(ctx, innerX, outerX, topY, bottomY) {
-  const left = Math.min(innerX, outerX);
-  const width = Math.abs(outerX - innerX);
-  if (width <= 0) return;
-  ctx.save();
-
-  // Base glass fill — a soft, mostly-neutral white gradient (glassmorphism
-  // leans neutral/frosted rather than tinted) that brightens gradually
-  // toward the outer edge with one gentle extra lift just past halfway,
-  // reading as light passing through the pane's real thickness rather than
-  // a flat tint.
-  const fill = ctx.createLinearGradient(innerX, 0, outerX, 0);
-  fill.addColorStop(0, 'rgba(255, 255, 255, 0.08)');
-  fill.addColorStop(0.45, 'rgba(255, 255, 255, 0.16)');
-  fill.addColorStop(0.6, 'rgba(255, 255, 255, 0.26)');
-  fill.addColorStop(1, 'rgba(255, 255, 255, 0.34)');
-  ctx.fillStyle = fill;
-  ctx.fillRect(left, topY, width, bottomY - topY);
-
-  // Faked inner box-shadow — a short, soft dark gradient hugging each edge
-  // from the inside, fading to nothing within TANK_WALL_INSET_SHADOW_FRACTION
-  // of the panel's own width, the same visual an `inset` CSS box-shadow
-  // gives a card.
-  const insetReach = width * TANK_WALL_INSET_SHADOW_FRACTION;
-  const innerShadow = ctx.createLinearGradient(innerX, 0, innerX + Math.sign(outerX - innerX) * insetReach, 0);
-  innerShadow.addColorStop(0, 'rgba(5, 15, 25, 0.22)');
-  innerShadow.addColorStop(1, 'rgba(5, 15, 25, 0)');
-  ctx.fillStyle = innerShadow;
-  ctx.fillRect(left, topY, width, bottomY - topY);
-  const outerShadow = ctx.createLinearGradient(outerX, 0, outerX - Math.sign(outerX - innerX) * insetReach, 0);
-  outerShadow.addColorStop(0, 'rgba(5, 15, 25, 0.16)');
-  outerShadow.addColorStop(1, 'rgba(5, 15, 25, 0)');
-  ctx.fillStyle = outerShadow;
-  ctx.fillRect(left, topY, width, bottomY - topY);
-
-  // Thin white translucent borders along both edges of the panel.
-  ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(innerX, topY);
-  ctx.lineTo(innerX, bottomY);
-  ctx.moveTo(outerX, topY);
-  ctx.lineTo(outerX, bottomY);
-  ctx.stroke();
-  ctx.restore();
-}
-function renderTankWalls(ctx, state, canvasWidth) {
-  const topY = worldToScreen(0, 0, state.camera).y;
-  const bottomY = worldToScreen(0, getUnlockedWorldH(state) + CAMERA_BOTTOM_BUFFER_PX, state.camera).y;
-  const minWidthPx = TANK_WALL_MIN_WIDTH * state.camera.zoom;
-  // The inner seam sits at the true world boundary whenever that's already
-  // comfortably on-screen; otherwise it falls back to a fixed minimum
-  // distance from the screen edge instead, so the wall never vanishes
-  // entirely on a narrower viewport (viewW < WORLD_W — see Engine.js's
-  // updateCamera's own comment on when the true boundary can fall
-  // off-canvas). The fill (above) always spans from this seam out to the
-  // real screen edge either way, so there's never a gap of plain water
-  // color between the glass and the edge of the canvas.
-  const trueLeftInnerX = worldToScreen(0, 0, state.camera).x;
-  const trueRightInnerX = worldToScreen(WORLD_W, 0, state.camera).x;
-  const leftInnerX = Math.max(trueLeftInnerX, minWidthPx);
-  const rightInnerX = Math.min(trueRightInnerX, canvasWidth - minWidthPx);
-  renderGlassWall(ctx, leftInnerX, 0, topY, bottomY);
-  renderGlassWall(ctx, rightInnerX, canvasWidth, topY, bottomY);
-  // Exposes each wall's actual live on-screen width as a CSS custom property
-  // — per direct request, the HUD/chat pill (both fixed-position DOM
-  // elements pinned near the corners) read these (see style.css's #hud/
-  // #notification-ticker) to offset themselves clear of
-  // the glass instead of visually overlapping it, at every viewport size
-  // rather than guessing one fixed margin that only happens to work for
-  // some. Only written when actually changed (camera/canvas size are
-  // otherwise stable frame-to-frame) to avoid triggering a layout
-  // recalculation on the fixed-position elements above every single frame
-  // for no reason.
-  const leftWidthPx = Math.round(leftInnerX);
-  const rightWidthPx = Math.round(canvasWidth - rightInnerX);
-  if (leftWidthPx !== lastGlassWallLeftWidth) {
-    lastGlassWallLeftWidth = leftWidthPx;
-    document.documentElement.style.setProperty('--glass-wall-left-width', `${leftWidthPx}px`);
-  }
-  if (rightWidthPx !== lastGlassWallRightWidth) {
-    lastGlassWallRightWidth = rightWidthPx;
-    document.documentElement.style.setProperty('--glass-wall-right-width', `${rightWidthPx}px`);
-  }
-}
-let lastGlassWallLeftWidth = null;
-let lastGlassWallRightWidth = null;
-
 // Alien hit-flash — per direct request ("aliens flash red and bounce when
 // they take damage"). Every alien color (both the flat ALIEN_COLOR fallback
 // and each archetype's own tier color — Dynamic Alien Archetypes) is a hex
@@ -4261,6 +4137,73 @@ function lerpRgbToString(from, to, t) {
   const g = Math.round(from.g + (to.g - from.g) * t);
   const b = Math.round(from.b + (to.b - from.b) * t);
   return `rgb(${r}, ${g}, ${b})`;
+}
+
+// ---- Fish/alien shadows, masked to seafloor decorations ----
+// Per direct request ("the fish shadows should only show up on the seabed
+// decoration... reverse mask it so that only the seafloor decorations
+// (boulders, seaweed, sand castles, etc) show the fish shadows"): a fish's
+// drop shadow used to be drawn straight onto whatever was behind it, which
+// floated a dark smudge over plain water. Now every fish/alien's shadow is
+// drawn into its own layer, that layer is cut down (destination-in) to the
+// alpha of a freshly-drawn mask of just the seafloor decorations (Ambience's
+// decor jobs plus the Mound/Science Lab), and only then composited over the
+// scene — so a shadow exists only where a decoration is behind the body.
+// Both layers run at SHADOW_MASK_SCALE of the screen resolution: the shadows
+// are soft blobs, so half-res is invisible and keeps this cheap. Skipped
+// entirely on frames with no fish/alien on screen.
+const SHADOW_MASK_SCALE = 0.5;
+const decorMaskCanvas = document.createElement('canvas');
+const decorMaskCtx = decorMaskCanvas.getContext('2d');
+const shadowLayerCanvas = document.createElement('canvas');
+const shadowLayerCtx = shadowLayerCanvas.getContext('2d');
+function drawAlienShadow(ctx, x, y, radius, bodyWidthMul, bodyHeightMul) {
+  const bodyRx = radius * 1.05 * bodyWidthMul;
+  const bodyRy = radius * 0.85 * bodyHeightMul;
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+  ctx.beginPath();
+  ctx.ellipse(x + bodyRx * 0.06, y + bodyRy * 0.45, bodyRx * 1.02, bodyRy * 0.95, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+function renderFishShadowsOnDecor(ctx, state) {
+  const casters = [];
+  for (const e of state.level.entities) {
+    if (e.type !== 'fish' && !(e.type === 'alien' && e.hp > 0)) continue;
+    const pos = worldToScreen(e.x, e.y, state.camera);
+    if (pos.x < -60 || pos.x > canvas.width + 60 || pos.y < -60 || pos.y > canvas.height + 60) continue;
+    casters.push({ e, pos });
+  }
+  if (!casters.length) return;
+  const w = Math.max(1, Math.ceil(canvas.width * SHADOW_MASK_SCALE));
+  const h = Math.max(1, Math.ceil(canvas.height * SHADOW_MASK_SCALE));
+  if (decorMaskCanvas.width !== w || decorMaskCanvas.height !== h) {
+    decorMaskCanvas.width = w; decorMaskCanvas.height = h;
+    shadowLayerCanvas.width = w; shadowLayerCanvas.height = h;
+  }
+  decorMaskCtx.setTransform(1, 0, 0, 1, 0, 0);
+  decorMaskCtx.clearRect(0, 0, w, h);
+  decorMaskCtx.setTransform(SHADOW_MASK_SCALE, 0, 0, SHADOW_MASK_SCALE, 0, 0);
+  renderDecorMask(decorMaskCtx, state, canvas.width, canvas.height);
+  renderMoundMask(decorMaskCtx, state);
+
+  shadowLayerCtx.setTransform(1, 0, 0, 1, 0, 0);
+  shadowLayerCtx.clearRect(0, 0, w, h);
+  shadowLayerCtx.setTransform(SHADOW_MASK_SCALE, 0, 0, SHADOW_MASK_SCALE, 0, 0);
+  for (const { e, pos } of casters) {
+    if (e.type === 'fish') {
+      drawFishShadow(shadowLayerCtx, pos.x, pos.y, e.speciesId, e.stage);
+    } else {
+      const baseRadius = (e.radius ?? ALIEN_RADIUS) * state.camera.zoom;
+      const flashFrac = e.hitFlashMs / ALIEN_HIT_FLASH_MS;
+      const bounce = e.hitFlashMs > 0 ? 1 + ALIEN_HIT_BOUNCE_SCALE * Math.sin((1 - flashFrac) * Math.PI) : 1;
+      drawAlienShadow(shadowLayerCtx, pos.x, pos.y, baseRadius * bounce, e.bodyWidthMul, e.bodyHeightMul);
+    }
+  }
+  shadowLayerCtx.setTransform(1, 0, 0, 1, 0, 0);
+  shadowLayerCtx.globalCompositeOperation = 'destination-in';
+  shadowLayerCtx.drawImage(decorMaskCanvas, 0, 0);
+  shadowLayerCtx.globalCompositeOperation = 'source-over';
+  ctx.drawImage(shadowLayerCanvas, 0, 0, w, h, 0, 0, canvas.width, canvas.height);
 }
 
 // A lit/rimmed/grained look for aliens, per direct request (same retweak as
@@ -4327,11 +4270,8 @@ function drawAlienBody(ctx, x, y, radius, facing, color, gazeAngle, spikes = 3, 
   const rimColor = toneColor(color, -0.55);
   const rimWidth = Math.max(1, radius * 0.09);
 
-  // Contact shadow, offset down-right like the boulders'.
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.16)';
-  ctx.beginPath();
-  ctx.ellipse(x + bodyRx * 0.06, y + bodyRy * 0.45, bodyRx * 1.02, bodyRy * 0.95, 0, 0, Math.PI * 2);
-  ctx.fill();
+  // (The alien's drop shadow is drawn by renderFishShadowsOnDecor's separate,
+  // decoration-masked pass — see drawAlienShadow below — not here.)
 
   // Tail fin, trailing behind the direction of travel.
   ctx.fillStyle = toneColor(color, -0.28);
@@ -4917,7 +4857,6 @@ function render() {
   renderScienceLab(ctx, state);
   renderAmbienceFrontLab(ctx, state, canvas.width, canvas.height);
   renderSeabedGrid(ctx, state, canvas.width, canvas.height);
-  renderTankWalls(ctx, state, canvas.width);
 
   // Shared by every ghost-preview branch below, and — via effectiveToolAt —
   // what makes a Build tool's ghost simply not show at all while hovering
@@ -5420,6 +5359,10 @@ function render() {
     ctx.stroke();
     ctx.restore();
   }
+
+  // Drop shadows for every fish/alien, drawn under all of them but only where a
+  // seafloor decoration is behind — see renderFishShadowsOnDecor.
+  renderFishShadowsOnDecor(ctx, state);
 
   for (const alien of state.level.entities) {
     if (alien.type !== 'alien' || alien.hp <= 0) continue;

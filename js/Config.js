@@ -685,7 +685,7 @@ export const ITEM_PUSH_IMPULSE_SPEED = 3;
 
 // ---- Economy & feeding ----
 export const FOOD_COST = 3; // $ per food pellet, matches the Buy Food shop entry — lowered from 5 so the early economy isn't so punishing to get rolling
-export const FOOD_RADIUS = 6.6; // px, visual + despawn-on-floor check — 10% bigger (was 6) per direct request ("increase the size of all the objects by 10%")
+export const FOOD_RADIUS = 7.26; // px, visual + collision + despawn-on-floor check — 10% bigger (was 6) per direct request ("increase the size of all the objects by 10%"), then 10% bigger again (was 6.6) per a later direct request ("increase the size of food by 10%, including the collision size, while keeping mass untouched" — mass is ITEM_MASS_BY_TYPE.food, a flat per-type value, not derived from this radius)
 // Per direct request ("make the food color slightly lighter to a pink
 // salmon color, and make sure all the food icons throughout the game
 // match") — was a flat red (#e74c3c); still clearly distinct from coins
@@ -731,11 +731,18 @@ export const CHEAT_FISHY_GEMS_GRANT_AMOUNT = 100; // per direct request ("make i
 // Coin color + size tier by value — checked in ascending order, first match
 // wins. Entities.js's getCoinTier()/getCoinColor() do the lookup; kept here
 // as data per §3.6. sizeMultiplier scales COIN_RADIUS for that tier.
+// Per direct request ("increase the size of the bronze coin to the size of the
+// silver coin, the silver to the gold, and the gold to the diamond/gem coin...
+// keep the mass unaffected"), every tier below the top moved up one step in
+// size — bronze is now silver's old 1.05, silver gold's old 1.10, gold the
+// diamond's 1.15 (diamond itself unchanged). massMultiplier carries each
+// tier's ORIGINAL size scale so createCoin's mass is exactly what it was
+// before this change (mass used to be derived from sizeMultiplier).
 export const COIN_TIERS = [
-  { maxValue: 5, color: '#cd7f32', sizeMultiplier: 1.0 }, // bronze, 1-5
-  { maxValue: 12, color: '#c0c0c0', sizeMultiplier: 1.05 }, // silver, 6-12, 5% bigger
-  { maxValue: 30, color: '#ffd700', sizeMultiplier: 1.10 }, // gold, 13-30, 10% bigger
-  { maxValue: Infinity, color: '#b9f2ff', sizeMultiplier: 1.15 }, // diamond, 31+, 15% bigger
+  { maxValue: 5, color: '#cd7f32', sizeMultiplier: 1.05, massMultiplier: 1.0 }, // bronze, 1-5
+  { maxValue: 12, color: '#c0c0c0', sizeMultiplier: 1.10, massMultiplier: 1.05 }, // silver, 6-12
+  { maxValue: 30, color: '#ffd700', sizeMultiplier: 1.15, massMultiplier: 1.10 }, // gold, 13-30
+  { maxValue: Infinity, color: '#b9f2ff', sizeMultiplier: 1.15, massMultiplier: 1.15 }, // diamond, 31+
 ];
 // Per direct request ("make the diamond colored coins more visually unique...
 // look more like a circular gem than a coin") — main.js's item render loop
@@ -910,7 +917,7 @@ export const BIOMASS_RADIUS = 10; // bumped from 9 alongside the recolor below, 
 // is what keeps the gradient itself readable as a gradient).
 export const BIOMASS_COLOR = '#51ad3f';
 export const BIOMASS_COLOR_CORE = ALIEN_DNA_COLOR;
-export const MUTAGEN_PASTE_RADIUS = FOOD_RADIUS; // Class 1, same size class as Food
+export const MUTAGEN_PASTE_RADIUS = 6.6; // Class 1 — was literally FOOD_RADIUS; pinned to Food's previous value so the later "make Food 10% bigger" request only resizes Food, not Mutagen Paste
 export const MUTAGEN_PASTE_COLOR = '#e64de0'; // vivid magenta/pink — unmistakably not plain Food, matches its "high-value" framing
 // Same "hard, silent safety cap" precedent as WASTE_MAX_ON_SCREEN above —
 // alien_dna in particular can arrive in bursts (several aliens dying in a

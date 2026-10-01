@@ -1762,18 +1762,24 @@ function renderCursorBubbles(ctx, camera, canvasWidth, canvasHeight) {
 // even though both are in the "behind lab" bucket).
 const behindLabJobs = [];
 const frontLabJobs = [];
-function addAmbienceJob(depth, draw) {
+// `decor` marks the physical seafloor decorations (boulders, seaweed, kelp,
+// sand castles, coral, urchins, crabs, the chest) — as opposed to light/
+// atmosphere layers (caustics, sun rays) — so renderDecorMask below can draw
+// just those.
+const decorJobs = [];
+function addAmbienceJob(depth, draw, decor = false) {
   (depth < LAB_DEPTH_THRESHOLD ? behindLabJobs : frontLabJobs).push({ depth, draw });
+  if (decor) decorJobs.push(draw);
 }
 for (const c of caustics) addAmbienceJob(c.depth, (ctx, camera, cw, ch) => drawOneCaustic(ctx, camera, cw, ch, c));
-for (const b of boulders) addAmbienceJob(b.depth, (ctx, camera, cw) => drawOneBoulder(ctx, camera, cw, b));
-for (const w of seaweeds) addAmbienceJob(w.depth, (ctx, camera, cw) => drawOneSeaweed(ctx, camera, cw, w));
-for (const k of kelps) addAmbienceJob(k.depth, (ctx, camera, cw) => drawOneKelp(ctx, camera, cw, k));
-for (const sc of sandCastles) addAmbienceJob(sc.depth, (ctx, camera, cw) => drawOneSandCastle(ctx, camera, cw, sc));
-for (const c of corals) addAmbienceJob(c.depth, (ctx, camera, cw) => drawOneCoral(ctx, camera, cw, c));
-for (const u of seaUrchins) addAmbienceJob(u.depth, (ctx, camera, cw) => drawOneSeaUrchin(ctx, camera, cw, u));
-for (const c of crabs) addAmbienceJob(c.depth, (ctx, camera, cw) => drawOneCrab(ctx, camera, cw, c));
-addAmbienceJob(treasureChest.depth, (ctx, camera, cw) => drawOneTreasureChest(ctx, camera, cw, treasureChest));
+for (const b of boulders) addAmbienceJob(b.depth, (ctx, camera, cw) => drawOneBoulder(ctx, camera, cw, b), true);
+for (const w of seaweeds) addAmbienceJob(w.depth, (ctx, camera, cw) => drawOneSeaweed(ctx, camera, cw, w), true);
+for (const k of kelps) addAmbienceJob(k.depth, (ctx, camera, cw) => drawOneKelp(ctx, camera, cw, k), true);
+for (const sc of sandCastles) addAmbienceJob(sc.depth, (ctx, camera, cw) => drawOneSandCastle(ctx, camera, cw, sc), true);
+for (const c of corals) addAmbienceJob(c.depth, (ctx, camera, cw) => drawOneCoral(ctx, camera, cw, c), true);
+for (const u of seaUrchins) addAmbienceJob(u.depth, (ctx, camera, cw) => drawOneSeaUrchin(ctx, camera, cw, u), true);
+for (const c of crabs) addAmbienceJob(c.depth, (ctx, camera, cw) => drawOneCrab(ctx, camera, cw, c), true);
+addAmbienceJob(treasureChest.depth, (ctx, camera, cw) => drawOneTreasureChest(ctx, camera, cw, treasureChest), true);
 for (const ray of sunRays) addAmbienceJob(ray.depth, (ctx, camera, cw, ch) => drawOneSunRay(ctx, camera, cw, ch, ray));
 behindLabJobs.sort((a, b) => a.depth - b.depth);
 frontLabJobs.sort((a, b) => a.depth - b.depth);
@@ -1783,6 +1789,15 @@ frontLabJobs.sort((a, b) => a.depth - b.depth);
 // then renderScienceLab, then renderAmbienceFrontLab below.
 export function renderAmbienceBehindLab(ctx, state, canvasWidth, canvasHeight) {
   for (const job of behindLabJobs) job.draw(ctx, state.camera, canvasWidth, canvasHeight);
+}
+
+// Draws just the seafloor decorations (every addAmbienceJob(..., true) above)
+// into whatever context it's handed — only their alpha matters. main.js uses
+// it as the mask that restricts fish shadows to the places a decoration is
+// actually behind the fish, per direct request ("reverse mask it so that only
+// the seafloor decorations... show the fish shadows").
+export function renderDecorMask(ctx, state, canvasWidth, canvasHeight) {
+  for (const draw of decorJobs) draw(ctx, state.camera, canvasWidth, canvasHeight);
 }
 
 // Shadow fish silhouettes — drawn as their own top-level pass, separate from

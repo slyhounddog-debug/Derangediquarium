@@ -555,7 +555,7 @@ export function getCoinColor(value) {
 export function createCoin(x, y, value) {
   const tier = getCoinTier(value);
   const radius = COIN_RADIUS * tier.sizeMultiplier;
-  const mass = ITEM_MASS_BY_TYPE.coin * tier.sizeMultiplier; // a gold/diamond coin is a little heavier than a bronze one, same scale as its size
+  const mass = ITEM_MASS_BY_TYPE.coin * tier.massMultiplier; // a gold/diamond coin is a little heavier than a bronze one — massMultiplier keeps each tier's original weight now that sizeMultiplier has moved up (see COIN_TIERS)
   return {
     id: nextId(), type: 'coin', x, y, vx: 0, vy: 0, radius, mass, value, resting: false,
     // Idle spin animation bookkeeping — see updateCoinSpin's own comment.

@@ -62,6 +62,9 @@ const SICK_GREEN = { r: 120, g: 200, b: 90 };
 // `grayed` param.
 const ALIEN_BLOCKED_GRAY = { r: 128, g: 128, b: 128 };
 
+// How much fuller the Electric Eel's head is than the bare taper at that point (see drawEelBody) — shared with the hat anchors below.
+const EEL_HEAD_SWELL = 1.28;
+
 // ---- Lit / rimmed / contact-shadow shading ----
 // Per direct request (rework the fish to match the boulders/mound/seaweed —
 // "lit, rimmed, contact-shadow", but deliberately WITHOUT the speckled grain
@@ -96,13 +99,6 @@ function strokeRim(ctx, color, size) {
   ctx.lineWidth = Math.max(1, size * 0.035);
   ctx.lineJoin = 'round';
   ctx.stroke();
-}
-// A soft shadow offset down-right of a body, like the boulders' contact shadow.
-function fillShadow(ctx, x, y, rx, ry) {
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.13)';
-  ctx.beginPath();
-  ctx.ellipse(x + rx * 0.08, y + ry * 0.45, rx, ry, 0, 0, Math.PI * 2);
-  ctx.fill();
 }
 
 // A straight 50/50 blend between two hex colors — used for a Gene-Splicing
@@ -525,7 +521,6 @@ function drawStandardBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGrow
   const shape = BODY_SHAPE_RATIOS[bodyShape] || BODY_SHAPE_RATIOS.normal;
   const bodyRx = size * shape.bodyW;
   const bodyRy = size * shape.bodyH;
-  fillShadow(ctx, x, y, bodyRx, bodyRy);
   // Mid and adult stages get a fin — small at mid, bigger (but still
   // smaller than the old fixed size) at adult. Baby stays plain.
   if (stage >= 1) {
@@ -581,7 +576,6 @@ function drawStandardBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGrow
 // along its top edge for the lumpy silhouette, otherwise the same
 // tail/shading/eye treatment as drawStandardBody.
 function drawSuckerfishBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGrown, color, eyeDirection) {
-  fillShadow(ctx, x, y, size * 0.68, size * 0.3);
   if (stage >= 1) {
     const finScale = isFullyGrown ? 1.0 : MID_STAGE_FIN_SCALE;
     const backX = x - facing * size * 0.6;
@@ -628,42 +622,90 @@ function drawSuckerfishBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGr
   }
 }
 
-// Electric Eel: "skinny and flat," no fins, and swims with a snake-like
-// undulation — "move like the seaweed but sideways," per direct request.
-// Drawn as a tapered stroked path through several points, each offset
-// perpendicular to the swim direction by a sine wave whose phase shifts
-// along the body — the same underlying idea Ambience.js's seaweed sway
-// uses, just applied along a horizontal body instead of a vertical stem.
-// widthScale/bumps/bulge are all purely for the Feeder Fish/Battery fish
-// hybrid bodies below (drawHybridBody) — a plain Electric Eel always calls
-// this with the defaults (1, false, 0), identical to its old behavior.
-// bulge adds a Blimpfish-like round "belly" — a sine bump (0 at both ends,
-// peaking mid-body) layered on top of the ordinary linear tail-to-head
-// taper, so the body reads as genuinely round in the middle while still
-// tapering thin at the tail and narrower at the head, unlike widthScale
-// alone (a flat multiplier, which just made a uniformly fatter eel).
+// Electric Eel — reworked per direct request ("looks more like an electric eel
+// by giving it fins and a rounded face, while keeping the aesthetic to match
+// the rest of the fish"; the Feeder Fish and Battery fish hybrids share this
+// body, so they match). Still the same undulating tapered body (a path through
+// several points, each offset perpendicular to the swim direction by a sine
+// wave whose phase shifts along the body — the same idea Ambience.js's
+// seaweed sway uses, just horizontal), but the head is now a fuller rounded
+// bulb with a snout cap and a small mouth line, and it grows fins: a tail fin
+// paddle, the long ribbon "anal" fin along the belly an electric eel
+// really swims with, and a flapping pectoral fin behind the head — all in the
+// lit/rimmed look every other fish has. The head is wider than the old straight
+// taper by EEL_HEAD_SWELL (callers computing a hat anchor use the same factor).
+// widthScale/bumps/bulge are for the Feeder Fish/Battery fish hybrids
+// (drawHybridBody): bulge adds a Blimpfish-like round "belly" — a sine bump (0
+// at both ends, peaking mid-body) layered on the ordinary linear taper; bumps
+// adds Feeder Fish's sucker bumps along the back.
 function drawEelBody(ctx, x, y, size, facing, tailPhase, isFullyGrown, color, eyeDirection, widthScale = 1, bumps = false, bulge = 0) {
   const length = size * 1.5;
-  const segments = 7;
+  const segments = 8;
   const points = [];
   for (let i = 0; i <= segments; i++) {
     const t = i / segments; // 0 = tail end, 1 = head end
     const px = x - facing * length * (0.5 - t);
     const wave = Math.sin(tailPhase - t * 3.2) * size * 0.22 * (1 - t * 0.3); // undulation eases off toward the head
+    const swell = t > 0.62 ? Math.sin(((t - 0.62) / 0.38) * (Math.PI / 2)) : 0; // 0 until the neck, easing up to a full round head
     const bulgeWidth = bulge * Math.sin(t * Math.PI) * size;
-    points.push({ x: px, y: y + wave, width: size * (0.1 + t * 0.16) * widthScale + bulgeWidth }); // tapers thin at the tail, wider at the head, rounder mid-body
+    points.push({ x: px, y: y + wave, width: size * (0.1 + t * 0.16) * widthScale * (1 + (EEL_HEAD_SWELL - 1) * swell) + bulgeWidth });
   }
-  fillShadow(ctx, x, y, length * 0.45, size * 0.2);
+  const tail = points[0];
+  const head = points[segments];
+  const backDir = -facing; // pointing away from the head
+  const finFill = tone(color, -0.08);
+
+  // Tail fin: a rounded paddle sweeping out behind the tail point.
+  const tailLen = size * 0.42;
+  const tailSpread = size * 0.2;
+  const tipWave = Math.sin(tailPhase + 0.5) * size * 0.2;
+  const tipX = tail.x + backDir * tailLen;
+  const midX = tail.x + backDir * tailLen * 0.5;
+  ctx.fillStyle = finFill;
+  ctx.beginPath();
+  ctx.moveTo(tail.x, tail.y - tail.width);
+  ctx.quadraticCurveTo(midX, tail.y - tailSpread + tipWave * 0.4, tipX, tail.y + tipWave);
+  ctx.quadraticCurveTo(midX, tail.y + tailSpread + tipWave * 0.4, tail.x, tail.y + tail.width);
+  ctx.closePath();
+  ctx.fill();
+  strokeRim(ctx, color, size);
+
+  // Belly (anal) ribbon fin: a fringe along the underside whose height peaks
+  // mid-body and ripples with the swim, drawn behind the body so only its
+  // outer edge shows.
+  const finFrom = 1, finTo = segments - 2;
+  const finOuter = [];
+  for (let i = finFrom; i <= finTo; i++) {
+    const u = (i - finFrom) / (finTo - finFrom);
+    const h = size * 0.14 * Math.sin(u * Math.PI) + size * 0.03 + Math.sin(tailPhase * 1.3 - i * 0.9) * size * 0.025;
+    finOuter.push({ x: points[i].x, y: points[i].y + points[i].width + h });
+  }
+  ctx.fillStyle = finFill;
+  ctx.beginPath();
+  ctx.moveTo(points[finFrom].x, points[finFrom].y + points[finFrom].width);
+  for (let i = finFrom + 1; i <= finTo; i++) ctx.lineTo(points[i].x, points[i].y + points[i].width);
+  for (let i = finOuter.length - 1; i >= 0; i--) ctx.lineTo(finOuter[i].x, finOuter[i].y);
+  ctx.closePath();
+  ctx.fill();
+  strokeRim(ctx, color, size);
+  ctx.save();
+  ctx.strokeStyle = tone(color, -0.35);
+  ctx.globalAlpha *= 0.45;
+  ctx.lineWidth = Math.max(1, size * 0.02);
+  ctx.beginPath();
+  for (let i = finFrom + 1; i < finTo; i += 1) {
+    ctx.moveTo(points[i].x, points[i].y + points[i].width);
+    ctx.lineTo(finOuter[i - finFrom].x, finOuter[i - finFrom].y);
+  }
+  ctx.stroke();
+  ctx.restore();
 
   // Feeder Fish (Electric Eel x Suckerfish) — a row of sucker bumps riding
   // along the eel's own undulating back, per direct request that a hybrid
   // should visibly carry a trait from each of its two parents. Drawn before
-  // the body (see drawSuckerfishBody's own note on why) so only each bump's
-  // rimmed crown shows above the back.
+  // the body so only each bump's rimmed crown shows above the back.
   if (bumps) {
-    const b1 = points[2];
-    const b2 = points[4];
-    for (const p of [b1, b2, points[3]]) {
+    for (const p of [points[3], points[4], points[5]]) {
       ctx.fillStyle = tone(color, 0.06);
       ctx.beginPath();
       ctx.arc(p.x, p.y - p.width - size * 0.08, size * 0.1, 0, Math.PI * 2);
@@ -672,30 +714,62 @@ function drawEelBody(ctx, x, y, size, facing, tailPhase, isFullyGrown, color, ey
     }
   }
 
-  const bodyGrad = ctx.createLinearGradient(0, y - size * 0.35, 0, y + size * 0.35);
+  // Body: smoothed top edge, a round cap over the head, smoothed belly edge.
+  const top = points.map((p) => ({ x: p.x, y: p.y - p.width }));
+  const bottom = points.map((p) => ({ x: p.x, y: p.y + p.width })).reverse();
+  const smoothAlong = (pts) => {
+    for (let i = 1; i < pts.length - 1; i++) {
+      ctx.quadraticCurveTo(pts[i].x, pts[i].y, (pts[i].x + pts[i + 1].x) / 2, (pts[i].y + pts[i + 1].y) / 2);
+    }
+    ctx.lineTo(pts[pts.length - 1].x, pts[pts.length - 1].y);
+  };
+  let maxWidth = 0;
+  for (const p of points) maxWidth = Math.max(maxWidth, p.width);
+  const gradReach = maxWidth + size * 0.12;
+  const bodyGrad = ctx.createLinearGradient(0, y - gradReach, 0, y + gradReach);
   bodyGrad.addColorStop(0, tone(color, 0.24));
   bodyGrad.addColorStop(1, tone(color, -0.22));
   ctx.fillStyle = bodyGrad;
   ctx.beginPath();
-  ctx.moveTo(points[0].x, points[0].y - points[0].width);
-  for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y - points[i].width);
-  for (let i = points.length - 1; i >= 0; i--) ctx.lineTo(points[i].x, points[i].y + points[i].width);
+  ctx.moveTo(top[0].x, top[0].y);
+  smoothAlong(top);
+  ctx.arc(head.x, head.y, head.width, -Math.PI / 2, Math.PI / 2, facing < 0);
+  smoothAlong(bottom);
   ctx.closePath();
   ctx.fill();
   strokeRim(ctx, color, size);
+
+  // A soft light streak along the upper body, like the highlight on the other fish.
   ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
   ctx.lineWidth = Math.max(1, size * 0.05);
+  ctx.lineCap = 'round';
   ctx.beginPath();
-  ctx.moveTo(points[Math.floor(points.length / 2)].x, points[Math.floor(points.length / 2)].y - points[Math.floor(points.length / 2)].width * 0.5);
-  for (let i = Math.floor(points.length / 2) + 1; i < points.length; i++) {
-    ctx.lineTo(points[i].x, points[i].y - points[i].width * 0.5);
-  }
+  ctx.moveTo(points[3].x, points[3].y - points[3].width * 0.5);
+  for (let i = 4; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y - points[i].width * 0.5);
   ctx.stroke();
 
+  // Pectoral fin, tucked behind the head and flapping gently.
+  const pf = points[segments - 2];
+  ctx.save();
+  ctx.translate(pf.x, pf.y + pf.width * 0.35);
+  ctx.scale(facing, 1);
+  ctx.rotate(0.5 + Math.sin(tailPhase * 1.4) * 0.3);
+  ctx.fillStyle = tone(color, -0.04);
+  ctx.beginPath();
+  ctx.ellipse(-size * 0.13, 0, size * 0.15, size * 0.065, 0, 0, Math.PI * 2);
+  ctx.fill();
+  strokeRim(ctx, color, size);
+  ctx.restore();
+
   if (isFullyGrown) {
-    const head = points[points.length - 1];
-    const eyeX = head.x + facing * head.width * 0.3;
-    drawEye(ctx, eyeX, head.y, size * EYE_SOCKET_RADIUS_RATIO * 0.7, size * EYE_PUPIL_RADIUS_RATIO * 0.7, eyeDirection);
+    // A small mouth line on the snout, then the eye set into the round head.
+    ctx.strokeStyle = tone(color, -0.5);
+    ctx.lineWidth = Math.max(1, size * 0.03);
+    ctx.beginPath();
+    ctx.moveTo(head.x + facing * head.width * 0.55, head.y + head.width * 0.32);
+    ctx.lineTo(head.x + facing * head.width * 0.97, head.y + head.width * 0.28);
+    ctx.stroke();
+    drawEye(ctx, head.x + facing * head.width * 0.32, head.y - head.width * 0.22, size * EYE_SOCKET_RADIUS_RATIO * 0.85, size * EYE_PUPIL_RADIUS_RATIO * 0.85, eyeDirection);
   }
 }
 
@@ -706,7 +780,6 @@ function drawOctopusBody(ctx, x, y, size, facing, tailPhase, isFullyGrown, color
   const headY = y - size * 0.22;
   const headRadius = size * 0.42;
   const tentacleCount = 4;
-  fillShadow(ctx, x, headY, headRadius, headRadius * 0.85);
   ctx.lineCap = 'round';
   // Two passes per tentacle set: a wider dark stroke first (the rim), then the
   // lit color on top, so each tentacle reads as rimmed without a separate
@@ -799,7 +872,7 @@ function drawHybridBody(ctx, x, y, size, facing, tailPhase, stage, color, eyeDir
     const t = 1; // head end, mirrors drawEelBody's own point math
     const headPx = x - facing * length * (0.5 - t);
     const headWave = Math.sin(tailPhase - t * 3.2) * size * 0.22 * (1 - t * 0.3);
-    const headWidth = size * (0.1 + t * 0.16) * widthScale; // bulge is 0 at t=1 (the head), so it deliberately doesn't factor in here
+    const headWidth = size * (0.1 + t * 0.16) * widthScale * EEL_HEAD_SWELL; // bulge is 0 at t=1 (the head), so it deliberately doesn't factor in here
     return {
       headX: headPx + facing * headWidth * 0.1,
       headY: y + headWave - headWidth * 1.4,
@@ -828,6 +901,43 @@ function drawHybridBody(ctx, x, y, size, facing, tailPhase, stage, color, eyeDir
     headY: y - size * shape.bodyH * 0.85,
     headSize: size * shape.bodyW * 0.85,
   };
+}
+
+// The soft shadow a fish casts, drawn by main.js's separate shadow pass (NOT
+// inside drawFish) so it can be masked to appear only over seafloor
+// decorations — per direct request. Same offset-ellipse shadow the bodies used
+// to draw themselves, sized per body shape; kept here so the geometry stays
+// next to the body code it mirrors.
+export function drawFishShadow(ctx, x, y, speciesId, stage) {
+  const def = SPECIES[speciesId];
+  const size = FISH_BASE_SIZE * def.growthStages[stage].scale;
+  const isFullyGrown = stage === def.growthStages.length - 1;
+  const hasEel = isFullyGrown && (speciesId === 'electric_eel' || (def.parents && def.parents.includes('electric_eel')));
+  let cy = y, rx, ry;
+  if (hasEel) {
+    const round = def.parents && def.parents.includes('blimpfish');
+    rx = size * 0.75;
+    ry = size * (round ? 0.3 : 0.2);
+  } else if (isFullyGrown && speciesId === 'octopus') {
+    cy = y - size * 0.22;
+    rx = size * 0.42;
+    ry = size * 0.357;
+  } else if (isFullyGrown && speciesId === 'suckerfish') {
+    rx = size * 0.68;
+    ry = size * 0.3;
+  } else {
+    const shapeId = isFullyGrown && def.parents
+      ? def.parents.find((p) => p === 'dartfin' || p === 'blimpfish')
+      : (def.parents ? def.parents[1] : speciesId);
+    const bodyShape = shapeId === 'dartfin' ? 'slim' : shapeId === 'blimpfish' ? 'round' : 'normal';
+    const shape = BODY_SHAPE_RATIOS[bodyShape] || BODY_SHAPE_RATIOS.normal;
+    rx = size * shape.bodyW;
+    ry = size * shape.bodyH;
+  }
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+  ctx.beginPath();
+  ctx.ellipse(x + rx * 0.08, cy + ry * 0.45, rx, ry, 0, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 // grayed (0-1) tints toward ALIEN_BLOCKED_GRAY — a fish that either has a
@@ -885,7 +995,7 @@ export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDire
     const t = 1; // head end
     const headPx = x - facing * length * (0.5 - t);
     const headWave = Math.sin(tailPhase - t * 3.2) * size * 0.22 * (1 - t * 0.3);
-    const headWidth = size * (0.1 + t * 0.16);
+    const headWidth = size * (0.1 + t * 0.16) * EEL_HEAD_SWELL;
     headX = headPx + facing * headWidth * 0.1;
     headY = y + headWave - headWidth * 1.4;
     headSize = headWidth * 2.1;

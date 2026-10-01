@@ -133,13 +133,8 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
      while either panel is open any more. Both toggle buttons moved down to
      #bottom-bar-row, so the old "clear the collapsed shop panel" right
      offset isn't needed either — plain 14px like every other corner pill. */
-  /* right offset clears the right glass tank wall's own live width (main.js's
-     renderTankWalls sets --glass-wall-right-width every frame) plus the usual
-     14px corner margin, so the pill never visually overlaps the glass panel
-     — per direct request. --glass-wall-right-width defaults to 22px (the
-     glass's own guaranteed-minimum width, TANK_WALL_MIN_WIDTH) for the one
-     frame before the canvas has rendered and actually set it. */
-  position: fixed; top: 14px; right: calc(14px + var(--glass-wall-right-width, 22px));
+  /* The glass tank walls are gone (per direct request), so this is back to the plain 14px corner margin. */
+  position: fixed; top: 14px; right: 14px;
   display: flex; gap: 14px; align-items: center;
   padding: 9px 18px;
   /* Poppy, non-flat pass, per direct request — a soft diagonal gradient plus
@@ -269,14 +264,12 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
    below (#pause-menu-btn), alongside Escape (see main.js's keydown
    handler), per a later direct request to add it back in that row. */
 
-/* Minimap — sits directly under #hud, same right-aligned corner (same
-   --glass-wall-right-width offset #hud itself uses, so neither ever drifts
-   out of alignment with the other as the glass wall's own live width
-   changes). top: 64px clears #hud's own ~40px pill height (14px top offset
+/* Minimap — sits directly under #hud, same right-aligned corner (same 14px
+   right offset #hud uses, so neither drifts out of alignment). top: 64px clears #hud's own ~40px pill height (14px top offset
    + ~38px tall + a 12px gap) without needing to read #hud's real rendered
    height every frame. */
 #minimap-wrap {
-  position: fixed; top: 64px; right: calc(14px + var(--glass-wall-right-width, 22px));
+  position: fixed; top: 64px; right: 14px;
   display: flex; flex-direction: column; align-items: stretch; gap: 6px;
   z-index: 10;
 }
@@ -422,13 +415,7 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
    line's hotkey actually does right now. */
 #hotkey-legend {
   position: fixed;
-  /* Real bug fix, per direct report ("the glass splits the legend and it
-     looks unpolished") — this was left at a flat 14px while every other
-     screen-edge element (#hud, #notification-ticker, #pause-toggle-btn) had
-     already been updated to clear the glass tank walls' own live-measured
-     width (--glass-wall-left/right-width, set every frame by main.js's
-     renderTankWalls) when those were added. This one was simply missed. */
-  left: calc(14px + var(--glass-wall-left-width, 22px));
+  left: 14px;
   bottom: 14px;
   z-index: 20;
   display: flex;
@@ -671,10 +658,7 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
    (Mound crack narration, tips, alerts once later phases write to it).
    Click the pill to expand a scrollback of recent messages. */
 #notification-ticker {
-  /* Same live glass-wall-clearing offset as #hud (see that rule's own
-     comment) — mirrored to the left edge, per direct request that the chat
-     shouldn't visually overlap the left glass panel either. */
-  position: fixed; top: 14px; left: calc(14px + var(--glass-wall-left-width, 22px));
+  position: fixed; top: 14px; left: 14px;
   max-width: 360px;
   z-index: 10;
 }
@@ -1373,6 +1357,7 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
   opacity: 0.6;
 }
 #shop-preview-empty.hidden { display: none; }
+#shop-preview-empty-hint { margin-top: 4px; font-weight: 700; }
 #shop-preview-content {
   flex: 1;
   display: flex;

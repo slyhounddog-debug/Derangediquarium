@@ -394,7 +394,6 @@ export function initUI(state) {
       document.getElementById('tool-favorite-2-btn'),
       document.getElementById('tool-favorite-3-btn'),
     ],
-    hotkeyLegendFavorite: document.getElementById('hotkey-legend-favorite'),
     buildToolGrid: document.getElementById('build-tool-grid'),
     pauseOverlay: document.getElementById('pause-overlay'),
     pauseMenu: document.getElementById('pause-menu'),
@@ -4981,11 +4980,6 @@ export function updateHUD(state) {
   els.hotkeyLegendQ.textContent = state.ui.blueprintClipboardActive
     ? 'Q: Clear Blueprint'
     : (state.ui.selectedTool !== 'cursor' ? 'Q: Clear Cursor' : 'Q: Pipette/ Last-used Tool');
-  // 4/5/6 — the favorite-pinning hotkeys (replaced the old F key), hinted
-  // only while they'd actually pin something: shop open with a fish/building
-  // selected, mirroring setFavoriteSlotFromShop's own condition.
-  const canSetFavorite = !state.ui.shopCollapsed && (state.ui.selectedTool.startsWith('build:') || state.ui.selectedTool.startsWith('fish:'));
-  els.hotkeyLegendFavorite.classList.toggle('hidden', !canSetFavorite);
   // Ctrl+Z — shown only while there's actually something to undo (main.js
   // writes state.ui.undoAvailable/undoLabel every time its own undo stack
   // changes — see that file's pushUndoEntry/performUndo).

@@ -389,6 +389,20 @@ export function isPointOnScienceLab(state, worldX, worldY) {
   return worldX >= left && worldX <= right && worldY >= top && worldY <= bottom;
 }
 
+// Just the Mound's (or, once it shatters, the Science Lab's) sprite, no glow/
+// shimmer/cracks — the mask main.js uses to restrict fish shadows to seafloor
+// objects, which counts these two too. Their shimmer timers are deliberately
+// not touched here, since they're advanced by the real render calls.
+export function renderMoundMask(ctx, state) {
+  const { camera } = state;
+  const lab = state.level.tier >= MOUND_MAX_TIER;
+  if (lab ? !labSprite : !moundSprite) return; // not baked yet — the real render bakes it on its first frame
+  const sp = lab ? labSprite : moundSprite;
+  const topLeft = worldToScreen(MOUND_X - MOUND_WIDTH_PX / 2, SEABED_FLOOR_Y - MOUND_HEIGHT_PX - (lab ? SCIENCE_LAB_LIFT_PX : MOUND_LIFT_PX), camera);
+  const z = camera.zoom / sp.scale;
+  ctx.drawImage(sp.canvas, topLeft.x - sp.pad * camera.zoom, topLeft.y - sp.pad * camera.zoom, sp.canvas.width * z, sp.canvas.height * z);
+}
+
 export function renderScienceLab(ctx, state) {
   if (state.level.tier < MOUND_MAX_TIER) return;
   const { camera } = state;
