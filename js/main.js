@@ -901,6 +901,180 @@ function drawWastePoop(ctx, cx, cy, r, color = WASTE_COLOR) {
   ctx.fill();
 }
 
+// Per direct request (populated-tank performance) — every Food/Coin/Waste/
+// Science/Bio-Sludge/Biomass/Mutagen Paste item used to be re-drawn from scratch
+// each frame as 5-10 vector ops (a coin's "$" alone is three text draws), so a
+// few hundred items cost more than the rest of the tank put together. Each
+// distinct look (type + radius + coin tier color [+ Food staleness step]) is
+// now drawn ONCE into a small sprite by drawItemShape — the same drawing code
+// that used to run live in the render loop — and each item is a single
+// drawImage. The coin's idle spin squash and the Food stale tint are still
+// applied per frame exactly as before (the spin as a canvas transform at blit
+// time, the tint as one of FOOD_STALE_STEPS pre-baked shades). Visual-only:
+// item.radius, positions and everything physics/collision-related are
+// untouched.
+const ITEM_SPRITE_SCALE = 2;
+const FOOD_STALE_STEPS = 16;
+const ITEM_SPRITE_CACHE_MAX = 256; // safety valve only — real item looks number in the dozens
+const itemSpriteCache = new Map();
+
+function drawItemShape(ctx, item, x, y, itemColor) {
+  if (item.type === 'science' || item.type === 'science_green') {
+    // "Magical bubble" — a two-tone radial blend plus a bright rim ring,
+    // per direct request, instead of the flat single-color fill every
+    // other item type gets below. A real ctx.createRadialGradient is fine
+    // here (unlike a ctx.filter, which is the actually expensive one —
+    // see Ambience.js's seaweed blur note) since it's just one more
+    // fillStyle, no per-pixel filter pass. Green Science (the
+    // Bio-Combuster's upgraded output) shares the exact same bubble
+    // treatment, just with its own green tones instead of purple/blue.
+    const colorA = item.type === 'science_green' ? SCIENCE_GREEN_COLOR_A : SCIENCE_ITEM_COLOR_A;
+    const colorB = item.type === 'science_green' ? SCIENCE_GREEN_COLOR_B : SCIENCE_ITEM_COLOR_B;
+    const gradient = ctx.createRadialGradient(
+      x - item.radius * 0.3, y - item.radius * 0.3, item.radius * 0.1,
+      x, y, item.radius
+    );
+    gradient.addColorStop(0, colorB);
+    gradient.addColorStop(1, colorA);
+    ctx.beginPath();
+    ctx.fillStyle = gradient;
+    ctx.arc(x, y, item.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
+    ctx.beginPath();
+    ctx.arc(x - item.radius * 0.3, y - item.radius * 0.3, item.radius * 0.28, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+
+  if (item.type === 'biomass') {
+    // A two-tone radial gradient — per direct request ("visually distinct
+    // and more interesting"), replacing the flat single-color fill every
+    // other Bio-chain item still gets below. The bright core is
+    // deliberately BIOMASS_COLOR_CORE, which IS Bio-Sludge's own
+    // ALIEN_DNA_COLOR — literally the same acid-green glowing at the
+    // center of a deeper, more "refined-looking" green shell, so the two
+    // read as pre/post-refined stages of the same material at a glance
+    // rather than just sharing a similar hue. Same gradient technique as
+    // the Science Bubble/Diamond coin's own special renders above.
+    const gradient = ctx.createRadialGradient(
+      x - item.radius * 0.3, y - item.radius * 0.3, item.radius * 0.1,
+      x, y, item.radius
+    );
+    gradient.addColorStop(0, BIOMASS_COLOR_CORE);
+    gradient.addColorStop(1, BIOMASS_COLOR);
+    ctx.beginPath();
+    ctx.fillStyle = gradient;
+    ctx.arc(x, y, item.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+    ctx.beginPath();
+    ctx.arc(x - item.radius * 0.3, y - item.radius * 0.3, item.radius * 0.26, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+
+  if (item.type === 'coin' && getCoinTier(item.value).maxValue === Infinity) {
+    // Diamond tier — a faceted radial-gradient gem plus cut-angle facet
+    // lines and a bright sparkle highlight, per direct request ("make the
+    // diamond colored coins... look more like a circular gem than a
+    // coin") instead of the flat single-color fill every other coin tier
+    // gets below. (Its idle-spin squash is applied at blit time, not here —
+    // see the item render loop.)
+    const gemGradient = ctx.createRadialGradient(
+      x - item.radius * 0.3, y - item.radius * 0.3, item.radius * 0.1,
+      x, y, item.radius
+    );
+    gemGradient.addColorStop(0, DIAMOND_GEM_COLOR_CORE);
+    gemGradient.addColorStop(1, DIAMOND_GEM_COLOR_EDGE);
+    ctx.beginPath();
+    ctx.fillStyle = gemGradient;
+    ctx.arc(x, y, item.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i < 3; i++) {
+      const angle = (i / 3) * Math.PI + Math.PI / 6;
+      ctx.beginPath();
+      ctx.moveTo(x + Math.cos(angle) * item.radius, y + Math.sin(angle) * item.radius);
+      ctx.lineTo(x - Math.cos(angle) * item.radius, y - Math.sin(angle) * item.radius);
+      ctx.stroke();
+    }
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.arc(x, y, item.radius, 0, Math.PI * 2);
+    ctx.stroke();
+    // The "$" is drawn here, BEFORE the sparkle highlight right below —
+    // see drawCoinDollarMark's own comment — so that highlight's own
+    // opacity glazes back over the glyph the same way it glazes the gem
+    // itself, instead of sitting as a flat sticker on top of it.
+    drawCoinDollarMark(ctx, x, y, item.radius, getCoinColor(item.value));
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
+    ctx.beginPath();
+    ctx.arc(x - item.radius * 0.32, y - item.radius * 0.32, item.radius * 0.24, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+
+  if (item.type === 'coin') {
+    drawFlatCoin(ctx, x, y, item.radius, item.value);
+    return;
+  }
+
+  if (item.type === 'waste') {
+    drawWastePoop(ctx, x, y, item.radius);
+    return;
+  }
+  if (item.type === 'alien_dna') {
+    drawWastePoop(ctx, x, y, item.radius, ALIEN_DNA_COLOR);
+    return;
+  }
+
+  // Food/Mutagen Paste only these days (never a coin of any tier) — itemColor
+  // is the type's flat color, or Food's pre-baked stale shade (see getItemSprite).
+  ctx.beginPath();
+  ctx.fillStyle = itemColor;
+  ctx.arc(x, y, item.radius, 0, Math.PI * 2);
+  ctx.fill();
+  // A thin darker rim plus a small glossy highlight — per direct request
+  // that items "pop more and look less flat" than a single flat fill,
+  // same treatment FishRenderer.js's drawFish gets for its own body.
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.22)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+  ctx.beginPath();
+  ctx.arc(x - item.radius * 0.32, y - item.radius * 0.32, item.radius * 0.32, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function getItemSprite(item, foodStaleStep) {
+  const isCoin = item.type === 'coin';
+  const isDiamond = isCoin && getCoinTier(item.value).maxValue === Infinity;
+  const key = item.type + '|' + item.radius + '|' + (isCoin ? getCoinColor(item.value) : '') + '|' + (isDiamond ? 1 : 0) + '|' + foodStaleStep;
+  let sprite = itemSpriteCache.get(key);
+  if (sprite) return sprite;
+  if (itemSpriteCache.size >= ITEM_SPRITE_CACHE_MAX) itemSpriteCache.clear();
+  const half = Math.ceil(item.radius * 1.7 + 4); // the poop outline/emboss/strokes all stay inside this
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = half * 2 * ITEM_SPRITE_SCALE;
+  const sctx = canvas.getContext('2d');
+  sctx.scale(ITEM_SPRITE_SCALE, ITEM_SPRITE_SCALE);
+  let itemColor = ITEM_FLAT_COLOR_BY_TYPE[item.type];
+  if (item.type === 'food' && foodStaleStep > 0) itemColor = lerpRgbToString(hexToRgb(FOOD_COLOR), hexToRgb(FOOD_STALE_COLOR), foodStaleStep / FOOD_STALE_STEPS);
+  drawItemShape(sctx, item, half, half, itemColor);
+  sprite = { canvas, half };
+  itemSpriteCache.set(key, sprite);
+  return sprite;
+}
+
 // Browsers refuse to let an AudioContext make sound until a real user
 // gesture — resumeAudio() also kicks off the looping background music the
 // first time it's called, so this single pair of one-time listeners is all
@@ -5216,138 +5390,6 @@ function render() {
       continue;
     }
 
-    if (item.type === 'science' || item.type === 'science_green') {
-      // "Magical bubble" — a two-tone radial blend plus a bright rim ring,
-      // per direct request, instead of the flat single-color fill every
-      // other item type gets below. A real ctx.createRadialGradient is fine
-      // here (unlike a ctx.filter, which is the actually expensive one —
-      // see Ambience.js's seaweed blur note) since it's just one more
-      // fillStyle, no per-pixel filter pass. Green Science (the
-      // Bio-Combuster's upgraded output) shares the exact same bubble
-      // treatment, just with its own green tones instead of purple/blue.
-      const colorA = item.type === 'science_green' ? SCIENCE_GREEN_COLOR_A : SCIENCE_ITEM_COLOR_A;
-      const colorB = item.type === 'science_green' ? SCIENCE_GREEN_COLOR_B : SCIENCE_ITEM_COLOR_B;
-      const gradient = ctx.createRadialGradient(
-        pos.x - item.radius * 0.3, pos.y - item.radius * 0.3, item.radius * 0.1,
-        pos.x, pos.y, item.radius
-      );
-      gradient.addColorStop(0, colorB);
-      gradient.addColorStop(1, colorA);
-      ctx.beginPath();
-      ctx.fillStyle = gradient;
-      ctx.arc(pos.x, pos.y, item.radius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
-      ctx.lineWidth = 1.4;
-      ctx.stroke();
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
-      ctx.beginPath();
-      ctx.arc(pos.x - item.radius * 0.3, pos.y - item.radius * 0.3, item.radius * 0.28, 0, Math.PI * 2);
-      ctx.fill();
-      continue;
-    }
-
-    if (item.type === 'biomass') {
-      // A two-tone radial gradient — per direct request ("visually distinct
-      // and more interesting"), replacing the flat single-color fill every
-      // other Bio-chain item still gets below. The bright core is
-      // deliberately BIOMASS_COLOR_CORE, which IS Bio-Sludge's own
-      // ALIEN_DNA_COLOR — literally the same acid-green glowing at the
-      // center of a deeper, more "refined-looking" green shell, so the two
-      // read as pre/post-refined stages of the same material at a glance
-      // rather than just sharing a similar hue. Same gradient technique as
-      // the Science Bubble/Diamond coin's own special renders above.
-      const gradient = ctx.createRadialGradient(
-        pos.x - item.radius * 0.3, pos.y - item.radius * 0.3, item.radius * 0.1,
-        pos.x, pos.y, item.radius
-      );
-      gradient.addColorStop(0, BIOMASS_COLOR_CORE);
-      gradient.addColorStop(1, BIOMASS_COLOR);
-      ctx.beginPath();
-      ctx.fillStyle = gradient;
-      ctx.arc(pos.x, pos.y, item.radius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-      ctx.lineWidth = 1.2;
-      ctx.stroke();
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
-      ctx.beginPath();
-      ctx.arc(pos.x - item.radius * 0.3, pos.y - item.radius * 0.3, item.radius * 0.26, 0, Math.PI * 2);
-      ctx.fill();
-      continue;
-    }
-
-    if (item.type === 'coin' && getCoinTier(item.value).maxValue === Infinity) {
-      // Diamond tier — a faceted radial-gradient gem plus cut-angle facet
-      // lines and a bright sparkle highlight, per direct request ("make the
-      // diamond colored coins... look more like a circular gem than a
-      // coin") instead of the flat single-color fill every other coin tier
-      // gets below.
-      // Idle spin — per direct request ("add a coin spinning animation if a
-      // coin hasn't moved for more than 3 seconds"). Squashes the WHOLE gem
-      // drawing horizontally around its own center — see coinSpinScaleX's
-      // own comment for the full rationale (including the ease-back-to-
-      // normal settle phase) and why this stays a free no-op the rest of
-      // the time.
-      const spinScaleX = coinSpinScaleX(item);
-      ctx.save();
-      ctx.translate(pos.x, pos.y);
-      ctx.scale(spinScaleX, 1);
-      ctx.translate(-pos.x, -pos.y);
-      const gemGradient = ctx.createRadialGradient(
-        pos.x - item.radius * 0.3, pos.y - item.radius * 0.3, item.radius * 0.1,
-        pos.x, pos.y, item.radius
-      );
-      gemGradient.addColorStop(0, DIAMOND_GEM_COLOR_CORE);
-      gemGradient.addColorStop(1, DIAMOND_GEM_COLOR_EDGE);
-      ctx.beginPath();
-      ctx.fillStyle = gemGradient;
-      ctx.arc(pos.x, pos.y, item.radius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
-      ctx.lineWidth = 1;
-      for (let i = 0; i < 3; i++) {
-        const angle = (i / 3) * Math.PI + Math.PI / 6;
-        ctx.beginPath();
-        ctx.moveTo(pos.x + Math.cos(angle) * item.radius, pos.y + Math.sin(angle) * item.radius);
-        ctx.lineTo(pos.x - Math.cos(angle) * item.radius, pos.y - Math.sin(angle) * item.radius);
-        ctx.stroke();
-      }
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
-      ctx.lineWidth = 1.2;
-      ctx.beginPath();
-      ctx.arc(pos.x, pos.y, item.radius, 0, Math.PI * 2);
-      ctx.stroke();
-      // The "$" is drawn here, BEFORE the sparkle highlight right below —
-      // see drawCoinDollarMark's own comment — so that highlight's own
-      // opacity glazes back over the glyph the same way it glazes the gem
-      // itself, instead of sitting as a flat sticker on top of it.
-      drawCoinDollarMark(ctx, pos.x, pos.y, item.radius, getCoinColor(item.value));
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.85)';
-      ctx.beginPath();
-      ctx.arc(pos.x - item.radius * 0.32, pos.y - item.radius * 0.32, item.radius * 0.24, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
-      continue;
-    }
-
-    if (item.type === 'coin') {
-      // Idle spin — per direct request ("add a coin spinning animation if a
-      // coin hasn't moved for more than 3 seconds"). Squashes the WHOLE
-      // flat-coin drawing horizontally around its own center — see
-      // coinSpinScaleX's own comment for the full rationale (including the
-      // ease-back-to-normal settle phase) and why this stays a free no-op
-      // the rest of the time.
-      const spinScaleX = coinSpinScaleX(item);
-      ctx.save();
-      ctx.translate(pos.x, pos.y);
-      ctx.scale(spinScaleX, 1);
-      ctx.translate(-pos.x, -pos.y);
-      drawFlatCoin(ctx, pos.x, pos.y, item.radius, item.value);
-      ctx.restore();
-      continue;
-    }
-
     if (item.type === 'alien_egg') {
       // A shrinking countdown ring on top of the flat shell fill, so the
       // player can see roughly how long until it hatches.
@@ -5371,44 +5413,35 @@ function render() {
       continue;
     }
 
-    if (item.type === 'waste') {
-      drawWastePoop(ctx, pos.x, pos.y, item.radius);
-      continue;
-    }
-    if (item.type === 'alien_dna') {
-      drawWastePoop(ctx, pos.x, pos.y, item.radius, ALIEN_DNA_COLOR);
-      continue;
-    }
-
-    // Coins have their own dedicated flat-coin branch above now (and the
-    // diamond tier its own gem branch above that) — this shared fallback is
-    // Food/Bio-Sludge/Mutagen Paste only these days, never a coin of any tier.
-    let itemColor = ITEM_FLAT_COLOR_BY_TYPE[item.type];
     // A "stale" gray phase, per direct spec — once a Food pellet's own
     // stationary timer crosses FOOD_STALE_FRACTION (75%) of the way to
     // turning into Waste, tint it toward FOOD_STALE_COLOR. Reading straight
     // off the live timer (which Entities.js's updateFood already resets to 0
     // the instant the pellet genuinely moves) means "the color resets" the
     // moment it's dragged/nudged falls out for free, with no extra state.
+    // Quantized to FOOD_STALE_STEPS pre-baked shades (see getItemSprite).
+    let foodStaleStep = 0;
     if (item.type === 'food') {
       const rawFrac = (item.stationaryTimer || 0) / FOOD_STATIONARY_TO_WASTE_MS;
       const staleT = Math.max(0, Math.min(1, (rawFrac - FOOD_STALE_FRACTION) / (1 - FOOD_STALE_FRACTION)));
-      if (staleT > 0) itemColor = lerpRgbToString(hexToRgb(FOOD_COLOR), hexToRgb(FOOD_STALE_COLOR), staleT);
+      foodStaleStep = Math.round(staleT * FOOD_STALE_STEPS);
     }
-    ctx.beginPath();
-    ctx.fillStyle = itemColor;
-    ctx.arc(pos.x, pos.y, item.radius, 0, Math.PI * 2);
-    ctx.fill();
-    // A thin darker rim plus a small glossy highlight — per direct request
-    // that items "pop more and look less flat" than a single flat fill,
-    // same treatment FishRenderer.js's drawFish gets for its own body.
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.22)';
-    ctx.lineWidth = 1;
-    ctx.stroke();
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
-    ctx.beginPath();
-    ctx.arc(pos.x - item.radius * 0.32, pos.y - item.radius * 0.32, item.radius * 0.32, 0, Math.PI * 2);
-    ctx.fill();
+    const sprite = getItemSprite(item, foodStaleStep);
+    // Idle spin — per direct request ("add a coin spinning animation if a
+    // coin hasn't moved for more than 3 seconds"). Squashes the WHOLE coin/gem
+    // horizontally around its own center — see coinSpinScaleX's own comment
+    // for the full rationale (including the ease-back-to-normal settle phase)
+    // and why this stays a free no-op the rest of the time.
+    const spinScaleX = item.type === 'coin' ? coinSpinScaleX(item) : 1;
+    if (spinScaleX !== 1) {
+      ctx.save();
+      ctx.translate(pos.x, pos.y);
+      ctx.scale(spinScaleX, 1);
+      ctx.drawImage(sprite.canvas, -sprite.half, -sprite.half, sprite.half * 2, sprite.half * 2);
+      ctx.restore();
+    } else {
+      ctx.drawImage(sprite.canvas, pos.x - sprite.half, pos.y - sprite.half, sprite.half * 2, sprite.half * 2);
+    }
   }
 
   perfMark('r: items', ctx);
