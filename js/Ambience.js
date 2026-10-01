@@ -944,7 +944,7 @@ function drawOneKelp(ctx, camera, canvasWidth, k, floorY = SEABED_FLOOR_Y) {
 // whichever coral/urchins happen to roll a higher depth than it did.
 // Bumped 4 -> 5 (25% more) per direct request ("increase the amount of...
 // crabs... by 25%").
-const CRAB_COUNT = 5;
+const CRAB_COUNT = 8; // was 5 — +50% (7.5, rounded up) per direct request
 // Per direct follow-up request ("make the crabs occasionally spawn bubbles
 // when they are moving") — timer range a moving crab waits between bubbles.
 const CRAB_BUBBLE_MIN_S = 2;
@@ -958,7 +958,7 @@ function randomCrab() {
     range: 60 + Math.random() * 100,
     dir: Math.random() < 0.5 ? 1 : -1,
     speed: 10 + Math.random() * 14,
-    size: 8 + Math.random() * 6,
+    size: 8 + Math.random() * 7.4, // max was 14 (8 + rand*6), +10% to 15.4 per direct request — min untouched
     legPhaseFreq: 6 + Math.random() * 3,
     hue: 10 + Math.random() * 20,
     pauseTimer: Math.random() * 2,
@@ -1075,36 +1075,80 @@ function updateCrabs(dt, list = crabs, targetArray = cursorBubbles, floorY = SEA
   }
 }
 
+// Per direct request (rework the crabs to match the boulders/mound/seaweed —
+// "lit, rimmed, grained, contact-shadow"): a contact shadow on the floor, legs
+// with a dark rim pass under the lit color, a radial-gradient lit shell with
+// grain specks and a darker rim, and rimmed lit claws. The scuttle/leg-swing
+// animation, size and position are unchanged. Grain positions are fixed per
+// crab (c.specks, rolled lazily) so they ride the shell instead of shimmering.
 function drawOneCrab(ctx, camera, canvasWidth, c, floorY = SEABED_FLOOR_Y) {
   const screen = worldToScreen(c.x, floorY, camera);
   const size = c.size * camera.zoom;
   if (screen.x < -size * 3 || screen.x > canvasWidth + size * 3) return;
+  if (!c.specks) c.specks = Array.from({ length: 7 }, () => ({ u: Math.random() * 2 - 1, v: Math.random() * 2 - 1, r: 0.04 + Math.random() * 0.06, light: Math.random() < 0.5 }));
   ctx.save();
   const legSwing = c.pauseTimer > 0 ? 0 : Math.sin(elapsed * c.legPhaseFreq) * 0.4;
-  ctx.strokeStyle = `hsl(${c.hue}, 55%, 30%)`;
-  ctx.lineWidth = Math.max(1, camera.zoom);
-  for (let side = -1; side <= 1; side += 2) {
-    for (let i = 0; i < 3; i++) {
-      const legAngle = Math.PI * 0.22 * (i - 1) + legSwing * side;
-      const lx = screen.x + side * size * 0.9;
-      const ly = screen.y - size * 0.3;
-      ctx.beginPath();
-      ctx.moveTo(lx, ly);
-      ctx.lineTo(lx + side * Math.cos(legAngle) * size * 0.9, ly + Math.sin(legAngle) * size * 0.9 + size * 0.4);
-      ctx.stroke();
+  const rim = Math.max(1, 0.9 * camera.zoom);
+
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.22)';
+  ctx.beginPath();
+  ctx.ellipse(screen.x + size * 0.1, screen.y + size * 0.05, size * 1.35, size * 0.22, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.lineCap = 'round';
+  for (const pass of [0, 1]) { // dark rim pass under, lit leg color over
+    ctx.strokeStyle = pass === 0 ? `hsl(${c.hue}, 55%, 22%)` : `hsl(${c.hue}, 55%, 38%)`;
+    ctx.lineWidth = Math.max(1, camera.zoom) + (pass === 0 ? rim : 0);
+    for (let side = -1; side <= 1; side += 2) {
+      for (let i = 0; i < 3; i++) {
+        const legAngle = Math.PI * 0.22 * (i - 1) + legSwing * side;
+        const lx = screen.x + side * size * 0.9;
+        const ly = screen.y - size * 0.3;
+        ctx.beginPath();
+        ctx.moveTo(lx, ly);
+        ctx.lineTo(lx + side * Math.cos(legAngle) * size * 0.9, ly + Math.sin(legAngle) * size * 0.9 + size * 0.4);
+        ctx.stroke();
+      }
     }
   }
-  ctx.fillStyle = `hsl(${c.hue}, 60%, 42%)`;
+
+  const litGrad = (cx, cy, r) => {
+    const g = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.45, r * 0.1, cx, cy, r * 1.15);
+    g.addColorStop(0, `hsl(${c.hue}, 62%, 58%)`);
+    g.addColorStop(1, `hsl(${c.hue}, 60%, 32%)`);
+    return g;
+  };
+  // Claws first, so the shell's own rim sits over where they meet it.
+  for (const side of [-1, 1]) {
+    const cx = screen.x + side * size * 1.1;
+    const cy = screen.y - size * 0.5;
+    ctx.beginPath();
+    ctx.arc(cx, cy, size * 0.4, 0, Math.PI * 2);
+    ctx.fillStyle = litGrad(cx, cy, size * 0.4);
+    ctx.fill();
+    ctx.strokeStyle = `hsl(${c.hue}, 55%, 20%)`;
+    ctx.lineWidth = rim;
+    ctx.stroke();
+  }
+  const bx = screen.x, by = screen.y - size * 0.3;
   ctx.beginPath();
-  ctx.ellipse(screen.x, screen.y - size * 0.3, size, size * 0.7, 0, 0, Math.PI * 2);
+  ctx.ellipse(bx, by, size, size * 0.7, 0, 0, Math.PI * 2);
+  ctx.fillStyle = litGrad(bx, by, size);
   ctx.fill();
-  ctx.fillStyle = `hsl(${c.hue}, 60%, 46%)`;
+  ctx.save();
+  ctx.clip();
+  for (const sk of c.specks) {
+    ctx.fillStyle = sk.light ? `hsla(${c.hue}, 70%, 80%, 0.5)` : `hsla(${c.hue}, 60%, 18%, 0.45)`;
+    ctx.beginPath();
+    ctx.arc(bx + sk.u * size * 0.85, by + sk.v * size * 0.6, Math.max(0.6, sk.r * size), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+  ctx.strokeStyle = `hsl(${c.hue}, 55%, 20%)`;
+  ctx.lineWidth = rim;
   ctx.beginPath();
-  ctx.arc(screen.x - size * 1.1, screen.y - size * 0.5, size * 0.4, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.arc(screen.x + size * 1.1, screen.y - size * 0.5, size * 0.4, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.ellipse(bx, by, size, size * 0.7, 0, 0, Math.PI * 2);
+  ctx.stroke();
   ctx.restore();
 }
 
@@ -1223,39 +1267,105 @@ function updateTreasureChest(dt, c = treasureChest, targetArray = cursorBubbles,
   }
 }
 
+// Per direct request (rework the treasure chest to match the boulders/mound/
+// seaweed — "lit, rimmed, grained, contact-shadow"): the sand pile and every
+// wooden/gold piece is now a lit gradient with a darker rim, the pile and
+// wood carry grain specks (c.specks, rolled once so they stay put), and a
+// contact shadow sits under the pile. The open/close animation, treasure
+// reveal, bubbles and dimensions are unchanged.
 function drawOneTreasureChest(ctx, camera, canvasWidth, c, floorY = SEABED_FLOOR_Y) {
   const screen = worldToScreen(c.x, floorY, camera);
   const size = c.size * camera.zoom;
   if (screen.x < -size * 3 || screen.x > canvasWidth + size * 3) return;
+  if (!c.specks) c.specks = Array.from({ length: 36 }, () => ({ u: Math.random() * 2 - 1, v: Math.random() * 2 - 1, r: 0.5 + Math.random() * 1.1, light: Math.random() < 0.5 }));
   ctx.save();
+  const rim = Math.max(1, 1.2 * camera.zoom);
+  const hGrad = (x0, x1, light, dark) => {
+    const g = ctx.createLinearGradient(x0, 0, x1, 0);
+    g.addColorStop(0, light);
+    g.addColorStop(1, dark);
+    return g;
+  };
+  const grain = (cx, cy, hw, hh, light, dark) => {
+    for (const sk of c.specks) {
+      ctx.fillStyle = sk.light ? light : dark;
+      ctx.beginPath();
+      ctx.arc(cx + sk.u * hw, cy + sk.v * hh, Math.max(0.5, sk.r * camera.zoom), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  };
 
   // The sand pile it's nestled in — a soft mound behind/around its base.
   const pileW = size * 2.4;
   const pileH = size * 0.9;
-  ctx.fillStyle = '#d8c08a';
+  const pileCy = screen.y - pileH * 0.15;
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
   ctx.beginPath();
-  ctx.ellipse(screen.x, screen.y - pileH * 0.15, pileW / 2, pileH / 2, 0, 0, Math.PI * 2);
+  ctx.ellipse(screen.x + 3, screen.y, (pileW / 2) * 1.04, pileH * 0.2, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = '#c9ae74';
+  const pileGrad = ctx.createRadialGradient(screen.x - pileW * 0.18, pileCy - pileH * 0.3, pileW * 0.03, screen.x, pileCy, pileW * 0.55);
+  pileGrad.addColorStop(0, '#ecdcae');
+  pileGrad.addColorStop(1, '#bfa46c');
+  ctx.beginPath();
+  ctx.ellipse(screen.x, pileCy, pileW / 2, pileH / 2, 0, 0, Math.PI * 2);
+  ctx.fillStyle = pileGrad;
+  ctx.fill();
+  ctx.save();
+  ctx.clip();
+  ctx.fillStyle = 'rgba(150, 120, 70, 0.22)';
   ctx.beginPath();
   ctx.ellipse(screen.x, screen.y - pileH * 0.05, pileW * 0.31, pileH * 0.28, 0, 0, Math.PI * 2);
   ctx.fill();
+  grain(screen.x, pileCy, pileW / 2, pileH / 2, 'rgba(255, 245, 210, 0.45)', 'rgba(110, 85, 45, 0.4)');
+  ctx.restore();
+  ctx.strokeStyle = 'rgba(120, 95, 50, 0.7)';
+  ctx.lineWidth = rim;
+  ctx.beginPath();
+  ctx.ellipse(screen.x, pileCy, pileW / 2, pileH / 2, 0, 0, Math.PI * 2);
+  ctx.stroke();
 
   const bodyW = size * 1.6;
   const bodyH = size * 0.9;
   const baseY = screen.y - pileH * 0.35; // nestled up out of the sand pile a bit
   const bodyTop = baseY - bodyH;
+  const bodyLeft = screen.x - bodyW / 2;
 
   // Chest body — wood box with gold corner/mid bands and a lock.
-  ctx.fillStyle = '#6b4423';
-  ctx.fillRect(screen.x - bodyW / 2, bodyTop, bodyW, bodyH);
-  ctx.fillStyle = '#d4af37';
-  ctx.fillRect(screen.x - bodyW / 2, bodyTop + bodyH * 0.35, bodyW, bodyH * 0.12);
-  ctx.fillRect(screen.x - bodyW / 2, bodyTop, bodyW * 0.14, bodyH);
-  ctx.fillRect(screen.x + bodyW / 2 - bodyW * 0.14, bodyTop, bodyW * 0.14, bodyH);
+  ctx.fillStyle = hGrad(bodyLeft, bodyLeft + bodyW, '#8a5a30', '#4d2f17');
+  ctx.fillRect(bodyLeft, bodyTop, bodyW, bodyH);
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(bodyLeft, bodyTop, bodyW, bodyH);
+  ctx.clip();
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.22)'; // plank seams
+  ctx.fillRect(bodyLeft, bodyTop + bodyH * 0.68, bodyW, Math.max(1, camera.zoom * 0.9));
+  ctx.fillRect(bodyLeft, bodyTop + bodyH * 0.86, bodyW, Math.max(1, camera.zoom * 0.9));
+  grain(screen.x, bodyTop + bodyH / 2, bodyW / 2, bodyH / 2, 'rgba(255, 220, 170, 0.28)', 'rgba(0, 0, 0, 0.3)');
+  ctx.restore();
+  ctx.strokeStyle = '#3a2410';
+  ctx.lineWidth = rim;
+  ctx.strokeRect(bodyLeft, bodyTop, bodyW, bodyH);
+  const goldBand = (bx, by, bw, bh) => {
+    ctx.fillStyle = hGrad(bx, bx + bw, '#f4d968', '#b8902a');
+    ctx.fillRect(bx, by, bw, bh);
+    ctx.strokeStyle = 'rgba(105, 75, 10, 0.75)';
+    ctx.lineWidth = Math.max(1, camera.zoom * 0.8);
+    ctx.strokeRect(bx, by, bw, bh);
+  };
+  goldBand(bodyLeft, bodyTop + bodyH * 0.35, bodyW, bodyH * 0.12);
+  goldBand(bodyLeft, bodyTop, bodyW * 0.14, bodyH);
+  goldBand(screen.x + bodyW / 2 - bodyW * 0.14, bodyTop, bodyW * 0.14, bodyH);
+  const lockR = size * 0.09;
   ctx.fillStyle = '#f0d060';
   ctx.beginPath();
-  ctx.arc(screen.x, bodyTop + bodyH * 0.42, size * 0.09, 0, Math.PI * 2);
+  ctx.arc(screen.x, bodyTop + bodyH * 0.42, lockR, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(105, 75, 10, 0.85)';
+  ctx.lineWidth = Math.max(1, camera.zoom * 0.8);
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+  ctx.beginPath();
+  ctx.arc(screen.x - lockR * 0.3, bodyTop + bodyH * 0.42 - lockR * 0.3, lockR * 0.3, 0, Math.PI * 2);
   ctx.fill();
 
   // Treasure glow + coin/gem pile, only visible once the lid's open enough
@@ -1273,10 +1383,16 @@ function drawOneTreasureChest(ctx, camera, canvasWidth, c, floorY = SEABED_FLOOR
     ctx.beginPath();
     ctx.arc(screen.x, bodyTop, glowR, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = '#f4cf4e';
+    const coinGrad = ctx.createLinearGradient(0, bodyTop - bodyH * 0.16, 0, bodyTop + bodyH * 0.28);
+    coinGrad.addColorStop(0, '#fbe68a');
+    coinGrad.addColorStop(1, '#d9a92e');
+    ctx.fillStyle = coinGrad;
     ctx.beginPath();
     ctx.ellipse(screen.x, bodyTop + bodyH * 0.06, bodyW * 0.42, bodyH * 0.22, 0, 0, Math.PI * 2);
     ctx.fill();
+    ctx.strokeStyle = 'rgba(120, 85, 10, 0.7)';
+    ctx.lineWidth = Math.max(1, camera.zoom * 0.8);
+    ctx.stroke();
     const gemColors = ['#ff6b6b', '#5ac8fa', '#7bd88f', '#f4cf4e', '#ff6b6b'];
     for (let i = 0; i < gemColors.length; i++) {
       const gx = screen.x + (i - 2) * bodyW * 0.13;
@@ -1284,6 +1400,13 @@ function drawOneTreasureChest(ctx, camera, canvasWidth, c, floorY = SEABED_FLOOR
       ctx.fillStyle = gemColors[i];
       ctx.beginPath();
       ctx.arc(gx, gy, size * 0.09, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'rgba(40, 20, 10, 0.55)';
+      ctx.lineWidth = Math.max(0.8, camera.zoom * 0.7);
+      ctx.stroke();
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+      ctx.beginPath();
+      ctx.arc(gx - size * 0.03, gy - size * 0.03, size * 0.028, 0, Math.PI * 2);
       ctx.fill();
     }
     ctx.restore();
@@ -1302,7 +1425,7 @@ function drawOneTreasureChest(ctx, camera, canvasWidth, c, floorY = SEABED_FLOOR
   ctx.save();
   ctx.translate(screen.x - lidW / 2, bodyTop);
   ctx.rotate(lidAngle);
-  ctx.fillStyle = '#7a4f29';
+  ctx.fillStyle = hGrad(0, lidW, '#94633a', '#53331a');
   ctx.beginPath();
   ctx.moveTo(0, 0);
   ctx.lineTo(0, -lidH * 0.15);
@@ -1311,8 +1434,15 @@ function drawOneTreasureChest(ctx, camera, canvasWidth, c, floorY = SEABED_FLOOR
   ctx.lineTo(lidW, 0);
   ctx.closePath();
   ctx.fill();
-  ctx.fillStyle = '#d4af37';
+  ctx.strokeStyle = '#3a2410';
+  ctx.lineWidth = rim;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+  ctx.fillStyle = hGrad(0, lidW, '#f4d968', '#b8902a');
   ctx.fillRect(0, -lidH * 0.42, lidW, lidH * 0.12);
+  ctx.strokeStyle = 'rgba(105, 75, 10, 0.75)';
+  ctx.lineWidth = Math.max(1, camera.zoom * 0.8);
+  ctx.strokeRect(0, -lidH * 0.42, lidW, lidH * 0.12);
   ctx.restore();
 
   ctx.restore();
@@ -1744,7 +1874,7 @@ const BG_PARALLAX_SAND_CASTLE_COUNT = 1;
 const BG_PARALLAX_SEAWEED_COUNT = SEAWEED_COUNT;
 const BG_PARALLAX_KELP_COUNT = 2;
 const BG_PARALLAX_SEA_URCHIN_COUNT = SEA_URCHIN_COUNT;
-const BG_PARALLAX_CRAB_COUNT = 2;
+const BG_PARALLAX_CRAB_COUNT = 3; // was 2 — +50% per direct request, same as the foreground
 // Per direct request ("shrink the size of all the decorations in the
 // background layer by 10%, leaving the foreground decorations... unchanged")
 // — applied to every bg pool below via the shrinkX helpers (boulders/coral

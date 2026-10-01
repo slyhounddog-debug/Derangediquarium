@@ -247,8 +247,7 @@ import {
   closeFishInfoMenu,
   copyPlatformFilter,
   openStorageChestModal,
-  toggleFavoriteForSelectedTool,
-  removeFavoriteAtHoveredSlot,
+  setFavoriteSlotFromShop,
   selectFavorite,
   pipetteSelectSpecies,
   pipetteSelectBuilding,
@@ -944,8 +943,8 @@ const state = {
     // 3 pinned "favorite" bottom-tool-bar slots (hotkeys 4-6) — per direct
     // request. Each entry is a 'build:<id>'/'fish:<id>' tool string, or null
     // for an empty slot; persisted like every other meta field. Set/cleared
-    // via UI.js's toggleFavoriteForSelectedTool (the F hotkey, in the shop)
-    // and removeFavoriteAtHoveredSlot (F while hovering a slot directly).
+    // via UI.js's setFavoriteSlotFromShop (hotkeys 4/5/6 while the shop is
+    // open with a fish/building selected).
     favorites: [null, null, null],
     // Lifetime counters/peaks/streaks every achievement's own statField
     // reads (Config.js's ACHIEVEMENTS) — persists across a restart same as
@@ -3115,25 +3114,18 @@ input.keydownHandlers.push((e) => {
     case 'Digit3': // Blueprint ("Stamp") — moved back to 3 per direct request, freeing 4-6 for the Favorite slots below — see blueprintClipboard's own comment above
       selectTool(state, 'blueprint');
       break;
-    case 'Digit4': // Favorite slot 1
-      selectFavorite(state, 0);
+    // 4/5/6 — Favorite slots 1/2/3. Per direct request (replacing the old F
+    // hotkey): with the shop open and a fish/building selected they PIN that
+    // selection into the slot (overwrite, or toggle off if it's already
+    // there); otherwise they select the slot's favorite as before.
+    case 'Digit4':
+      if (!setFavoriteSlotFromShop(state, 0)) selectFavorite(state, 0);
       break;
-    case 'Digit5': // Favorite slot 2
-      selectFavorite(state, 1);
+    case 'Digit5':
+      if (!setFavoriteSlotFromShop(state, 1)) selectFavorite(state, 1);
       break;
-    case 'Digit6': // Favorite slot 3
-      selectFavorite(state, 2);
-      break;
-    case 'KeyF': // Add/Remove Favorite — per direct request
-      // Hovering a favorite slot on the toolbar always means "remove
-      // whatever's there," regardless of what's currently selected in the
-      // shop — checked first; removeFavoriteAtHoveredSlot returns false
-      // (a genuine no-op, nothing removed) when the cursor isn't over any
-      // slot at all, in which case F instead toggles the CURRENTLY
-      // SELECTED shop tool's own favorite status (add if not already one,
-      // remove if it is — a no-op for Food/Merge/Blueprint/nothing
-      // selected, or if all 3 slots are already full).
-      if (!removeFavoriteAtHoveredSlot(state)) toggleFavoriteForSelectedTool(state);
+    case 'Digit6':
+      if (!setFavoriteSlotFromShop(state, 2)) selectFavorite(state, 2);
       break;
     case 'KeyZ': // Ctrl+Z — undo the last building place/move/sell
       if (e.ctrlKey || e.metaKey) {
@@ -4263,19 +4255,42 @@ function lerpRgbToString(from, to, t) {
   return `rgb(${r}, ${g}, ${b})`;
 }
 
+// A lit/rimmed/grained look for aliens, per direct request (same retweak as
+// the boulders/mound/seaweed, and — unlike the regular fish — WITH the
+// speckled grain). `color` is hex or the "rgb(...)" a hit-flash blend
+// produces (see lerpRgbToString), so toneColor parses either; the grain's
+// positions come from a tiny seeded PRNG keyed to the alien's own id so they
+// stay put frame to frame (a fresh Math.random() per frame would shimmer).
+// Duplicated from FishRenderer.js's own tone helper rather than imported —
+// same "each module keeps its own small renderers" convention as the item icons.
+function toneColor(color, t) {
+  const rgb = color[0] === '#' ? hexToRgb(color) : (() => { const m = color.match(/\d+/g); return { r: +m[0], g: +m[1], b: +m[2] }; })();
+  const target = t >= 0 ? 255 : 0;
+  const a = Math.abs(t);
+  return `rgb(${Math.round(rgb.r + (target - rgb.r) * a)}, ${Math.round(rgb.g + (target - rgb.g) * a)}, ${Math.round(rgb.b + (target - rgb.b) * a)})`;
+}
+function seededRandom(seed) {
+  let s = (seed * 2654435761) >>> 0;
+  return () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 // An alien's body — reworked per direct request ("rework the alien fish so
 // they are not flat, and so they match the same style of the fish") from a
 // single flat circle into an oval body + trailing tail fin + dorsal spikes,
-// with the same darker-underside/glossy-highlight "pop more, less flat"
-// pass FishRenderer.js's own drawFish already gives every real fish. `color`
-// is whatever the caller already resolved (including the hit-flash blend),
-// `facing` is ±1 (which way the alien is currently moving), used to trail
-// the tail fin and highlight the same direction a fish's own facing would.
-// `gazeAngle` (radians, world-space atan2 toward the nearest fish — see the
-// render loop below) drives the single cyclops eye's pupil, per direct
-// request ("one eye like a cyclops... with a pupil that looks at the
-// closest fish").
-function drawAlienBody(ctx, x, y, radius, facing, color, gazeAngle, spikes = 3, bodyWidthMul = 1, bodyHeightMul = 1, glow = false, glowHex = null) {
+// then again ("lit, rimmed, grained, contact-shadow") into the same shading
+// the boulders use. `color` is whatever the caller already resolved (including
+// the hit-flash blend), `facing` is ±1 (which way the alien is currently
+// moving), used to trail the tail fin and highlight the same direction a
+// fish's own facing would. `gazeAngle` (radians, world-space atan2 toward the
+// nearest fish — see the render loop below) drives the single cyclops eye's
+// pupil, per direct request ("one eye like a cyclops... with a pupil that
+// looks at the closest fish"). `seed` (the alien's id) fixes its grain.
+function drawAlienBody(ctx, x, y, radius, facing, color, gazeAngle, spikes = 3, bodyWidthMul = 1, bodyHeightMul = 1, glow = false, glowHex = null, seed = 0) {
   ctx.save();
 
   const bodyRx = radius * 1.05 * bodyWidthMul;
@@ -4301,29 +4316,34 @@ function drawAlienBody(ctx, x, y, radius, facing, color, gazeAngle, spikes = 3, 
     ctx.fill();
   }
 
+  const rimColor = toneColor(color, -0.55);
+  const rimWidth = Math.max(1, radius * 0.09);
+
+  // Contact shadow, offset down-right like the boulders'.
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.16)';
+  ctx.beginPath();
+  ctx.ellipse(x + bodyRx * 0.06, y + bodyRy * 0.45, bodyRx * 1.02, bodyRy * 0.95, 0, 0, Math.PI * 2);
+  ctx.fill();
+
   // Tail fin, trailing behind the direction of travel.
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.28)';
+  ctx.fillStyle = toneColor(color, -0.28);
   ctx.beginPath();
   ctx.moveTo(x - facing * bodyRx * 1.1, y);
   ctx.lineTo(x - facing * bodyRx * 0.52, y - bodyRy * 0.6);
   ctx.lineTo(x - facing * bodyRx * 0.52, y + bodyRy * 0.6);
   ctx.closePath();
   ctx.fill();
-
-  // Main body — an oval, not a perfect circle. bodyWidthMul/bodyHeightMul
-  // (per-tier, see ALIEN_ARCHETYPES) stretch/squash this beyond the base
-  // ratio so each tier reads as a genuinely different silhouette, not just
-  // a resized copy of the same shape.
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.ellipse(x, y, bodyRx, bodyRy, 0, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.strokeStyle = rimColor;
+  ctx.lineWidth = rimWidth * 0.8;
+  ctx.lineJoin = 'round';
+  ctx.stroke();
 
   // Dorsal spikes along the top, one per tier (see ALIEN_ARCHETYPES'
   // `spikes` field) — the one purely "alien/sea-monster" flourish, keeping
   // it visually distinct from an ordinary fish silhouette despite sharing
-  // the same shading language, and now itself a visible tier marker.
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.3)';
+  // the same shading language, and now itself a visible tier marker. Drawn
+  // before the body so its own fill/rim tucks over their bases.
+  ctx.fillStyle = toneColor(color, -0.28);
   const spikeSpacing = radius * 0.3;
   const spikeStartOffset = -((spikes - 1) / 2) * spikeSpacing;
   for (let i = 0; i < spikes; i++) {
@@ -4334,21 +4354,41 @@ function drawAlienBody(ctx, x, y, radius, facing, color, gazeAngle, spikes = 3, 
     ctx.lineTo(sx + radius * 0.12, y - bodyRy * 0.65);
     ctx.closePath();
     ctx.fill();
+    ctx.stroke();
   }
 
-  // Darker underside + glossy highlight — the same treatment every fish
-  // body already gets.
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.18)';
+  // Main body — an oval, not a perfect circle, lit from the upper-left.
+  // bodyWidthMul/bodyHeightMul (per-tier, see ALIEN_ARCHETYPES) stretch/squash
+  // this beyond the base ratio so each tier reads as a genuinely different
+  // silhouette, not just a resized copy of the same shape.
+  const bodyGrad = ctx.createRadialGradient(x - facing * bodyRx * 0.25, y - bodyRy * 0.45, bodyRx * 0.08, x, y, bodyRx * 1.15);
+  bodyGrad.addColorStop(0, toneColor(color, 0.24));
+  bodyGrad.addColorStop(1, toneColor(color, -0.22));
+  ctx.fillStyle = bodyGrad;
   ctx.beginPath();
-  ctx.ellipse(x, y + bodyRy * 0.38, bodyRx * 0.76, bodyRy * 0.41, 0, 0, Math.PI * 2);
+  ctx.ellipse(x, y, bodyRx, bodyRy, 0, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.28)';
+
+  // Speckled grain, clipped to the body, same light/dark dot mix as drawBoulder.
+  ctx.save();
+  ctx.clip();
+  const rng = seededRandom(seed + 1);
+  const grains = Math.max(6, Math.round(radius * 0.9));
+  for (let i = 0; i < grains; i++) {
+    ctx.fillStyle = rng() < 0.5 ? 'rgba(255, 255, 255, 0.3)' : 'rgba(0, 0, 0, 0.3)';
+    ctx.beginPath();
+    ctx.arc(x + (rng() * 2 - 1) * bodyRx, y + (rng() * 2 - 1) * bodyRy, Math.max(0.6, radius * (0.03 + rng() * 0.05)), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.24)';
   ctx.beginPath();
   ctx.ellipse(x - facing * bodyRx * 0.27, y - bodyRy * 0.41, bodyRx * 0.3, bodyRy * 0.21, -0.3 * facing, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.4)';
-  ctx.lineWidth = 1.5;
+  ctx.strokeStyle = rimColor;
+  ctx.lineWidth = rimWidth;
   ctx.beginPath();
   ctx.ellipse(x, y, bodyRx, bodyRy, 0, 0, Math.PI * 2);
   ctx.stroke();
@@ -5404,7 +5444,7 @@ function render() {
       if (d < nearestDist) { nearestDist = d; nearestFish = other; }
     }
     const gazeAngle = nearestFish ? Math.atan2(nearestFish.y - alien.y, nearestFish.x - alien.x) : (facing > 0 ? 0 : Math.PI);
-    drawAlienBody(ctx, pos.x, pos.y, radius, facing, color, gazeAngle, alien.spikes, alien.bodyWidthMul, alien.bodyHeightMul, alien.glow, alienBaseColor);
+    drawAlienBody(ctx, pos.x, pos.y, radius, facing, color, gazeAngle, alien.spikes, alien.bodyWidthMul, alien.bodyHeightMul, alien.glow, alienBaseColor, alien.id);
 
     // Alien-Egg hatch grace period — a soft pulsing shield ring, so a click
     // or turret shot doing nothing to it doesn't read as broken.

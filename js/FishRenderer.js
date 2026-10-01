@@ -62,6 +62,49 @@ const SICK_GREEN = { r: 120, g: 200, b: 90 };
 // `grayed` param.
 const ALIEN_BLOCKED_GRAY = { r: 128, g: 128, b: 128 };
 
+// ---- Lit / rimmed / contact-shadow shading ----
+// Per direct request (rework the fish to match the boulders/mound/seaweed —
+// "lit, rimmed, contact-shadow", but deliberately WITHOUT the speckled grain
+// the rocks/aliens get): each body is a radial-gradient lit fill (highlight
+// upper-left, same as drawBoulder), a crisp darker rim in a shade of its own
+// color, and a soft offset shadow underneath. Every helper works off whatever
+// color string drawFish already resolved (hex, or the "rgb(...)" a
+// sick/grayed/hybrid tint produces), so tints carry through the shading.
+function parseColor(c) {
+  if (c[0] === '#') return hexToRgb(c);
+  const m = c.match(/\d+/g);
+  return { r: +m[0], g: +m[1], b: +m[2] };
+}
+// t > 0 lightens toward white, t < 0 darkens toward black.
+function tone(c, t) {
+  const { r, g, b } = parseColor(c);
+  const target = t >= 0 ? 255 : 0;
+  const a = Math.abs(t);
+  return `rgb(${Math.round(r + (target - r) * a)}, ${Math.round(g + (target - g) * a)}, ${Math.round(b + (target - b) * a)})`;
+}
+// Sets fillStyle to a lit radial gradient over a body of radius r centred on
+// (cx, cy), lit from the upper-left in the direction the fish faces.
+function setLitFill(ctx, cx, cy, r, color, facing) {
+  const g = ctx.createRadialGradient(cx - facing * r * 0.25, cy - r * 0.45, r * 0.08, cx, cy, r * 1.15);
+  g.addColorStop(0, tone(color, 0.24));
+  g.addColorStop(1, tone(color, -0.22));
+  ctx.fillStyle = g;
+}
+// Strokes the CURRENT path with the darker rim.
+function strokeRim(ctx, color, size) {
+  ctx.strokeStyle = tone(color, -0.5);
+  ctx.lineWidth = Math.max(1, size * 0.035);
+  ctx.lineJoin = 'round';
+  ctx.stroke();
+}
+// A soft shadow offset down-right of a body, like the boulders' contact shadow.
+function fillShadow(ctx, x, y, rx, ry) {
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.13)';
+  ctx.beginPath();
+  ctx.ellipse(x + rx * 0.08, y + ry * 0.45, rx, ry, 0, 0, Math.PI * 2);
+  ctx.fill();
+}
+
 // A straight 50/50 blend between two hex colors — used for a Gene-Splicing
 // hybrid's color, per direct request: rather than a single flat color (or
 // silently falling back to plain white, since hybrid ids have never had
@@ -480,6 +523,9 @@ const BODY_SHAPE_RATIOS = {
 
 function drawStandardBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGrown, color, eyeDirection, bodyShape = 'normal') {
   const shape = BODY_SHAPE_RATIOS[bodyShape] || BODY_SHAPE_RATIOS.normal;
+  const bodyRx = size * shape.bodyW;
+  const bodyRy = size * shape.bodyH;
+  fillShadow(ctx, x, y, bodyRx, bodyRy);
   // Mid and adult stages get a fin — small at mid, bigger (but still
   // smaller than the old fixed size) at adult. Baby stays plain.
   if (stage >= 1) {
@@ -498,31 +544,26 @@ function drawStandardBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGrow
     const tipX = backX - facing * tailLength;
     const tipY = y + swing;
     const midX = backX - facing * tailLength * 0.5;
-    ctx.fillStyle = color;
+    ctx.fillStyle = tone(color, -0.08);
     ctx.beginPath();
     ctx.moveTo(backX + baseLean, y - tailHalfWidth);
     ctx.quadraticCurveTo(midX, y - tailHalfWidth * 0.3 + swing * 0.5, tipX, tipY);
     ctx.quadraticCurveTo(midX, y + tailHalfWidth * 0.3 + swing * 0.5, backX + baseLean, y + tailHalfWidth);
     ctx.closePath();
     ctx.fill();
+    strokeRim(ctx, color, size);
   }
 
-  ctx.fillStyle = color;
   ctx.beginPath();
-  ctx.ellipse(x, y, size * shape.bodyW, size * shape.bodyH, 0, 0, Math.PI * 2);
+  ctx.ellipse(x, y, bodyRx, bodyRy, 0, 0, Math.PI * 2);
+  setLitFill(ctx, x, y, bodyRx, color, facing);
   ctx.fill();
-  // A soft, darker underside plus a small glossy highlight — per direct
-  // request that fish "pop more and look less flat" than a single flat
-  // fill. Cheap (two extra ellipses, no filters/gradients) so it doesn't
-  // risk the same per-frame cost every fish, every frame would make a real
-  // canvas filter or gradient noticeably add up to. Scaled proportionally to
-  // the body's own (possibly non-default) width/height above, so the shading
-  // still tracks a slimmer or rounder silhouette correctly.
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.12)';
-  ctx.beginPath();
-  ctx.ellipse(x, y + size * shape.bodyH * 0.4, size * shape.bodyW * 0.92, size * shape.bodyH * 0.55, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+  strokeRim(ctx, color, size);
+  // A small glossy highlight on top of the lit gradient — per direct request
+  // that fish "pop more and look less flat." Scaled proportionally to the
+  // body's own (possibly non-default) width/height, so it still tracks a
+  // slimmer or rounder silhouette correctly.
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.32)';
   ctx.beginPath();
   ctx.ellipse(x - facing * size * shape.bodyW * 0.2, y - size * shape.bodyH * 0.4, size * shape.bodyW * 0.37, size * shape.bodyH * 0.3, 0, 0, Math.PI * 2);
   ctx.fill();
@@ -540,6 +581,7 @@ function drawStandardBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGrow
 // along its top edge for the lumpy silhouette, otherwise the same
 // tail/shading/eye treatment as drawStandardBody.
 function drawSuckerfishBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGrown, color, eyeDirection) {
+  fillShadow(ctx, x, y, size * 0.68, size * 0.3);
   if (stage >= 1) {
     const finScale = isFullyGrown ? 1.0 : MID_STAGE_FIN_SCALE;
     const backX = x - facing * size * 0.6;
@@ -547,32 +589,34 @@ function drawSuckerfishBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGr
     const tailHalfWidth = size * TAIL_WIDTH_RATIO * finScale * 0.8;
     const swing = Math.sin(tailPhase) * size * TAIL_SWING_RATIO * finScale;
     const tipX = backX - facing * tailLength;
-    ctx.fillStyle = color;
+    ctx.fillStyle = tone(color, -0.08);
     ctx.beginPath();
     ctx.moveTo(backX, y - tailHalfWidth);
     ctx.lineTo(tipX, y + swing);
     ctx.lineTo(backX, y + tailHalfWidth);
     ctx.closePath();
     ctx.fill();
+    strokeRim(ctx, color, size);
   }
 
-  ctx.fillStyle = color;
-  ctx.beginPath();
-  ctx.ellipse(x, y, size * 0.68, size * 0.3, 0, 0, Math.PI * 2);
-  ctx.fill();
   // Lumpy bumps along the top edge — the one visual trait that reads as
-  // "sucker/scavenger" rather than a smooth standard fish body.
-  ctx.fillStyle = color;
+  // "sucker/scavenger" rather than a smooth standard fish body. Drawn before
+  // the body now so the body's own rim/fill tucks over their lower halves and
+  // only each bump's rimmed crown shows, instead of a rim circle cutting
+  // through the body.
   for (let i = -1; i <= 1; i++) {
+    ctx.fillStyle = tone(color, 0.06);
     ctx.beginPath();
     ctx.arc(x + i * size * 0.22, y - size * 0.22, size * 0.13, 0, Math.PI * 2);
     ctx.fill();
+    strokeRim(ctx, color, size);
   }
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.12)';
   ctx.beginPath();
-  ctx.ellipse(x, y + size * 0.1, size * 0.6, size * 0.14, 0, 0, Math.PI * 2);
+  ctx.ellipse(x, y, size * 0.68, size * 0.3, 0, 0, Math.PI * 2);
+  setLitFill(ctx, x, y, size * 0.68, color, facing);
   ctx.fill();
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+  strokeRim(ctx, color, size);
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
   ctx.beginPath();
   ctx.ellipse(x - facing * size * 0.1, y - size * 0.08, size * 0.2, size * 0.08, 0, 0, Math.PI * 2);
   ctx.fill();
@@ -609,34 +653,44 @@ function drawEelBody(ctx, x, y, size, facing, tailPhase, isFullyGrown, color, ey
     const bulgeWidth = bulge * Math.sin(t * Math.PI) * size;
     points.push({ x: px, y: y + wave, width: size * (0.1 + t * 0.16) * widthScale + bulgeWidth }); // tapers thin at the tail, wider at the head, rounder mid-body
   }
-  ctx.fillStyle = color;
+  fillShadow(ctx, x, y, length * 0.45, size * 0.2);
+
+  // Feeder Fish (Electric Eel x Suckerfish) — a row of sucker bumps riding
+  // along the eel's own undulating back, per direct request that a hybrid
+  // should visibly carry a trait from each of its two parents. Drawn before
+  // the body (see drawSuckerfishBody's own note on why) so only each bump's
+  // rimmed crown shows above the back.
+  if (bumps) {
+    const b1 = points[2];
+    const b2 = points[4];
+    for (const p of [b1, b2, points[3]]) {
+      ctx.fillStyle = tone(color, 0.06);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y - p.width - size * 0.08, size * 0.1, 0, Math.PI * 2);
+      ctx.fill();
+      strokeRim(ctx, color, size);
+    }
+  }
+
+  const bodyGrad = ctx.createLinearGradient(0, y - size * 0.35, 0, y + size * 0.35);
+  bodyGrad.addColorStop(0, tone(color, 0.24));
+  bodyGrad.addColorStop(1, tone(color, -0.22));
+  ctx.fillStyle = bodyGrad;
   ctx.beginPath();
   ctx.moveTo(points[0].x, points[0].y - points[0].width);
   for (let i = 1; i < points.length; i++) ctx.lineTo(points[i].x, points[i].y - points[i].width);
   for (let i = points.length - 1; i >= 0; i--) ctx.lineTo(points[i].x, points[i].y + points[i].width);
   ctx.closePath();
   ctx.fill();
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+  strokeRim(ctx, color, size);
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+  ctx.lineWidth = Math.max(1, size * 0.05);
   ctx.beginPath();
   ctx.moveTo(points[Math.floor(points.length / 2)].x, points[Math.floor(points.length / 2)].y - points[Math.floor(points.length / 2)].width * 0.5);
   for (let i = Math.floor(points.length / 2) + 1; i < points.length; i++) {
     ctx.lineTo(points[i].x, points[i].y - points[i].width * 0.5);
   }
   ctx.stroke();
-
-  // Feeder Fish (Electric Eel x Suckerfish) — a row of sucker bumps riding
-  // along the eel's own undulating back, per direct request that a hybrid
-  // should visibly carry a trait from each of its two parents.
-  if (bumps) {
-    const b1 = points[2];
-    const b2 = points[4];
-    ctx.fillStyle = color;
-    for (const p of [b1, b2, points[3]]) {
-      ctx.beginPath();
-      ctx.arc(p.x, p.y - p.width - size * 0.08, size * 0.1, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
 
   if (isFullyGrown) {
     const head = points[points.length - 1];
@@ -652,26 +706,29 @@ function drawOctopusBody(ctx, x, y, size, facing, tailPhase, isFullyGrown, color
   const headY = y - size * 0.22;
   const headRadius = size * 0.42;
   const tentacleCount = 4;
-  ctx.strokeStyle = color;
+  fillShadow(ctx, x, headY, headRadius, headRadius * 0.85);
   ctx.lineCap = 'round';
-  ctx.lineWidth = Math.max(1, size * 0.11);
-  for (let i = 0; i < tentacleCount; i++) {
-    const spread = (i - (tentacleCount - 1) / 2) * size * 0.22;
-    const wave = Math.sin(tailPhase + i * 1.3) * size * 0.14;
-    ctx.beginPath();
-    ctx.moveTo(x + spread, headY + headRadius * 0.5);
-    ctx.quadraticCurveTo(x + spread + wave, y + size * 0.35, x + spread + wave * 0.6, y + size * 0.6);
-    ctx.stroke();
+  // Two passes per tentacle set: a wider dark stroke first (the rim), then the
+  // lit color on top, so each tentacle reads as rimmed without a separate
+  // outline path.
+  for (const pass of [0, 1]) {
+    ctx.strokeStyle = pass === 0 ? tone(color, -0.5) : color;
+    ctx.lineWidth = Math.max(1, size * 0.11) + (pass === 0 ? Math.max(1, size * 0.07) : 0);
+    for (let i = 0; i < tentacleCount; i++) {
+      const spread = (i - (tentacleCount - 1) / 2) * size * 0.22;
+      const wave = Math.sin(tailPhase + i * 1.3) * size * 0.14;
+      ctx.beginPath();
+      ctx.moveTo(x + spread, headY + headRadius * 0.5);
+      ctx.quadraticCurveTo(x + spread + wave, y + size * 0.35, x + spread + wave * 0.6, y + size * 0.6);
+      ctx.stroke();
+    }
   }
-  ctx.fillStyle = color;
   ctx.beginPath();
   ctx.ellipse(x, headY, headRadius, headRadius * 0.85, 0, 0, Math.PI * 2);
+  setLitFill(ctx, x, headY, headRadius, color, facing);
   ctx.fill();
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.12)';
-  ctx.beginPath();
-  ctx.ellipse(x, headY + headRadius * 0.35, headRadius * 0.85, headRadius * 0.3, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+  strokeRim(ctx, color, size);
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.32)';
   ctx.beginPath();
   ctx.ellipse(x - facing * headRadius * 0.25, headY - headRadius * 0.3, headRadius * 0.3, headRadius * 0.16, 0, 0, Math.PI * 2);
   ctx.fill();
@@ -694,25 +751,28 @@ function drawOctopusBody(ctx, x, y, size, facing, tailPhase, isFullyGrown, color
 // (falls through to the eel form alone) rather than speculatively built for
 // a combination that doesn't exist yet.
 function drawHybridTentacles(ctx, x, attachY, size, facing, tailPhase, color, tentacleCount = 3) {
-  ctx.strokeStyle = color;
   ctx.lineCap = 'round';
-  ctx.lineWidth = Math.max(1, size * 0.09);
-  for (let i = 0; i < tentacleCount; i++) {
-    const spread = (i - (tentacleCount - 1) / 2) * size * 0.22;
-    const wave = Math.sin(tailPhase + i * 1.3) * size * 0.12;
-    ctx.beginPath();
-    ctx.moveTo(x + spread, attachY);
-    ctx.quadraticCurveTo(x + spread + wave, attachY + size * 0.3, x + spread + wave * 0.6, attachY + size * 0.55);
-    ctx.stroke();
+  for (const pass of [0, 1]) { // wide dark rim pass, then the lit color — see drawOctopusBody
+    ctx.strokeStyle = pass === 0 ? tone(color, -0.5) : color;
+    ctx.lineWidth = Math.max(1, size * 0.09) + (pass === 0 ? Math.max(1, size * 0.06) : 0);
+    for (let i = 0; i < tentacleCount; i++) {
+      const spread = (i - (tentacleCount - 1) / 2) * size * 0.22;
+      const wave = Math.sin(tailPhase + i * 1.3) * size * 0.12;
+      ctx.beginPath();
+      ctx.moveTo(x + spread, attachY);
+      ctx.quadraticCurveTo(x + spread + wave, attachY + size * 0.3, x + spread + wave * 0.6, attachY + size * 0.55);
+      ctx.stroke();
+    }
   }
 }
 
 function drawHybridBackBumps(ctx, x, topY, size, color) {
-  ctx.fillStyle = color;
   for (let i = -1; i <= 1; i++) {
+    ctx.fillStyle = tone(color, 0.06);
     ctx.beginPath();
     ctx.arc(x + i * size * 0.2, topY, size * 0.11, 0, Math.PI * 2);
     ctx.fill();
+    strokeRim(ctx, color, size);
   }
 }
 
@@ -752,8 +812,9 @@ function drawHybridBody(ctx, x, y, size, facing, tailPhase, stage, color, eyeDir
   // octopus tentacles hanging below if this hybrid has an Octopus parent.
   // (No current hybrid combines Octopus with Suckerfish, so bumps-on-oval
   // is left unbuilt too — Magnet Fish, the one Suckerfish hybrid without an
-  // Eel parent, is handled below instead.)
-  drawStandardBody(ctx, x, y, size, facing, tailPhase, stage, true, color, eyeDirection, bodyShape);
+  // Eel parent, is handled below instead.) The bumps and tentacles are drawn
+  // BEFORE the body so its own fill/rim covers where they attach, leaving just
+  // each one's rimmed outer edge showing.
   const shape = BODY_SHAPE_RATIOS[bodyShape] || BODY_SHAPE_RATIOS.normal;
   if (hasSuckerfish) {
     drawHybridBackBumps(ctx, x, y - size * shape.bodyH * 0.85, size, color);
@@ -761,6 +822,7 @@ function drawHybridBody(ctx, x, y, size, facing, tailPhase, stage, color, eyeDir
   if (hasOctopus) {
     drawHybridTentacles(ctx, x, y + size * shape.bodyH * 0.7, size, facing, tailPhase, color, 3);
   }
+  drawStandardBody(ctx, x, y, size, facing, tailPhase, stage, true, color, eyeDirection, bodyShape);
   return {
     headX: x + facing * size * shape.bodyW * 0.15,
     headY: y - size * shape.bodyH * 0.85,
