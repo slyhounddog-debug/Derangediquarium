@@ -4518,13 +4518,35 @@ function renderPowerPlantIcon(ctx, x, y, size, color) {
 // POWER_PLANT_RECIPES) — anything else falls through to the plain Food look.
 function renderRecipeItemIcon(ctx, itemType, cx, cy, r) {
   if (itemType === 'science' || itemType === 'science_green') {
+    // A round-bottom flask with a short neck and open mouth — the same art as
+    // main.js's drawScienceFlask, duplicated here per this function's own
+    // convention, shrunk a little and shifted down so the neck stays inside
+    // the icon's footprint.
     const colorA = itemType === 'science_green' ? SCIENCE_GREEN_COLOR_A : SCIENCE_ITEM_COLOR_A;
     const colorB = itemType === 'science_green' ? SCIENCE_GREEN_COLOR_B : SCIENCE_ITEM_COLOR_B;
-    const grad = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.3, r * 0.1, cx, cy, r);
+    const fr = r * 0.8;
+    const fy = cy + fr * 0.275;
+    const neckHalf = fr * 0.4;
+    const neckTop = fy - fr * 1.6;
+    const lipHalf = fr * 0.62;
+    const lipH = fr * 0.3;
+    ctx.beginPath();
+    ctx.rect(cx - neckHalf, neckTop, neckHalf * 2, fr);
+    ctx.fillStyle = 'rgba(215, 235, 255, 0.28)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.lineWidth = Math.max(1, r * 0.1);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.rect(cx - lipHalf, neckTop - lipH * 0.3, lipHalf * 2, lipH);
+    ctx.fillStyle = 'rgba(235, 245, 255, 0.55)';
+    ctx.fill();
+    ctx.stroke();
+    const grad = ctx.createRadialGradient(cx - fr * 0.3, fy - fr * 0.3, fr * 0.1, cx, fy, fr);
     grad.addColorStop(0, colorA);
     grad.addColorStop(1, colorB);
     ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.arc(cx, fy, fr, 0, Math.PI * 2);
     ctx.fillStyle = grad;
     ctx.fill();
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
@@ -4546,10 +4568,31 @@ function renderRecipeItemIcon(ctx, itemType, cx, cy, r) {
     return;
   }
   if (itemType === 'alien_egg') {
+    // The same narrower-on-top speckled egg as main.js's drawAlienEgg
+    // (duplicated here per this function's own convention), with a few fixed
+    // speckles since this renders small, and the acid-green outline this icon
+    // always had so it still reads as an alien egg.
+    const a = r * 0.8;
+    const b = r * 1.1;
     ctx.beginPath();
-    ctx.ellipse(cx, cy, r * 0.72, r, 0, 0, Math.PI * 2);
+    for (let i = 0; i <= 32; i++) {
+      const t = (i / 32) * Math.PI * 2;
+      const px = cx + a * Math.sin(t) * (1 - 0.18 * Math.cos(t));
+      const py = cy - b * Math.cos(t);
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
     ctx.fillStyle = ALIEN_EGG_COLOR;
     ctx.fill();
+    ctx.save();
+    ctx.clip();
+    ctx.fillStyle = 'rgba(70, 48, 22, 0.55)';
+    for (const [dx, dy, dr] of [[-0.35, -0.55, 0.1], [0.3, -0.3, 0.08], [-0.1, 0.05, 0.11], [0.4, 0.3, 0.09], [-0.4, 0.45, 0.08], [0.05, 0.7, 0.1], [0.1, -0.8, 0.07]]) {
+      ctx.beginPath();
+      ctx.arc(cx + dx * r, cy + dy * r, dr * r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
     ctx.strokeStyle = ALIEN_EGG_RING_COLOR;
     ctx.lineWidth = Math.max(1, r * 0.18);
     ctx.stroke();

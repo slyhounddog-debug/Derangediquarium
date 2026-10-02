@@ -958,6 +958,15 @@ export const BIOMASS_MAX_ON_SCREEN = 80;
 export const ALIEN_EGG_RADIUS = 9.5;
 export const ALIEN_EGG_COLOR = '#c9a86b'; // a mottled tan/olive shell color, distinct from every other item's color family
 export const ALIEN_EGG_RING_COLOR = '#7cff5a'; // the countdown-to-hatch progress ring, matching Alien DNA's own acid-green "alien" accent
+// Rolling — per direct request ("make most of the objects roll"). Purely
+// visual: Entities.js's updateItemRoll turns each of these item types by
+// (horizontal distance moved / radius) every sim tick, and main.js's item
+// render loop blits the cached sprite rotated by that angle. Nothing
+// physics/collision-related reads or writes it — the collision circle and
+// every velocity/mass stay exactly as they were. Food/Biomass/Mutagen Paste
+// are plain featureless circles, so rolling them would be invisible.
+export const ROLLING_ITEM_TYPES = new Set(['coin', 'science', 'science_green', 'waste', 'alien_dna', 'alien_egg']);
+export const ROLL_DEADZONE_PX = 0.05; // per-tick horizontal movement below this doesn't turn an item, so a settled pile's sub-pixel jitter never shimmers
 // How long the egg sits inert before hatching, per direct spec ("it will
 // stay as an egg for 30 seconds"). Entities.js's updateAlienEgg counts this
 // up itself (item.hatchTimer) rather than routing through any of the
@@ -2735,28 +2744,28 @@ export const SCIENCE_LAB_UPGRADES = {
   // Per direct request, Bubble Cap 20 is the thing gated behind the tree's
   // remaining 2 roots together (Suckerfish, Science Octopus).
   science_cap_2: {
-    id: 'science_cap_2', name: 'Bubble Cap 40', icon: '🫧',
-    description: 'Raises the Science Bubble cap from 20 to 40 — how many can exist unbanked in the tank at once before an Octopus\'s brew is blocked.',
+    id: 'science_cap_2', name: 'Science Cap 40', icon: '🫧',
+    description: 'Raises the Science Cap from 20 to 40 — how many can exist unbanked in the tank at once before an Octopus\'s brew is blocked.',
     scienceCost: SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[1], goldCost: SCIENCE_CAP_UPGRADE_GOLD_COSTS[1],
     requires: ['suckerfish', 'octopus'], grants: { scienceCapLevel: 1 },
   },
   // Per direct request, "the 2 requirements for bubble cap 30 is the
   // manufacturer and the bubble cap 20."
   science_cap_3: {
-    id: 'science_cap_3', name: 'Bubble Cap 60', icon: '🫧',
-    description: 'Raises the Science Bubble cap from 40 to 60 — how many can exist unbanked in the tank at once before an Octopus\'s brew is blocked.',
+    id: 'science_cap_3', name: 'Science Cap 60', icon: '🫧',
+    description: 'Raises the Science Cap from 40 to 60 — how many can exist unbanked in the tank at once before an Octopus\'s brew is blocked.',
     scienceCost: SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[2], goldCost: SCIENCE_CAP_UPGRADE_GOLD_COSTS[2],
     requires: ['manufacturer', 'science_cap_2'], grants: { scienceCapLevel: 1 },
   },
   science_cap_4: {
-    id: 'science_cap_4', name: 'Bubble Cap 80', icon: '🫧',
-    description: 'Raises the Science Bubble cap from 60 to 80 — how many can exist unbanked in the tank at once before an Octopus\'s brew is blocked.',
+    id: 'science_cap_4', name: 'Science Cap 80', icon: '🫧',
+    description: 'Raises the Science Cap from 60 to 80 — how many can exist unbanked in the tank at once before an Octopus\'s brew is blocked.',
     scienceCost: SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[3], goldCost: SCIENCE_CAP_UPGRADE_GOLD_COSTS[3],
     requires: ['science_cap_3'], grants: { scienceCapLevel: 1 },
   },
   science_cap_5: {
-    id: 'science_cap_5', name: 'Bubble Cap 100', icon: '🫧',
-    description: 'Raises the Science Bubble cap from 80 to 100 — how many can exist unbanked in the tank at once before an Octopus\'s brew is blocked.',
+    id: 'science_cap_5', name: 'Science Cap 100', icon: '🫧',
+    description: 'Raises the Science Cap from 80 to 100 — how many can exist unbanked in the tank at once before an Octopus\'s brew is blocked.',
     scienceCost: SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[4], goldCost: SCIENCE_CAP_UPGRADE_GOLD_COSTS[4],
     requires: ['science_cap_4'], grants: { scienceCapLevel: 1 },
   },

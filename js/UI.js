@@ -237,8 +237,8 @@ const HUD_INFO_DATA = {
     statFn: (state) => `$${Math.round(computeTheoreticalGoldPerMinute(state))}`,
   },
   scienceCap: {
-    icon: '🔬', title: 'Science Bubbles',
-    desc: "Science Bubbles currently sitting in the tank, uncollected — capped by the Science Lab's Bubble Capacity upgrade.",
+    icon: '🔬', title: 'Science Cap',
+    desc: "Science Bubbles currently sitting in the tank, uncollected — capped by the Science Lab's Science Cap upgrades.",
     statLabel: 'Science/min',
     statFn: (state) => computeTheoreticalSciencePerMinute(state).toFixed(1),
   },
@@ -2175,7 +2175,7 @@ function openLabPurchaseModal(state, id) {
     els.labPurchaseIcon.textContent = '❓';
     els.labPurchaseName.textContent = '???';
     els.labPurchaseCost.textContent = '???';
-    els.labPurchaseDesc.innerHTML = '<div>Something is stirring in the deep... you\'ll need to have unlocked everything Green Science research offers, plus Bubble Cap 100, before you can learn any more.</div>';
+    els.labPurchaseDesc.innerHTML = '<div>Something is stirring in the deep... you\'ll need to have unlocked everything Green Science research offers, plus Science Cap 100, before you can learn any more.</div>';
     els.labPurchaseStats.innerHTML = '';
     refreshLabPurchaseButton(state);
     els.labPurchaseOverlay.classList.remove('hidden');
@@ -2214,7 +2214,7 @@ function openLabPurchaseModal(state, id) {
     // 30" -> 30), itself static per-node data, not the player's live level.
     descLines.push(node.description);
     const capValue = parseInt(node.name.match(/\d+/)[0], 10);
-    statChips.push(`<div class="building-stat">🔬 Bubble cap: <b>${capValue}</b></div>`);
+    statChips.push(`<div class="building-stat">🔬 Science Cap: <b>${capValue}</b></div>`);
   }
   if (!descLines.length) {
     // Per direct request ("change the wording... so it says what recipe
@@ -3053,21 +3053,47 @@ function drawItemIconCanvas(canvas, itemType) {
   const cy = size / 2;
   const r = size * 0.42;
   if (itemType === 'science' || itemType === 'science_green') {
+    // A round-bottom flask with a short neck and open mouth, same art as
+    // main.js's drawScienceFlask (duplicated here, per this function's own
+    // convention) — drawn smaller and shifted down so the neck still fits in
+    // the icon square.
     const colorA = itemType === 'science_green' ? SCIENCE_GREEN_COLOR_A : SCIENCE_ITEM_COLOR_A;
     const colorB = itemType === 'science_green' ? SCIENCE_GREEN_COLOR_B : SCIENCE_ITEM_COLOR_B;
-    const gradient = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.3, r * 0.1, cx, cy, r);
+    const fr = size * 0.34;
+    const fy = cy + fr * 0.275;
+    const neckHalf = fr * 0.4;
+    const neckTop = fy - fr * 1.6;
+    const lipHalf = fr * 0.62;
+    const lipH = fr * 0.3;
+    ctx.beginPath();
+    ctx.rect(cx - neckHalf, neckTop, neckHalf * 2, fr);
+    ctx.fillStyle = 'rgba(215, 235, 255, 0.28)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.rect(cx - lipHalf, neckTop - lipH * 0.3, lipHalf * 2, lipH);
+    ctx.fillStyle = 'rgba(235, 245, 255, 0.55)';
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.ellipse(cx, neckTop - lipH * 0.3, neckHalf * 0.85, lipH * 0.4, 0, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(15, 25, 45, 0.65)';
+    ctx.fill();
+    const gradient = ctx.createRadialGradient(cx - fr * 0.3, fy - fr * 0.3, fr * 0.1, cx, fy, fr);
     gradient.addColorStop(0, colorB);
     gradient.addColorStop(1, colorA);
     ctx.beginPath();
     ctx.fillStyle = gradient;
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.arc(cx, fy, fr, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
     ctx.lineWidth = 1.4;
     ctx.stroke();
     ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
     ctx.beginPath();
-    ctx.arc(cx - r * 0.3, cy - r * 0.3, r * 0.28, 0, Math.PI * 2);
+    ctx.arc(cx - fr * 0.3, fy - fr * 0.3, fr * 0.28, 0, Math.PI * 2);
     ctx.fill();
     return;
   }
@@ -3089,22 +3115,33 @@ function drawItemIconCanvas(canvas, itemType) {
     return;
   }
   if (itemType === 'alien_egg') {
+    // The same narrower-on-top speckled egg as main.js's drawAlienEgg
+    // (duplicated here, per this file's own convention), simplified to a
+    // handful of fixed speckles since this renders small.
+    const a = r * 0.8;
+    const b = r * 1.1;
     ctx.beginPath();
+    for (let i = 0; i <= 32; i++) {
+      const t = (i / 32) * Math.PI * 2;
+      const px = cx + a * Math.sin(t) * (1 - 0.18 * Math.cos(t));
+      const py = cy - b * Math.cos(t);
+      if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
     ctx.fillStyle = ALIEN_EGG_COLOR;
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.22)';
+    ctx.save();
+    ctx.clip();
+    ctx.fillStyle = 'rgba(70, 48, 22, 0.55)';
+    for (const [dx, dy, dr] of [[-0.35, -0.55, 0.1], [0.3, -0.3, 0.08], [-0.1, 0.05, 0.11], [0.4, 0.3, 0.09], [-0.4, 0.45, 0.08], [0.05, 0.7, 0.1], [0.1, -0.8, 0.07]]) {
+      ctx.beginPath();
+      ctx.arc(cx + dx * r, cy + dy * r, dr * r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
     ctx.lineWidth = 1;
     ctx.stroke();
-    ctx.strokeStyle = ALIEN_EGG_RING_COLOR;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(cx, cy, r + 2, -Math.PI / 2, Math.PI); // a static partial ring, not a live hatch countdown
-    ctx.stroke();
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-    ctx.beginPath();
-    ctx.arc(cx - r * 0.32, cy - r * 0.32, r * 0.28, 0, Math.PI * 2);
-    ctx.fill();
     return;
   }
   if (itemType === 'waste' || itemType === 'alien_dna') { // Bio-Sludge shares Waste's poop shape in its own color, per direct request

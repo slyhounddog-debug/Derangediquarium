@@ -182,6 +182,8 @@ import {
   ELECTRIC_SUCKER_FOOD_INTERVAL_MS,
   SCIENCE_ALIEN_DNA_INTERVAL_MS,
   ALIEN_EGG_RADIUS,
+  ROLLING_ITEM_TYPES,
+  ROLL_DEADZONE_PX,
   ALIEN_EGG_HATCH_MS,
   ALIEN_EGG_RISE_SPEED,
   FRIENDLY_ALIEN_WASTE_INTERVAL_MS,
@@ -2257,6 +2259,25 @@ function updateFood(item, state, dtMs) {
   return true;
 }
 
+// Rolling — per direct request ("make most of the objects roll"). Turns
+// item.rollAngle by (horizontal distance moved since the previous tick /
+// radius), i.e. a no-slip roll, read straight off real displacement so it
+// works identically for ramps, fan pushes, collision shoves, free fall with
+// sideways drift and a thrown item — no new physics state. Purely visual:
+// only ever writes rollAngle/rollPrevX, which main.js's item render loop
+// reads; item.x/y/vx/vy, the collision radius and mass are never touched. A
+// sleeping/settled item moves 0px so it costs one subtraction. An item a
+// Collector/Refinery/Manufacturer is holding doesn't turn (its pull-in
+// easing isn't a roll), and main.js's drag/sea-turtle code rebaselines
+// rollPrevX itself for the same reason.
+function updateItemRoll(item) {
+  const prevX = item.rollPrevX;
+  item.rollPrevX = item.x;
+  if (prevX === undefined || item.collectorProgressMs != null || item.heldByKey != null) return;
+  const dx = item.x - prevX;
+  if (dx > ROLL_DEADZONE_PX || dx < -ROLL_DEADZONE_PX) item.rollAngle = ((item.rollAngle || 0) + dx / item.radius) % (Math.PI * 2);
+}
+
 // Idle spin animation bookkeeping — per direct request ("add a coin
 // spinning animation if a coin hasn't moved for more than 3 seconds. spin
 // periodically 1-2 rotations. this shouldn't change any physics or the
@@ -3869,6 +3890,7 @@ export function updateEntities(state, dtMs) {
       if (((loadModeStep + item.id) & 1) === 1) return true;
       stepMs = dtMs * 2;
     }
+    if (ROLLING_ITEM_TYPES.has(item.type)) updateItemRoll(item);
     if (item.type === 'food') return updateFood(item, state, stepMs);
     if (item.type === 'coin') return updateCoin(item, state, stepMs);
     if (item.type === 'science') return updateScience(item, state, stepMs);

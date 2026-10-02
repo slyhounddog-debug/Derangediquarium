@@ -883,30 +883,41 @@ const WASTE_VISUAL_Y_OFFSET_FRACTION = 0.1;
 // has") — so it picks up WASTE_VISUAL_SCALE and the Y offset above for free,
 // applied to ITS radius (ALIEN_DNA_RADIUS), not Waste's. Purely visual: the
 // real collision radius is untouched, same as for Waste.
-function drawWastePoop(ctx, cx, cy, r, color = WASTE_COLOR) {
+// Rolling split, per direct request ("make most of the objects roll"): the
+// sprite this draws is now ROTATED at blit time, so `layer` lets it be baked
+// as two sprites — 'body' (the blob, outline and wrinkles, which turn with
+// the item) and 'highlight' (the glint, which must NOT turn or the light
+// would orbit the item) — see getItemSprite/the item render loop. The old
+// WASTE_VISUAL_Y_OFFSET_FRACTION nudge is no longer baked in here either: the
+// blob has to rotate about its OWN center, so the render loop applies that
+// same offset to the sprite's pivot (sprite.dy) instead.
+function drawWastePoop(ctx, cx, cy, r, color = WASTE_COLOR, layer = 'all') {
   r *= WASTE_VISUAL_SCALE;
-  cy += r * WASTE_VISUAL_Y_OFFSET_FRACTION;
-  tracePoopBlobPath(ctx, cx, cy, r);
-  ctx.fillStyle = color;
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
-  ctx.lineWidth = Math.max(1, r * 0.12);
-  ctx.stroke();
-  // A couple of short curved "wrinkle" lines instead of the plain glossy
-  // highlight dot every other item gets — reads as texture, not shine.
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
-  ctx.lineWidth = Math.max(1, r * 0.08);
-  ctx.lineCap = 'round';
-  ctx.beginPath();
-  ctx.arc(cx, cy - r * 0.05, r * 0.48, Math.PI * 0.12, Math.PI * 0.82);
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.arc(cx, cy + r * 0.32, r * 0.38, Math.PI * 1.12, Math.PI * 1.75);
-  ctx.stroke();
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
-  ctx.beginPath();
-  ctx.arc(cx - r * 0.32, cy - r * 0.4, r * 0.18, 0, Math.PI * 2);
-  ctx.fill();
+  if (layer !== 'highlight') {
+    tracePoopBlobPath(ctx, cx, cy, r);
+    ctx.fillStyle = color;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+    ctx.lineWidth = Math.max(1, r * 0.12);
+    ctx.stroke();
+    // A couple of short curved "wrinkle" lines instead of the plain glossy
+    // highlight dot every other item gets — reads as texture, not shine.
+    ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+    ctx.lineWidth = Math.max(1, r * 0.08);
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.arc(cx, cy - r * 0.05, r * 0.48, Math.PI * 0.12, Math.PI * 0.82);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.arc(cx, cy + r * 0.32, r * 0.38, Math.PI * 1.12, Math.PI * 1.75);
+    ctx.stroke();
+  }
+  if (layer !== 'body') {
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.beginPath();
+    ctx.arc(cx - r * 0.32, cy - r * 0.4, r * 0.18, 0, Math.PI * 2);
+    ctx.fill();
+  }
 }
 
 // Per direct request (populated-tank performance) — every Food/Coin/Waste/
@@ -926,35 +937,123 @@ const FOOD_STALE_STEPS = 16;
 const ITEM_SPRITE_CACHE_MAX = 256; // safety valve only — real item looks number in the dozens
 const itemSpriteCache = new Map();
 
-function drawItemShape(ctx, item, x, y, itemColor) {
-  if (item.type === 'science' || item.type === 'science_green') {
-    // "Magical bubble" — a two-tone radial blend plus a bright rim ring,
-    // per direct request, instead of the flat single-color fill every
-    // other item type gets below. A real ctx.createRadialGradient is fine
-    // here (unlike a ctx.filter, which is the actually expensive one —
-    // see Ambience.js's seaweed blur note) since it's just one more
-    // fillStyle, no per-pixel filter pass. Green Science (the
-    // Bio-Combuster's upgraded output) shares the exact same bubble
-    // treatment, just with its own green tones instead of purple/blue.
-    const colorA = item.type === 'science_green' ? SCIENCE_GREEN_COLOR_A : SCIENCE_ITEM_COLOR_A;
-    const colorB = item.type === 'science_green' ? SCIENCE_GREEN_COLOR_B : SCIENCE_ITEM_COLOR_B;
-    const gradient = ctx.createRadialGradient(
-      x - item.radius * 0.3, y - item.radius * 0.3, item.radius * 0.1,
-      x, y, item.radius
-    );
+// A round-bottom lab flask with a short neck and an open mouth, per direct
+// request ("turn the blue and green bubbles into circular flasks/vials that
+// have a short neck and an opening") — the body is the item's full collision
+// circle (so it still rests flush on the floor), and the neck/lip poke OUT of
+// that circle, same visual-only spill-out trick the Waste lobes use. Drawn
+// neck-up at angle 0; the sprite is rotated at blit time (see the item render
+// loop), so a rolling flask's neck swings around. The body is filled
+// completely with the liquid (a partial liquid line would have to stay level
+// while the glass turns, i.e. a live per-frame clip per flask — the one
+// expensive option) with an empty glass neck above it. `layer` splits the
+// baked sprite in two ('body' turns with the flask, 'highlight' is the
+// fixed-light glint that must not turn) — see getItemSprite.
+function drawScienceFlask(ctx, x, y, r, colorA, colorB, layer = 'all') {
+  if (layer !== 'highlight') {
+    const neckHalf = r * 0.4;
+    const neckTop = y - r * 1.6;
+    const lipHalf = r * 0.62;
+    const lipH = r * 0.3;
+    // Neck glass — runs down inside the body, which is drawn over its lower end below.
+    ctx.beginPath();
+    ctx.rect(x - neckHalf, neckTop, neckHalf * 2, r * 1.0);
+    ctx.fillStyle = 'rgba(215, 235, 255, 0.28)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.lineWidth = 1.2;
+    ctx.stroke();
+    // Rim lip, then the dark opening at the very top.
+    ctx.beginPath();
+    ctx.rect(x - lipHalf, neckTop - lipH * 0.3, lipHalf * 2, lipH);
+    ctx.fillStyle = 'rgba(235, 245, 255, 0.55)';
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.ellipse(x, neckTop - lipH * 0.3, neckHalf * 0.85, lipH * 0.4, 0, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(15, 25, 45, 0.65)';
+    ctx.fill();
+    // Liquid-filled body.
+    const gradient = ctx.createRadialGradient(x - r * 0.3, y - r * 0.3, r * 0.1, x, y, r);
     gradient.addColorStop(0, colorB);
     gradient.addColorStop(1, colorA);
     ctx.beginPath();
     ctx.fillStyle = gradient;
-    ctx.arc(x, y, item.radius, 0, Math.PI * 2);
+    ctx.arc(x, y, r, 0, Math.PI * 2);
     ctx.fill();
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
     ctx.lineWidth = 1.4;
     ctx.stroke();
+  }
+  if (layer !== 'body') {
     ctx.fillStyle = 'rgba(255, 255, 255, 0.65)';
     ctx.beginPath();
-    ctx.arc(x - item.radius * 0.3, y - item.radius * 0.3, item.radius * 0.28, 0, Math.PI * 2);
+    ctx.arc(x - r * 0.3, y - r * 0.3, r * 0.28, 0, Math.PI * 2);
     ctx.fill();
+  }
+}
+
+// A speckled egg, per direct request ("turn the alien eggs into an egg shaped
+// speckled/grained object that rolls") — still circular PHYSICS (the real
+// collision circle is the item's own radius), the narrower-on-top egg outline
+// and its long axis just spill slightly past it, visual-only. Speckles come
+// from a fixed-seed generator so the one cached sprite is identical every
+// time, and they're clipped to the egg so none escape the shell. Everything
+// here (speckles and highlight alike) turns with the egg — it's the cheapest
+// option, one blit, per direct request. The live hatch-countdown ring is NOT
+// part of this sprite — the render loop strokes it fixed (non-rotating) on top.
+function traceEggPath(ctx, cx, cy, r) {
+  const a = r * 0.8;  // half-width
+  const b = r * 1.1;  // half-length
+  ctx.beginPath();
+  for (let i = 0; i <= 32; i++) {
+    const t = (i / 32) * Math.PI * 2;
+    const px = cx + a * Math.sin(t) * (1 - 0.18 * Math.cos(t)); // cos(t) = 1 at the narrow top, -1 at the wide bottom
+    const py = cy - b * Math.cos(t);
+    if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+}
+function drawAlienEgg(ctx, cx, cy, r) {
+  traceEggPath(ctx, cx, cy, r);
+  ctx.fillStyle = ALIEN_EGG_COLOR;
+  ctx.fill();
+  ctx.save();
+  ctx.clip();
+  let seed = 7;
+  const rand = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+  for (let i = 0; i < 22; i++) {
+    const sx = cx + (rand() * 2 - 1) * r * 0.85;
+    const sy = cy + (rand() * 2 - 1) * r * 1.1;
+    const sr = r * (0.06 + rand() * 0.09);
+    ctx.fillStyle = rand() < 0.7 ? 'rgba(70, 48, 22, 0.55)' : 'rgba(255, 240, 200, 0.5)';
+    ctx.beginPath();
+    ctx.arc(sx, sy, sr, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.restore();
+  traceEggPath(ctx, cx, cy, r);
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+  ctx.beginPath();
+  ctx.arc(cx - r * 0.3, cy - r * 0.35, r * 0.22, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawItemShape(ctx, item, x, y, itemColor, layer = 'all') {
+  if (item.type === 'science' || item.type === 'science_green') {
+    // Both Science types share the flask shape, just in their own tones —
+    // Green Science (the Bio-Combuster's upgraded output) keeps its
+    // own green pair instead of purple/blue.
+    const isGreen = item.type === 'science_green';
+    drawScienceFlask(ctx, x, y, item.radius, isGreen ? SCIENCE_GREEN_COLOR_A : SCIENCE_ITEM_COLOR_A, isGreen ? SCIENCE_GREEN_COLOR_B : SCIENCE_ITEM_COLOR_B, layer);
+    return;
+  }
+
+  if (item.type === 'alien_egg') {
+    drawAlienEgg(ctx, x, y, item.radius);
     return;
   }
 
@@ -1037,11 +1136,11 @@ function drawItemShape(ctx, item, x, y, itemColor) {
   }
 
   if (item.type === 'waste') {
-    drawWastePoop(ctx, x, y, item.radius);
+    drawWastePoop(ctx, x, y, item.radius, WASTE_COLOR, layer);
     return;
   }
   if (item.type === 'alien_dna') {
-    drawWastePoop(ctx, x, y, item.radius, ALIEN_DNA_COLOR);
+    drawWastePoop(ctx, x, y, item.radius, ALIEN_DNA_COLOR, layer);
     return;
   }
 
@@ -1077,8 +1176,22 @@ function getItemSprite(item, foodStaleStep) {
   sctx.scale(ITEM_SPRITE_SCALE, ITEM_SPRITE_SCALE);
   let itemColor = ITEM_FLAT_COLOR_BY_TYPE[item.type];
   if (item.type === 'food' && foodStaleStep > 0) itemColor = lerpRgbToString(hexToRgb(FOOD_COLOR), hexToRgb(FOOD_STALE_COLOR), foodStaleStep / FOOD_STALE_STEPS);
-  drawItemShape(sctx, item, half, half, itemColor);
-  sprite = { canvas, half };
+  // Rolling (see the item render loop): flasks, waste and bio-sludge bake
+  // their glint into a SECOND, unrotated sprite so the light stays fixed while
+  // the body turns; waste/sludge also carry the old "sit a bit lower" nudge as
+  // sprite.dy (applied to the pivot, so the blob turns about its own center).
+  const splitHighlight = item.type === 'science' || item.type === 'science_green' || item.type === 'waste' || item.type === 'alien_dna';
+  drawItemShape(sctx, item, half, half, itemColor, splitHighlight ? 'body' : 'all');
+  let hl = null;
+  if (splitHighlight) {
+    hl = document.createElement('canvas');
+    hl.width = hl.height = canvas.width;
+    const hctx = hl.getContext('2d');
+    hctx.scale(ITEM_SPRITE_SCALE, ITEM_SPRITE_SCALE);
+    drawItemShape(hctx, item, half, half, itemColor, 'highlight');
+  }
+  const dy = (item.type === 'waste' || item.type === 'alien_dna') ? item.radius * WASTE_VISUAL_SCALE * WASTE_VISUAL_Y_OFFSET_FRACTION : 0;
+  sprite = { canvas, half, hl, dy };
   itemSpriteCache.set(key, sprite);
   return sprite;
 }
@@ -2133,6 +2246,7 @@ function updateItemDrag() {
   const clampedY = Math.min(Math.max(world.y, margin), getUnlockedWorldH(state) - margin);
   dragged.x = clampedX;
   dragged.y = clampedY;
+  dragged.rollPrevX = clampedX; // rolling (Entities.js's updateItemRoll) measures displacement — rebaselined so the cursor snapping an item around never reads as it rolling, per direct request's visual-only roll
   dragged.resting = false;
 }
 
@@ -5058,6 +5172,7 @@ function updateSeaTurtle(state, nowMs) {
       const leadPos = seaTurtleMemberPosition(turtle, 0);
       coin.x = leadPos.x;
       coin.y = leadPos.y - SEA_TURTLE_RADIUS_PX * 0.55;
+      coin.rollPrevX = coin.x; // riding the turtle's back isn't rolling — see Entities.js's updateItemRoll
     }
   }
 
@@ -5594,29 +5709,6 @@ function render() {
       continue;
     }
 
-    if (item.type === 'alien_egg') {
-      // A shrinking countdown ring on top of the flat shell fill, so the
-      // player can see roughly how long until it hatches.
-      ctx.beginPath();
-      ctx.fillStyle = ALIEN_EGG_COLOR;
-      ctx.arc(pos.x, pos.y, item.radius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.22)';
-      ctx.lineWidth = 1;
-      ctx.stroke();
-      const hatchFrac = Math.min(1, (item.hatchTimer || 0) / ALIEN_EGG_HATCH_MS);
-      ctx.strokeStyle = ALIEN_EGG_RING_COLOR;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(pos.x, pos.y, item.radius + 3, -Math.PI / 2, -Math.PI / 2 + hatchFrac * Math.PI * 2);
-      ctx.stroke();
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-      ctx.beginPath();
-      ctx.arc(pos.x - item.radius * 0.32, pos.y - item.radius * 0.32, item.radius * 0.28, 0, Math.PI * 2);
-      ctx.fill();
-      continue;
-    }
-
     // A "stale" gray phase, per direct spec — once a Food pellet's own
     // stationary timer crosses FOOD_STALE_FRACTION (75%) of the way to
     // turning into Waste, tint it toward FOOD_STALE_COLOR. Reading straight
@@ -5637,14 +5729,43 @@ function render() {
     // for the full rationale (including the ease-back-to-normal settle phase)
     // and why this stays a free no-op the rest of the time.
     const spinScaleX = item.type === 'coin' ? coinSpinScaleX(item) : 1;
-    if (spinScaleX !== 1) {
+    // Rolling — per direct request ("make most of the objects roll"), see
+    // Entities.js's updateItemRoll. The cached sprite is turned by
+    // item.rollAngle about the item's own center (sprite.dy lowers the pivot
+    // for Waste/Bio-Sludge, same offset they always had) with one
+    // setTransform + drawImage (plus one reset), no per-item sprite rebuild.
+    // An item that has never rolled keeps the plain axis-aligned blit. A
+    // coin's idle-spin squash composes with the roll (squash applied to the
+    // already-turned face, i.e. scale-then-rotate in matrix terms), so the two
+    // never fight. Visual-only: nothing here touches item.x/y/radius or physics.
+    const rollAngle = item.rollAngle || 0;
+    const py = pos.y + sprite.dy;
+    if (rollAngle !== 0) {
+      const cos = Math.cos(rollAngle);
+      const sin = Math.sin(rollAngle);
+      ctx.setTransform(spinScaleX * cos, sin, -spinScaleX * sin, cos, pos.x, py);
+      ctx.drawImage(sprite.canvas, -sprite.half, -sprite.half, sprite.half * 2, sprite.half * 2);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+    } else if (spinScaleX !== 1) {
       ctx.save();
-      ctx.translate(pos.x, pos.y);
+      ctx.translate(pos.x, py);
       ctx.scale(spinScaleX, 1);
       ctx.drawImage(sprite.canvas, -sprite.half, -sprite.half, sprite.half * 2, sprite.half * 2);
       ctx.restore();
     } else {
-      ctx.drawImage(sprite.canvas, pos.x - sprite.half, pos.y - sprite.half, sprite.half * 2, sprite.half * 2);
+      ctx.drawImage(sprite.canvas, pos.x - sprite.half, py - sprite.half, sprite.half * 2, sprite.half * 2);
+    }
+    if (sprite.hl) ctx.drawImage(sprite.hl, pos.x - sprite.half, py - sprite.half, sprite.half * 2, sprite.half * 2); // the fixed-light glint, deliberately not rotated
+    if (item.type === 'alien_egg') {
+      // A shrinking countdown ring around the shell (kept live and NOT
+      // rotating, so the player can still read roughly how long until it
+      // hatches however the egg is tumbling).
+      const hatchFrac = Math.min(1, (item.hatchTimer || 0) / ALIEN_EGG_HATCH_MS);
+      ctx.strokeStyle = ALIEN_EGG_RING_COLOR;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, item.radius + 3, -Math.PI / 2, -Math.PI / 2 + hatchFrac * Math.PI * 2);
+      ctx.stroke();
     }
   }
 
@@ -6542,22 +6663,10 @@ function render() {
     }
 
     // The icon itself, shrinking — a plain gold disc with a darker rim for a
-    // blocked coin, or the same two-tone purple/blue gradient sphere the
-    // real physical Science Bubble item uses for a blocked science brew.
+    // blocked coin, or the same flask the
+    // real physical Science item uses for a blocked science brew.
     if (effect.resource === 'science') {
-      const gradient = ctx.createRadialGradient(
-        pos.x - radius * 0.3, pos.y - radius * 0.3, radius * 0.1,
-        pos.x, pos.y, radius
-      );
-      gradient.addColorStop(0, SCIENCE_ITEM_COLOR_B);
-      gradient.addColorStop(1, SCIENCE_ITEM_COLOR_A);
-      ctx.fillStyle = gradient;
-      ctx.beginPath();
-      ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = 'rgba(255, 255, 255, 0.55)';
-      ctx.lineWidth = 1.4;
-      ctx.stroke();
+      drawScienceFlask(ctx, pos.x, pos.y, radius, SCIENCE_ITEM_COLOR_A, SCIENCE_ITEM_COLOR_B);
     } else {
       ctx.fillStyle = '#ffd23f';
       ctx.beginPath();
