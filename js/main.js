@@ -13,6 +13,7 @@ import {
   FISH_BASE_SIZE,
   HUNGER_SEEK_THRESHOLD,
   HUNGER_CRITICAL_THRESHOLD,
+  SCIENCE_BLOCKED_SICKNESS,
   HUNGER_ICON_BOUNCE_SLOW_PERIOD_MS,
   HUNGER_ICON_BOUNCE_SLOW_AMPLITUDE_PX,
   HUNGER_ICON_BOUNCE_FAST_PERIOD_MS,
@@ -1356,6 +1357,11 @@ const state = {
     // 'postalien'/'wastedrag' guided-tutorial flows' "drag Waste into the
     // Turret" step.
     wasteTurretAmmoGainedPending: false,
+    // Monotonic count of Bubble-Cap-blocked science drops, bumped by Entities.js's
+    // triggerProductionBlocked and watched by UI.js's updateScienceCapArrow (which
+    // compares it to the last value it saw) — same cross-module-flag idea as the
+    // pending flags here, but a counter so several blocks in one frame all register.
+    scienceBlockedSignals: 0,
     // Same cross-module-flag pattern as wasteTurretAmmoGainedPending above,
     // set by Grid.js's Storage Chest intake scan — read and cleared by
     // UI.js's updateHUD to advance the 'chest' guided-tutorial flow's own
@@ -5669,7 +5675,9 @@ function render() {
     // same threshold that already shows the "!" indicator below) — a
     // little more green past the "!!" critical threshold — per direct
     // request that a hungry fish should visibly look a bit unwell.
-    const sickness = fish.hunger >= HUNGER_CRITICAL_THRESHOLD ? 0.35 : fish.hunger >= HUNGER_SEEK_THRESHOLD ? 0.18 : 0;
+    const hungerSickness = fish.hunger >= HUNGER_CRITICAL_THRESHOLD ? 0.35 : fish.hunger >= HUNGER_SEEK_THRESHOLD ? 0.18 : 0;
+    // A researcher whose science drop was just blocked by the Bubble Cap looks properly sick for a second — see SCIENCE_BLOCKED_SICKNESS.
+    const sickness = fish.scienceBlockedSickMs > 0 ? Math.max(hungerSickness, SCIENCE_BLOCKED_SICKNESS) : hungerSickness;
     // Alien Invasion: a fish reads as gray while it can't currently produce
     // money — either a living alien is close by (continuous) or it just had
     // a coin drop blocked by the Coin Cap (timed, ~1s) — see Entities.js's

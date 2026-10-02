@@ -103,6 +103,7 @@ body.alt-mode #alien-countdown,
 body.alt-mode #boss-health-bar-wrap,
 body.alt-mode #save-toast,
 body.alt-mode #scroll-hint,
+body.alt-mode #science-cap-arrow,
 body.alt-mode #tab-reminder,
 body.alt-mode #tutorial-overlay,
 body.alt-mode #tutorial-text {
@@ -1018,6 +1019,18 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
   border-radius: 999px;
   box-shadow: 0 3px 9px rgba(107, 76, 107, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.85);
 }
+/* Bubble Cap arrow — see UI.js's updateScienceCapArrow. The wrapper fades in/out
+   over its 4s life (SCIENCE_CAP_ARROW_MS); restarting that animation is how a
+   repeat block restarts the timer. The svg bobs; .alert (a repeat block while
+   already showing) swaps in a shake plus a bright flash, then the bob resumes. */
+#science-cap-arrow { position: fixed; display: none; z-index: 30; pointer-events: none; transform: translateX(-50%); filter: drop-shadow(0 1px 3px rgba(0, 0, 0, 0.45)); }
+#science-cap-arrow.show { display: block; animation: science-cap-arrow-life 4s linear forwards; }
+#science-cap-arrow svg { display: block; animation: science-cap-arrow-bob 0.9s ease-in-out infinite; }
+#science-cap-arrow.alert svg { animation: science-cap-arrow-shake 0.5s linear 1, science-cap-arrow-flash 0.5s linear 1, science-cap-arrow-bob 0.9s ease-in-out 0.5s infinite; }
+@keyframes science-cap-arrow-life { 0% { opacity: 0; } 4% { opacity: 1; } 90% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes science-cap-arrow-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(5px); } }
+@keyframes science-cap-arrow-shake { 0%, 100% { transform: translateX(0); } 15% { transform: translateX(-6px); } 30% { transform: translateX(6px); } 45% { transform: translateX(-5px); } 60% { transform: translateX(5px); } 80% { transform: translateX(-2px); } }
+@keyframes science-cap-arrow-flash { 0%, 100% { filter: none; } 20%, 60% { filter: brightness(2.4) saturate(0.4); } 40% { filter: none; } }
 #hud-science-cap.hidden { display: none; } /* only shown once the Science Octopus is unlocked, same "hidden until relevant" precedent as #hud-power/electric Eel */
 
 /* A soft diagonal light sweep that plays across a UI element every so often

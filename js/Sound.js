@@ -441,11 +441,14 @@ export function playFishKilledByAlien() {
   playTone(164.81, 0.24, { type: 'sawtooth', gain: 0.1, when: 0.26 }); // E3
 }
 
-// A bright quick double-blip, Mario-coin style — banking a coin.
+// A quick double-blip, Mario-coin style — banking a coin. Softened per direct
+// request ("slightly too aggressive and shrill"): a triangle wave instead of a
+// square (far fewer harmonics, so no buzz), a fourth lower (G5/C6, was B5/E6),
+// quieter, and with a gentler attack and a longer tail on the second note.
 export function playCoinBank() {
   if (sfxOnCooldown('playCoinBank')) return;
-  playTone(988, 0.05, { type: 'square', gain: 0.15 }); // B5
-  playTone(1318.5, 0.14, { type: 'square', gain: 0.15, when: 0.05 }); // E6
+  playTone(784, 0.06, { type: 'triangle', gain: 0.13, attack: 0.01 }); // G5
+  playTone(1046.5, 0.16, { type: 'triangle', gain: 0.13, attack: 0.01, release: 0.1, when: 0.055 }); // C6
 }
 
 // A solid ascending "thunk" — placing a building. Reworked per direct

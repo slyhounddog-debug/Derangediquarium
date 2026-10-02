@@ -102,6 +102,13 @@
      direct request. -->
 <div id="hud-hover-bubble" class="hidden">❓</div>
 
+<!-- Gold arrow under the HUD pointing up at the Bubble Cap readout, shown for 4s
+     whenever a researcher's science drop is blocked by the cap (UI.js's
+     updateScienceCapArrow). Same triangle look as the Mound/Science Lab arrow. -->
+<div id="science-cap-arrow" aria-hidden="true">
+  <svg viewBox="0 0 36 36" width="28" height="28"><polygon points="18,5 31,29 5,29" fill="#ffd76b" stroke="#8a5a14" stroke-width="3" stroke-linejoin="round"/></svg>
+</div>
+
 <!-- Minimal minimap, per direct request — sits directly under #hud, same
      right-aligned corner. #minimap-canvas always renders the whole tank
      letterboxed to fit its own small fixed box (main.js's renderMinimap).

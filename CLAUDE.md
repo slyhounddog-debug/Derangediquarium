@@ -2124,3 +2124,11 @@ Verified in a browser (Playwright, zero JS errors; the only console error is the
 **Fish stage sizes:** baby scale x1.2 (`FISH_BABY_SCALE_MULTIPLIER`) and mid x1.1 (`FISH_MID_SCALE_MULTIPLIER`), applied once in `Config.js` right after `SPECIES` to every non-final stage; adults and single-stage hybrids are untouched. Scale is also the hit/eat radius, so those grow too. Side effect: the Electric Eel's mid scale (0.825) now exceeds its adult scale (0.8, from the earlier 25% cut) — its adult uses a long eel body, so it still reads larger.
 
 **E hotkey only opens/closes the shop.** `toggleShopCollapse(state, keepSelection)` — both E handlers in `main.js` (normal and during a guided tutorial) pass `true`, so closing the shop with E no longer deselects a selected fish (`updateShopCollapse`'s fish-deselect-on-close is skipped). Every other close path (the shop button, opening the Tank panel, `closeSidePanels`) still deselects, as before.
+
+## Softer Coin SFX, "Sick" Researcher + Bubble Cap Arrow, Eel 0.85, Mid Fish -5%
+
+**Coin-bank SFX** (`Sound.js`'s `playCoinBank`) softened: triangle wave instead of square, a fourth lower (G5/C6, was B5/E6), gain 0.15 -> 0.13, gentler attack, longer tail.
+
+**Bubble-Cap-blocked science.** `Entities.js`'s `triggerProductionBlocked`, for `resource === 'science'`: sets `fish.scienceBlockedSickMs` (1s, `FISH_BLOCKED_TINT_MS`) — `main.js` blends the researcher (Octopus or hybrid) toward the sick green at `SCIENCE_BLOCKED_SICKNESS` (0.8; hunger sickness is only 0.18-0.35) instead of the gray tint a blocked coin still gets — and bumps `state.ui.scienceBlockedSignals`. `UI.js`'s `updateScienceCapArrow` (from `updateHUD`) sees the counter change and shows `#science-cap-arrow` (gold up-pointing triangle, same look as the Mound's) under the Bubble Cap readout for 4s (CSS animation; its `animationend` clears the classes). A block while it's showing restarts the 4s and adds `.alert` (shake + flash, then the bob resumes). Hidden in Alt-mode.
+
+**Sizes:** Electric Eel adult scale 0.8 -> 0.85 (its hybrids stay 0.8); `FISH_MID_SCALE_MULTIPLIER` 1.1 -> 1.1 * 0.95 (mid fish 5% smaller than the previous round; guppy mid 0.825 -> 0.784).

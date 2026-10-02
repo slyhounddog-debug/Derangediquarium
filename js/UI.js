@@ -341,6 +341,7 @@ export function initUI(state) {
     minimapWrap: document.getElementById('minimap-wrap'),
     money: document.getElementById('hud-money'),
     scienceCap: document.getElementById('hud-science-cap'),
+    scienceCapArrow: document.getElementById('science-cap-arrow'),
     cleanliness: document.getElementById('hud-cleanliness'),
     power: document.getElementById('hud-power'),
     powerText: document.getElementById('hud-power-text'),
@@ -533,6 +534,9 @@ export function initUI(state) {
     }
     els.tabReminderCarets.appendChild(row);
   }
+  els.scienceCapArrow.addEventListener('animationend', (e) => {
+    if (e.target === els.scienceCapArrow) els.scienceCapArrow.classList.remove('show', 'alert'); // its 4s fade-out finished — so a later block reads as a fresh show, not a repeat (the svg's own shake/flash/bob animations bubble too, hence the target check)
+  });
   els.tabReminder.addEventListener('animationend', (e) => {
     if (e.target === els.tabReminder) els.tabReminder.classList.remove('show'); // the carets' own (infinite) animations bubble too — only the container's fade-out ends the reminder
   });
@@ -3755,6 +3759,29 @@ export function toggleStatsPanel(state) {
 // after the last time it was (then every 1.5 min — 5, 6.5, 8...). Driven by
 // state.level.elapsed, so it neither counts nor fires while paused, and it
 // waits (without consuming the reminder) during a guided tutorial.
+// Per direct request — whenever a researcher's science drop is blocked by the
+// Bubble Cap (Entities.js bumps state.ui.scienceBlockedSignals), a gold arrow
+// under the HUD points up at the Bubble Cap readout for 4s. A block while it's
+// already showing restarts that 4s timer (by restarting the CSS animation) and
+// shakes and flashes the arrow. Only does anything on the frame a new block is
+// seen; the arrow itself is pure CSS.
+let lastScienceBlockedSignals = 0;
+function updateScienceCapArrow(state) {
+  const signals = state.ui.scienceBlockedSignals;
+  if (signals === lastScienceBlockedSignals) return;
+  lastScienceBlockedSignals = signals;
+  const arrow = els.scienceCapArrow;
+  const rect = els.scienceCap.getBoundingClientRect();
+  if (rect.width === 0) return; // the Bubble Cap readout isn't showing (no Octopus unlocked), nothing to point at
+  const wasShowing = arrow.classList.contains('show');
+  arrow.style.left = `${rect.left + rect.width / 2}px`;
+  arrow.style.top = `${rect.bottom + 4}px`;
+  arrow.classList.remove('show', 'alert');
+  void arrow.offsetWidth; // forced reflow so both CSS animations restart
+  arrow.classList.add('show');
+  if (wasShowing) arrow.classList.add('alert');
+}
+
 function updateTabReminder(state) {
   if (statsPanelOpen || state.level.tutorialFlow || state.ui.paused) return;
   if (typeof state.level.tabReminderNextAtMs !== 'number') state.level.tabReminderNextAtMs = state.level.elapsed + TAB_REMINDER_REPEAT_MS; // a save from before this field existed
@@ -4814,6 +4841,7 @@ export function updateHUD(state) {
   if (!state.ui.tankPanelCollapsed) refreshTankPanelView(state);
   if (statsPanelOpen) refreshStatsPanel(state);
   updateTabReminder(state);
+  updateScienceCapArrow(state);
 
   if (lastMoney !== null && money !== lastMoney) {
     playFlash(els.money, money > lastMoney ? 'flash-pickup' : 'flash-spend');

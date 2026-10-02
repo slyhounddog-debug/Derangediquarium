@@ -1549,8 +1549,8 @@ export const SPECIES = {
     growthStages: [
       { feedsRequired: 0, scale: 0.5, pixelsPerMW: 1 },
       { feedsRequired: 2, scale: 0.75, pixelsPerMW: 1 },
-      // Adult 1.0 -> 0.8 (a 25% size reduction, 1/1.25), per direct request ("The electric eel adult and its hybrids are 25% too big") — also shrinks its hit/eat radius, since size is the single source for both.
-      { feedsRequired: 4, scale: 0.8, pixelsPerMW: 0.5 },
+      // Adult 1.0 -> 0.8 (a 25% size reduction, 1/1.25), per direct request ("The electric eel adult and its hybrids are 25% too big"), then back up to 0.85 per a later direct request — also its hit/eat radius, since size is the single source for both. Its hybrids (Battery/Feeder fish) stay at 0.8.
+      { feedsRequired: 4, scale: 0.85, pixelsPerMW: 0.5 },
     ],
     unlockedByDefault: false,
   },
@@ -1677,7 +1677,7 @@ export const SPECIES = {
 // untouched. Note scale is also a fish's hit/eat radius, so baby/mid hitboxes
 // grow with it.
 export const FISH_BABY_SCALE_MULTIPLIER = 1.2;
-export const FISH_MID_SCALE_MULTIPLIER = 1.1;
+export const FISH_MID_SCALE_MULTIPLIER = 1.1 * 0.95; // 1.1, then a further 5% smaller per direct request (= 1.045x the original mid size)
 for (const def of Object.values(SPECIES)) {
   const stages = def.growthStages;
   if (stages.length > 1) stages[0].scale *= FISH_BABY_SCALE_MULTIPLIER;
@@ -3561,6 +3561,16 @@ export const COIN_SPARKLE_COLOR = { r: 255, g: 214, b: 92 }; // warm gold, disti
 // stays true, so it reads as a steady tint, not a flicker), or for exactly
 // this long, one-shot, the moment a coin-drop is blocked by the Coin Cap.
 export const FISH_BLOCKED_TINT_MS = 1000;
+// Per direct request ("the visual isn't obvious enough when the bubble cap is
+// met and an octopus tries to spawn a science but can't") — a science drop
+// blocked by the Bubble Cap now makes the researcher (Octopus or hybrid) look
+// SICK for FISH_BLOCKED_TINT_MS instead of the plain gray tint a blocked coin
+// still gets: a heavy green blend (the hunger sickness tint is only 0.18-0.35).
+export const SCIENCE_BLOCKED_SICKNESS = 0.8;
+// ...and a gold arrow under the HUD points at the Bubble Cap readout for 4s
+// (UI.js's updateScienceCapArrow; the duration is #science-cap-arrow.show's CSS
+// animation), restarting — with a shake and flash — if another researcher is
+// blocked while it's still showing.
 
 // Portals — temporary animated spawn points, per direct request ("have
 // alien fish spawn in from animated temporary portals that open to let them

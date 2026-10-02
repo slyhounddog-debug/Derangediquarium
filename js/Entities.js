@@ -1185,6 +1185,7 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
     bubbleTimerMs: FISH_BUBBLE_INTERVAL_MIN_MS + Math.random() * (FISH_BUBBLE_INTERVAL_MAX_MS - FISH_BUBBLE_INTERVAL_MIN_MS),
     pendingSecondBubbleMs: 0,
     alienNearby: false, // recomputed every tick in updateFish — true while a living alien is within ALIEN_INCOME_BLOCK_RADIUS, driving both the coin-production block and the continuous gray tint (main.js's render)
+    scienceBlockedSickMs: 0, // counts down from FISH_BLOCKED_TINT_MS when a SCIENCE drop is blocked by the Bubble Cap — drives the "looks sick" tint (main.js's render), see triggerProductionBlocked
     capBlockedTintRemainingMs: 0, // counts down from FISH_BLOCKED_TINT_MS whenever a science drop is blocked by the Bubble Cap — the OTHER (timed) source of the gray tint, see triggerProductionBlocked
     mutagenBuffActive: false, // Adult-only Mutagen Paste buff — see updateFish's eat branch; cleared once hunger crosses back into HUNGER_CRITICAL_THRESHOLD
     magnetOn: false, // Magnet Fish (buffer_fish) only — toggled by DOUBLE-clicking the fish (main.js's click handler); pulls nearby items whose type is in magnetFilterItems toward it while true, see computeBufferFishMagnetForce
@@ -1336,7 +1337,16 @@ function triggerProductionBlocked(state, fish, stageDef, resource) {
   // FISH_BLOCKED_TINT_MS the moment a drop is blocked by its cap — the same
   // visual cue an alien blocking production continuously uses (see
   // fish.alienNearby), just timed instead of proximity-driven.
-  fish.capBlockedTintRemainingMs = FISH_BLOCKED_TINT_MS;
+  // Per direct request, a blocked SCIENCE drop instead makes the researcher
+  // look sick for the same duration (the gray tint wasn't obvious enough) and
+  // signals UI.js to point an arrow at the Bubble Cap in the HUD — see
+  // state.ui.scienceBlockedSignals.
+  if (resource === 'science') {
+    fish.scienceBlockedSickMs = FISH_BLOCKED_TINT_MS;
+    state.ui.scienceBlockedSignals += 1;
+  } else {
+    fish.capBlockedTintRemainingMs = FISH_BLOCKED_TINT_MS;
+  }
 }
 
 const FOOD_ROT_WARNING_MESSAGE = "Careful now, food that's chilling too long rots into waste";
@@ -2800,6 +2810,7 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
   const nearbyAlien = findNearestAlienWithin(state.level.entities, fish.x, fish.y, ALIEN_AWARENESS_RADIUS);
   fish.alienNearby = !!(nearbyAlien && Math.hypot(nearbyAlien.x - fish.x, nearbyAlien.y - fish.y) <= ALIEN_INCOME_BLOCK_RADIUS);
   if (fish.capBlockedTintRemainingMs > 0) fish.capBlockedTintRemainingMs = Math.max(0, fish.capBlockedTintRemainingMs - dtMs);
+  if (fish.scienceBlockedSickMs > 0) fish.scienceBlockedSickMs = Math.max(0, fish.scienceBlockedSickMs - dtMs);
 
   // A higher star tier is also less hungry — compounding 10%-per-tier
   // reduction, same ^(starTier-1) pattern as the coin-value multiplier below.
