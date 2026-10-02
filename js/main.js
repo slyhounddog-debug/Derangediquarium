@@ -1553,10 +1553,10 @@ function bakeMergeHoverGlow() {
   return canvas;
 }
 // Per direct request, a bubble sits at the exact midpoint of each line, showing
-// the fish that pair would make at 66% of its real on-screen size. Icons are
+// the fish that pair would make at 60% of its real on-screen size. Icons are
 // baked once per species (adult stage, facing right) so the per-frame cost is
 // one drawImage each.
-const MERGE_BUBBLE_ICON_SCALE = 0.66;
+const MERGE_BUBBLE_ICON_SCALE = 0.6; // 0.66 -> 0.6 per direct request
 const MERGE_BUBBLE_ICON_BAKE = 2; // bake resolution multiplier
 const MERGE_BUBBLE_ICON_HALF = 100; // px each side of center the baked canvas covers — enough for the longest hybrid (Eel body, Octopus tentacles)
 const mergeBubbleIcons = {};
@@ -1569,7 +1569,7 @@ function getMergeBubbleIcon(speciesId) {
   c.scale(MERGE_BUBBLE_ICON_BAKE, MERGE_BUBBLE_ICON_BAKE);
   const def = SPECIES[speciesId];
   drawFish(c, MERGE_BUBBLE_ICON_HALF, MERGE_BUBBLE_ICON_HALF, speciesId, def.growthStages.length - 1, 1, 0, { x: 1, y: 0 });
-  icon = mergeBubbleIcons[speciesId] = { canvas, radius: MERGE_BUBBLE_ICON_SCALE * FISH_BASE_SIZE * def.growthStages[def.growthStages.length - 1].scale * 1.35 + 4 };
+  icon = mergeBubbleIcons[speciesId] = { canvas, radius: MERGE_BUBBLE_ICON_SCALE * FISH_BASE_SIZE * def.growthStages[def.growthStages.length - 1].scale * 1.285 + 3.5 }; // ~13% smaller bubble than before (was 0.66 * ... * 1.35 + 4), hugging the smaller icon
   return icon;
 }
 
