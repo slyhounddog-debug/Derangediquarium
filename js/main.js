@@ -1557,6 +1557,10 @@ function bakeMergeHoverGlow() {
 // baked once per species (adult stage, facing right) so the per-frame cost is
 // one drawImage each.
 const MERGE_BUBBLE_ICON_SCALE = 0.6; // 0.66 -> 0.6 per direct request
+// Per direct request, every result fish's icon and bubble match the size the Feeder/Battery
+// fish's (adult scale MERGE_BUBBLE_REF_SCALE) get — so a full-size (1.0) fish's icon is drawn
+// smaller, to the same on-screen size, and the bubble radius is the same for all.
+const MERGE_BUBBLE_REF_SCALE = 0.8;
 const MERGE_BUBBLE_ICON_BAKE = 2; // bake resolution multiplier
 const MERGE_BUBBLE_ICON_HALF = 100; // px each side of center the baked canvas covers — enough for the longest hybrid (Eel body, Octopus tentacles)
 const mergeBubbleIcons = {};
@@ -1569,7 +1573,12 @@ function getMergeBubbleIcon(speciesId) {
   c.scale(MERGE_BUBBLE_ICON_BAKE, MERGE_BUBBLE_ICON_BAKE);
   const def = SPECIES[speciesId];
   drawFish(c, MERGE_BUBBLE_ICON_HALF, MERGE_BUBBLE_ICON_HALF, speciesId, def.growthStages.length - 1, 1, 0, { x: 1, y: 0 });
-  icon = mergeBubbleIcons[speciesId] = { canvas, radius: MERGE_BUBBLE_ICON_SCALE * FISH_BASE_SIZE * def.growthStages[def.growthStages.length - 1].scale * 1.285 + 3.5 }; // ~13% smaller bubble than before (was 0.66 * ... * 1.35 + 4), hugging the smaller icon
+  const adultScale = def.growthStages[def.growthStages.length - 1].scale;
+  icon = mergeBubbleIcons[speciesId] = {
+    canvas,
+    drawScale: MERGE_BUBBLE_ICON_SCALE * MERGE_BUBBLE_REF_SCALE / adultScale, // 0.6 of the reference fish's size, whatever this species' own scale
+    radius: MERGE_BUBBLE_ICON_SCALE * FISH_BASE_SIZE * MERGE_BUBBLE_REF_SCALE * 1.285 + 3.5, // the Feeder/Battery fish's bubble, for every fish
+  };
   return icon;
 }
 
@@ -1642,7 +1651,7 @@ function renderMergeToolPartnerHighlight(ctx, state, subject, nowMs, fade = 1) {
     ctx.arc(mx - r * 0.45, my - r * 0.45, r * 0.14, 0, Math.PI * 2);
     ctx.fill();
     ctx.globalAlpha = glowAlpha;
-    const half = MERGE_BUBBLE_ICON_HALF * MERGE_BUBBLE_ICON_SCALE;
+    const half = MERGE_BUBBLE_ICON_HALF * icon.drawScale;
     ctx.drawImage(icon.canvas, mx - half, my - half, half * 2, half * 2);
   }
   ctx.restore();
