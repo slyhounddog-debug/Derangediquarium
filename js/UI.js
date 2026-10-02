@@ -26,6 +26,7 @@ import {
   PROCESSOR_STATS,
   REFINERY_STATS,
   TAB_REMINDER_AFTER_OPEN_MS,
+  PRODUCTION_INFO_REFRESH_MS,
   TAB_REMINDER_REPEAT_MS,
   ALIEN_DNA_REFINERY_TIME_MULTIPLIER,
   MANUFACTURER_RECIPES,
@@ -111,6 +112,7 @@ import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
 import { playUpgrade, setMusicVolume, setSfxVolume, getMusicVolume, getSfxVolume, playPanelOpen, playPanelClose, playInsufficientFunds, setMusicUnderwaterMuffle, setMusicSpeedBoost, setMusicPaused } from './Sound.js';
+import { computeProductionInfo } from './ProductionInfo.js';
 import { hasSaveGame, saveGame, loadSaveGame, isGuidedTutorialsEnabled, setGuidedTutorialsEnabled } from './Save.js';
 import { pushGameNotification } from './Notifications.js';
 
@@ -357,6 +359,9 @@ export function initUI(state) {
     alienCountdownSeconds: document.getElementById('alien-countdown-seconds'),
     statsPanel: document.getElementById('stats-panel'),
     statsPanelList: document.getElementById('stats-panel-list'),
+    productionInfo: document.getElementById('production-info'),
+    productionInfoTitle: document.getElementById('production-info-title'),
+    productionInfoBody: document.getElementById('production-info-body'),
     tabReminder: document.getElementById('tab-reminder'),
     tabReminderCarets: document.getElementById('tab-reminder-carets'),
     bossHealthBarWrap: document.getElementById('boss-health-bar-wrap'),
@@ -3722,6 +3727,106 @@ export function toggleStatsPanel(state) {
 // already showing restarts that 4s timer (by restarting the CSS animation) and
 // shakes and flashes the arrow. Only does anything on the frame a new block is
 // seen; the arrow itself is pure CSS.
+// ---- Production info modal (Shift-drag box select, main.js) ----
+// Per direct request: shows what everything in the selection box produces and
+// consumes per minute, its electricity (draw orange, production teal, net
+// green/red) and the items/chests inside. main.js calls this every frame while
+// a selection is being dragged, with the box in world space (the numbers) and
+// in screen space (where to sit). The numbers are recomputed only every
+// PRODUCTION_INFO_REFRESH_MS and the DOM is touched only when the generated
+// HTML actually changed, so a frame mostly costs one style write.
+const PRODUCTION_INFO_GAP_PX = 10;
+const PRODUCTION_INFO_MARGIN_PX = 8;
+let productionInfoNextAtMs = 0;
+let productionInfoHtml = null;
+let productionInfoW = 0;
+let productionInfoH = 0;
+let productionInfoPos = '';
+
+function productionRowHtml(itemType, text, extra = '') {
+  const def = PLATFORM_FILTER_ITEM_TYPES.find((t) => t.id === itemType);
+  return `<div class="prod-row"><span>${itemIconImgHtml(itemType, 16)}${def ? def.label : itemType}</span><b>${text}${extra}</b></div>`;
+}
+
+function buildProductionInfoHtml(info) {
+  const order = PLATFORM_FILTER_ITEM_TYPES.map((t) => t.id);
+  const rateRows = (map, withGold) => order.filter((id) => map[id] > 0.005).map((id) => {
+    const gold = withGold && id === 'coin' && info.goldPerMin > 0 ? ` <span class="prod-row-sub">($${Math.round(info.goldPerMin)})</span>` : '';
+    return productionRowHtml(id, map[id].toFixed(1), gold);
+  });
+  const parts = [];
+  parts.push(`<div class="prod-row prod-row-sub"><span>${info.fishCount} fish · ${info.buildingCount} active building${info.buildingCount === 1 ? '' : 's'}</span></div>`);
+  const made = rateRows(info.produced, true);
+  const needed = rateRows(info.consumed, false);
+  if (made.length) parts.push('<div class="prod-section-title">Producing / min</div>', ...made);
+  if (needed.length) parts.push('<div class="prod-section-title">Needs / min</div>', ...needed);
+  if (info.powerDraw > 0.05 || info.powerProduced > 0.05) {
+    const net = info.powerProduced - info.powerDraw;
+    parts.push(
+      '<div class="prod-section-title">Electricity</div>',
+      `<div class="prod-row prod-draw"><span>⚡ Draw</span><b>${info.powerDraw.toFixed(1)} mw</b></div>`,
+      `<div class="prod-row prod-made"><span>⚡ Production</span><b>${info.powerProduced.toFixed(1)} mw</b></div>`,
+      `<div class="prod-row ${net >= 0 ? 'prod-net-pos' : 'prod-net-neg'}"><span>Net</span><b>${net >= 0 ? '+' : ''}${net.toFixed(1)} mw</b></div>`,
+    );
+  }
+  const loose = order.filter((id) => info.items[id] > 0);
+  if (loose.length) parts.push('<div class="prod-section-title">Items inside</div>', ...loose.map((id) => productionRowHtml(id, String(info.items[id]))));
+  if (info.chests.length) {
+    parts.push('<div class="prod-section-title">In chests</div>', ...info.chests.map((c) => productionRowHtml(c.itemType, String(c.count), c.itemType === 'coin' ? ` <span class="prod-row-sub">($${c.coinTotal})</span>` : '')));
+  }
+  if (!made.length && !needed.length && !loose.length && !info.chests.length && !(info.powerDraw > 0.05 || info.powerProduced > 0.05)) {
+    parts.push('<div class="prod-row prod-row-sub"><span>Nothing producing here.</span></div>');
+  }
+  return parts.join('');
+}
+
+// worldRect: { x0, y0, x1, y1 } in world px; screenRect: { left, top, right, bottom } in screen px.
+export function updateProductionInfoModal(state, worldRect, screenRect, nowMs) {
+  const el = els.productionInfo;
+  if (el.classList.contains('hidden')) {
+    el.classList.remove('hidden');
+    productionInfoNextAtMs = 0; // first frame: build immediately
+    productionInfoHtml = null;
+  }
+  if (nowMs >= productionInfoNextAtMs) {
+    productionInfoNextAtMs = nowMs + PRODUCTION_INFO_REFRESH_MS;
+    const html = buildProductionInfoHtml(computeProductionInfo(state, worldRect));
+    if (html !== productionInfoHtml) {
+      productionInfoHtml = html;
+      els.productionInfoBody.innerHTML = html;
+      productionInfoW = el.offsetWidth;
+      productionInfoH = el.offsetHeight;
+    }
+  }
+  // Centered horizontally on the box and sitting just above it; near the top of
+  // the screen it drops below the box, and if that doesn't fit either, beside it.
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const cx = (screenRect.left + screenRect.right) / 2;
+  const clampX = (x) => Math.max(PRODUCTION_INFO_MARGIN_PX, Math.min(vw - productionInfoW - PRODUCTION_INFO_MARGIN_PX, x));
+  let left = clampX(cx - productionInfoW / 2);
+  let top = screenRect.top - PRODUCTION_INFO_GAP_PX - productionInfoH;
+  if (top < PRODUCTION_INFO_MARGIN_PX) {
+    top = screenRect.bottom + PRODUCTION_INFO_GAP_PX;
+    if (top + productionInfoH > vh - PRODUCTION_INFO_MARGIN_PX) {
+      left = clampX(screenRect.right + PRODUCTION_INFO_GAP_PX);
+      if (left + productionInfoW > vw - PRODUCTION_INFO_MARGIN_PX) left = clampX(screenRect.left - PRODUCTION_INFO_GAP_PX - productionInfoW);
+      top = Math.max(PRODUCTION_INFO_MARGIN_PX, Math.min(vh - productionInfoH - PRODUCTION_INFO_MARGIN_PX, (screenRect.top + screenRect.bottom) / 2 - productionInfoH / 2));
+    }
+  }
+  const pos = `${Math.round(left)}px,${Math.round(top)}px`;
+  if (pos !== productionInfoPos) {
+    productionInfoPos = pos;
+    el.style.left = `${Math.round(left)}px`;
+    el.style.top = `${Math.round(top)}px`;
+  }
+}
+
+export function closeProductionInfoModal() {
+  els.productionInfo.classList.add('hidden');
+  productionInfoHtml = null;
+}
+
 let lastScienceBlockedSignals = 0;
 function updateScienceCapArrow(state) {
   const signals = state.ui.scienceBlockedSignals;

@@ -454,6 +454,36 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
   transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 #stats-panel.open { transform: translate(0, -50%); }
+/* Production info modal — see UI.js's updateProductionInfoModal. Same card look as
+   the fish info modal; pointer-events none since the player is mid-drag. */
+#production-info {
+  position: fixed;
+  z-index: 185;
+  width: 250px;
+  background: #fff8f0;
+  color: #6b4c6b;
+  border-radius: 18px;
+  padding: 12px 14px;
+  box-shadow: 0 10px 28px rgba(107, 76, 107, 0.4);
+  font-size: 12px;
+  pointer-events: none;
+}
+#production-info.hidden { display: none; }
+#production-info-title { font-size: 14px; font-weight: 800; color: #c25f8f; margin-bottom: 6px; }
+.prod-section-title {
+  font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.03em; opacity: 0.65;
+  margin-top: 8px; padding-top: 6px; border-top: 1px dashed rgba(107, 76, 107, 0.25);
+}
+.prod-section-title:first-child { margin-top: 0; padding-top: 0; border-top: none; }
+.prod-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-weight: 700; line-height: 1.55; }
+.prod-row .stat-item-icon { vertical-align: -3px; margin-right: 4px; }
+.prod-row-sub { font-weight: 600; opacity: 0.65; }
+.prod-draw { color: #f08a24; }
+.prod-made { color: #1fb8a0; }
+.prod-net-pos { color: #2fae5d; }
+.prod-net-neg { color: #e0392b; }
+#production-info-note { font-size: 10px; opacity: 0.6; margin-top: 8px; line-height: 1.3; }
+body.alt-mode #production-info { display: none !important; }
 /* Tab reminder — see UI.js's updateTabReminder. Shown for 6s by adding .show
    (the container fades in and out over that time); each caret pulses on its own
    delay (column, then row), so the brightness sweeps left to right. */

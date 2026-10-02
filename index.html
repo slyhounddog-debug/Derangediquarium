@@ -144,6 +144,17 @@
      now and then until the panel gets opened (UI.js's updateTabReminder). A
      sideways "Tab" label plus rows of right-pointing carets that fade in and
      out in a staggered wave, built by UI.js's initUI. -->
+<!-- Production info — shown while Shift-dragging a selection box with nothing armed:
+     what the fish/buildings inside it produce and consume per minute, their
+     electricity, and the items/chests inside. Content is rebuilt a few times a
+     second (UI.js's updateProductionInfoModal); positioned above the box,
+     flipping below/beside it near the top of the screen. -->
+<div id="production-info" class="hidden" aria-hidden="true">
+  <div id="production-info-title">Selection</div>
+  <div id="production-info-body"></div>
+  <div id="production-info-note">Building rates and electricity are scaled by each building's uptime %.</div>
+</div>
+
 <div id="tab-reminder" aria-hidden="true">
   <div id="tab-reminder-text">Tab</div>
   <div id="tab-reminder-carets"></div>

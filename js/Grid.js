@@ -3161,11 +3161,16 @@ function ejectOneFromChest(state, data, key, centerX, centerY, angle, distanceTi
 function isBuildingActiveForUptime(state, type, data, centerX, centerY) {
   if (FAN_TILES.has(type)) return true;
   if (COLLECTOR_TILES.has(type)) {
-    return state.level.items.some(
+    const activeItem = state.level.items.find(
       (it) => it.collectorProgressMs != null && it.collectorCenterX === centerX && it.collectorCenterY === centerY
     );
+    if (activeItem) data.lastActiveItemType = activeItem.type; // remembered for the production-info modal, which needs to know what a recently-active Collector was processing
+    return !!activeItem;
   }
-  if (REFINERY_TILES.has(type)) return data.lockedRecipe !== null;
+  if (REFINERY_TILES.has(type)) {
+    if (data.lockedRecipe !== null) data.lastActiveRecipe = data.lockedRecipe; // same reason — the recipe resets to null the moment an item finishes
+    return data.lockedRecipe !== null;
+  }
   if (MANUFACTURER_TILES.has(type)) return !!data.processing;
   if (POWER_PLANT_TILES.has(type)) return !!data.fueled && data.recipeId !== null;
   if (TURRET_TILES.has(type)) {
@@ -3193,7 +3198,10 @@ function updateBuildingUptimeTracking(state, type, data, centerX, centerY, dtMs)
     data.uptimeSampleTimerMs = 0;
     data.uptimeActiveMs = 0;
   }
-  if (isBuildingActiveForUptime(state, type, data, centerX, centerY)) data.uptimeActiveMs += dtMs;
+  if (isBuildingActiveForUptime(state, type, data, centerX, centerY)) {
+    data.uptimeActiveMs += dtMs;
+    data.lastActiveAtMs = state.level.elapsed; // for getBuildingRecentlyActive
+  }
   data.uptimeSampleTimerMs += dtMs;
   if (data.uptimeSampleTimerMs >= BUILDING_UPTIME_SAMPLE_INTERVAL_MS) {
     data.uptimeSamples.push(data.uptimeActiveMs / data.uptimeSampleTimerMs);
@@ -3207,6 +3215,14 @@ function updateBuildingUptimeTracking(state, type, data, centerX, centerY, dtMs)
 // samples have accumulated so far (not necessarily a full 3 minutes' worth
 // yet on a freshly-placed building), or null if none exist at all (shown as
 // "still warming up" rather than a misleading 0%).
+// Per direct request (production info modal): whether a building was doing work
+// within the last graceMs — the "active" half of "count only active buildings",
+// with a grace window so a machine briefly waiting on its next item doesn't
+// flicker in and out. Reads the timestamp updateBuildingUptimeTracking keeps.
+export function getBuildingRecentlyActive(state, data, graceMs) {
+  return data.lastActiveAtMs !== undefined && state.level.elapsed - data.lastActiveAtMs <= graceMs;
+}
+
 export function getBuildingUptimeFraction(data) {
   if (!data || !data.uptimeSamples || data.uptimeSamples.length === 0) return null;
   const sum = data.uptimeSamples.reduce((a, b) => a + b, 0);

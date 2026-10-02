@@ -28,6 +28,8 @@ export function createInput(canvas) {
     clickHandlers: [],
     rightClickHandlers: [], // now main.js's universal-cancel + in-progress-move/blueprint cancel; contextmenu is prevented so it never opens the browser menu
     middleClickHandlers: [], // building-move pick-up — moved here from right-click per direct request ("right-click to move is changed to middle-click to move"); fired on mousedown (button 1) since there's no middle-click equivalent of the contextmenu event, with its own default (OS autoscroll) prevented below
+    mouseDownInterceptors: [], // checked BEFORE mouseDownHandlers on a left press — if any returns true the press is consumed (no other handler sees it); main.js's Shift-drag production-info box select uses this so item/chest/recipe drags don't also start
+    clickInterceptors: [], // same idea for the native click that follows — true swallows it
     mouseDownHandlers: [], // fired once, at press — main.js uses this to arm an Economy Fish Combining drag when the press lands on a combinable fish
     mouseUpHandlers: [], // fired once, at release (screen coords are the last tracked in-canvas mouse position — see the window mouseup listener below) — main.js uses this to resolve a combining drag
     // Right-button press/release, per direct request (the Storage Chest's
@@ -67,6 +69,7 @@ export function createInput(canvas) {
     const rect = canvas.getBoundingClientRect();
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
+    if (input.clickInterceptors.some((handler) => handler(sx, sy, e))) return;
     for (const handler of input.clickHandlers) handler(sx, sy, e);
   });
   canvas.addEventListener('mousedown', (e) => {
@@ -94,6 +97,7 @@ export function createInput(canvas) {
     const rect = canvas.getBoundingClientRect();
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;
+    if (input.mouseDownInterceptors.some((handler) => handler(sx, sy, e))) return;
     for (const handler of input.mouseDownHandlers) handler(sx, sy, e);
   });
   window.addEventListener('mouseup', (e) => {

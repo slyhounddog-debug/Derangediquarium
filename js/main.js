@@ -253,6 +253,8 @@ import {
   openPlatformFilterMenu,
   openFishInfoMenu,
   closeFishInfoMenu,
+  updateProductionInfoModal,
+  closeProductionInfoModal,
   copyPlatformFilter,
   openStorageChestModal,
   setFavoriteSlotFromShop,
@@ -1765,6 +1767,41 @@ input.rightMouseUpHandlers.push((sx, sy) => {
   if (moved || state.ui.paused || state.level.tutorialFlow) return;
   const fish = state.level.entities.find((e) => e.id === pressedId && e.type === 'fish');
   if (fish && TOGGLEABLE_FISH_SPECIES.includes(fish.speciesId)) toggleFishAbility(state, fish);
+});
+
+// ---- Production info: Shift + left-drag box select ----
+// Per direct request: with nothing armed (the plain cursor), holding Shift and
+// dragging draws a selection box, and a modal above it (UI.js's
+// updateProductionInfoModal) shows what the fish/buildings inside produce and
+// consume, their electricity, and the items/chests inside. The box is in
+// WORLD space (anchored to the tank as the camera moves) and, unlike the
+// Blueprint box, free-form pixels rather than tile-snapped, since fish and items
+// aren't on the grid. Releasing the mouse removes the box and the modal at once.
+// It uses Engine.js's mouseDownInterceptors/clickInterceptors so none of the
+// ordinary left-press handlers (item/chest/recipe drags, info modals, coin
+// banking) also react to the same press.
+let prodSelect = null; // { x0, y0 } world-space start of the active selection, or null
+let prodSelectSwallowClick = false; // the native click after a selection's mouseup shouldn't also act
+
+input.mouseDownInterceptors.push((sx, sy) => {
+  prodSelectSwallowClick = false; // a lost release (mouseup outside the window) must not leave a stale swallow
+  if (!isShiftHeld() || state.ui.selectedTool !== 'cursor' || state.ui.paused || state.level.tutorialFlow) return false;
+  const world = screenToWorld(sx, sy, state.camera);
+  prodSelect = { x0: world.x, y0: world.y };
+  return true;
+});
+
+input.mouseUpHandlers.push(() => {
+  if (!prodSelect) return;
+  prodSelect = null;
+  prodSelectSwallowClick = true;
+  closeProductionInfoModal();
+});
+
+input.clickInterceptors.push(() => {
+  if (!prodSelectSwallowClick) return false;
+  prodSelectSwallowClick = false;
+  return true;
 });
 
 // Whether the "drag Waste into the Turret" guided-tutorial step is the one
@@ -5402,6 +5439,27 @@ function render() {
     ctx.fillStyle = 'rgba(124, 255, 90, 0.12)';
     ctx.fillRect(bx, by, bw, bh);
     ctx.restore();
+  }
+  // Production info selection box + modal — see the box-select block near the fish drag handlers.
+  if (prodSelect) {
+    if (!input.mouseDown || state.ui.paused || state.ui.selectedTool !== 'cursor') {
+      prodSelect = null; // cancelled (a hotkey swapped the tool, the game paused, or the release was missed)
+      closeProductionInfoModal();
+    } else {
+      const cur = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
+      const worldRect = { x0: Math.min(prodSelect.x0, cur.x), y0: Math.min(prodSelect.y0, cur.y), x1: Math.max(prodSelect.x0, cur.x), y1: Math.max(prodSelect.y0, cur.y) };
+      const tl = worldToScreen(worldRect.x0, worldRect.y0, state.camera);
+      const br = worldToScreen(worldRect.x1, worldRect.y1, state.camera);
+      ctx.save();
+      ctx.strokeStyle = '#5fd0ff';
+      ctx.lineWidth = 2;
+      ctx.setLineDash([6, 4]);
+      ctx.strokeRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
+      ctx.fillStyle = 'rgba(95, 208, 255, 0.12)';
+      ctx.fillRect(tl.x, tl.y, br.x - tl.x, br.y - tl.y);
+      ctx.restore();
+      updateProductionInfoModal(state, worldRect, { left: tl.x, top: tl.y, right: br.x, bottom: br.y }, performance.now());
+    }
   }
   if (blueprintClipboard != null && input.mouse.inside && !state.ui.paused) {
     const hoverWorld = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
