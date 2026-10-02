@@ -3800,13 +3800,12 @@ export function updateProductionInfoModal(state, worldRect, screenRect, nowMs) {
   }
   // Always on the box's right side (per direct request — it reads best there, and
   // never hopping between above/below/beside keeps it from jumping around),
-  // vertically centered on the box and kept on screen. Only if there's no room
-  // on the right does it fall back to the box's left side.
+  // vertically centered on the box and kept on screen — if the box reaches the
+  // right edge it overlaps the box rather than moving to another side.
   const vw = window.innerWidth;
   const vh = window.innerHeight;
   const clampX = (x) => Math.max(PRODUCTION_INFO_MARGIN_PX, Math.min(vw - productionInfoW - PRODUCTION_INFO_MARGIN_PX, x));
-  let left = screenRect.right + PRODUCTION_INFO_GAP_PX;
-  if (left + productionInfoW > vw - PRODUCTION_INFO_MARGIN_PX) left = clampX(screenRect.left - PRODUCTION_INFO_GAP_PX - productionInfoW);
+  const left = clampX(screenRect.right + PRODUCTION_INFO_GAP_PX);
   const top = Math.max(PRODUCTION_INFO_MARGIN_PX, Math.min(vh - productionInfoH - PRODUCTION_INFO_MARGIN_PX, (screenRect.top + screenRect.bottom) / 2 - productionInfoH / 2));
   const pos = `${Math.round(left)}px,${Math.round(top)}px`;
   if (pos !== productionInfoPos) {
