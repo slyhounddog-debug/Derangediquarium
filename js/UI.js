@@ -806,25 +806,28 @@ export function closeSidePanels(state) {
 // the shop auto-collapses the Tank panel — they share the same on-screen
 // slot (see the CSS comment on #shop-panel, #tank-panel), so at most one is
 // ever expanded.
-export function toggleShopCollapse(state) {
+// keepSelection: the E hotkey passes true — per direct request it only ever
+// opens/closes the shop, so closing it must NOT deselect a selected fish (see
+// updateShopCollapse); every other close path still deselects.
+export function toggleShopCollapse(state, keepSelection = false) {
   state.ui.shopCollapsed = !state.ui.shopCollapsed;
   if (!state.ui.shopCollapsed) {
     state.ui.tankPanelCollapsed = true;
     updateTankPanelCollapse(state);
     state.level.tutorialFlags.firstShopOpened = true; // stops scheduleShopButtonReminder's bounce for good, this playthrough
   }
-  updateShopCollapse(state);
+  updateShopCollapse(state, keepSelection);
   (state.ui.shopCollapsed ? playPanelClose : playPanelOpen)();
 }
 
-function updateShopCollapse(state) {
+function updateShopCollapse(state, keepSelection = false) {
   // Per direct request ("if a fish is selected and you close the shop, have
   // it deselect the fish and default to the food") — checked here, the one
   // place every close path (the toggle button/S hotkey, opening the Tank
   // panel, closeSidePanels) funnels through, rather than duplicated at each
   // call site. Idempotent: once deselected, selectedTool is 'cursor', so a
   // later call with the shop still collapsed is a no-op.
-  if (state.ui.shopCollapsed && state.ui.selectedTool.startsWith('fish:')) {
+  if (state.ui.shopCollapsed && !keepSelection && state.ui.selectedTool.startsWith('fish:')) {
     deselectShopSelection(state);
   }
   els.shopPanel.classList.toggle('collapsed', state.ui.shopCollapsed);
