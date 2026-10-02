@@ -112,7 +112,7 @@ export const SEABED_FLOOR_Y = SEABED_ROW_START * TILE_SIZE; // world-y of the wa
 // for what fills it.
 export const CAMERA_BOTTOM_BUFFER_PX = 126;
 // The old Rocky Shelf — a fixed rest height 4 tiles above the world's
-// absolute bottom that nothing (coins, Science Bubbles, Food, Waste) fell
+// absolute bottom that nothing (coins, Science Flasks, Food, Waste) fell
 // past, splitting the seabed into a visually distinct "city" and
 // "underground" — is gone entirely per direct request ("remove the upper
 // and lower sections of the city... make it all the same section... food,
@@ -478,7 +478,7 @@ export const STORAGE_CHEST_CLEAR_REGRAB_COOLDOWN_MS = 1000;
 
 // A Collector doesn't bank an item the instant it lands any more — it visibly
 // draws it in toward the tile's center and holds it there for that tile's
-// PROCESSOR_STATS-derived duration (coin vs Science Bubble, tier-scaled —
+// PROCESSOR_STATS-derived duration (coin vs Science Flask, tier-scaled —
 // see that table below) before actually consuming it (Grid.js's
 // stepCollectorProcessing), so the single-item-at-a-time bottleneck that was
 // always the design intent (see the "Items can't stack" note on why a
@@ -745,7 +745,7 @@ export const COIN_RADIUS = 11; // px, base visual radius (bronze size) — 10% b
 export const COIN_CLICK_RADIUS_MULTIPLIER = 1.9; // click hit-test radius is each coin's own (tier-scaled) radius times this — 90% bigger than the coin itself (was 60%, bumped again per direct request), so a click doesn't have to be pixel-perfect (and doesn't get misread as a food-placement click on a miss). Purely a hit-test radius — the coin's actual drawn/collision size (COIN_RADIUS) is untouched. tryBankCoinAt still only ever banks the first match it finds per click and returns immediately, so an overlapping pair of these bigger radii still can't bank two coins on one click.
 export const CHEAT_GRANT_AMOUNT = 10000; // $ granted by the M debug key
 export const CHEAT_TANK_POINTS_GRANT_AMOUNT = 20; // Tank Points also granted by the M debug key, so testing the Tank Upgrades panel doesn't require grinding fish growth
-export const CHEAT_SCIENCE_GRANT_AMOUNT = 500; // Science Bubbles also granted by the M debug key, so testing the Science Lab's tech tree doesn't require grinding an Octopus's real brew-and-collect cycle
+export const CHEAT_SCIENCE_GRANT_AMOUNT = 500; // Science Flasks also granted by the M debug key, so testing the Science Lab's tech tree doesn't require grinding an Octopus's real brew-and-collect cycle
 export const CHEAT_SCIENCE_GREEN_GRANT_AMOUNT = 500; // Green Science too, per direct request ("so I can test those things") — same flat amount as blue Science above, granted alongside it by the M debug key
 export const CHEAT_FISHY_GEMS_GRANT_AMOUNT = 100; // per direct request ("make it so M debug hotkey gives me fishy gems") — comfortably covers even the priciest single hat (30) several times over, so testing the Customization panel doesn't require grinding real achievement claims first
 
@@ -875,7 +875,7 @@ export const SCIENCE_ITEM_RADIUS = 8.8; // 10% bigger (was 8) per direct request
 export const SCIENCE_ITEM_COLOR_A = '#b98bff'; // purple
 export const SCIENCE_ITEM_COLOR_B = '#5fc9ff'; // blue — matches the existing SCIENCE_COLOR used for floating text/HUD accents
 // While a Researcher fish (Science Octopus) is mid-cycle toward producing its
-// next physical Science bubble, a small "+0.1 🔬" floating text pops above it
+// next physical Science flask, a small "+0.1 🔬" floating text pops above it
 // every time it crosses another tenth of its current stage's cycle — pure
 // progress feedback, not an actual resource grant (nothing is banked until
 // the physical bubble itself is later collected) — per direct request, so a
@@ -883,7 +883,7 @@ export const SCIENCE_ITEM_COLOR_B = '#5fc9ff'; // blue — matches the existing 
 export const SCIENCE_PROGRESS_TICKS = 10;
 
 // ---- Green Science (Bio-Combuster's upgraded output) ----
-// Physically identical in every way to a blue Science Bubble — same
+// Physically identical in every way to a blue Science Flask — same
 // click-bank-or-Collector-routing rule ("Must be routed into a Collector to
 // be added to active science reserves," per direct spec — click-banking is
 // also supported for consistency with blue Science, since nothing in the
@@ -1575,13 +1575,13 @@ export const SPECIES = {
   },
   octopus: {
     id: 'octopus', name: 'Science Octopus', tier: 3, unlockPhase: 4, cost: 60, // cut from 90 per direct request
-    description: 'Slowly brews Science Bubbles — requires a Collector building to gather them.',
+    description: 'Slowly brews Science Flasks — requires a Collector building to gather them.',
     behavior: ['RESEARCHER'], dropType: 'science_blue',
     swimSpeed: 25, lifespan: 300000, hungerRate: 0.468, // 25% slower again per direct request — was 0.624
     // dropInterval is now a real long brew cycle, not a short speed-scaled
     // tick — per direct request ("a full minute at base... every 70 seconds
     // as a baby, every 50 seconds as an adult"). dropValue is the number of
-    // physical Science bubbles spawned once the cycle completes (always 1
+    // physical Science flasks spawned once the cycle completes (always 1
     // here) — see Entities.js's updateFish RESEARCHER branch and
     // SCIENCE_PROGRESS_TICKS for the "+0.1" progress-bubble feedback shown
     // every tenth of the way through.
@@ -1677,7 +1677,7 @@ export const SPECIES = {
   // a hostile wave alien can't be spliced.
   xeno_octopus: {
     id: 'xeno_octopus', name: 'Bio Fish', tier: 4, unlockPhase: 4, cost: 100, parents: ['octopus', 'alien_t1'], // renamed from 'Xeno Octopus' per direct request; id left alone, same precedent as eel_blimp's own rename
-    description: 'A hybrid of an Alien and a Science Octopus — not purchasable directly. Right-click and drag a grown Octopus onto the friendly alien an Alien Egg hatches into (a hostile wave alien won\'t do) to splice them together. Right-click it to toggle Bio-Sludge mode (single-click opens its info instead) — while on, it brews and spits out Bio-Sludge every 8 seconds instead of Science Bubbles. Still needs to be fed like any other fish.',
+    description: 'A hybrid of an Alien and a Science Octopus — not purchasable directly. Right-click and drag a grown Octopus onto the friendly alien an Alien Egg hatches into (a hostile wave alien won\'t do) to splice them together. Right-click it to toggle Bio-Sludge mode (single-click opens its info instead) — while on, it brews and spits out Bio-Sludge every 8 seconds instead of Science Flasks. Still needs to be fed like any other fish.',
     behavior: ['RESEARCHER'], dropType: 'science_blue',
     swimSpeed: 25, lifespan: 300000, hungerRate: 0.468,
     growthStages: [
@@ -2433,7 +2433,7 @@ export const TIER_UNLOCKS = {
 // A real branching dependency web, per direct request ("should look like a
 // web of unlocks branching from the unlocks that are barring them
 // before"), replacing the old flat "buy Gene-Splicing / buy 2 Advanced
-// buildings" list. Every node costs BOTH Science Bubbles and gold — a
+// buildings" list. Every node costs BOTH Science Flasks and gold — a
 // deliberate first in this game's economy, tying the Lab's whole tree to
 // two resources at once so it reads as the game's real end-goal sink.
 // `requires` lists prerequisite node ids that must already be purchased
@@ -2896,7 +2896,7 @@ export const ELECTRIC_SUCKER_FOOD_INTERVAL_MS = 6000;
 // Bio Fish: click it to toggle Bio-Sludge mode (fish.alienDnaModeOn) —
 // while on, its normal long Science brew cycle is replaced entirely by a
 // fixed SCIENCE_ALIEN_DNA_INTERVAL_MS timer that spits out one Bio-Sludge
-// (type `alien_dna`) item instead of a Science Bubble, per spec ("every 8
+// (type `alien_dna`) item instead of a Science Flask, per spec ("every 8
 // seconds instead of science"). See updateFish's isPureResearcher branch.
 export const SCIENCE_ALIEN_DNA_INTERVAL_MS = 8000;
 
@@ -2918,7 +2918,7 @@ export const MANUFACTURER_INPUT_COLOR_BY_TYPE = {
 // dedicated "on fire, disintegrating" effect — per direct request ("instead
 // of the bubble icon that shows up when the fish can't spawn coins, make it
 // look like a coin on fire that disintegrates"), later extended to Science
-// too ("use a science icon and do that animation when the science bubble cap
+// too ("use a science icon and do that animation when the science flask cap
 // is reached"). Entities.js's triggerProductionBlocked pushes a
 // { x, y, age, resource } record into state.level.productionBlockedEffects
 // (resource is 'coin' or 'science', read by main.js's render to decide which
@@ -3482,8 +3482,8 @@ export const BOSS_MINION_SPAWN_COUNT = 2;
 // On death: "have the boss exploded and turn into a bunch of green and blue
 // science (ignore the bubble cap at this point so it will spawn a bunch of
 // science)" — see Entities.js's updateAlien death branch, isBoss case.
-export const BOSS_DEATH_SCIENCE_COUNT = 12; // blue Science bubbles
-export const BOSS_DEATH_SCIENCE_GREEN_COUNT = 12; // Green Science bubbles
+export const BOSS_DEATH_SCIENCE_COUNT = 12; // blue Science flasks
+export const BOSS_DEATH_SCIENCE_GREEN_COUNT = 12; // Green Science flasks
 // "...and then slowly fade in a game over modal" — the delay between the
 // death-burst finishing and the stats modal starting its fade-in, plus the
 // fade's own duration (read by main.js/UI.js's showGameOverModal, and by
@@ -3699,14 +3699,14 @@ export const ACHIEVEMENTS = {
   // reaching adulthood (TANK_POINT_PER_ADULT_FISH = 1 each), so the two
   // conditions could never actually diverge from one another.
   four_star_fish: { id: 'four_star_fish', name: 'Four-Star General', description: 'Combine a fish all the way up to 4-star.', tier: 'medium', statField: 'fourStarFishAchieved', threshold: 1 },
-  science_banked_50: { id: 'science_banked_50', name: 'Lab Assistant', description: 'Bank 50 Science Bubbles.', tier: 'medium', statField: 'scienceBanked', threshold: 50 },
+  science_banked_50: { id: 'science_banked_50', name: 'Lab Assistant', description: 'Bank 50 Science Flasks.', tier: 'medium', statField: 'scienceBanked', threshold: 50 },
   fish_saved_10: { id: 'fish_saved_10', name: 'Lifeguard', description: 'Save 10 fish from starving by feeding them right at the brink.', tier: 'hard', statField: 'fishSaved', threshold: 10 },
   power_deficit_60s: { id: 'power_deficit_60s', name: 'Brownout', description: 'Under-produce electricity (demand exceeding supply) for a continuous 60 seconds.', tier: 'hard', statField: 'powerDeficitStreakBestMs', threshold: 60000 },
   power_surplus_60s: { id: 'power_surplus_60s', name: 'Overcharged', description: 'Produce at least double the electricity your grid needs, continuously, for 60 seconds.', tier: 'hard', statField: 'powerSurplusStreakBestMs', threshold: 60000 },
   cleanliness_recovery: { id: 'cleanliness_recovery', name: 'Spring Cleaning', description: 'Clean the tank back up to 99% after letting it drop below 90%.', tier: 'medium', statField: 'cleanlinessRecoveryDone', threshold: 1 },
-  science_onscreen_10: { id: 'science_onscreen_10', name: 'Bubble Trouble', description: 'Have 10 Science Bubbles on screen at once.', tier: 'easy', statField: 'sciencePeakOnScreen', threshold: 10 },
-  science_onscreen_25: { id: 'science_onscreen_25', name: 'Bubble Bath', description: 'Have 25 Science Bubbles on screen at once.', tier: 'medium', statField: 'sciencePeakOnScreen', threshold: 25 },
-  science_onscreen_50: { id: 'science_onscreen_50', name: 'Bubble Apocalypse', description: 'Have 50 Science Bubbles on screen at once.', tier: 'hard', statField: 'sciencePeakOnScreen', threshold: 50 },
+  science_onscreen_10: { id: 'science_onscreen_10', name: 'Bubble Trouble', description: 'Have 10 Science Flasks on screen at once.', tier: 'easy', statField: 'sciencePeakOnScreen', threshold: 10 },
+  science_onscreen_25: { id: 'science_onscreen_25', name: 'Bubble Bath', description: 'Have 25 Science Flasks on screen at once.', tier: 'medium', statField: 'sciencePeakOnScreen', threshold: 25 },
+  science_onscreen_50: { id: 'science_onscreen_50', name: 'Bubble Apocalypse', description: 'Have 50 Science Flasks on screen at once.', tier: 'hard', statField: 'sciencePeakOnScreen', threshold: 50 },
 };
 export const ACHIEVEMENT_LIST = Object.values(ACHIEVEMENTS);
 

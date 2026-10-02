@@ -629,7 +629,7 @@ export function spawnChestTutorialWaste(state, chestKey) {
   state.level.chestDragTutorialTargetId = item.id;
 }
 
-// A physical Science Bubble — falls/routes exactly like a coin (straight
+// A physical Science Flask — falls/routes exactly like a coin (straight
 // gravity, no sway), just lighter-looking (SCIENCE_ITEM_RADIUS, smaller than
 // a bronze coin) and much heavier (ITEM_MASS_BY_TYPE.science = 9, 3x a
 // coin's mass) — per direct request, Science is now "an actual resource,
@@ -640,7 +640,7 @@ export function createScience(x, y) {
   return { id: nextId(), type: 'science', x, y, vx: 0, vy: 0, radius: SCIENCE_ITEM_RADIUS, mass: ITEM_MASS_BY_TYPE.science, resting: false };
 }
 
-// A green Science Bubble — the Bio-Combuster's upgraded output. Physically
+// A green Science Flask — the Bio-Combuster's upgraded output. Physically
 // and mechanically identical to a blue one (see createScience above): falls
 // exactly like a coin, click-bankable or Collector-routed, always worth 1
 // when banked (bankScienceGreen below) — only its own separate reserve
@@ -1282,7 +1282,7 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
 // at once — counts EVERY item of the type anywhere in the tank, seabed city
 // included, since the whole point is "how many currently-unbanked drops
 // exist in the world," not "how many are still reachable by a fish." Checked
-// by updateFish right before a coin/Science Bubble would spawn — see
+// by updateFish right before a coin/Science Flask would spawn — see
 // triggerProductionBlocked below for what happens when the cap's already
 // been hit. (Food has no equivalent cap or HUD readout any more — both were
 // retired per direct request, the cap replaced entirely by the
@@ -1354,7 +1354,7 @@ export function effectiveScienceCapacity(state) {
 }
 
 // Per direct request ("make sure green science counts towards the bubble
-// cap when on screen") — Green Science Bubbles now count against the exact
+// cap when on screen") — Green Science Flasks now count against the exact
 // same cap Blue Science does, not a separate unbounded pool. Used wherever
 // "how much of the Bubble Cap is currently used" matters.
 export function countScienceCapacityUsed(state) {
@@ -1369,7 +1369,7 @@ export function countScienceCapacityUsed(state) {
 // particle effect — per direct request ("instead of the bubble icon that
 // shows up when the fish can't spawn coins, make it look like a coin on fire
 // that disintegrates"), later extended to Science too ("use a science icon
-// and do that animation when the science bubble cap is reached") — pushed
+// and do that animation when the science flask cap is reached") — pushed
 // into state.level.productionBlockedEffects (tagged with `resource` so
 // main.js's render knows which icon to burn) and rendered/aged the same
 // "detached particle, independent of the fish" way alienDeathEffects already
@@ -1524,7 +1524,7 @@ function bankScienceGreen(state, amount) {
 }
 
 // tryBankScienceAt/tryBankScienceGreenAt (click-to-bank a Science/Green
-// Science Bubble directly, mirroring tryBankCoinAt) are removed entirely,
+// Science Flask directly, mirroring tryBankCoinAt) are removed entirely,
 // per direct request ("blue and green science cannot be clicked to be
 // collected, it has to be processed by a collector") — bankScience/
 // bankScienceGreen above are still very much alive, just now only ever
@@ -2417,7 +2417,7 @@ function updateScience(item, state, dtMs) {
     bankScience(state, 1);
     state.level.floatingTexts.push(createPickupText(item.x, item.y, '+1 🔬', SCIENCE_COLOR));
     state.level.gridStats.itemsRoutedTotal += 1;
-    playDispense(); // a Processor finishing a Science Bubble's hold — the coin equivalent already has its own playCoinBank blip, so this is the "output" sound that path was missing
+    playDispense(); // a Processor finishing a Science Flask's hold — the coin equivalent already has its own playCoinBank blip, so this is the "output" sound that path was missing
     return false;
   }
   item.resting = status === 'resting';
@@ -3353,7 +3353,7 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
     // fish's does, but instead of an instant resource grant, it (a) posts a
     // small "+0.1 🔬" progress bubble every time it crosses another tenth of
     // the cycle (pure feedback — nothing is actually banked yet), and (b)
-    // spawns `dropValue` real, physical Science Bubbles once the cycle
+    // spawns `dropValue` real, physical Science Flasks once the cycle
     // completes, which still have to be collected like a coin — see
     // Entities.js's createScience/updateScience and Grid.js's Processor.
     fish.dropTimer += dtMs;

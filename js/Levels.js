@@ -51,7 +51,7 @@ export function loadLevel(state, levelId) {
     levelId: def.id,
     levelName: def.name,
     money: def.startingMoney,
-    science: 0, // Science Bubbles (blue) banked so far — level-scoped like money now that Science is a real collected resource (see Entities.js's createScience/bankScience), not a permanent meta counter
+    science: 0, // Science Flasks (blue) banked so far — level-scoped like money now that Science is a real collected resource (see Entities.js's createScience/bankScience), not a permanent meta counter
     scienceGreen: 0, // Green Science's own separate reserve — the Bio-Combuster's upgraded output, banked via Entities.js's bankScienceGreen (click or Collector-routed, same as blue Science). Never mixed with `science` above — the Bio-Reactor's scienceGreenCost purchases and the Bio-Combuster's upgraded recipe both read/spend this one specifically.
 
     cleanliness: 100, // 0-100, clamped — real now (Phase 3): Entities.js/Grid.js adjust it whenever Waste spawns or gets cleaned up, see Config.js's CLEANLINESS_* comment. No gameplay effect from a low value yet (fish stress/toxicity is still unbuilt) — this is the live-tracked value + HUD feedback half of the system

@@ -171,7 +171,7 @@ let currentPreviewBuilding = null; // building currently shown in the in-panel p
 let lastMoney = null; // previous frame's money, to detect gain vs spend for the flash animation
 let lastCleanliness = null; // previous frame's cleanliness, same purpose
 let lastCleanlinessColor = null; // last color actually written to the cleanliness readout — see setText's comment
-let lastScienceCapCount = null; // previous frame's live Science Bubble count, to detect a rise for the shake-red cue below
+let lastScienceCapCount = null; // previous frame's live Science Flask count, to detect a rise for the shake-red cue below
 let notificationLogExpanded = false;
 let lastRenderedNotificationCount = -1; // rebuild the log list only when it actually changes, not every frame
 let lastPillNotificationCount = null; // separate from the above — tracks the pill's own bounce/shimmer trigger regardless of whether the log is expanded; null means "not yet initialized," so the very first real notification on page load doesn't bounce
@@ -238,7 +238,7 @@ const HUD_INFO_DATA = {
   },
   scienceCap: {
     icon: '🔬', title: 'Science Cap',
-    desc: "Science Bubbles currently sitting in the tank, uncollected — capped by the Science Lab's Science Cap upgrades.",
+    desc: "Science Flasks currently sitting in the tank, uncollected — capped by the Science Lab's Science Cap upgrades.",
     statLabel: 'Science/min',
     statFn: (state) => computeTheoreticalSciencePerMinute(state).toFixed(1),
   },
@@ -2207,7 +2207,7 @@ function openLabPurchaseModal(state, id) {
   if (node.grants.scienceCapLevel) {
     // Per direct request, each Bubble Cap node's description is now its own
     // fixed string (Config.js's SCIENCE_LAB_UPGRADES.science_cap_2..5, e.g.
-    // "Raises the Science Bubble cap from 20 to 30...") rather than computed
+    // "Raises the Science Flask cap from 20 to 30...") rather than computed
     // live off state.level.upgrades.scienceCapLevel — it no longer changes
     // depending on what the player has already unlocked. The stat chip's own
     // target figure is parsed straight from the node's own name ("Bubble Cap
@@ -3063,7 +3063,7 @@ function drawItemIconCanvas(canvas, itemType) {
     const fy = cy + fr * 0.275;
     const neckHalf = fr * 0.4;
     const neckTop = fy - fr * 1.6;
-    const lipHalf = fr * 0.62;
+    const lipHalf = fr * 0.52;
     const lipH = fr * 0.3;
     ctx.beginPath();
     ctx.rect(cx - neckHalf, neckTop, neckHalf * 2, fr);
@@ -3078,7 +3078,7 @@ function drawItemIconCanvas(canvas, itemType) {
     ctx.fill();
     ctx.stroke();
     ctx.beginPath();
-    ctx.ellipse(cx, neckTop - lipH * 0.3, neckHalf * 0.85, lipH * 0.4, 0, 0, Math.PI * 2);
+    ctx.rect(cx - neckHalf * 0.85, neckTop - lipH * 0.3, neckHalf * 1.7, lipH * 0.3); // flat opening, per direct request
     ctx.fillStyle = 'rgba(15, 25, 45, 0.65)';
     ctx.fill();
     const gradient = ctx.createRadialGradient(cx - fr * 0.3, fy - fr * 0.3, fr * 0.1, cx, fy, fr);
@@ -3181,11 +3181,7 @@ function drawItemIconCanvas(canvas, itemType) {
     ctx.beginPath();
     ctx.arc(cx, cy - r * 0.05, r * 0.48, Math.PI * 0.12, Math.PI * 0.82);
     ctx.stroke();
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
-    ctx.beginPath();
-    ctx.arc(cx - r * 0.3, cy - r * 0.35, r * 0.18, 0, Math.PI * 2);
-    ctx.fill();
-    return;
+    return; // no glint on Waste/Bio-Sludge, per direct request
   }
   if (itemType === 'coin') {
     // Matches main.js's own drawFlatCoin, per direct request ("update the

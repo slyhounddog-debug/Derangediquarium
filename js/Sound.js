@@ -632,7 +632,7 @@ export function playAlienDeath() {
   playTone(110, 0.16, { type: 'sawtooth', gain: 0.1, when: 0.09 });
 }
 
-// A soft rising whoosh — any item (coin, Science Bubble, Waste) getting
+// A soft rising whoosh — any item (coin, Science Flask, Waste) getting
 // pulled into a Processor/Auto-Feeder/Waste Turret's intake. Deliberately
 // quiet/short, since this can fire often in a busy factory.
 export function playIntake() {
@@ -642,7 +642,7 @@ export function playIntake() {
 
 // A soft falling pop — a Processor/Auto-Feeder actually dispensing/
 // finishing off with something (the Auto-Feeder's Food output; a
-// Processor's Science Bubble finishing its hold — the coin equivalent
+// Processor's Science Flask finishing its hold — the coin equivalent
 // already has its own dedicated playCoinBank blip, so this doesn't also
 // fire there, to avoid two sounds landing on one event).
 export function playDispense() {

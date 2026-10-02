@@ -883,41 +883,32 @@ const WASTE_VISUAL_Y_OFFSET_FRACTION = 0.1;
 // has") — so it picks up WASTE_VISUAL_SCALE and the Y offset above for free,
 // applied to ITS radius (ALIEN_DNA_RADIUS), not Waste's. Purely visual: the
 // real collision radius is untouched, same as for Waste.
-// Rolling split, per direct request ("make most of the objects roll"): the
-// sprite this draws is now ROTATED at blit time, so `layer` lets it be baked
-// as two sprites — 'body' (the blob, outline and wrinkles, which turn with
-// the item) and 'highlight' (the glint, which must NOT turn or the light
-// would orbit the item) — see getItemSprite/the item render loop. The old
-// WASTE_VISUAL_Y_OFFSET_FRACTION nudge is no longer baked in here either: the
-// blob has to rotate about its OWN center, so the render loop applies that
-// same offset to the sprite's pivot (sprite.dy) instead.
-function drawWastePoop(ctx, cx, cy, r, color = WASTE_COLOR, layer = 'all') {
+// Rolling, per direct request ("make most of the objects roll"): the sprite
+// this draws is ROTATED at blit time, so it carries no glint at all any more
+// (a fixed-light glint would have to be a second unrotated sprite, and per
+// direct request Waste/Bio-Sludge no longer have one — the wrinkle lines below
+// are their only surface detail). The old WASTE_VISUAL_Y_OFFSET_FRACTION nudge
+// isn't baked in here either: the blob has to rotate about its OWN center, so
+// the render loop applies that same offset to the sprite's pivot (sprite.dy).
+function drawWastePoop(ctx, cx, cy, r, color = WASTE_COLOR) {
   r *= WASTE_VISUAL_SCALE;
-  if (layer !== 'highlight') {
-    tracePoopBlobPath(ctx, cx, cy, r);
-    ctx.fillStyle = color;
-    ctx.fill();
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
-    ctx.lineWidth = Math.max(1, r * 0.12);
-    ctx.stroke();
-    // A couple of short curved "wrinkle" lines instead of the plain glossy
-    // highlight dot every other item gets — reads as texture, not shine.
-    ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
-    ctx.lineWidth = Math.max(1, r * 0.08);
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.arc(cx, cy - r * 0.05, r * 0.48, Math.PI * 0.12, Math.PI * 0.82);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.arc(cx, cy + r * 0.32, r * 0.38, Math.PI * 1.12, Math.PI * 1.75);
-    ctx.stroke();
-  }
-  if (layer !== 'body') {
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
-    ctx.beginPath();
-    ctx.arc(cx - r * 0.32, cy - r * 0.4, r * 0.18, 0, Math.PI * 2);
-    ctx.fill();
-  }
+  tracePoopBlobPath(ctx, cx, cy, r);
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.3)';
+  ctx.lineWidth = Math.max(1, r * 0.12);
+  ctx.stroke();
+  // A couple of short curved "wrinkle" lines instead of the plain glossy
+  // highlight dot every other item gets — reads as texture, not shine.
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.2)';
+  ctx.lineWidth = Math.max(1, r * 0.08);
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.arc(cx, cy - r * 0.05, r * 0.48, Math.PI * 0.12, Math.PI * 0.82);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(cx, cy + r * 0.32, r * 0.38, Math.PI * 1.12, Math.PI * 1.75);
+  ctx.stroke();
 }
 
 // Per direct request (populated-tank performance) — every Food/Coin/Waste/
@@ -953,7 +944,7 @@ function drawScienceFlask(ctx, x, y, r, colorA, colorB, layer = 'all') {
   if (layer !== 'highlight') {
     const neckHalf = r * 0.4;
     const neckTop = y - r * 1.6;
-    const lipHalf = r * 0.62;
+    const lipHalf = r * 0.52;
     const lipH = r * 0.3;
     // Neck glass — runs down inside the body, which is drawn over its lower end below.
     ctx.beginPath();
@@ -963,14 +954,15 @@ function drawScienceFlask(ctx, x, y, r, colorA, colorB, layer = 'all') {
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
     ctx.lineWidth = 1.2;
     ctx.stroke();
-    // Rim lip, then the dark opening at the very top.
+    // Rim lip, then the dark opening at the very top — a flat strip, not an
+    // ellipse, per direct request (the curved opening read as too concave).
     ctx.beginPath();
     ctx.rect(x - lipHalf, neckTop - lipH * 0.3, lipHalf * 2, lipH);
     ctx.fillStyle = 'rgba(235, 245, 255, 0.55)';
     ctx.fill();
     ctx.stroke();
     ctx.beginPath();
-    ctx.ellipse(x, neckTop - lipH * 0.3, neckHalf * 0.85, lipH * 0.4, 0, 0, Math.PI * 2);
+    ctx.rect(x - neckHalf * 0.85, neckTop - lipH * 0.3, neckHalf * 1.7, lipH * 0.3);
     ctx.fillStyle = 'rgba(15, 25, 45, 0.65)';
     ctx.fill();
     // Liquid-filled body.
@@ -1066,7 +1058,7 @@ function drawItemShape(ctx, item, x, y, itemColor, layer = 'all') {
     // center of a deeper, more "refined-looking" green shell, so the two
     // read as pre/post-refined stages of the same material at a glance
     // rather than just sharing a similar hue. Same gradient technique as
-    // the Science Bubble/Diamond coin's own special renders above.
+    // the Science Flask/Diamond coin's own special renders above.
     const gradient = ctx.createRadialGradient(
       x - item.radius * 0.3, y - item.radius * 0.3, item.radius * 0.1,
       x, y, item.radius
@@ -1136,11 +1128,11 @@ function drawItemShape(ctx, item, x, y, itemColor, layer = 'all') {
   }
 
   if (item.type === 'waste') {
-    drawWastePoop(ctx, x, y, item.radius, WASTE_COLOR, layer);
+    drawWastePoop(ctx, x, y, item.radius);
     return;
   }
   if (item.type === 'alien_dna') {
-    drawWastePoop(ctx, x, y, item.radius, ALIEN_DNA_COLOR, layer);
+    drawWastePoop(ctx, x, y, item.radius, ALIEN_DNA_COLOR);
     return;
   }
 
@@ -1176,11 +1168,12 @@ function getItemSprite(item, foodStaleStep) {
   sctx.scale(ITEM_SPRITE_SCALE, ITEM_SPRITE_SCALE);
   let itemColor = ITEM_FLAT_COLOR_BY_TYPE[item.type];
   if (item.type === 'food' && foodStaleStep > 0) itemColor = lerpRgbToString(hexToRgb(FOOD_COLOR), hexToRgb(FOOD_STALE_COLOR), foodStaleStep / FOOD_STALE_STEPS);
-  // Rolling (see the item render loop): flasks, waste and bio-sludge bake
-  // their glint into a SECOND, unrotated sprite so the light stays fixed while
-  // the body turns; waste/sludge also carry the old "sit a bit lower" nudge as
-  // sprite.dy (applied to the pivot, so the blob turns about its own center).
-  const splitHighlight = item.type === 'science' || item.type === 'science_green' || item.type === 'waste' || item.type === 'alien_dna';
+  // Rolling (see the item render loop): flasks bake their glint into a
+  // SECOND, unrotated sprite so the light stays fixed while the body turns;
+  // waste/sludge (no glint, per direct request) carry the old "sit a bit
+  // lower" nudge as sprite.dy (applied to the pivot, so the blob turns about
+  // its own center).
+  const splitHighlight = item.type === 'science' || item.type === 'science_green';
   drawItemShape(sctx, item, half, half, itemColor, splitHighlight ? 'body' : 'all');
   let hl = null;
   if (splitHighlight) {
@@ -2081,7 +2074,7 @@ input.mouseDownHandlers.push((sx, sy) => {
     if (item.type === 'food' && state.ui.selectedTool === 'food') continue;
     // Already claimed as a building's input (mid-disintegrate) — per direct
     // report, can't be grabbed at all while that's happening, not even a
-    // Collector-held coin/Science Bubble (which tracks its own hold via
+    // Collector-held coin/Science Flask (which tracks its own hold via
     // item.collectorProgressMs, a completely different field from
     // heldByKey — checking both via the same predicate the render loop
     // already uses for the disintegrate effect itself is what makes this
@@ -6626,8 +6619,8 @@ function render() {
   // "On fire, disintegrating" — per direct request, replacing the old plain
   // bubble-pop icon for a blocked COIN drop, then extended to a blocked
   // SCIENCE brew too ("use a science icon and do that animation when the
-  // science bubble cap is reached"). A shrinking icon (a gold coin, or a
-  // purple/blue Science bubble — same two-tone gradient the real physical
+  // science flask cap is reached"). A shrinking icon (a gold coin, or a
+  // purple/blue Science flask — same two-tone gradient the real physical
   // Science item uses) with a couple of flickering flame licks above it and
   // a few dark ember/ash flecks drifting up and outward as it crumbles, all
   // fading together over PRODUCTION_BLOCKED_EFFECT_DURATION_MS. Purely

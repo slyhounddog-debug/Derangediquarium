@@ -2125,7 +2125,7 @@ function stepCollectorProcessing(item, state, dt) {
   const appliedEfficiency = powerCost > 0 ? state.level.powerEfficiency : 1;
   item.collectorProgressMs += dt * 1000 * appliedEfficiency;
   // Target duration is resolved once, at the moment processing started (see
-  // beginCollectorProcessing) — coin vs Science Bubble, and which tier of
+  // beginCollectorProcessing) — coin vs Science Flask, and which tier of
   // Processor tile, per PROCESSOR_STATS.
   if (item.collectorProgressMs >= item.collectorTargetMs) {
     item.mass = item.collectorOriginalMass;
@@ -2514,7 +2514,7 @@ function beginCollectorProcessing(item, centerX, centerY, tileType) {
   item.collectorCenterX = centerX;
   item.collectorCenterY = centerY;
   item.collectorProgressMs = 0;
-  // A coin, a Blue Science Bubble, and a Green Science Bubble all take
+  // A coin, a Blue Science Flask, and a Green Science Flask all take
   // different amounts of time on the same tile, and each shrinks
   // independently per tier — see Config.js's PROCESSOR_STATS. Green Science
   // used to just share Blue's own scienceMs; per direct request it now has
@@ -4528,7 +4528,7 @@ function renderRecipeItemIcon(ctx, itemType, cx, cy, r) {
     const fy = cy + fr * 0.275;
     const neckHalf = fr * 0.4;
     const neckTop = fy - fr * 1.6;
-    const lipHalf = fr * 0.62;
+    const lipHalf = fr * 0.52;
     const lipH = fr * 0.3;
     ctx.beginPath();
     ctx.rect(cx - neckHalf, neckTop, neckHalf * 2, fr);
@@ -4694,11 +4694,7 @@ function drawWastePoopIcon(ctx, cx, cy, r, color = WASTE_COLOR) {
   ctx.lineCap = 'round';
   ctx.beginPath();
   ctx.arc(cx, cy - r * 0.05, r * 0.48, Math.PI * 0.12, Math.PI * 0.82);
-  ctx.stroke();
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
-  ctx.beginPath();
-  ctx.arc(cx - r * 0.28, cy - r * 0.32, r * 0.2, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.stroke(); // no glint on Waste/Bio-Sludge, per direct request
 }
 
 // A recipe identifier marking a Manufacturer/Power Plant's chosen recipe —
