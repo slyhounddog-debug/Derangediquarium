@@ -3732,7 +3732,7 @@ export function toggleStatsPanel(state) {
 // consumes per minute, its electricity (draw orange, production teal, net
 // green/red) and the items/chests inside. main.js calls this every frame while
 // a selection is being dragged, with the box in world space (the numbers) and
-// in screen space (where to sit). The numbers are recomputed only every
+// in screen space (where to sit — beside the box). The numbers are recomputed only every
 // PRODUCTION_INFO_REFRESH_MS and the DOM is touched only when the generated
 // HTML actually changed, so a frame mostly costs one style write.
 const PRODUCTION_INFO_GAP_PX = 10;
@@ -3798,22 +3798,16 @@ export function updateProductionInfoModal(state, worldRect, screenRect, nowMs) {
       productionInfoH = el.offsetHeight;
     }
   }
-  // Centered horizontally on the box and sitting just above it; near the top of
-  // the screen it drops below the box, and if that doesn't fit either, beside it.
+  // Always on the box's right side (per direct request — it reads best there, and
+  // never hopping between above/below/beside keeps it from jumping around),
+  // vertically centered on the box and kept on screen. Only if there's no room
+  // on the right does it fall back to the box's left side.
   const vw = window.innerWidth;
   const vh = window.innerHeight;
-  const cx = (screenRect.left + screenRect.right) / 2;
   const clampX = (x) => Math.max(PRODUCTION_INFO_MARGIN_PX, Math.min(vw - productionInfoW - PRODUCTION_INFO_MARGIN_PX, x));
-  let left = clampX(cx - productionInfoW / 2);
-  let top = screenRect.top - PRODUCTION_INFO_GAP_PX - productionInfoH;
-  if (top < PRODUCTION_INFO_MARGIN_PX) {
-    top = screenRect.bottom + PRODUCTION_INFO_GAP_PX;
-    if (top + productionInfoH > vh - PRODUCTION_INFO_MARGIN_PX) {
-      left = clampX(screenRect.right + PRODUCTION_INFO_GAP_PX);
-      if (left + productionInfoW > vw - PRODUCTION_INFO_MARGIN_PX) left = clampX(screenRect.left - PRODUCTION_INFO_GAP_PX - productionInfoW);
-      top = Math.max(PRODUCTION_INFO_MARGIN_PX, Math.min(vh - productionInfoH - PRODUCTION_INFO_MARGIN_PX, (screenRect.top + screenRect.bottom) / 2 - productionInfoH / 2));
-    }
-  }
+  let left = screenRect.right + PRODUCTION_INFO_GAP_PX;
+  if (left + productionInfoW > vw - PRODUCTION_INFO_MARGIN_PX) left = clampX(screenRect.left - PRODUCTION_INFO_GAP_PX - productionInfoW);
+  const top = Math.max(PRODUCTION_INFO_MARGIN_PX, Math.min(vh - productionInfoH - PRODUCTION_INFO_MARGIN_PX, (screenRect.top + screenRect.bottom) / 2 - productionInfoH / 2));
   const pos = `${Math.round(left)}px,${Math.round(top)}px`;
   if (pos !== productionInfoPos) {
     productionInfoPos = pos;
