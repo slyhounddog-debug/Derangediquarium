@@ -3,7 +3,7 @@
 // which species/buildings are available, win conditions, alien waves, and
 // meta rewards granted on completion.
 
-import { SPECIES_LIST, BUILDING_LIST, ALIEN_WAVE_INTERVAL_EARLY_MS, ALIEN_FIRST_WAVE_EARLY_MS, AUTOSAVE_INTERVAL_MS, POWER_WARNING_CHECK_INTERVAL_MS, SEA_TURTLE_SPAWN_MIN_MS, SEA_TURTLE_SPAWN_MAX_MS } from './Config.js';
+import { SPECIES_LIST, BUILDING_LIST, TAB_REMINDER_NEVER_OPENED_MS, ALIEN_WAVE_INTERVAL_EARLY_MS, ALIEN_FIRST_WAVE_EARLY_MS, AUTOSAVE_INTERVAL_MS, POWER_WARNING_CHECK_INTERVAL_MS, SEA_TURTLE_SPAWN_MIN_MS, SEA_TURTLE_SPAWN_MAX_MS } from './Config.js';
 import { createGrid } from './Grid.js';
 
 // The very first entry in state.level.notifications, pushed at level load
@@ -215,6 +215,7 @@ export function loadLevel(state, levelId) {
     powerDeficitStreakMs: 0, // real-ms a continuous demand>supply streak has held, sampled once/real-second alongside the existing HUD power history
     powerSurplusStreakMs: 0, // same, for supply >= demand*ACHIEVEMENT_POWER_SURPLUS_RATIO
     cleanlinessRecoveryArmed: false, // set true the moment cleanliness first drops below ACHIEVEMENT_CLEANLINESS_ARM_THRESHOLD; the achievement completes (and this clears back to false) the moment it's true AND cleanliness reaches ACHIEVEMENT_CLEANLINESS_COMPLETE_THRESHOLD
+    tabReminderNextAtMs: TAB_REMINDER_NEVER_OPENED_MS, // level.elapsed time the next Tab-panel reminder is due — pushed back whenever the panel is opened, see UI.js's updateTabReminder
     lastPurchaseAtMs: 0, // real elapsed timestamp of the last fish bought OR building placed — see Entities.js's trySpawnPurchasedFish/Grid.js's placeTile (both update this on success) and Systems.js's updateIdlePurchaseHint (reads it to fire a one-time "check the Achievements tab" nudge after 60s of inactivity)
     bankruptcyActive: false, // true while "no fish + can't afford anything" is CURRENTLY true, so the bailout/game-over response only fires once per fresh occurrence of that condition, not every tick it holds — see Systems.js's updateStoryTriggers
     bankruptciesTriggered: 0, // 0 = never happened, 1 = the one-time $100 bailout already used, 2+ = game over

@@ -133,6 +133,15 @@
   <div id="stats-panel-list"></div>
 </div>
 
+<!-- Brief "Tab" hint at the left edge, where #stats-panel flies out from — shown
+     now and then until the panel gets opened (UI.js's updateTabReminder). A
+     sideways "Tab" label plus rows of right-pointing carets that fade in and
+     out in a staggered wave, built by UI.js's initUI. -->
+<div id="tab-reminder" aria-hidden="true">
+  <div id="tab-reminder-text">Tab</div>
+  <div id="tab-reminder-carets"></div>
+</div>
+
 <div id="tutorial-overlay" class="hidden"></div>
 <div id="tutorial-text" class="hidden"></div>
 <!-- Deliberately NOT nested inside #bottom-bar-row (see that element's own

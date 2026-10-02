@@ -148,6 +148,7 @@ import {
   FISH_HEALTH_ADULT,
   FISH_HEALTH_UPGRADE_BONUS_PER_LEVEL,
   ALIEN_FISH_DAMAGE_INTERVAL_MS,
+  ALIEN_FOOD_EAT_COOLDOWN_MS,
   BOSS_FISH_DAMAGE_PER_SEC,
   FISH_HEALTH_REGEN_DURATION_MS,
   FISH_DEATH_TOTAL_DURATION_MS,
@@ -707,6 +708,7 @@ export function createAlien(x, y, hp, archetypeId) {
     dnaYield: archetype.dnaYield,
     fishDamagePerSec: archetype.fishDamagePerSec, // per direct spec — applied once per second to any fish this alien is touching, see updateAlien
     fishDamageTimerMs: 0,
+    foodEatCooldownMs: 0, // counts down after a Food item is eaten — see updateAlien's food branch and ALIEN_FOOD_EAT_COOLDOWN_MS
     // Per direct request ("more visually distinct alien tiers") — copied
     // straight from the archetype, same as radius/color above, so
     // main.js's drawAlienBody needs no per-tier lookup of its own.
@@ -940,14 +942,20 @@ function updateAlien(alien, state, dtMs) {
   // Food drifts genuinely close. Overrides whatever heading wander just
   // picked above — an opportunistic snack takes priority over wandering,
   // but only ever when Food is actually nearby.
+  if (alien.foodEatCooldownMs > 0) alien.foodEatCooldownMs = Math.max(0, alien.foodEatCooldownMs - dtMs);
   const nearbyFood = findNearestFood(state.level.items, alien.x, alien.y);
   if (nearbyFood && Math.hypot(nearbyFood.x - alien.x, nearbyFood.y - alien.y) <= ALIEN_FOOD_AWARENESS_RADIUS) {
     const dx = nearbyFood.x - alien.x;
     const dy = nearbyFood.y - alien.y;
     const dist = Math.hypot(dx, dy) || 1;
     if (dist <= alien.radius + FOOD_RADIUS) {
-      const idx = state.level.items.indexOf(nearbyFood);
-      if (idx !== -1) state.level.items.splice(idx, 1);
+      // Per direct request, at most one Food item per ALIEN_FOOD_EAT_COOLDOWN_MS;
+      // while it's cooling down the alien just keeps its current heading.
+      if (!(alien.foodEatCooldownMs > 0)) {
+        const idx = state.level.items.indexOf(nearbyFood);
+        if (idx !== -1) state.level.items.splice(idx, 1);
+        alien.foodEatCooldownMs = ALIEN_FOOD_EAT_COOLDOWN_MS;
+      }
     } else {
       alien.vx = (dx / dist) * alien.speed;
       alien.vy = (dy / dist) * alien.speed * FISH_VERTICAL_DAMPING;

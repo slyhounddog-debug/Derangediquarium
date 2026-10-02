@@ -1670,6 +1670,20 @@ export const SPECIES = {
   },
 };
 
+// Per direct request ("for all fish types, make the baby fish stage size 20%
+// bigger, and the mid size 10% bigger (keep adult size fish unchanged)") —
+// applied once here to every species' non-final growth stages, rather than
+// editing each row's scale by hand. A hybrid (one stage, the adult) is
+// untouched. Note scale is also a fish's hit/eat radius, so baby/mid hitboxes
+// grow with it.
+export const FISH_BABY_SCALE_MULTIPLIER = 1.2;
+export const FISH_MID_SCALE_MULTIPLIER = 1.1;
+for (const def of Object.values(SPECIES)) {
+  const stages = def.growthStages;
+  if (stages.length > 1) stages[0].scale *= FISH_BABY_SCALE_MULTIPLIER;
+  if (stages.length > 2) stages[1].scale *= FISH_MID_SCALE_MULTIPLIER;
+}
+
 export const SPECIES_LIST = Object.values(SPECIES);
 
 // ---- Buildings (Phase 2, Seabed Platform architecture) ----
@@ -3109,6 +3123,15 @@ export const CHEST_TUTORIAL_DRAG_CLICK_RADIUS_TILES = 8;
 // the achievements to get ideas on how to progress") — see Systems.js's
 // updateIdlePurchaseHint, which tracks state.level.lastPurchaseAtMs.
 export const IDLE_PURCHASE_HINT_DELAY_MS = 60000;
+// Tab (Base Stats) reminder, per direct request — a brief "Tab" hint at the left
+// edge, where the panel flies out from. First shown TAB_REMINDER_NEVER_OPENED_MS
+// into a level if it has never been opened; once it has been, TAB_REMINDER_AFTER_OPEN_MS
+// after the last open. Either way it then repeats every TAB_REMINDER_REPEAT_MS
+// (so never-opened: 2, 4, 6 min...; after an open at t: t+5, t+7, t+9 min...)
+// until the panel is opened again. UI.js's updateTabReminder.
+export const TAB_REMINDER_NEVER_OPENED_MS = 120000;
+export const TAB_REMINDER_AFTER_OPEN_MS = 300000;
+export const TAB_REMINDER_REPEAT_MS = 120000;
 export const IDLE_PURCHASE_HINT_MESSAGE = "Not sure what to do next? Check the Achievements tab (🎖️) — it's full of ideas for how to keep growing your tank.";
 
 // ---- Power/Bio-Sludge/Biomass story tips ----
@@ -3469,6 +3492,9 @@ export const FISH_HEALTH_ADULT = 125;
 // ALIEN_ARCHETYPES row (fishDamagePerSec); the boss isn't one of those 5
 // tiers, so it gets its own flat rate below instead.
 export const ALIEN_FISH_DAMAGE_INTERVAL_MS = 1000;
+// Per direct request — a hostile alien can eat at most one Food item per this
+// long (previously it could clear a pile one item per tick).
+export const ALIEN_FOOD_EAT_COOLDOWN_MS = 500;
 export const BOSS_FISH_DAMAGE_PER_SEC = 50; // above Tier 5's 35, matching the boss's "far deadlier than any wave alien" flavor without a full 10x multiply (its other stats — see BOSS_SPEED's own comment — are individually hand-tuned too, not a uniform scale-up)
 // Per direct request: fish don't regenerate AT ALL while any alien is alive
 // anywhere in the level, but once the last one dies, every damaged fish

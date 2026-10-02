@@ -25,6 +25,8 @@ import {
   CLEANLINESS_COLOR_DIRTY,
   PROCESSOR_STATS,
   REFINERY_STATS,
+  TAB_REMINDER_AFTER_OPEN_MS,
+  TAB_REMINDER_REPEAT_MS,
   ALIEN_DNA_REFINERY_TIME_MULTIPLIER,
   MANUFACTURER_RECIPES,
   MANUFACTURER_RECIPE_LIST,
@@ -354,6 +356,8 @@ export function initUI(state) {
     alienCountdownSeconds: document.getElementById('alien-countdown-seconds'),
     statsPanel: document.getElementById('stats-panel'),
     statsPanelList: document.getElementById('stats-panel-list'),
+    tabReminder: document.getElementById('tab-reminder'),
+    tabReminderCarets: document.getElementById('tab-reminder-carets'),
     bossHealthBarWrap: document.getElementById('boss-health-bar-wrap'),
     bossHealthBarFill: document.getElementById('boss-health-bar-fill'),
     bossVictoryOverlay: document.getElementById('boss-victory-overlay'),
@@ -515,6 +519,23 @@ export function initUI(state) {
     startHelpOverlay: document.getElementById('start-help-overlay'),
     startHelpBackBtn: document.getElementById('start-help-back-btn'),
   };
+
+  // Tab reminder: 4 rows x 3 right-pointing carets, each pulsing on its own
+  // delay (column first, then row) so the brightness sweeps left to right.
+  for (let r = 0; r < 4; r++) {
+    const row = document.createElement('div');
+    row.className = 'tab-reminder-row';
+    for (let c = 0; c < 3; c++) {
+      const caret = document.createElement('div');
+      caret.className = 'tab-reminder-caret';
+      caret.style.animationDelay = `${(c * 0.2 + r * 0.07).toFixed(2)}s`;
+      row.appendChild(caret);
+    }
+    els.tabReminderCarets.appendChild(row);
+  }
+  els.tabReminder.addEventListener('animationend', (e) => {
+    if (e.target === els.tabReminder) els.tabReminder.classList.remove('show'); // the carets' own (infinite) animations bubble too — only the container's fade-out ends the reminder
+  });
 
   els.moundThrowBtn.addEventListener('click', () => {
     if (!canCrackMound(state)) return;
@@ -3713,6 +3734,8 @@ export function isStatsPanelOpen() { return statsPanelOpen; }
 export function openStatsPanel(state) {
   statsPanelOpen = true;
   els.statsPanel.classList.add('open');
+  state.level.tabReminderNextAtMs = state.level.elapsed + TAB_REMINDER_AFTER_OPEN_MS; // see updateTabReminder
+  els.tabReminder.classList.remove('show');
   refreshStatsPanel(state);
 }
 export function closeStatsPanel() {
@@ -3722,6 +3745,22 @@ export function closeStatsPanel() {
 export function toggleStatsPanel(state) {
   if (statsPanelOpen) closeStatsPanel();
   else openStatsPanel(state);
+}
+
+// Per direct request — a brief "Tab" hint at the left edge (where the panel
+// flies out from) every TAB_REMINDER_REPEAT_MS while the panel stays unopened:
+// first after 2 min of a level in which it has never been opened, or 5 min
+// after the last time it was (then every 2 min — 5, 7, 9...). Driven by
+// state.level.elapsed, so it neither counts nor fires while paused, and it
+// waits (without consuming the reminder) during a guided tutorial.
+function updateTabReminder(state) {
+  if (statsPanelOpen || state.level.tutorialFlow || state.ui.paused) return;
+  if (typeof state.level.tabReminderNextAtMs !== 'number') state.level.tabReminderNextAtMs = state.level.elapsed + TAB_REMINDER_REPEAT_MS; // a save from before this field existed
+  if (state.level.elapsed < state.level.tabReminderNextAtMs) return;
+  state.level.tabReminderNextAtMs = state.level.elapsed + TAB_REMINDER_REPEAT_MS;
+  els.tabReminder.classList.remove('show');
+  void els.tabReminder.offsetWidth; // forced reflow so the CSS animation restarts
+  els.tabReminder.classList.add('show');
 }
 
 // A plain "label -> value" row. `locked`, when true, renders as a single
@@ -4772,6 +4811,7 @@ export function updateHUD(state) {
   if (labMenuOpen) refreshLabTree(state); // no position-tracking needed any more — it's a centered modal now, not anchored to the Mound's screen position
   if (!state.ui.tankPanelCollapsed) refreshTankPanelView(state);
   if (statsPanelOpen) refreshStatsPanel(state);
+  updateTabReminder(state);
 
   if (lastMoney !== null && money !== lastMoney) {
     playFlash(els.money, money > lastMoney ? 'flash-pickup' : 'flash-spend');
