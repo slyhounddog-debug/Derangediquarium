@@ -3749,8 +3749,8 @@ export function toggleStatsPanel(state) {
 
 // Per direct request — a brief "Tab" hint at the left edge (where the panel
 // flies out from) every TAB_REMINDER_REPEAT_MS while the panel stays unopened:
-// first after 2 min of a level in which it has never been opened, or 5 min
-// after the last time it was (then every 2 min — 5, 7, 9...). Driven by
+// first after 1.5 min of a level in which it has never been opened, or 5 min
+// after the last time it was (then every 1.5 min — 5, 6.5, 8...). Driven by
 // state.level.elapsed, so it neither counts nor fires while paused, and it
 // waits (without consuming the reminder) during a guided tutorial.
 function updateTabReminder(state) {

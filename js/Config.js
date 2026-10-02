@@ -3127,11 +3127,11 @@ export const IDLE_PURCHASE_HINT_DELAY_MS = 60000;
 // edge, where the panel flies out from. First shown TAB_REMINDER_NEVER_OPENED_MS
 // into a level if it has never been opened; once it has been, TAB_REMINDER_AFTER_OPEN_MS
 // after the last open. Either way it then repeats every TAB_REMINDER_REPEAT_MS
-// (so never-opened: 2, 4, 6 min...; after an open at t: t+5, t+7, t+9 min...)
+// (so never-opened: 1.5, 3, 4.5 min...; after an open at t: t+5, t+6.5, t+8 min...)
 // until the panel is opened again. UI.js's updateTabReminder.
-export const TAB_REMINDER_NEVER_OPENED_MS = 120000;
+export const TAB_REMINDER_NEVER_OPENED_MS = 90000; // 2 min -> 1.5 min per direct request
 export const TAB_REMINDER_AFTER_OPEN_MS = 300000;
-export const TAB_REMINDER_REPEAT_MS = 120000;
+export const TAB_REMINDER_REPEAT_MS = 90000; // 2 min -> 1.5 min per direct request
 export const IDLE_PURCHASE_HINT_MESSAGE = "Not sure what to do next? Check the Achievements tab (🎖️) — it's full of ideas for how to keep growing your tank.";
 
 // ---- Power/Bio-Sludge/Biomass story tips ----
