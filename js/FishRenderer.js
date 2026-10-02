@@ -953,9 +953,9 @@ export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDire
   // A Gene-Splicing hybrid (def.parents, [utilityId, economyId]) has no
   // FISH_COLORS entry of its own — per direct request, it's a straight
   // blend of whichever two species it was spliced from, not a flat color.
-  const baseColor = def.parents
+  const baseColor = FISH_COLORS[speciesId] || (def.parents
     ? blendHexColors(FISH_COLORS[def.parents[0]] || '#ffffff', FISH_COLORS[def.parents[1]] || '#ffffff')
-    : FISH_COLORS[speciesId] || '#ffffff';
+    : '#ffffff');
   let color = baseColor;
   if (sickness > 0 || grayed > 0) {
     // parseColor, not hexToRgb — a hybrid's baseColor is blendHexColors's

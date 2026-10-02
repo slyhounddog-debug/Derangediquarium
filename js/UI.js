@@ -95,7 +95,7 @@ import {
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings, loadLevel } from './Levels.js';
 import {
-  getFishPurchaseCost, effectiveScienceCapacity, countTankItemsByType, hasAnyMergeOpportunity, resolveMergeTutorialPair,
+  getFishPurchaseCost, effectiveScienceCapacity, countTankItemsByType, resolveMergeTutorialPair,
   computeTheoreticalGoldPerMinute, computeTheoreticalCoinCountPerMinute, computeTheoreticalSciencePerMinute, computeTheoreticalFoodNeededPerMinute,
   computeTheoreticalWastePerMinute, computeTheoreticalManufacturerOutputPerMinute, computeTheoreticalBiomassPerMinute,
   computeFishInfoModalStats, describeFishMergeOptions,
@@ -401,7 +401,6 @@ export function initUI(state) {
     previewStats: document.getElementById('shop-preview-stats'),
     previewHint: document.getElementById('shop-preview-hint'),
     toolFoodBtn: document.getElementById('tool-food-btn'),
-    toolMergeBtn: document.getElementById('tool-merge-btn'),
     toolBlueprintBtn: document.getElementById('tool-blueprint-btn'),
     favoriteSlotBtns: [
       document.getElementById('tool-favorite-1-btn'),
@@ -653,15 +652,6 @@ export function initUI(state) {
   });
 
   els.toolFoodBtn.addEventListener('click', () => selectTool(state, 'food'));
-  // Merge tool (🧤) — combining/splicing fish now requires this to be
-  // selected first, per direct request, instead of firing on any mousedown
-  // that happened to land on an eligible fish regardless of tool. Also the
-  // first-time merge tutorial's own 'switch' step target — a no-op unless
-  // that exact flow/step is currently active, so safe to call unconditionally.
-  els.toolMergeBtn.addEventListener('click', () => {
-    selectTool(state, 'merge');
-    advanceTutorialFlow(state, 'mergefish', 'switch');
-  });
   // Blueprint ("Stamp") — the 4th bottom-tool-bar tool, per direct request:
   // click-and-drag a box over a built area to copy it, then click again to
   // paste that whole layout elsewhere. All the actual drag-select/paste
@@ -2714,33 +2704,15 @@ function returnToMainMenuFromPause(state) {
 // shop-preview window instead (see selectSpeciesForPreview/
 // selectBuildingForPreview).
 // Shared by the bottom tool-bar's own click handlers above and main.js's
-// 1/2/3 hotkeys (see main.js's keydownHandlers) — one place that actually
+// 1/2 hotkeys (see main.js's keydownHandlers) — one place that actually
 // sets the tool so both paths stay in sync.
 // Demolish used to live here too (its own standalone tool, grayed out with
 // nothing built yet) — per direct request it's gone entirely now, folded
 // into the Food tool's own D-hotkey delete (main.js's updateKeyDDelete),
 // which needs no availability gate of its own since it's just a no-op
 // wherever there's nothing to delete under the cursor.
-// Per direct request, merging is always available now (no Tank Upgrade
-// gate any more) — the Merge tool instead grays out based on live board
-// state: is there actually a combinable or spliceable pair on screen right
-// now (Entities.js's hasAnyMergeOpportunity)? Blocked during any OTHER
-// guided tutorial flow — per direct report, a stray Merge selection
-// mid-flow (there's nothing stopping a click from reaching the bottom
-// tool-bar during a noSpotlight step like the post-alien flow's "scroll,"
-// which hides the whole overlay) could strand the player on the wrong tool
-// with no way for a later step's own click to ever succeed — but NOT during
-// the first-time merge tutorial's own flow, which needs to select this
-// exact tool as its whole first step.
-export function isMergeToolAvailable(state) {
-  const flow = state.level.tutorialFlow;
-  const blockedByOtherTutorial = flow && flow.id !== 'mergefish';
-  return hasAnyMergeOpportunity(state) && !blockedByOtherTutorial;
-}
-
 export function selectTool(state, tool) {
-  if (tool === 'merge' && !isMergeToolAvailable(state)) return;
-  // Per direct request ("1-6 hotkeys (or clicking on the toolbar buttons)
+  // Per direct request ("1-5 hotkeys (or clicking on the toolbar buttons)
   // should work as a toggle to select/deselect the tool") — pressing the
   // hotkey (or clicking the button) for whatever's ALREADY armed clears
   // back to the plain cursor instead of just re-selecting the same thing.
@@ -2750,7 +2722,7 @@ export function selectTool(state, tool) {
     return;
   }
   state.ui.selectedTool = tool;
-  closeSidePanels(state); // per direct request — picking a bottom-tool-bar tool (Food/Merge/Blueprint) closes the Shop/Tank Upgrades panel if it's open
+  closeSidePanels(state); // per direct request — picking a bottom-tool-bar tool (Food/Blueprint) closes the Shop/Tank Upgrades panel if it's open
   updateToolbar(state);
 }
 
@@ -2770,7 +2742,7 @@ export function isCursorOrFoodTool(tool) {
 }
 
 // Called by the Escape key AND the new universal right-click cancel (both
-// in main.js): cancels an actively-armed build/fish/merge/blueprint/food
+// in main.js): cancels an actively-armed build/fish/blueprint/food
 // tool and defaults back to the plain cursor. A no-op while the cursor is
 // already selected. Building AND fish selection both reuse
 // deselectShopSelection so the preview window clears too, exactly like
@@ -2779,43 +2751,28 @@ export function isCursorOrFoodTool(tool) {
 // dedicated pause-menu button was removed), which meant Escape's own "(Esc)
 // to cancel" legend was actually a lie while a fish was armed; fixed as part
 // of making the new bottom-left Esc hotkey legend (see updateHUD) honest for
-// every tool it claims to clear. Merge/Blueprint/Food have no preview to
+// every tool it claims to clear. Blueprint/Food have no preview to
 // clear, just the tool itself.
 export function cancelActiveTool(state) {
   const tool = state.ui.selectedTool;
   if (tool.startsWith('build:') || tool.startsWith('fish:')) {
     deselectShopSelection(state);
-  } else if (tool === 'merge' || tool === 'blueprint' || tool === 'food') {
+  } else if (tool === 'blueprint' || tool === 'food') {
     state.ui.selectedTool = 'cursor';
     updateToolbar(state);
   }
 }
 
 function updateToolbar(state) {
-  // Grayed-out + genuinely disabled until there's something to merge or
-  // splice — re-checked every frame (called from updateHUD) so the board's
-  // mergeable fish changing takes effect immediately, not just the next
-  // time the tool happens to be picked.
-  const mergeAvailable = isMergeToolAvailable(state);
-  if (els.toolMergeBtn.disabled === mergeAvailable) els.toolMergeBtn.disabled = !mergeAvailable;
-  // Merge deliberately does NOT auto-revert to Food the moment it becomes
-  // unavailable — per direct request ("don't force the player off the tool
-  // if they merge the last mergeable fish"). The button above still reads
-  // disabled/grayed in that moment; the tool just stays armed and ready in
-  // case a new mergeable pair appears again shortly after (a fish growing
-  // to Adult, say), rather than making the player reselect it.
-
   const foodSelected = state.ui.selectedTool === 'food';
-  const mergeSelected = state.ui.selectedTool === 'merge';
   const blueprintSelected = state.ui.selectedTool === 'blueprint';
   els.toolFoodBtn.classList.toggle('selected', foodSelected);
-  els.toolMergeBtn.classList.toggle('selected', mergeSelected);
   els.toolBlueprintBtn.classList.toggle('selected', blueprintSelected);
 
   // Descriptive text lives on each button's own native `title` hover
   // tooltip now, not a separate always-visible shop line — per direct
   // request ("remove any text from the shop for the tools, and move those
-  // to a tool hovertip"). Merge's title is static (set once in index.html);
+  // to a tool hovertip"). Blueprint's title is static (set once in index.html);
   // Food's needs to stay JS-driven since FOOD_COST could in principle
   // change — also mentions the D-hotkey delete mechanic now folded into
   // this tool (see main.js's updateKeyDDelete), per direct request
@@ -2839,7 +2796,7 @@ function updateToolbar(state) {
 }
 
 // ---- Favorite toolbar slots ----
-// Per direct request: 3 extra bottom-tool-bar slots (hotkeys 4-6) a player
+// Per direct request: 3 extra bottom-tool-bar slots (hotkeys 3-5) a player
 // can pin any fish or building into. state.meta.favorites is a plain
 // 3-element array — each entry a 'build:<id>'/'fish:<id>' tool string or
 // null for an empty slot — persisted like every other meta field (survives
@@ -2860,7 +2817,7 @@ function buildFavoriteSlots(state) {
 function refreshFavoriteSlots(state) {
   els.favoriteSlotBtns.forEach((btn, index) => {
     const tool = state.meta.favorites[index];
-    const hotkeyNum = index + 4; // slots are hotkeys 4/5/6
+    const hotkeyNum = index + 3; // slots are hotkeys 3/4/5 (the Merge tool, and its hotkey, were removed)
     btn.innerHTML = '';
     // Per direct request ("add in badges to the 1-6 tools in the toolbar,
     // like the E and P badges") — this whole button's innerHTML gets wiped
@@ -2901,12 +2858,12 @@ function refreshFavoriteSlots(state) {
   });
 }
 
-// Per direct request (replaces the old dedicated F hotkey): pressing 4/5/6
+// Per direct request (replaces the old dedicated F hotkey): pressing 3/4/5
 // while the shop is open with a fish/building selected pins that selection
 // into slot 1/2/3 — overwriting whatever was there — or, if that exact tool
 // is already in that exact slot, clears it back to empty. Returns false when
 // it doesn't apply (shop closed, or nothing buildable/buyable selected), so
-// main.js's keydown handler falls through to selectFavorite, i.e. 4/5/6's
+// main.js's keydown handler falls through to selectFavorite, i.e. 3/4/5's
 // usual "arm this slot's tool" meaning.
 export function setFavoriteSlotFromShop(state, index) {
   const tool = state.ui.selectedTool;
@@ -4102,7 +4059,7 @@ export function deselectShopSelection(state) {
   els.previewContent.classList.add('hidden');
   // Deliberately NOT selectTool(state, 'cursor') — that also closes the Shop/
   // Tank Upgrades panel (see its own closeSidePanels call, for the bottom
-  // hotbar's Food/Merge/Blueprint buttons), which would be wrong here: the
+  // hotbar's Food/Blueprint buttons), which would be wrong here: the
   // player is still IN the shop, just with nothing picked any more.
   state.ui.selectedTool = 'cursor';
   updateToolbar(state);
@@ -4705,7 +4662,7 @@ function updateSaveToast(state) {
 
 export function updateHUD(state) {
   updateSaveToast(state);
-  // Keeps the Merge gray-out live every frame — see updateToolbar's own
+  // Keeps the toolbar's selected highlights live every frame — see updateToolbar's own
   // comment on why this can't just wait for the next tool-select event.
   updateToolbar(state);
   // Per direct request, #hud is the ONE copy of every readout now — the
@@ -5015,7 +4972,7 @@ export function updateHUD(state) {
   setText(els.hotkeyLegendE, `E: ${state.ui.shopCollapsed ? 'Open Shop' : 'Close Shop'}`);
   // Q is a genuine toggle, per direct request — Clear Cursor while ANY tool
   // is already armed ("something is being held" — build:/fish:, but also
-  // Merge/Blueprint/Food per a later direct follow-up, not just
+  // Blueprint/Food per a later direct follow-up, not just
   // toolIsPurchasable's narrower build:/fish:-only build/purchase-cost
   // condition above), otherwise Pipette/reselect-last (see main.js's KeyQ
   // handler and state.ui.lastArmedTool). A copied Blueprint takes priority
@@ -5059,8 +5016,18 @@ function buildFishMergeIconCanvas(speciesId) {
   drawFishIconScaled(canvas.getContext('2d'), FISH_MERGE_ICON_SIZE, speciesId, def.growthStages.length - 1);
   return canvas;
 }
+let lastFishMergeLegendKey = null;
 function refreshFishMergeLegendIcons(entries) {
+  // Rebuilt only when the content changes — this runs every frame while a fish
+  // is hovered, and each rebuild draws a fresh canvas per icon.
+  const key = entries.map((e) => e.text).join('|');
+  if (key === lastFishMergeLegendKey && els.fishMergeLegend.firstChild) return;
+  lastFishMergeLegendKey = key;
   els.fishMergeLegend.innerHTML = '';
+  // Per direct request, every hovered fish's legend leads with how to move/merge it.
+  const header = document.createElement('div');
+  header.textContent = 'Right-click and drag: Move/Merge';
+  els.fishMergeLegend.appendChild(header);
   for (const entry of entries) {
     if (entry.otherSpeciesId == null) {
       // The "No available fish to merge." entry — no icons to show.
@@ -5352,9 +5319,7 @@ const TUTORIAL_FLOWS = {
   // nothing was stopping a click from reaching the bottom tool-bar and
   // selecting the OLD standalone Demolish tool there — since removed
   // entirely, folded into the Food tool's own D-hotkey delete — stranding
-  // the following "place" step with no build tool armed); isMergeToolAvailable
-  // also refuses Merge outright for the whole duration of any flow, so this
-  // is belt-and-suspenders, not the only fix.
+  // the following "place" step with no build tool armed).
   start: [
     { id: 'shop', text: 'Click the Shop to buy your first fish!', tool: 'food', getCircle: () => tutorialCircleForDom(els.shopCollapseBtn) },
     { id: 'guppy', text: 'Pick a Guppy!', tool: 'food', getCircle: () => tutorialCircleForDom(els.shopGrid.querySelector('[data-tool="fish:guppy"]')) },
@@ -5400,13 +5365,12 @@ const TUTORIAL_FLOWS = {
   ],
   // Fires the first time two Adult, same-species-and-star-tier fish exist on
   // screen at once (Systems.js's updateMergeTutorialTrigger) — per direct
-  // request. 'switch' spotlights the Merge tool button itself; clicking it
-  // (see the button's own click handler) advances to 'drag', which
-  // spotlights the two locked-in target fish and completes the instant a
-  // real combine happens anywhere (main.js's mouseup handler).
+  // request. A single step, since the Merge tool is gone: spotlights the two
+  // locked-in target fish and completes the instant a real combine happens
+  // anywhere (main.js's right-mouse-up handler). Right-click-and-drag needs the
+  // plain cursor selected, hence tool 'cursor'.
   mergefish: [
-    { id: 'switch', text: 'Two matching fish! Switch to the Merge tool.', tool: 'food', getCircle: () => tutorialCircleForDom(els.toolMergeBtn) },
-    { id: 'drag', text: 'Drag one fish onto the other to merge them!', tool: 'merge', getCircle: mergeFishStepCircle },
+    { id: 'drag', text: 'Right-click and drag one fish onto the other to merge them!', tool: 'cursor', getCircle: mergeFishStepCircle },
   ],
   // Started by Systems.js's updateChestTutorialTrigger — per direct request
   // ("have a chest tutorial start that's like the turret tutorial"), then
@@ -5526,7 +5490,7 @@ export function advanceTutorialFlow(state, id, step) {
 // off-screen vertically right now, and which way the camera needs to pan
 // to bring it into view — 'up', 'down', or null (already visible, or this
 // step has no world-space target at all: a DOM-anchored button spotlight
-// like the Shop/Merge buttons, which are always on screen regardless of
+// like the Shop button, which are always on screen regardless of
 // camera position, or a noSpotlight step like the postalien flow's own
 // 'scroll' step, which already handles its own scrolling explicitly).
 //
@@ -5587,7 +5551,7 @@ function updateTutorialOverlay(state) {
   // selectedTool away gets corrected right back on the very next frame.
   // Suppressed for exactly this one step by a matching
   // state.ui.tutorialToolOverrideStep — per a later direct request, the
-  // player can deliberately toggle the tool off (main.js's 1/2/3 hotkey
+  // player can deliberately toggle the tool off (main.js's 1/2 hotkey
   // handler during a tutorial) if it's in the way of something else; this
   // self-heal would otherwise immediately undo that the very next frame.
   // The override key is step-scoped (`${flow.id}:${flow.step}`) so it stops

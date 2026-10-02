@@ -127,6 +127,7 @@ import {
   ALIEN_PORTAL_OPEN_MS,
   ALIEN_PORTAL_CLOSE_MS,
   FISH_BLOCKED_TINT_MS,
+  SCIENCE_BLOCKED_SICK_MS,
   ALIEN_DEATH_EFFECT_DURATION_MS,
   TURRET_MUZZLE_FLASH_DURATION_MS,
   TURRET_IMPACT_EFFECT_DURATION_MS,
@@ -1140,6 +1141,29 @@ export function computeGrowthOrbitPosition(fish, index, elapsedMs) {
   };
 }
 
+// The "3 quick feeds" celebration, minus the grow-to-adult particle burst: the
+// two orbiting food bits fly into the fish, plus the coin-pickup sparkle,
+// bigger (see FISH_STREAK_SPARKLE_SCALE). Shared by updateFish's growth-feed-
+// streak branch and — per direct request ("use the same animation as when the
+// fish eat three food quickly in a row") — a merge/splice result (see
+// pushFishMergeEffects).
+function pushFishStreakEffects(state, fish) {
+  const p0 = computeGrowthOrbitPosition(fish, 0, state.level.elapsed);
+  const p1 = computeGrowthOrbitPosition(fish, 1, state.level.elapsed);
+  state.level.fishGrowthAbsorbEffects.push(
+    { fishId: fish.id, startX: p0.x, startY: p0.y, age: 0 },
+    { fishId: fish.id, startX: p1.x, startY: p1.y, age: 0 }
+  );
+  state.level.coinSparkleEffects.push({ x: fish.x, y: fish.y, age: 0, scale: FISH_STREAK_SPARKLE_SCALE });
+}
+
+// The full effect a streak-to-adult growth plays, for a freshly merged/spliced
+// fish: pushFishStreakEffects plus the shared grow-to-adult particle burst.
+function pushFishMergeEffects(state, fish) {
+  pushFishStreakEffects(state, fish);
+  state.level.fishGrowthEffects.push({ x: fish.x, y: fish.y, age: 0 });
+}
+
 export function createFish(speciesId, x, y, state, { grown = false, starTier = 1, dropValueOverride = null } = {}) {
   const def = SPECIES[speciesId];
   const totalFeeds = grown ? def.growthStages[def.growthStages.length - 1].feedsRequired : 0;
@@ -1185,7 +1209,7 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
     bubbleTimerMs: FISH_BUBBLE_INTERVAL_MIN_MS + Math.random() * (FISH_BUBBLE_INTERVAL_MAX_MS - FISH_BUBBLE_INTERVAL_MIN_MS),
     pendingSecondBubbleMs: 0,
     alienNearby: false, // recomputed every tick in updateFish — true while a living alien is within ALIEN_INCOME_BLOCK_RADIUS, driving both the coin-production block and the continuous gray tint (main.js's render)
-    scienceBlockedSickMs: 0, // counts down from FISH_BLOCKED_TINT_MS when a SCIENCE drop is blocked by the Bubble Cap — drives the "looks sick" tint (main.js's render), see triggerProductionBlocked
+    scienceBlockedSickMs: 0, // counts down from SCIENCE_BLOCKED_SICK_MS when a SCIENCE drop is blocked by the Bubble Cap — drives the "looks sick" tint (main.js's render), see triggerProductionBlocked
     capBlockedTintRemainingMs: 0, // counts down from FISH_BLOCKED_TINT_MS whenever a science drop is blocked by the Bubble Cap — the OTHER (timed) source of the gray tint, see triggerProductionBlocked
     mutagenBuffActive: false, // Adult-only Mutagen Paste buff — see updateFish's eat branch; cleared once hunger crosses back into HUNGER_CRITICAL_THRESHOLD
     magnetOn: false, // Magnet Fish (buffer_fish) only — toggled by DOUBLE-clicking the fish (main.js's click handler); pulls nearby items whose type is in magnetFilterItems toward it while true, see computeBufferFishMagnetForce
@@ -1338,11 +1362,11 @@ function triggerProductionBlocked(state, fish, stageDef, resource) {
   // visual cue an alien blocking production continuously uses (see
   // fish.alienNearby), just timed instead of proximity-driven.
   // Per direct request, a blocked SCIENCE drop instead makes the researcher
-  // look sick for the same duration (the gray tint wasn't obvious enough) and
+  // look sick for SCIENCE_BLOCKED_SICK_MS (the gray tint wasn't obvious enough) and
   // signals UI.js to point an arrow at the Bubble Cap in the HUD — see
   // state.ui.scienceBlockedSignals.
   if (resource === 'science') {
-    fish.scienceBlockedSickMs = FISH_BLOCKED_TINT_MS;
+    fish.scienceBlockedSickMs = SCIENCE_BLOCKED_SICK_MS;
     state.ui.scienceBlockedSignals += 1;
   } else {
     fish.capBlockedTintRemainingMs = FISH_BLOCKED_TINT_MS;
@@ -1681,6 +1705,7 @@ export function combineFish(state, a, b) {
 
   const fish = createFish(speciesId, x, y, state, { grown: true, starTier: newTier });
   state.level.entities.push(fish);
+  pushFishMergeEffects(state, fish);
   state.level.floatingTexts.push(
     createPickupText(x, y, `${newTier}★ ${SPECIES[speciesId].name}!`, FISH_STAR_COLOR)
   );
@@ -1912,6 +1937,7 @@ export function spliceFish(state, utilityFish, targetFish) {
   const idxT = state.level.entities.indexOf(targetFish);
   if (idxT !== -1) state.level.entities.splice(idxT, 1);
   state.level.entities.push(hybrid);
+  pushFishMergeEffects(state, hybrid);
 
   state.level.floatingTexts.push(createPickupText(x, y, 'Spliced!', TANK_POINT_COLOR));
   state.meta.stats.hybridsCreated += 1; // hybrids_created_1/5 achievements
@@ -1955,14 +1981,14 @@ export function spliceOctopusWithAlien(state, octopusFish, alien) {
   const idxA = state.level.entities.indexOf(alien);
   if (idxA !== -1) state.level.entities.splice(idxA, 1);
   state.level.entities.push(hybrid);
+  pushFishMergeEffects(state, hybrid);
   state.level.floatingTexts.push(createPickupText(x, y, 'Spliced!', TANK_POINT_COLOR));
   state.meta.stats.hybridsCreated += 1; // hybrids_created_1/5 achievements
   return hybrid;
 }
 
 // The first pair of two fish currently on screen that could legally be
-// combined (or null) — per direct request, drives both the Merge tool's
-// grayed-out/available state (via hasAnyMergeOpportunity below) and the
+// combined (or null) — per direct request, drives the
 // first-time merge guided tutorial's trigger (Systems.js's
 // updateMergeTutorialTrigger) and its target-pair spotlight (see
 // resolveMergeTutorialPair below). O(n^2) over the fish on screen, same
@@ -1977,30 +2003,6 @@ export function findCombinablePair(state) {
     }
   }
   return null;
-}
-
-// Whether ANY two fish on screen could currently be combined OR spliced —
-// the Merge tool handles both interactions, so its availability has to
-// cover both, not just combining (see UI.js's isMergeToolAvailable). Also
-// covers the Bio Fish's own one-off Octopus+alien splice — without this,
-// a player with a qualifying Octopus and Alien-Egg-hatched alien but no
-// other combinable/spliceable FISH pair on screen would find the Merge tool
-// permanently grayed out, making that whole hybrid completely unreachable.
-export function hasAnyMergeOpportunity(state) {
-  if (findCombinablePair(state)) return true;
-  const fish = state.level.entities.filter((e) => e.type === 'fish');
-  for (const a of fish) {
-    for (const b of fish) {
-      if (a.id !== b.id && canSpliceFish(state, a, b)) return true;
-    }
-  }
-  for (const f of fish) {
-    if (f.speciesId !== 'octopus') continue;
-    for (const entity of state.level.entities) {
-      if (entity.type === 'friendly_alien' && canSpliceOctopusWithAlien(state, f, entity)) return true;
-    }
-  }
-  return false;
 }
 
 // Resolves the two fish the first-time merge guided tutorial's "drag" step
@@ -3108,14 +3110,7 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
               // other growth path here) and the shared grow-to-adult
               // particle burst plays (see the Mutagen Paste branch above
               // for its other trigger).
-              const p0 = computeGrowthOrbitPosition(fish, 0, state.level.elapsed);
-              const p1 = computeGrowthOrbitPosition(fish, 1, state.level.elapsed);
-              state.level.fishGrowthAbsorbEffects.push(
-                { fishId: fish.id, startX: p0.x, startY: p0.y, age: 0 },
-                { fishId: fish.id, startX: p1.x, startY: p1.y, age: 0 }
-              );
-              // The coin-pickup sparkle, bigger — see FISH_STREAK_SPARKLE_SCALE.
-              state.level.coinSparkleEffects.push({ x: fish.x, y: fish.y, age: 0, scale: FISH_STREAK_SPARKLE_SCALE });
+              pushFishStreakEffects(state, fish);
               if (isAlreadyAdult) {
                 // Adult: the 3 quick feeds buy an immediate coin (spawned in the coin block
                 // below) instead of growth. dropTimer is left untouched.

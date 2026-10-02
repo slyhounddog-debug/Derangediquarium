@@ -1385,6 +1385,14 @@ export const FISH_COLORS = {
   suckerfish: '#2dd4a5',
   electric_eel: '#ffd93d',
   octopus: '#a663ff',
+  // Explicit hybrid colors (drawFish uses an entry here over its default
+  // 50/50 parent blend), per direct request: the Battery fish takes the Feeder
+  // fish's old blended color (Electric Eel x Suckerfish), and the Feeder fish
+  // gets a slightly more orange take on FOOD_COLOR — the midpoint of the
+  // Battery fish's old blend (Eel x Blimpfish, rgb(255,178,81)) and FOOD_COLOR
+  // (#ff9b8a).
+  eel_blimp: '#96d771',
+  zap_sucker: '#ffa76e',
 };
 
 // ---- Species table (§4) ----
@@ -1658,7 +1666,7 @@ export const SPECIES = {
   // a hostile wave alien can't be spliced.
   xeno_octopus: {
     id: 'xeno_octopus', name: 'Bio Fish', tier: 4, unlockPhase: 4, cost: 100, parents: ['octopus', 'alien_t1'], // renamed from 'Xeno Octopus' per direct request; id left alone, same precedent as eel_blimp's own rename
-    description: 'A hybrid of an Alien and a Science Octopus — not purchasable directly. Drag a grown Octopus onto the friendly alien an Alien Egg hatches into (a hostile wave alien won\'t do) to splice them together. Right-click it to toggle Bio-Sludge mode (single-click opens its info instead) — while on, it brews and spits out Bio-Sludge every 8 seconds instead of Science Bubbles. Still needs to be fed like any other fish.',
+    description: 'A hybrid of an Alien and a Science Octopus — not purchasable directly. Right-click and drag a grown Octopus onto the friendly alien an Alien Egg hatches into (a hostile wave alien won\'t do) to splice them together. Right-click it to toggle Bio-Sludge mode (single-click opens its info instead) — while on, it brews and spits out Bio-Sludge every 8 seconds instead of Science Bubbles. Still needs to be fed like any other fish.',
     behavior: ['RESEARCHER'], dropType: 'science_blue',
     swimSpeed: 25, lifespan: 300000, hungerRate: 0.468,
     growthStages: [
@@ -3564,9 +3572,10 @@ export const FISH_BLOCKED_TINT_MS = 1000;
 // Per direct request ("the visual isn't obvious enough when the bubble cap is
 // met and an octopus tries to spawn a science but can't") — a science drop
 // blocked by the Bubble Cap now makes the researcher (Octopus or hybrid) look
-// SICK for FISH_BLOCKED_TINT_MS instead of the plain gray tint a blocked coin
-// still gets: a heavy green blend (the hunger sickness tint is only 0.18-0.35).
+// SICK for SCIENCE_BLOCKED_SICK_MS instead of the plain gray tint a blocked coin
+// (FISH_BLOCKED_TINT_MS, 1s) still gets: a heavy green blend (the hunger sickness tint is only 0.18-0.35).
 export const SCIENCE_BLOCKED_SICKNESS = 0.8;
+export const SCIENCE_BLOCKED_SICK_MS = 4000; // 1s -> 4s per direct request
 // ...and a gold arrow under the HUD points at the Bubble Cap readout for 4s
 // (UI.js's updateScienceCapArrow; the duration is #science-cap-arrow.show's CSS
 // animation), restarting — with a shake and flash — if another researcher is

@@ -1217,7 +1217,7 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
    entirely (folded into the Food tool's own D-hotkey delete instead — see
    main.js's updateKeyDDelete). */
 .tool-btn:disabled { opacity: 0.4; cursor: not-allowed; filter: grayscale(0.6); }
-/* Favorite slots (3, hotkeys 4-6) — per direct request. An empty slot shows
+/* Favorite slots (3, hotkeys 3-5) — per direct request. An empty slot shows
    a plain faint dashed star outline (UI.js's buildFavoriteSlots sets this
    text content once and never touches it again for that slot until it's
    actually filled); a filled one shows the real building/fish art via the
@@ -1236,7 +1236,6 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
    JS constant, so if FOOD_COLOR ever changes again this needs updating by
    hand to match. */
 .tool-icon-food { width: 22px; height: 22px; background: #ff9b8a; box-shadow: 0 0 0 5px rgba(255, 155, 138, 0.3); }
-.tool-btn-emoji { font-size: 26px; } /* the Merge button's 🧤 (Demolish's own 🔨 used this too, before that tool was removed) */
 /* A small sheet of blue blueprint paper — a fine white grid on a deep blue
    ground, per direct request ("make the blueprint on the toolbar look like
    a blue paper blueprint") — rectangular (border-radius overridden down

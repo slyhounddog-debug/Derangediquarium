@@ -14,6 +14,9 @@ import {
   HUNGER_SEEK_THRESHOLD,
   HUNGER_CRITICAL_THRESHOLD,
   SCIENCE_BLOCKED_SICKNESS,
+  FISH_MIN_X,
+  FISH_MAX_X,
+  FISH_MIN_Y,
   HUNGER_ICON_BOUNCE_SLOW_PERIOD_MS,
   HUNGER_ICON_BOUNCE_SLOW_AMPLITUDE_PX,
   HUNGER_ICON_BOUNCE_FAST_PERIOD_MS,
@@ -1483,38 +1486,54 @@ function isCtrlHeld() {
   return input.keysDown.has('ControlLeft') || input.keysDown.has('ControlRight');
 }
 
-// Economy Fish Combining (Tier 2) drag state — see Entities.js's
-// isCombinableFish/canCombineFish/combineFish and CLAUDE.md's "Economy Fish
-// Combining/Splicing" section. draggedFishId is set on mousedown if the
-// press landed on a legal combine SOURCE (economy species, Adult, not
-// already at the tier cap); while set, update() below snaps that fish's
-// position to the cursor every tick (freezing its own AI movement in the
-// process, since the override runs after updateEntities) and render()
-// highlights whatever fish is currently under the cursor green/red.
-// fishDragArmed mirrors "a drag started this press" for exactly one
-// browser 'click' event — the native click always fires after mouseup on
-// the same element regardless of how far the mouse moved in between, so
-// without this guard, starting a drag on a fish would ALSO trigger the
-// click handler below (banking a coin / spawning food / opening the Mound
-// menu) at the release point.
+// Fish move/merge drag state — see Entities.js's isCombinableFish/
+// canCombineFish/combineFish and CLAUDE.md's "Economy Fish Combining/Splicing"
+// section. Per direct request the dedicated Merge tool is gone: RIGHT-click and
+// drag any fish (with nothing armed — the plain cursor) to move it anywhere in
+// the water, and drop it on a legal partner to merge/splice. draggedFishId is
+// set once a right-button press on a fish has moved past
+// ITEM_DRAG_MOVE_THRESHOLD_PX; while set, update() below snaps that fish to the
+// cursor every tick (freezing its own AI movement in the process, since the
+// override runs after updateEntities) and render() highlights whatever fish is
+// currently under the cursor green/red. A right-click released without moving
+// is not a drag — it still toggles a hybrid's ability (see the right-mouse-up
+// handler below). Moving/merging is disabled while any hostile alien is alive,
+// even with Pause Time on.
 let draggedFishId = null;
-let fishDragArmed = false;
+let rightPressFishId = null; // the fish under the cursor when the right button went down (ability toggle on a plain right-click, drag source otherwise)
+let rightPressDragCandidate = false; // whether that press may start a drag (plain cursor armed, no blocking tutorial)
+let rightPressStartSx = 0;
+let rightPressStartSy = 0;
+let rightPressGrabOffset = { x: 0, y: 0 }; // fish position minus cursor world position at press, so the fish doesn't jump onto the cursor
+let rightPressAlienNoticeShown = false;
+const FISH_DRAG_ALIEN_MESSAGE = "Can't move or merge fish while aliens are on screen!";
 
-// Merge-tool partner highlight — per direct request, while the Merge/hybrid
-// tool is selected and the cursor hovers a fish that can merge or splice, every
+// Per direct request, fish can't be moved or merged while a hostile alien is
+// alive — checked against the live entity list, so it holds even under Pause
+// Time (state.ui.timePaused), when fish drags are otherwise allowed. Friendly
+// (egg-hatched) aliens are their own entity type and don't count.
+function hostileAliensActive(state) {
+  return state.level.entities.some((e) => e.type === 'alien' && e.hp > 0);
+}
+
+// Merge partner highlight — per direct request, with nothing armed (plain cursor) and
+// the cursor hovering (or dragging) a fish that can merge or splice, every
 // fish it could pair with pulses a soft glow, with a faint line out to each
 // from the hovered fish that fades in and out in step with the glow. Kept
 // cheap: the partner list is recomputed only when the hovered fish changes or
 // every MERGE_HOVER_REFRESH_MS (not per frame — pairing rules don't change
 // that fast), the glow is one pre-baked sprite drawn with drawImage, and the
 // lines are a single batched path — so the per-frame cost is a handful of draw
-// calls, and exactly zero whenever the Merge tool isn't the one in hand.
+// calls, and exactly zero unless the plain cursor is hovering/dragging a fish.
 const MERGE_HOVER_REFRESH_MS = 300;
 const MERGE_HOVER_PULSE_PERIOD_MS = 1200;
 let mergeHoverSubjectId = null;
 let mergeHoverPartners = [];
 let mergeHoverRefreshAtMs = 0;
 let mergeHoverGlowSprite = null;
+let mergeLegendFishId = null; // the hover legend's own cache (same refresh cadence) — see the legend block in render()
+let mergeLegendLines = [];
+let mergeLegendRefreshAtMs = 0;
 function bakeMergeHoverGlow() {
   const size = 64;
   const canvas = document.createElement('canvas');
@@ -1564,10 +1583,10 @@ function renderMergeToolPartnerHighlight(ctx, state, subject, nowMs) {
 
 // Which hybrids have a real on/off ability toggle — Magnet Fish (magnet),
 // Feeder Fish (auto-Food dispenser), Bio Fish (Bio-Sludge mode) — per direct
-// request, all 3 now flip on a genuine RIGHT-click (see the rightClickHandlers
-// entry below), which needs no disambiguation against a plain left-click
-// opening the info modal at all, unlike the double-click scheme this
-// replaced.
+// request, all 3 flip on a right-click that doesn't turn into a drag (see the
+// right-mouse-up handler below, since right-DRAG now moves/merges fish), which
+// needs no disambiguation against a plain left-click opening the info modal at
+// all, unlike the double-click scheme this replaced.
 const TOGGLEABLE_FISH_SPECIES = ['buffer_fish', 'zap_sucker', 'xeno_octopus'];
 const FISH_TOGGLE_BOUNCE_DURATION_MS = 400;
 const FISH_TOGGLE_BOUNCE_AMOUNT = 0.22;
@@ -1593,54 +1612,35 @@ function toggleFishAbility(state, fish) {
   }
 }
 
-input.mouseDownHandlers.push((sx, sy) => {
-  fishDragArmed = false;
+input.rightMouseDownHandlers.push((sx, sy) => {
+  rightPressFishId = null;
+  rightPressDragCandidate = false;
+  rightPressAlienNoticeShown = false;
   if (state.ui.paused) return;
+  // Guided tutorials swallow this, except the first-time merge tutorial's own
+  // drag step (which teaches exactly this gesture).
+  if (state.level.tutorialFlow && !isMergeDragTutorialStepActive(state)) return;
   const world = screenToWorld(sx, sy, state.camera);
   const fish = findFishAt(state, world.x, world.y);
   if (!fish) return;
-  // A fish can be a legal drag SOURCE for either interaction — Economy Fish
-  // Combining or (Phase 4) Gene-Splicing. Per direct bug report ("it only
-  // seems to work if I grab one of the two specifically first... fix it so
-  // I can grab either fish"), a splice pair's TARGET half (an ordinary
-  // economy/hybrid-eligible fish, not one of the 3 utility species) also
-  // needs to be pickable — isSpliceTargetCandidate is the missing other half
-  // of isSpliceSource's own check, true for whichever fish would be eligible
-  // as the RECEIVING side of some currently-unlocked splice. The mouseup
-  // handler and the hover-highlight below both already try both dragged/
-  // target orderings, so it no longer matters which half of a pair gets
-  // grabbed first.
-  const spliceEligible = isSpliceSource(state, fish) || isSpliceTargetCandidate(state, fish);
-  // Both Economy Fish Combining AND Gene-Splicing now require the dedicated
-  // Merge tool (🧤) to be selected first — per direct request ("Make it so
-  // the merge/hybrid tool needs to be selected to actually merge fish. If
-  // the default cursor is selected, don't let it merge fish. That way, the
-  // info modal works correctly on fish that can be merged"). An earlier
-  // round had relaxed this for splicing only ("use the splice tool at any
-  // time"), which meant a plain cursor-tool press on a splice-eligible fish
-  // armed a drag instead of falling through to the fish info modal's own
-  // click handling further down — reverted back to requiring 'merge' for
-  // both, so a cursor-tool click on ANY fish (mergeable or not) reliably
-  // opens its info modal instead.
-  if (state.ui.selectedTool === 'merge' && (isCombinableFish(state, fish) || spliceEligible)) {
-    draggedFishId = fish.id;
-    fishDragArmed = true;
-  }
+  rightPressFishId = fish.id;
+  rightPressStartSx = sx;
+  rightPressStartSy = sy;
+  rightPressGrabOffset = { x: fish.x - world.x, y: fish.y - world.y };
+  // Moving/merging only with nothing armed — the plain cursor (not the Food tool,
+  // a shop fish/building, or a Blueprint), per direct request.
+  rightPressDragCandidate = state.ui.selectedTool === 'cursor';
 });
 
-input.mouseUpHandlers.push((sx, sy) => {
-  if (draggedFishId == null) return;
-  const world = screenToWorld(sx, sy, state.camera);
-  const dragged = state.level.entities.find((e) => e.id === draggedFishId);
-  const target = findFishAt(state, world.x, world.y, draggedFishId);
+// What dropping a dragged fish at `world` does: combine/splice it with a legal
+// partner under the cursor, or (Bio Fish) splice an Octopus with an
+// egg-hatched friendly alien; anywhere else it simply stays where it was
+// dropped and resumes swimming.
+function resolveFishDrop(dragged, world) {
+  if (hostileAliensActive(state)) return;
+  const target = findFishAt(state, world.x, world.y, dragged.id);
   if (dragged && target) {
-    // draggedFishId can now only ever have been armed while 'merge' was
-    // selected (see the mousedown handler above) — this check is kept
-    // anyway as a defensive belt-and-suspenders in case the tool changed
-    // mid-drag (e.g. a hotkey swapped it while the mouse button was still
-    // down), so combining can't fire off a drag that started as one thing
-    // and ended as another.
-    if (state.ui.selectedTool === 'merge' && canCombineFish(state, dragged, target)) {
+    if (canCombineFish(state, dragged, target)) {
       combineFish(state, dragged, target);
       // The first-time merge guided tutorial's own final step — a no-op
       // unless that exact flow/step is currently active (see UI.js's
@@ -1672,7 +1672,28 @@ input.mouseUpHandlers.push((sx, sy) => {
       spliceOctopusWithAlien(state, dragged, alienTarget);
     }
   }
-  draggedFishId = null;
+}
+
+input.rightMouseUpHandlers.push((sx, sy) => {
+  const pressedId = rightPressFishId;
+  rightPressFishId = null;
+  rightPressDragCandidate = false;
+  if (pressedId == null) return;
+  const moved = Math.hypot(sx - rightPressStartSx, sy - rightPressStartSy) >= ITEM_DRAG_MOVE_THRESHOLD_PX;
+  if (moved) input.suppressContextMenuUntilMs = performance.now() + 200; // this was a drag, not a right-click — see Engine.js's contextmenu listener
+  if (draggedFishId != null) {
+    const dragged = state.level.entities.find((e) => e.id === draggedFishId);
+    draggedFishId = null;
+    if (dragged) {
+      resolveFishDrop(dragged, screenToWorld(sx, sy, state.camera));
+      dragged.wanderTimer = 0; // resume swimming right away from wherever it was dropped (a no-op if it was just merged away)
+    }
+    return;
+  }
+  // A plain right-click (no drag) on a toggleable hybrid flips its ability.
+  if (moved || state.ui.paused || state.level.tutorialFlow) return;
+  const fish = state.level.entities.find((e) => e.id === pressedId && e.type === 'fish');
+  if (fish && TOGGLEABLE_FISH_SPECIES.includes(fish.speciesId)) toggleFishAbility(state, fish);
 });
 
 // Whether the "drag Waste into the Turret" guided-tutorial step is the one
@@ -1719,7 +1740,7 @@ function isChestTrickleStepActive(state) {
 // (coin/food/waste/science), per direct request ("make it so that every
 // object can be clicked and dragged around, just like waste. Make sure the
 // collision, gravity, and momentum works the same way"). Mirrors the Economy
-// Fish combine-drag pattern above (draggedFishId/fishDragArmed) for the
+// Fish combine-drag pattern above (draggedFishId) for the
 // grab/hold/release shape, no tool requirement (grabbing an item directly
 // always works, regardless of the currently selected tool). Only one item
 // can ever be dragged at a time (a second mousedown on another item while
@@ -2690,7 +2711,6 @@ function effectiveToolAt(worldY) {
 }
 
 input.clickHandlers.push((sx, sy) => {
-  if (fishDragArmed) { fishDragArmed = false; return; } // this click followed a fish-combine drag gesture — don't also bank/feed/mound-click at the release point
   if (itemDragMoved) { itemDragMoved = false; return; } // this click followed a genuine item-drag gesture — don't also bank/feed/place at the release point. An unmoved press-release leaves itemDragMoved false, so a plain click on a Coin/Science item still banks it normally
   if (recipeDragMoved) { recipeDragMoved = false; return; } // this click followed a genuine Manufacturer/Power Plant recipe-copy drag — don't also open the recipe pop-up at the release point
   if (platformFilterDragMoved) { platformFilterDragMoved = false; return; } // this click followed a genuine Platform filter-copy drag — don't also open the filter pop-up at the release point
@@ -3016,22 +3036,6 @@ input.clickHandlers.push((sx, sy) => {
   // click for those building types.
 });
 
-// Magnet Fish/Feeder Fish/Bio Fish: right-click toggles their on/off
-// ability — per direct request ("let's make it so that you right-click to
-// toggle on/off hybrid fish"), replacing the earlier double-click scheme (a
-// plain left-click now always opens the info modal immediately, with no
-// disambiguation delay — see the click handler's own comment). Checked
-// first, ahead of every other right-click handler below, so it can't be
-// shadowed by the universal-cancel handler's own closeSidePanels/
-// cancelActiveTool (which still also runs on this same right-click — see
-// that handler's own comment on why that's fine/existing precedent).
-input.rightClickHandlers.push((sx, sy) => {
-  if (state.ui.paused || state.level.tutorialFlow) return;
-  const world = screenToWorld(sx, sy, state.camera);
-  const fish = findFishAt(state, world.x, world.y);
-  if (fish && TOGGLEABLE_FISH_SPECIES.includes(fish.speciesId)) toggleFishAbility(state, fish);
-});
-
 // Blueprint tool: right-click cancels an in-progress selection (drag) or an
 // already-captured clipboard armed for pasting — back to a clean slate,
 // ready for a new drag-select, without leaving the tool itself.
@@ -3241,14 +3245,12 @@ input.keydownHandlers.push((e) => {
     return;
   }
   // Per direct request ("make it so that during tutorials you can use
-  // hotkeys 1-3 to toggle the tools on or off, in case they are on and need
+  // hotkeys 1-2 to toggle the tools on or off, in case they are on and need
   // to be turned off for the tutorial") — a third exception to "every hotkey
   // is swallowed during a tutorial," alongside Escape/KeyE above. selectTool
   // already toggles (re-pressing an already-armed tool's own hotkey clears
   // back to the plain cursor — see its own comment), so this reuses it
-  // completely unchanged rather than duplicating that logic; Merge's own
-  // isMergeToolAvailable already gates itself correctly during a tutorial
-  // (blocked by any OTHER flow, allowed by the 'mergefish' flow itself).
+  // completely unchanged rather than duplicating that logic.
   // Also records state.ui.tutorialToolOverrideStep (see its own comment) so
   // UI.js's per-frame "keep the step's own required tool selected" self-heal
   // doesn't immediately stomp this deliberate toggle back on the very next
@@ -3258,8 +3260,7 @@ input.keydownHandlers.push((e) => {
   if (state.level.tutorialFlow) {
     const flow = state.level.tutorialFlow;
     if (e.code === 'Digit1') { selectTool(state, 'food'); state.ui.tutorialToolOverrideStep = `${flow.id}:${flow.step}`; return; }
-    if (e.code === 'Digit2') { selectTool(state, 'merge'); state.ui.tutorialToolOverrideStep = `${flow.id}:${flow.step}`; return; }
-    if (e.code === 'Digit3') { selectTool(state, 'blueprint'); state.ui.tutorialToolOverrideStep = `${flow.id}:${flow.step}`; return; }
+    if (e.code === 'Digit2') { selectTool(state, 'blueprint'); state.ui.tutorialToolOverrideStep = `${flow.id}:${flow.step}`; return; }
   }
   // Guided tutorial flows (see UI.js's TUTORIAL_FLOWS) swallow every OTHER
   // hotkey, same reasoning as the cinematic intro above — the overlay's own
@@ -3352,23 +3353,21 @@ input.keydownHandlers.push((e) => {
     case 'Digit1': // Food — matches the fixed bottom tool-bar's own hotkeys
       selectTool(state, 'food');
       break;
-    case 'Digit2': // Merge — moved down to fill the old Demolish slot, per direct request, once Blueprint moved to 3 and Favorites took 4-6
-      selectTool(state, 'merge');
-      break;
-    case 'Digit3': // Blueprint ("Stamp") — moved back to 3 per direct request, freeing 4-6 for the Favorite slots below — see blueprintClipboard's own comment above
+    case 'Digit2': // Blueprint ("Stamp") — moved down from 3 when the Merge tool was removed, per direct request — see blueprintClipboardActive's/blueprintClipboard's own comments
       selectTool(state, 'blueprint');
       break;
-    // 4/5/6 — Favorite slots 1/2/3. Per direct request (replacing the old F
-    // hotkey): with the shop open and a fish/building selected they PIN that
-    // selection into the slot (overwrite, or toggle off if it's already
-    // there); otherwise they select the slot's favorite as before.
-    case 'Digit4':
+    // 3/4/5 — Favorite slots 1/2/3 (were 4/5/6 before the Merge tool was removed).
+    // Per direct request (replacing the old F hotkey): with the shop open and a
+    // fish/building selected they PIN that selection into the slot (overwrite,
+    // or toggle off if it's already there); otherwise they select the slot's
+    // favorite as before.
+    case 'Digit3':
       if (!setFavoriteSlotFromShop(state, 0)) selectFavorite(state, 0);
       break;
-    case 'Digit5':
+    case 'Digit4':
       if (!setFavoriteSlotFromShop(state, 1)) selectFavorite(state, 1);
       break;
-    case 'Digit6':
+    case 'Digit5':
       if (!setFavoriteSlotFromShop(state, 2)) selectFavorite(state, 2);
       break;
     case 'KeyZ': // Ctrl+Z — undo the last building place/move/sell
@@ -3858,12 +3857,28 @@ function updateKeyDDelete() {
 // interaction needs. If the dragged fish stopped existing mid-drag (e.g. it
 // starved the same tick), this just clears the drag rather than erroring.
 function updateFishDrag() {
-  if (draggedFishId == null) return;
-  const dragged = state.level.entities.find((e) => e.id === draggedFishId);
-  if (!dragged) { draggedFishId = null; return; }
+  if (rightPressFishId == null || !rightPressDragCandidate) return;
+  const dragged = state.level.entities.find((e) => e.id === rightPressFishId && e.type === 'fish' && !e.dying);
+  if (!dragged) { draggedFishId = null; rightPressFishId = null; rightPressDragCandidate = false; return; }
+  if (draggedFishId == null) {
+    // A right-press only becomes a drag once the cursor has actually moved, so a plain right-click (a hybrid's ability toggle) never nudges the fish.
+    if (Math.hypot(input.mouse.x - rightPressStartSx, input.mouse.y - rightPressStartSy) < ITEM_DRAG_MOVE_THRESHOLD_PX) return;
+    if (hostileAliensActive(state)) {
+      if (!rightPressAlienNoticeShown) { rightPressAlienNoticeShown = true; showBuildError(FISH_DRAG_ALIEN_MESSAGE); }
+      return;
+    }
+    draggedFishId = dragged.id;
+  } else if (hostileAliensActive(state)) {
+    // An alien appeared mid-drag — drop the fish right where it is.
+    draggedFishId = null;
+    rightPressDragCandidate = false;
+    dragged.wanderTimer = 0;
+    showBuildError(FISH_DRAG_ALIEN_MESSAGE);
+    return;
+  }
   const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
-  dragged.x = world.x;
-  dragged.y = world.y;
+  dragged.x = Math.max(FISH_MIN_X, Math.min(FISH_MAX_X, world.x + rightPressGrabOffset.x)); // kept inside the tank, same bounds the fish's own wander uses
+  dragged.y = Math.max(FISH_MIN_Y, Math.min(SEABED_FLOOR_Y, world.y + rightPressGrabOffset.y));
   dragged.vx = 0;
   dragged.vy = 0;
 }
@@ -4685,21 +4700,6 @@ const CURSOR_BY_TOOL = {
   // old standalone Demolish tool is gone, this fires off the D hotkey being
   // held instead (see updateCanvasCursor).
   delete: emojiCursorCss('🔨', 13, 8),
-  // Real bug fixed, per direct report ("the center of the cursor is way too
-  // far to the bottom left of the glove icon... I have to click in the top
-  // right corner of the fish for it to work"). The default hotspot (4, 26)
-  // — near the bottom-LEFT corner of the 32x32 glyph box, tuned for a glyph
-  // shaped like the hammer's own handle-and-head silhouette — lands almost
-  // entirely OUTSIDE the glove emoji's own rendered pixels at this exact
-  // font/size (measured directly via an offscreen-canvas pixel scan: the
-  // glove's real bounding box is x:6-27, y:4-29, so x=4 sits to the left of
-  // every one of its pixels). (17, 17) is that same glove's own measured
-  // bounding-box center — unlike the hammer (whose hotspot is deliberately
-  // its striking head, not its bounding-box center, since a hammer's visual
-  // weight skews toward one corner), a glove/mitten shape is roughly
-  // symmetric, so its true center is exactly where "grabbing with the
-  // glove" should click from.
-  merge: emojiCursorCss('🧤', 17, 17),
   food: circleCursorCss(FOOD_COLOR),
   // The default/neutral tool's cursor, per direct request ("default back to
   // just a cursor that looks like a shell emoji, with the tip of the shell
@@ -5607,9 +5607,13 @@ function render() {
   }
 
   perfMark('r: shadow pass + aliens', ctx);
-  // Merge-tool partner highlight, drawn under the fish below — see renderMergeToolPartnerHighlight.
-  if (state.ui.selectedTool === 'merge' && hoverWorld && !state.ui.paused && draggedFishId == null) {
-    const mergeHoverFish = findFishAt(state, hoverWorld.x, hoverWorld.y);
+  // Merge partner highlight, drawn under the fish below — see renderMergeToolPartnerHighlight.
+  // Per direct request: with nothing armed (plain cursor), while hovering a fish or dragging one, and
+  // never while hostile aliens are alive (fish can't be moved or merged then).
+  if (state.ui.selectedTool === 'cursor' && hoverWorld && !state.ui.paused && !hostileAliensActive(state)) {
+    const mergeHoverFish = draggedFishId != null
+      ? state.level.entities.find((e) => e.id === draggedFishId && e.type === 'fish')
+      : findFishAt(state, hoverWorld.x, hoverWorld.y);
     if (mergeHoverFish) renderMergeToolPartnerHighlight(ctx, state, mergeHoverFish, performance.now());
     else mergeHoverSubjectId = null;
   }
@@ -6439,16 +6443,30 @@ function render() {
   // comment. Only computed while nothing else is already claiming the
   // bottom-left legend spot (no building hovered/moving, no cost legend for
   // an armed build:/fish: tool) and no drag is in progress, so this never
-  // fights those for the same on-screen slot. Purely informational (what
-  // WOULD merge/splice if the Merge tool were selected) — deliberately not
-  // gated on the Merge tool itself, unlike the real drag-arm gesture below.
+  // fights those for the same on-screen slot. Per direct request, only with
+  // nothing armed (the plain cursor) and no hostile alien alive (fish can't be
+  // moved/merged then); every hovered fish gets the legend (an empty list is
+  // just the "Right-click and drag: Move/Merge" header — UI.js draws that line).
+  // The merge list is recomputed only when the hovered fish changes or every
+  // MERGE_HOVER_REFRESH_MS, not every frame.
   if (
-    input.mouse.inside && !state.ui.paused && !state.level.tutorialFlow &&
+    input.mouse.inside && !state.ui.paused && !state.level.tutorialFlow && state.ui.selectedTool === 'cursor' &&
     draggedFishId == null && !state.ui.buildingMoveArmed && state.ui.buildingMoveHoverLabel == null &&
-    !hoverEffectiveTool.startsWith('build:') && !hoverEffectiveTool.startsWith('fish:') && blueprintClipboard == null
+    blueprintClipboard == null && !hostileAliensActive(state)
   ) {
     const hoverFish = findFishAt(state, hoverWorld.x, hoverWorld.y);
-    state.ui.fishMergeHoverLines = hoverFish ? describeFishMergeOptions(state, hoverFish) : null;
+    if (hoverFish) {
+      const nowMs = performance.now();
+      if (hoverFish.id !== mergeLegendFishId || nowMs >= mergeLegendRefreshAtMs) {
+        mergeLegendFishId = hoverFish.id;
+        mergeLegendLines = describeFishMergeOptions(state, hoverFish) ?? [];
+        mergeLegendRefreshAtMs = nowMs + MERGE_HOVER_REFRESH_MS;
+      }
+      state.ui.fishMergeHoverLines = mergeLegendLines;
+    } else {
+      mergeLegendFishId = null;
+      state.ui.fishMergeHoverLines = null;
+    }
   } else {
     state.ui.fishMergeHoverLines = null;
   }

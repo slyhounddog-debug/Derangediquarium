@@ -37,6 +37,8 @@ export function createInput(canvas) {
     // pair mirrors mouseDown/mouseDownHandlers/mouseUpHandlers exactly, just
     // gated on e.button === 2 instead of 0.
     rightMouseDown: false,
+    suppressContextMenuUntilMs: 0, // main.js sets this when a right-button DRAG just ended, so the browser's contextmenu event that follows the release doesn't also run the right-click (cancel/toggle) handlers
+    suppressContextMenuUntilMs: 0, // main.js sets this when a right-button DRAG just ended, so the browser's contextmenu event that follows the release doesn't also run the right-click (cancel/toggle) handlers
     rightMouseDownHandlers: [],
     rightMouseUpHandlers: [],
     keydownHandlers: [],
@@ -111,6 +113,8 @@ export function createInput(canvas) {
   });
   canvas.addEventListener('contextmenu', (e) => {
     e.preventDefault(); // right-click is build-mode tile removal, not the browser menu
+    if (performance.now() < input.suppressContextMenuUntilMs) return;
+    if (performance.now() < input.suppressContextMenuUntilMs) return;
     const rect = canvas.getBoundingClientRect();
     const sx = e.clientX - rect.left;
     const sy = e.clientY - rect.top;

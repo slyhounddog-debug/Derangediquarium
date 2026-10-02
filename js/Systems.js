@@ -149,7 +149,7 @@ function updateMergeTutorialTrigger(state) {
   if (state.level.tutorialFlags.mergeTutorialShown || state.level.tutorialFlow) return;
   if (!findCombinablePair(state)) return;
   state.level.tutorialFlags.mergeTutorialShown = true;
-  state.level.tutorialFlow = { id: 'mergefish', step: 'switch' };
+  state.level.tutorialFlow = { id: 'mergefish', step: 'drag' };
 }
 
 // Starts the post-alien "arm up" guided tutorial (Shop -> Waste Turret ->
