@@ -453,7 +453,7 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
   transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
 #stats-panel.open { transform: translate(0, -50%); }
-/* Tab reminder — see UI.js's updateTabReminder. Shown for 2.5s by adding .show
+/* Tab reminder — see UI.js's updateTabReminder. Shown for 4s by adding .show
    (the container fades in and out over that time); each caret pulses on its own
    delay (column, then row), so the brightness sweeps left to right. */
 #tab-reminder {
@@ -464,11 +464,11 @@ body.alt-mode #hotkey-legend > *:not(#hotkey-legend-alt) {
   display: none;
   align-items: center;
   gap: 8px;
-  z-index: 22;
+  z-index: 20; /* below #stats-panel (21), so opening it mid-reminder slides the panel over the hint */
   pointer-events: none;
   color: #ffffff;
 }
-#tab-reminder.show { display: flex; animation: tab-reminder-life 2.5s ease forwards; } /* 1.5s -> 2.5s per direct request */
+#tab-reminder.show { display: flex; animation: tab-reminder-life 4s ease forwards; } /* 1.5s -> 2.5s -> 4s per direct request */
 @keyframes tab-reminder-life { 0% { opacity: 0; } 10% { opacity: 1; } 85% { opacity: 1; } 100% { opacity: 0; } }
 #tab-reminder-text {
   writing-mode: vertical-rl;

@@ -3735,7 +3735,6 @@ export function openStatsPanel(state) {
   statsPanelOpen = true;
   els.statsPanel.classList.add('open');
   state.level.tabReminderNextAtMs = state.level.elapsed + TAB_REMINDER_AFTER_OPEN_MS; // see updateTabReminder
-  els.tabReminder.classList.remove('show');
   refreshStatsPanel(state);
 }
 export function closeStatsPanel() {
