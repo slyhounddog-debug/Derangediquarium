@@ -10,6 +10,7 @@
 // fire-and-forget side effect a caller triggers at the moment something
 // already happened.
 
+import { getSavedVolume, setSavedVolume } from './Save.js';
 import { ALIEN_MUSIC_BATTLE_LEAD_MS, BOSS_MUSIC_FADE_OUT_MS, BOSS_MUSIC_FADE_IN_START_MS, BOSS_MUSIC_FADE_IN_MS } from './Config.js';
 
 let ctx = null;
@@ -99,8 +100,10 @@ let bossActive = false;
 // request ("make the max music 10% quieter and also start 10% quieter, but
 // keep the sound effects untouched"), music's own starting fraction is now
 // 45% (50% * 0.9); sfxVolume is untouched.
-let musicVolume = 0.45;
-let sfxVolume = 0.5;
+// Per direct request, a volume the player has set persists (Save.js's prefs) across
+// refreshes and New Games — these load it, falling back to the defaults until then.
+let musicVolume = getSavedVolume('music') ?? 0.45;
+let sfxVolume = getSavedVolume('sfx') ?? 0.5;
 // Per direct request ("the max loudness the music and sound effects can get
 // are 30% quieter than they are now") — a slider at 100% used to map
 // straight to gain 1.0 (the loudest this app could ever get); now it maps to
@@ -242,10 +245,12 @@ window.addEventListener('focus', () => {
 // volume updates live while dragging, not just on release.
 export function setMusicVolume(v) {
   musicVolume = Math.max(0, Math.min(1, v));
+  setSavedVolume('music', musicVolume);
   if (musicGain) musicGain.gain.value = musicVolume * MUSIC_VOLUME_MAX_GAIN;
 }
 export function setSfxVolume(v) {
   sfxVolume = Math.max(0, Math.min(1, v));
+  setSavedVolume('sfx', sfxVolume);
   if (sfxGain) sfxGain.gain.value = sfxVolume * SFX_VOLUME_MAX_GAIN;
 }
 export function getMusicVolume() { return musicVolume; }

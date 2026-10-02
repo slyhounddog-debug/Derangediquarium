@@ -2157,3 +2157,7 @@ Also in this commit: the octopus "sick" tint after a Bubble-Cap-blocked science 
 
 **First-adult reminder.** `Entities.js`'s `maybeStartMergeHint` (from `awardTankPoint`, the single adult-transition hook): the first time a fish becomes an adult AND has at least one merge partner (an adult with nothing to pair with yet doesn't use it up), sets `state.level.mergeHint` and `tutorialFlags.firstAdultMergeHintShown`; `main.js`'s render plays the same highlight on that fish for `MERGE_HINT_MS` (3s) then fades it off over `MERGE_HINT_FADE_MS` (0.75s), unless the player is hovering/dragging something else or hostile aliens are alive.
 
+## Music/Sound Volume Now Persist (Settings Persistence)
+
+All three Settings (Music slider, Sounds slider, Guided Tutorial toggle) now survive refreshes and New Games. The Guided Tutorial toggle already did, via `Save.js`'s `finsanity_prefs_v1`; the volumes join it as `musicVolume`/`sfxVolume` (`null` until the player first moves a slider, then the game's defaults 0.45/0.5 no longer apply). `Sound.js` reads them at module load (`getSavedVolume`) and `setMusicVolume`/`setSfxVolume` write them (`setSavedVolume`). Once any setting is touched it stays as set (the Guided Tutorial auto-off still never overrides a toggle the player has touched).
+

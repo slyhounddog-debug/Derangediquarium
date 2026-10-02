@@ -12,7 +12,7 @@ import { WORLD_TILES_H, WORLD_TILES_W, TILE_EMPTY, TILE_REFINERY, SEA_TURTLE_SPA
 const SAVE_KEY = 'finsanity_save_v1';
 const PREFS_KEY = 'finsanity_prefs_v1';
 
-// ---- Player preferences (Guided Tutorial toggle) ----
+// ---- Player preferences (Guided Tutorial toggle, Music/Sound volume) ----
 // Deliberately NOT part of the campaign save above: the toggle has to
 // survive New Game/Restart and carry across sessions, and the set of
 // tutorials already encountered is a property of the player, not of any one
@@ -24,15 +24,20 @@ const PREFS_KEY = 'finsanity_prefs_v1';
 //     from then on their choice is final and the auto-off below never
 //     overrides it.
 //   tutorialsSeen: GUIDED_TUTORIAL_IDS the player has encountered so far.
+//   musicVolume/sfxVolume: the Settings sliders' 0-1 values, or null until the
+//     player first moves one (then the game's own default applies) — once set,
+//     they stick across refreshes and New Games, per direct request.
 const prefs = loadPrefs();
 
 function loadPrefs() {
-  const fresh = { guidedTutorials: true, guidedTutorialsUserSet: false, tutorialsSeen: [] };
+  const fresh = { guidedTutorials: true, guidedTutorialsUserSet: false, tutorialsSeen: [], musicVolume: null, sfxVolume: null };
   try {
     const parsed = JSON.parse(localStorage.getItem(PREFS_KEY));
     if (!parsed || typeof parsed !== 'object') return fresh;
     if (typeof parsed.guidedTutorials === 'boolean') fresh.guidedTutorials = parsed.guidedTutorials;
     if (typeof parsed.guidedTutorialsUserSet === 'boolean') fresh.guidedTutorialsUserSet = parsed.guidedTutorialsUserSet;
+    if (typeof parsed.musicVolume === 'number') fresh.musicVolume = Math.max(0, Math.min(1, parsed.musicVolume));
+    if (typeof parsed.sfxVolume === 'number') fresh.sfxVolume = Math.max(0, Math.min(1, parsed.sfxVolume));
     if (Array.isArray(parsed.tutorialsSeen)) fresh.tutorialsSeen = parsed.tutorialsSeen.filter((id) => GUIDED_TUTORIAL_IDS.includes(id));
   } catch {
     // no stored prefs, or localStorage is unavailable — the defaults above are fine
@@ -46,6 +51,17 @@ function savePrefs() {
   } catch {
     // locked-down/private-browsing context — the preference just won't outlive this page
   }
+}
+
+// The saved Settings volumes (null = never touched), read by Sound.js at load.
+export function getSavedVolume(kind) {
+  return kind === 'music' ? prefs.musicVolume : prefs.sfxVolume;
+}
+
+export function setSavedVolume(kind, v) {
+  if (kind === 'music') prefs.musicVolume = v;
+  else prefs.sfxVolume = v;
+  savePrefs();
 }
 
 export function isGuidedTutorialsEnabled() {
