@@ -19,11 +19,27 @@ import {
   EYE_PUPIL_RADIUS_RATIO,
   EYE_PUPIL_OFFSET_RATIO,
   FISH_STAR_COUNT_BY_TIER,
-  FISH_STAR_COLOR,
-  FISH_STAR_OUTER_RADIUS_RATIO,
-  FISH_STAR_INNER_RADIUS_FRACTION,
-  FISH_STAR_SPACING_RATIO,
-  FISH_STAR_Y_OFFSET_RATIO,
+  FISH_STAR_SPRITE_FILL,
+  FISH_STAR_SPRITE_OUTLINE,
+  FISH_STAR_RADIUS_RATIO,
+  FISH_STAR_ORBIT_PERIOD_MS,
+  FISH_STAR_ORBIT_RX_RATIO,
+  FISH_STAR_ORBIT_RY_RATIO,
+  FISH_STAR_DEPTH_SCALE,
+  FISH_STAR_MERGE_HOVER_RATIO,
+  FISH_STAR_MERGE_DROP_RATIO,
+  FISH_STAR_MERGE_DROP_MS,
+  FISH_STAR_MERGE_SPIN_MS,
+  FISH_STAR_MERGE_GLIDE_MS,
+  FISH_STAR_MERGE_SPIN_TURNS,
+  FISH_RIM_PERIOD_MS,
+  FISH_RIM_LIGHTEN,
+  FISH_RIM_BAND_BY_TIER,
+  FISH_ORBIT_RING_LIGHTEN,
+  FISH_ORBIT_RING_ALPHA,
+  FISH_ORBIT_RING_WIDTH_RATIO,
+  ECONOMY_SPECIES_IDS,
+  FISH_TIER4_SIZE_MULTIPLIER,
 } from './Config.js';
 
 function hexToRgb(hex) {
@@ -112,28 +128,183 @@ function blendHexColors(hexA, hexB) {
   return `rgb(${Math.round((a.r + b.r) / 2)}, ${Math.round((a.g + b.g) / 2)}, ${Math.round((a.b + b.b) / 2)})`;
 }
 
-// Standard 5-point star polygon, alternating outer/inner radius points
-// around the circle starting straight up — used for the Economy Fish
-// Combining tier overlay below. Pure drawing helper, no game-state reads.
-function drawStar(ctx, cx, cy, outerRadius, color) {
-  const innerRadius = outerRadius * FISH_STAR_INNER_RADIUS_FRACTION;
-  const spikes = 5;
-  let rot = -Math.PI / 2;
-  const step = Math.PI / spikes;
-  ctx.beginPath();
-  ctx.moveTo(cx, cy - outerRadius);
-  for (let i = 0; i < spikes; i++) {
-    ctx.lineTo(cx + Math.cos(rot) * outerRadius, cy + Math.sin(rot) * outerRadius);
-    rot += step;
-    ctx.lineTo(cx + Math.cos(rot) * innerRadius, cy + Math.sin(rot) * innerRadius);
-    rot += step;
+// ---- Economy Fish Combining tier overlay: orbiting stars + golden rim ----
+// Per direct request (a better way to read a fish's star tier at a glance) —
+// kept cheap on purpose, since every adult fish can carry it every frame: the
+// star is baked ONCE to a small canvas (same bake-once approach Mound.js's
+// bakeMoundArrow uses, and the same gold-fill/brown-outline look) so each
+// orbiting star is a single drawImage; orbit positions are plain sin/cos off the
+// caller's elapsed clock (no per-star state, no gradients/shadowBlur/filters);
+// and the golden rim is one extra stroke on a body path that was already built.
+const STAR_SPRITE_SIZE = 32;
+let starSprite = null;
+function getStarSprite() {
+  if (starSprite) return starSprite;
+  const canvas = document.createElement('canvas');
+  canvas.width = STAR_SPRITE_SIZE;
+  canvas.height = STAR_SPRITE_SIZE;
+  const c = canvas.getContext('2d');
+  const cx = STAR_SPRITE_SIZE / 2;
+  const cy = STAR_SPRITE_SIZE / 2 + 1; // a 5-point star's visual centre sits a touch below its circumcentre
+  const outer = STAR_SPRITE_SIZE * 0.42;
+  const inner = outer * 0.45;
+  c.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const r = i % 2 === 0 ? outer : inner;
+    const a = -Math.PI / 2 + (i * Math.PI) / 5;
+    const px = cx + Math.cos(a) * r;
+    const py = cy + Math.sin(a) * r;
+    if (i === 0) c.moveTo(px, py);
+    else c.lineTo(px, py);
   }
-  ctx.closePath();
-  ctx.fillStyle = color;
-  ctx.fill();
-  ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
-  ctx.lineWidth = 1;
+  c.closePath();
+  c.fillStyle = FISH_STAR_SPRITE_FILL;
+  c.fill();
+  c.lineJoin = 'round';
+  c.lineWidth = 2.5;
+  c.strokeStyle = FISH_STAR_SPRITE_OUTLINE;
+  c.stroke();
+  starSprite = canvas;
+  return starSprite;
+}
+
+// One star on the orbit at `angle`; the fish is drawn at (x, y). depth = sin(angle),
+// +1 on the near side (lower on screen, a bit bigger and brighter) down to -1 on the far side.
+function drawOrbitStar(ctx, sprite, x, y, rx, ry, baseRadius, angle) {
+  const depth = Math.sin(angle);
+  const r = baseRadius * (1 + FISH_STAR_DEPTH_SCALE * depth);
+  ctx.globalAlpha = 0.85 + 0.15 * depth;
+  ctx.drawImage(sprite, x + Math.cos(angle) * rx - r, y + depth * ry - r, r * 2, r * 2);
+}
+
+const ORBIT_TWO_PI = Math.PI * 2;
+const ECONOMY_SPECIES = new Set(ECONOMY_SPECIES_IDS);
+const MERGE_DROP_SPIN_MS = FISH_STAR_MERGE_DROP_MS + FISH_STAR_MERGE_SPIN_MS;
+const MERGE_TOTAL_MS = MERGE_DROP_SPIN_MS + FISH_STAR_MERGE_GLIDE_MS;
+
+// Draws one half of a fish's orbiting stars (and the same half of its faint orbit oval, `ring`): frontPass=false is the far side (call
+// BEFORE the body so it tucks behind), true the near side (call after the body).
+// mergeAgeMs >= 0 while a merge's new star is still arriving (see
+// fish.starAnimStartedAt): it drops/spins above the head in the front pass, then glides
+// into the orbit while the other stars re-space around it — the existing stars keep
+// their old spacing until the glide starts, so nothing jumps when the count goes up.
+function drawOrbitStars(ctx, x, y, size, count, elapsedMs, fishPhase, mergeAgeMs, frontPass, ring) {
+  const sprite = getStarSprite();
+  const half = ring.height / 2;
+  ctx.drawImage(ring, 0, frontPass ? half : 0, ring.width, half, x - ring.width / 2, frontPass ? y : y - half, ring.width, half); // this side's half of the oval, under the stars
+  const rx = size * FISH_STAR_ORBIT_RX_RATIO;
+  const ry = size * FISH_STAR_ORBIT_RY_RATIO;
+  const baseRadius = size * FISH_STAR_RADIUS_RATIO;
+  const base = fishPhase + (elapsedMs / FISH_STAR_ORBIT_PERIOD_MS) * ORBIT_TWO_PI;
+  const prevAlpha = ctx.globalAlpha;
+  const animating = mergeAgeMs >= 0 && mergeAgeMs < MERGE_TOTAL_MS && count >= 2;
+
+  let orbiting = count;
+  let spacing = ORBIT_TWO_PI / count;
+  let glideE = 0;
+  if (animating) {
+    orbiting = count - 1;
+    const gu = Math.max(0, (mergeAgeMs - MERGE_DROP_SPIN_MS) / FISH_STAR_MERGE_GLIDE_MS);
+    glideE = gu * gu * (3 - 2 * gu);
+    spacing = ORBIT_TWO_PI / (count - 1) + (ORBIT_TWO_PI / count - ORBIT_TWO_PI / (count - 1)) * glideE;
+  }
+  for (let k = 0; k < orbiting; k++) {
+    const angle = base + k * spacing;
+    if ((Math.sin(angle) >= 0) === frontPass) drawOrbitStar(ctx, sprite, x, y, rx, ry, baseRadius, angle);
+  }
+
+  if (animating) {
+    const hoverY = y - size * FISH_STAR_MERGE_HOVER_RATIO;
+    if (mergeAgeMs < MERGE_DROP_SPIN_MS) {
+      if (frontPass) {
+        let py = hoverY;
+        let alpha = 1;
+        let scaleX = 1;
+        if (mergeAgeMs < FISH_STAR_MERGE_DROP_MS) {
+          const u = mergeAgeMs / FISH_STAR_MERGE_DROP_MS;
+          const e = 1 - (1 - u) * (1 - u) * (1 - u); // ease-out: falls fast, settles softly
+          py = hoverY - (1 - e) * size * FISH_STAR_MERGE_DROP_RATIO;
+          alpha = e;
+        } else {
+          scaleX = Math.cos(((mergeAgeMs - FISH_STAR_MERGE_DROP_MS) / FISH_STAR_MERGE_SPIN_MS) * ORBIT_TWO_PI * FISH_STAR_MERGE_SPIN_TURNS);
+        }
+        const r = baseRadius * 1.25;
+        ctx.globalAlpha = alpha;
+        ctx.save();
+        ctx.translate(x, py);
+        ctx.scale(scaleX, 1);
+        ctx.drawImage(sprite, -r, -r, r * 2, r * 2);
+        ctx.restore();
+      }
+    } else {
+      const angle = base + orbiting * spacing; // its slot, on the same moving orbit as the others
+      if ((Math.sin(angle) >= 0) === frontPass) {
+        const depth = Math.sin(angle);
+        const r = baseRadius * (1.25 + (1 + FISH_STAR_DEPTH_SCALE * depth - 1.25) * glideE);
+        const sx = x + (Math.cos(angle) * rx) * glideE;
+        const sy = hoverY + (y + depth * ry - hoverY) * glideE;
+        ctx.globalAlpha = 1 - (1 - (0.85 + 0.15 * depth)) * glideE;
+        ctx.drawImage(sprite, sx - r, sy - r, r * 2, r * 2);
+      }
+    }
+  }
+  ctx.globalAlpha = prevAlpha;
+}
+
+// Per-draw tier look, set by drawFish just before the body is drawn so the body
+// functions below don't each need more parameters: the Tier 2+ rim band (width px, color,
+// alpha — alpha 0 = none) and the pupil color (Tier 4's matches the fish's own color).
+let rimBandWidth = 0;
+let rimBandAlpha = 0;
+let rimBandColor = '#ffffff';
+let pupilColor = '#1a1a1a';
+
+// Per direct request (the gold rim clashed with some fish's darkened outline): a
+// lighter shade of the fish's own color as a band just INSIDE the dark outline.
+// Call on the body path AFTER its fill and BEFORE strokeRim — clipping to the path and
+// stroking at double width paints only the inner half, and the dark outline stroked
+// next covers the band's outer edge. One clip + one stroke per Tier 2+ fish.
+function strokeRimBand(ctx, size) {
+  if (rimBandAlpha === 0) return;
+  const prevAlpha = ctx.globalAlpha;
+  ctx.save();
+  ctx.clip();
+  ctx.strokeStyle = rimBandColor;
+  ctx.lineJoin = 'round';
+  ctx.lineWidth = rimBandWidth * 2;
+  ctx.globalAlpha = prevAlpha * rimBandAlpha;
   ctx.stroke();
+  ctx.restore(); // also restores globalAlpha; the path itself survives for the caller's strokeRim
+}
+
+// The faint oval the stars follow, per direct request: a lighter shade of the fish's own
+// color, the same ellipse the stars sit on. Baked once per species+size (not per frame)
+// so each half is a single drawImage — the far half goes behind the body with the far stars,
+// the near half in front with the near stars, always under the stars themselves.
+const orbitRingSprites = new Map();
+function getOrbitRingSprite(speciesId, size, baseColor) {
+  const key = speciesId + '|' + Math.round(size * 10);
+  let sprite = orbitRingSprites.get(key);
+  if (sprite) return sprite;
+  const rx = size * FISH_STAR_ORBIT_RX_RATIO;
+  const ry = size * FISH_STAR_ORBIT_RY_RATIO;
+  const lineWidth = Math.max(1, size * FISH_ORBIT_RING_WIDTH_RATIO);
+  const pad = Math.ceil(lineWidth) + 2;
+  const w = Math.ceil(rx * 2) + pad * 2;
+  const h = Math.ceil(ry * 2 + pad * 2 + 1) & ~1; // even, so the sprite's middle row splits the far/near halves exactly
+  const canvas = document.createElement('canvas');
+  canvas.width = w;
+  canvas.height = h;
+  const c = canvas.getContext('2d');
+  c.strokeStyle = tone(baseColor, FISH_ORBIT_RING_LIGHTEN);
+  c.globalAlpha = FISH_ORBIT_RING_ALPHA;
+  c.lineWidth = lineWidth;
+  c.beginPath();
+  c.ellipse(w / 2, h / 2, rx, ry, 0, 0, Math.PI * 2);
+  c.stroke();
+  sprite = canvas;
+  orbitRingSprites.set(key, sprite);
+  return sprite;
 }
 
 // ---- Equipped cosmetic hats ----
@@ -471,9 +642,9 @@ function drawHat(ctx, hatId, x, y, size, facing) {
 // starTier (1-4, default 1) is the Economy Fish Combining tier — see
 // Config.js's FISH_STAR_COUNT_BY_TIER. Deliberately no separate spritesheet
 // per tier (per the design spec): the same base adult sprite is drawn, with
-// a small row of stars overlaid above it. Tier 1 has no stars at all; a
-// non-economy species or a fish that's never been combined always passes
-// the default and never draws any.
+// golden stars orbiting it (one per tier, Tier 1 included), a golden rim from
+// Tier 2, and a golden pupil + 5% growth at Tier 4 — see the helpers above
+// drawOrbitStars and the elapsedMs/fishPhase/mergeAgeMs note on drawFish.
 //
 // sickness (0-1, default 0) tints the body/tail toward SICK_GREEN — the
 // caller (main.js) derives it from the fish's current hunger, so a hungry
@@ -489,7 +660,7 @@ function drawEye(ctx, eyeX, eyeY, socketRadius, pupilRadius, eyeDirection) {
   ctx.beginPath();
   ctx.arc(eyeX, eyeY, socketRadius, 0, Math.PI * 2);
   ctx.fill();
-  ctx.fillStyle = '#1a1a1a';
+  ctx.fillStyle = pupilColor;
   ctx.beginPath();
   ctx.arc(eyeX + eyeDirection.x * pupilOffset, eyeY + eyeDirection.y * pupilOffset, pupilRadius, 0, Math.PI * 2);
   ctx.fill();
@@ -546,6 +717,7 @@ function drawStandardBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGrow
     ctx.quadraticCurveTo(midX, y + tailHalfWidth * 0.3 + swing * 0.5, backX + baseLean, y + tailHalfWidth);
     ctx.closePath();
     ctx.fill();
+    strokeRimBand(ctx, size); // Tier 2+: the tail gets the same lighter inner band as the body, per direct request
     strokeRim(ctx, color, size);
   }
 
@@ -553,6 +725,7 @@ function drawStandardBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGrow
   ctx.ellipse(x, y, bodyRx, bodyRy, 0, 0, Math.PI * 2);
   setLitFill(ctx, x, y, bodyRx, color, facing);
   ctx.fill();
+  strokeRimBand(ctx, size);
   strokeRim(ctx, color, size);
   // A small glossy highlight on top of the lit gradient — per direct request
   // that fish "pop more and look less flat." Scaled proportionally to the
@@ -609,6 +782,7 @@ function drawSuckerfishBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGr
   ctx.ellipse(x, y, size * 0.68, size * 0.3, 0, 0, Math.PI * 2);
   setLitFill(ctx, x, y, size * 0.68, color, facing);
   ctx.fill();
+  strokeRimBand(ctx, size);
   strokeRim(ctx, color, size);
   ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
   ctx.beginPath();
@@ -737,6 +911,7 @@ function drawEelBody(ctx, x, y, size, facing, tailPhase, isFullyGrown, color, ey
   smoothAlong(bottom);
   ctx.closePath();
   ctx.fill();
+  strokeRimBand(ctx, size);
   strokeRim(ctx, color, size);
 
   // A soft light streak along the upper body, like the highlight on the other fish.
@@ -800,6 +975,7 @@ function drawOctopusBody(ctx, x, y, size, facing, tailPhase, isFullyGrown, color
   ctx.ellipse(x, headY, headRadius, headRadius * 0.85, 0, 0, Math.PI * 2);
   setLitFill(ctx, x, headY, headRadius, color, facing);
   ctx.fill();
+  strokeRimBand(ctx, size);
   strokeRim(ctx, color, size);
   ctx.fillStyle = 'rgba(255, 255, 255, 0.32)';
   ctx.beginPath();
@@ -908,10 +1084,10 @@ function drawHybridBody(ctx, x, y, size, facing, tailPhase, stage, color, eyeDir
 // decorations — per direct request. Same offset-ellipse shadow the bodies used
 // to draw themselves, sized per body shape; kept here so the geometry stays
 // next to the body code it mirrors.
-export function drawFishShadow(ctx, x, y, speciesId, stage) {
+export function drawFishShadow(ctx, x, y, speciesId, stage, starTier = 1) {
   const def = SPECIES[speciesId];
-  const size = FISH_BASE_SIZE * def.growthStages[stage].scale;
   const isFullyGrown = stage === def.growthStages.length - 1;
+  const size = FISH_BASE_SIZE * def.growthStages[stage].scale * (isFullyGrown && starTier >= 4 ? FISH_TIER4_SIZE_MULTIPLIER : 1); // matches drawFish's Tier 4 growth
   const hasEel = isFullyGrown && (speciesId === 'electric_eel' || (def.parents && def.parents.includes('electric_eel')));
   let cy = y, rx, ry;
   if (hasEel) {
@@ -946,10 +1122,17 @@ export function drawFishShadow(ctx, x, y, speciesId, stage) {
 // fish.capBlockedTintRemainingMs) — per direct request that a fish should
 // visibly read as "not producing" in both cases. Applied on top of any
 // sickness tint rather than instead of it; the two only rarely coincide.
-export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDirection, starTier = 1, sickness = 0, grayed = 0, hatId = 'none') {
+//
+// elapsedMs/fishPhase/mergeAgeMs drive the Tier overlay's motion (orbiting stars,
+// pulsing golden rim) — pass the game clock (state.level.elapsed), the fish's own
+// random phase, and ms since a merge made it (-1 for none). Left at the default
+// (-1) by every preview/icon caller, which then draw no stars or rim at all —
+// only the static Tier 4 look (gold pupil, +5% size) still follows starTier.
+export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDirection, starTier = 1, sickness = 0, grayed = 0, hatId = 'none', elapsedMs = -1, fishPhase = 0, mergeAgeMs = -1) {
   const def = SPECIES[speciesId];
   const scale = def.growthStages[stage].scale;
-  const size = FISH_BASE_SIZE * scale;
+  const isFullyGrown = stage === def.growthStages.length - 1;
+  const size = FISH_BASE_SIZE * scale * (isFullyGrown && starTier >= 4 ? FISH_TIER4_SIZE_MULTIPLIER : 1);
   // A Gene-Splicing hybrid (def.parents, [utilityId, economyId]) has no
   // FISH_COLORS entry of its own — per direct request, it's a straight
   // blend of whichever two species it was spliced from, not a flat color.
@@ -966,7 +1149,28 @@ export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDire
     if (grayed > 0) rgb = mixRgb(rgb, ALIEN_BLOCKED_GRAY, grayed);
     color = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
   }
-  const isFullyGrown = stage === def.growthStages.length - 1;
+
+  // Economy Fish Combining tier look (see the helpers above) — adults only. The far
+  // half of the orbiting stars draws before the body so it tucks behind it.
+  pupilColor = isFullyGrown && starTier >= 4 ? color : '#1a1a1a'; // Tier 4: the pupil matches the fish's own color
+  rimBandAlpha = 0;
+  let starCount = 0;
+  let orbitRing = null;
+  // Only economy fish (the ones that can merge up a tier) get stars, the orbit oval and the rim.
+  if (isFullyGrown && elapsedMs >= 0 && ECONOMY_SPECIES.has(speciesId)) {
+    starCount = FISH_STAR_COUNT_BY_TIER[starTier] || 0;
+    const band = FISH_RIM_BAND_BY_TIER[starTier];
+    if (band) {
+      const pulse = 0.5 + 0.5 * Math.sin((elapsedMs / FISH_RIM_PERIOD_MS) * Math.PI * 2 + fishPhase);
+      rimBandAlpha = band.minAlpha + (band.maxAlpha - band.minAlpha) * pulse;
+      rimBandWidth = size * band.width;
+      rimBandColor = tone(color, FISH_RIM_LIGHTEN);
+    }
+    if (starCount > 0) {
+      orbitRing = getOrbitRingSprite(speciesId, size, baseColor);
+      drawOrbitStars(ctx, x, y, size, starCount, elapsedMs, fishPhase, mergeAgeMs, false, orbitRing);
+    }
+  }
 
   // Suckerfish/Electric Eel/Science Octopus each get a visually distinct
   // body shape — per direct request that the 3 utility species "look
@@ -1045,23 +1249,8 @@ export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDire
     headSize = size * stdShape.bodyW * 0.85;
   }
 
-  // Economy Fish Combining tier overlay — only ever nonzero on an adult fish
-  // in practice (combining always both requires and produces Adult fish),
-  // but gated on isFullyGrown too regardless, same defensive spirit as the
-  // eye above.
-  if (isFullyGrown) {
-    const starCount = FISH_STAR_COUNT_BY_TIER[starTier] || 0;
-    if (starCount > 0) {
-      const starRadius = size * FISH_STAR_OUTER_RADIUS_RATIO;
-      const spacing = starRadius * FISH_STAR_SPACING_RATIO;
-      const totalWidth = (starCount - 1) * spacing;
-      const startX = x - totalWidth / 2;
-      const starY = y - size * FISH_STAR_Y_OFFSET_RATIO;
-      for (let i = 0; i < starCount; i++) {
-        drawStar(ctx, startX + i * spacing, starY, starRadius, FISH_STAR_COLOR);
-      }
-    }
-  }
+  // The near half of the orbiting stars, over the body (and under any hat).
+  if (starCount > 0) drawOrbitStars(ctx, x, y, size, starCount, elapsedMs, fishPhase, mergeAgeMs, true, orbitRing);
 
   // Equipped cosmetic hat — per direct spec ("achievements used for
   // unlockable hats to be added to the fish"), a global equip (the same one

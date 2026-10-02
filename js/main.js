@@ -221,6 +221,7 @@ import {
   getChestKeyAt,
   getChestKeyNear,
   armChestTrickle,
+  setChestPourMode,
   clearChestContents,
   isBuildingStalledOrPowerless,
   describeReplacement,
@@ -1251,6 +1252,7 @@ const state = {
     undoLabel: null, // 'Undo Place' | 'Undo Move' | 'Undo Sell' | null — what Ctrl+Z would currently do, shown in that same legend line
     shopCollapsed: true, // shop starts tucked away — just the toggle button — so it doesn't clutter the view
     fanConesVisible: true, // whether every placed Fan's push-cone/arrow renders (Grid.js's renderFanIndicators) — G toggles this off/on for players with many fans cluttering the view; starts true, matching the old always-on behavior
+    filterModalTileKey: null, // "row,col" of whichever Platform/Fan the item-filter pop-up is open for — mirrored every frame by UI.js's updateHUD; Grid.js's renderFanIndicators highlights that fan's cone
     buildingInfoTileKey: null, // "row,col" of whichever building's info modal is open, mirrored from UI.js's own module-local var (UI.js can't be imported back here) — Grid.js's renderFanIndicators reads this to highlight that one fan's cone while its modal is open
     // Per direct request ("pipette tool copies recipe/filter from pipetted
     // building") — UI.js's pipetteSelectBuilding captures the SPECIFIC
@@ -1264,6 +1266,8 @@ const state = {
     // never stale leftovers from an earlier, unrelated pipette.
     pipetteRecipeId: null,
     pipetteFilterItems: null,
+    pipetteFanRangePct: null, // a pipetted Fan's range slider (1-100) — applied to the fans placed with that tool, same carry-over as the fields around it (a Fan's aim angle is deliberately NOT copied)
+    pipetteChestPourMode: null, // a pipetted Storage Chest's Pour/Trickle toggle (true = Pour) — same one-way carry-over as the two above
     // Ctrl + Click: Snap Placement — per direct request, holding Ctrl with
     // a build tool armed snaps a line of ghost buildings from here to the
     // cursor (Grid.js's computeSnapLine). Set on every successful non-Fan
@@ -1298,6 +1302,7 @@ const state = {
     // to Adjust/Move" while just hovering a placed building with nothing in
     // progress yet.
     buildingMoveArmed: false,
+    buildingMoveDragging: false, // true while a building is being right-dragged (see main.js's rightMoveDragging)
     buildingMoveHoverLabel: null,
     // Fish merge/splice hover legend — per direct request ("when you hover
     // over a fish have a bubble legend... that shows what fish can be
@@ -2138,14 +2143,11 @@ function updateItemDrag() {
 // storage chest trickle the output in the chosen direction"), later
 // extended ("make the distance the chests spits out objects variable based
 // on the distance away the cursor gets from the chest") to also drive
-// launch distance, and mirrored by a SECOND, right-button gesture ("add a
-// right click and drag mechanic... that mimics the click and drag mechanic
-// exactly, but clears all the contents of the chest") that replaces the old
-// Clear Chest button outright. Both gestures share this one helper for the
-// "read the live angle/distance/fraction from a chest to the cursor" math,
-// so the two can never drift apart — left-drag arms an ongoing trickle
-// (armChestTrickle), right-drag immediately triggers a full staggered dump
-// (clearChestContents), and BOTH drive the identical glowing/stretching/
+// launch distance. It was once mirrored by a right-button "clear" gesture; per
+// direct request that became the chest's Pour/Trickle toggle (right-drag now
+// moves buildings), so releasing this one drag either arms an ongoing trickle
+// (armChestTrickle) or immediately triggers a full staggered dump
+// (clearChestContents) depending on the chest's mode, and drives the identical glowing/stretching/
 // color-shifting cursor via chestAimCursorCss below.
 //
 // distanceTiles is a straight 1:1 mapping of the drag's own live WORLD-
@@ -2224,7 +2226,13 @@ input.mouseUpHandlers.push(() => {
     // pop the chest's info modal open).
     if (!isPointOverChestTile(chestAimDragKey, world.x, world.y)) {
       const { angle, distanceTiles } = computeChestAimState(state, chestAimDragKey, world.x, world.y);
-      armChestTrickle(state, chestAimDragKey, angle, distanceTiles);
+      const chestData = state.level.buildingData[chestAimDragKey];
+      // The chest tutorial's own drag step teaches the trickle, so it forces Trickle mode.
+      if (chestData && isChestTrickleStepActive(state)) setChestPourMode(state, chestAimDragKey, false);
+      // Per direct request, the chest's Pour/Trickle toggle (default Pour) decides what releasing does:
+      // Pour dumps everything out along the aim (what the right-drag used to do), Trickle arms the auto-trickle.
+      if (chestData && chestData.pourMode !== false) clearChestContents(state, chestAimDragKey, angle, distanceTiles);
+      else armChestTrickle(state, chestAimDragKey, angle, distanceTiles);
       advanceTutorialFlow(state, 'chest', 'trickle');
     }
   }
@@ -2232,47 +2240,7 @@ input.mouseUpHandlers.push(() => {
   lastCursorTool = null; // force updateCanvasCursor to re-apply the ordinary tool cursor next frame, since this gesture was overriding it directly
 });
 
-// ---- Right-drag: an immediate, fully-staggered clear ----
-// Uses Engine.js's new rightMouseDownHandlers/rightMouseUpHandlers (added
-// specifically for this — the pre-existing rightClickHandlers only ever
-// fires once per gesture, off the browser's own contextmenu event, with no
-// down/move/up granularity of its own). Deliberately NOT exempted during
-// any tutorial step — clearing a chest isn't something the guided flow ever
-// asks the player to do, so it stays blocked like any other non-essential
-// interaction while one is active, same as the item-drag mousedown's own
-// default (non-carved-out) tutorial gate.
-let chestClearDragKey = null;
-let chestClearDragStartSx = 0;
-let chestClearDragStartSy = 0;
-
-input.rightMouseDownHandlers.push((sx, sy) => {
-  if (state.ui.paused || state.level.tutorialFlow) return;
-  if (draggedFishId != null || draggedItemId != null || chestAimDragKey != null) return;
-  const world = screenToWorld(sx, sy, state.camera);
-  if (!isCursorOrFoodTool(effectiveToolAt(world.y))) return;
-  const key = getChestKeyAt(state, world.x, world.y);
-  if (!key) return;
-  chestClearDragKey = key;
-  chestClearDragStartSx = sx;
-  chestClearDragStartSy = sy;
-});
-
-input.rightMouseUpHandlers.push(() => {
-  if (chestClearDragKey == null) return;
-  const movedPx = Math.hypot(input.mouse.x - chestClearDragStartSx, input.mouse.y - chestClearDragStartSy);
-  if (movedPx >= ITEM_DRAG_MOVE_THRESHOLD_PX) {
-    const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
-    // Same cancel-on-release-over-the-chest rule as the left-drag above.
-    if (!isPointOverChestTile(chestClearDragKey, world.x, world.y)) {
-      const { angle, distanceTiles } = computeChestAimState(state, chestClearDragKey, world.x, world.y);
-      clearChestContents(state, chestClearDragKey, angle, distanceTiles);
-    }
-  }
-  chestClearDragKey = null;
-  lastCursorTool = null;
-});
-
-// Called every tick from update() while either chest-aim drag is in
+// Called every tick from update() while the chest-aim drag is in
 // progress — recomputes the live angle/distance from whichever chest is
 // being dragged from to wherever the cursor currently is, and points the OS
 // cursor glyph itself in that exact direction, stretching/glowing/changing
@@ -2281,7 +2249,7 @@ input.rightMouseUpHandlers.push(() => {
 // either time, just choosing left (trickle) or right (clear) for what
 // happens on release.
 function updateChestAimDrag() {
-  const activeKey = chestAimDragKey ?? chestClearDragKey;
+  const activeKey = chestAimDragKey;
   if (activeKey == null) return;
   const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
   // The cursor is still sitting back over the chest it was dragged from —
@@ -2414,6 +2382,7 @@ let recipeDragHoverKey = null; // whichever same-type building the cursor is cur
 input.mouseDownHandlers.push((sx, sy) => {
   if (state.ui.paused) return;
   const world = screenToWorld(sx, sy, state.camera);
+  if (!isCursorOrFoodTool(state.ui.selectedTool)) return; // drag-copy is a cursor gesture — with a Blueprint/build tool armed a drag starting on a building is that tool's own (it used to also arm a copy and swallow the Blueprint's capture click)
   if (input.keysDown.has('KeyD') && isCursorOrFoodTool(state.ui.selectedTool)) return; // don't fight with the D-hotkey's own drag-delete on the same press
   const key = getRecipeBuildingKeyAt(state, world.x, world.y);
   if (!key) return;
@@ -2472,6 +2441,7 @@ let platformFilterDragHoverKey = null; // whichever other Platform tile the curs
 input.mouseDownHandlers.push((sx, sy) => {
   if (state.ui.paused) return;
   const world = screenToWorld(sx, sy, state.camera);
+  if (!isCursorOrFoodTool(state.ui.selectedTool)) return; // drag-copy is a cursor gesture — with a Blueprint/build tool armed a drag starting on a building is that tool's own (it used to also arm a copy and swallow the Blueprint's capture click)
   if (input.keysDown.has('KeyD') && isCursorOrFoodTool(state.ui.selectedTool)) return; // don't fight with the D-hotkey's own drag-delete on the same press
   const key = getPlatformFilterKeyAt(state, world.x, world.y);
   if (!key) return;
@@ -2767,6 +2737,72 @@ let movingBuilding = null; // { fromCol, fromRow, buildingId, data } | null
 let fanAimingMoveData = null;
 let fanAimingMoveOrigin = null; // { fromCol, fromRow } | null
 
+// Finishes a building move at the tile under `world`: puts it down there (one
+// Undo entry unless it didn't actually change tile), or, for a Fan, hands it to
+// its own angle-choosing step. Returns null on success, else the failure reason
+// (the building stays picked up — the caller decides whether to retry or snap back).
+function confirmBuildingMoveAt(world) {
+  const { col, row } = worldToTile(world.x, world.y);
+  if (FAN_BUILDING_IDS.includes(movingBuilding.buildingId)) {
+    const check = canPlaceTile(state, col, row, movingBuilding.buildingId, true);
+    if (!check.ok) return check.reason;
+    fanAimingCell = { col, row, buildingId: movingBuilding.buildingId };
+    fanAimingMoveData = movingBuilding.data;
+    fanAimingMoveOrigin = { fromCol: movingBuilding.fromCol, fromRow: movingBuilding.fromRow };
+    movingBuilding = null;
+    return null;
+  }
+  const result = putDownMovedBuilding(state, col, row, movingBuilding.buildingId, movingBuilding.data);
+  if (!result.ok) return result.reason;
+  if (movingBuilding.fromCol !== col || movingBuilding.fromRow !== row) {
+    pushUndoEntry({ type: 'move', fromCol: movingBuilding.fromCol, fromRow: movingBuilding.fromRow, toCol: col, toRow: row });
+  }
+  movingBuilding = null;
+  return null;
+}
+
+// ---- Right-drag: move a building ----
+// Per direct request, moving a building is now a right-button press-drag-release
+// (like the left-drag recipe copy) instead of the old middle-click; middle-click
+// became a pipette. Only with the plain cursor armed: with any tool selected a
+// right-click just cancels it (the universal-cancel handler below), so one right
+// click never both cancels the selection AND starts a move. The building is picked
+// up once the press has moved past the drag threshold (so a plain right-click on
+// one does nothing here), follows the cursor as the usual ghost, and releasing
+// over a valid tile puts it there (a Fan then needs its extra angle click, as
+// before); an invalid release snaps it back to where it was.
+const eyeDirScratch = { x: 1, y: 0 }; // reused for every fish's eye direction in render() — drawFish only reads it during its own call, so one shared object is safe
+let rightMoveCandidate = null; // { col, row, sx, sy } while a right press on a building is waiting to turn into a drag
+let rightMoveDragging = false; // true once that press picked the building up
+
+input.rightMouseDownHandlers.push((sx, sy) => {
+  rightMoveCandidate = null;
+  rightMoveDragging = false;
+  if (state.ui.paused || state.level.tutorialFlow) return;
+  if (state.ui.selectedTool !== 'cursor') return;
+  if (rightPressFishId != null) return; // a fish is under the press — that's the fish move/merge drag
+  if (movingBuilding != null || (isFanAimingActive() && fanAimingMoveData != null)) return;
+  const world = screenToWorld(sx, sy, state.camera);
+  const { col, row } = worldToTile(world.x, world.y);
+  const tile = getTile(state.level.grid, col, row);
+  if (!tile || tile === TILE_EMPTY) return;
+  rightMoveCandidate = { col, row, sx, sy };
+});
+
+input.rightMouseUpHandlers.push((sx, sy) => {
+  rightMoveCandidate = null;
+  if (!rightMoveDragging) return;
+  rightMoveDragging = false;
+  input.suppressContextMenuUntilMs = performance.now() + 200; // this was a drag, not a right-click — don't also run the cancel handlers
+  if (movingBuilding == null) return; // already put back (a tool got selected mid-drag)
+  const failure = confirmBuildingMoveAt(screenToWorld(sx, sy, state.camera));
+  if (failure) {
+    handleBuildPlacementFailure(failure);
+    putDownMovedBuilding(state, movingBuilding.fromCol, movingBuilding.fromRow, movingBuilding.buildingId, movingBuilding.data); // snap back
+    movingBuilding = null;
+  }
+});
+
 // Called every tick from update() — the only thing a move genuinely needs
 // checked continuously (the ghost itself is drawn fresh every render()
 // frame straight off movingBuilding, no separate live-update needed). Its
@@ -2779,6 +2815,16 @@ let fanAimingMoveOrigin = null; // { fromCol, fromRow } | null
 // since selecting either of the two neutral tools mid-move is fine — a move
 // is armed from the cursor OR the Food tool alike, see middleClickHandlers.
 function updateBuildingMove() {
+  // A right press on a building that has now moved far enough picks it up (see the right-drag section above).
+  if (rightMoveCandidate && !rightMoveDragging && input.rightMouseDown && movingBuilding == null
+      && Math.hypot(input.mouse.x - rightMoveCandidate.sx, input.mouse.y - rightMoveCandidate.sy) >= ITEM_DRAG_MOVE_THRESHOLD_PX) {
+    const picked = pickUpBuildingForMove(state, rightMoveCandidate.col, rightMoveCandidate.row);
+    if (picked) {
+      movingBuilding = { fromCol: rightMoveCandidate.col, fromRow: rightMoveCandidate.row, buildingId: picked.type, data: picked.data };
+      rightMoveDragging = true;
+    }
+    rightMoveCandidate = null;
+  }
   if (movingBuilding != null && !isCursorOrFoodTool(state.ui.selectedTool)) {
     putDownMovedBuilding(state, movingBuilding.fromCol, movingBuilding.fromRow, movingBuilding.buildingId, movingBuilding.data);
     movingBuilding = null;
@@ -2852,22 +2898,8 @@ input.clickHandlers.push((sx, sy) => {
   // destination here just threads it into the existing two-click aiming
   // flow (fanAimingCell) instead of finishing outright.
   if (movingBuilding != null) {
-    const { col, row } = worldToTile(world.x, world.y);
-    if (FAN_BUILDING_IDS.includes(movingBuilding.buildingId)) {
-      const check = canPlaceTile(state, col, row, movingBuilding.buildingId, true);
-      if (!check.ok) { handleBuildPlacementFailure(check.reason); return; }
-      fanAimingCell = { col, row, buildingId: movingBuilding.buildingId };
-      fanAimingMoveData = movingBuilding.data;
-      fanAimingMoveOrigin = { fromCol: movingBuilding.fromCol, fromRow: movingBuilding.fromRow };
-      movingBuilding = null;
-      return;
-    }
-    const result = putDownMovedBuilding(state, col, row, movingBuilding.buildingId, movingBuilding.data);
-    if (!result.ok) { handleBuildPlacementFailure(result.reason); return; } // stay in move mode — the ghost keeps following, try again
-    if (movingBuilding.fromCol !== col || movingBuilding.fromRow !== row) {
-      pushUndoEntry({ type: 'move', fromCol: movingBuilding.fromCol, fromRow: movingBuilding.fromRow, toCol: col, toRow: row });
-    }
-    movingBuilding = null;
+    const failure = confirmBuildingMoveAt(world);
+    if (failure) handleBuildPlacementFailure(failure); // stay in move mode — the ghost keeps following, try again
     return;
   }
 
@@ -2925,8 +2957,10 @@ input.clickHandlers.push((sx, sy) => {
       showBuildError("Can't afford");
       return;
     }
+    const moneyBeforePaste = state.level.money;
     const placedCells = placeBlueprint(state, col, row, blueprintClipboard);
     for (const p of placedCells) pushUndoEntry({ type: 'place', col: p.col, row: p.row, buildingId: p.buildingId });
+    if (placedCells.length > 0) showPurchaseCostText(col * TILE_SIZE + TILE_SIZE / 2, row * TILE_SIZE, moneyBeforePaste - state.level.money);
     blueprintClipboard = null;
     return;
   }
@@ -3061,6 +3095,7 @@ input.clickHandlers.push((sx, sy) => {
         showReplaceNetCostText(col * TILE_SIZE + TILE_SIZE / 2, row * TILE_SIZE + TILE_SIZE / 2, result.info.netCost);
       } else {
         pushUndoEntry({ type: 'place', col, row, buildingId });
+        showPurchaseCostText(col * TILE_SIZE + TILE_SIZE / 2, row * TILE_SIZE, result.info.netCost);
       }
       fanAimingCell = { col, row, buildingId };
       return; // either way, a fan-tool click never falls through to mound/coin/food
@@ -3134,9 +3169,13 @@ input.clickHandlers.push((sx, sy) => {
   // Entities.js's trySpawnPurchasedFish and UI.js's selectSpeciesForPreview
   // (which sets this tool instead of arming a Buy button any more).
   if (effectiveTool.startsWith('fish:')) {
+    const moneyBeforeFish = state.level.money;
     const result = trySpawnPurchasedFish(state, effectiveTool.slice('fish:'.length), world.x, world.y);
     if (result === 'no_money') flashMoneyInsufficient(state);
-    else if (result === 'spawned') advanceTutorialFlow(state, 'start', 'buyfish'); // game-start guided tutorial's final step
+    else if (result === 'spawned') {
+      showPurchaseCostText(world.x, world.y - TILE_SIZE, moneyBeforeFish - state.level.money);
+      advanceTutorialFlow(state, 'start', 'buyfish'); // game-start guided tutorial's final step
+    }
     return;
   }
   // Non-fan build-mode placement doesn't happen here — see the mousedown/
@@ -3208,19 +3247,33 @@ input.rightClickHandlers.push(() => {
   cancelArmedFanPlacement();
 });
 
-// Middle-click-to-move — see movingBuilding's own comment above. Only arms
-// from the cursor/Food tool (matching the hover legend's own gating below,
-// isCursorOrFoodTool) — a build/fish/merge tool has its own unrelated
-// interactions and shouldn't also start a move.
+// Pipette whatever is at `world`: a fish (checked first — its hit radius is the
+// bigger, more forgiving target) or a placed building, arming it as the current
+// tool exactly like clicking its shop icon (a building's recipe/filter/chest mode
+// ride along — see UI.js's pipetteSelectBuilding). Returns whether anything was found.
+function pipetteAtWorld(world) {
+  const fish = findFishForPipetteAt(state, world.x, world.y);
+  if (fish) {
+    pipetteSelectSpecies(state, fish.speciesId);
+    return true;
+  }
+  const { col, row } = worldToTile(world.x, world.y);
+  const tileType = getTile(state.level.grid, col, row);
+  if (tileType && tileType !== TILE_EMPTY) {
+    pipetteSelectBuilding(state, tileType, `${row},${col}`);
+    return true;
+  }
+  return false;
+}
+
+// Middle-click = pipette, per direct request (it used to arm a building move,
+// which is right-drag now). Pipettes whatever's under the cursor, replacing any
+// armed tool; nothing under the cursor does nothing (no clear / last-used
+// fallback — that stays on Q).
 input.middleClickHandlers.push((sx, sy) => {
   if (state.ui.paused || state.level.tutorialFlow) return;
-  if (movingBuilding != null || (isFanAimingActive() && fanAimingMoveData != null)) return; // a move's already in progress — middle-click isn't a second gesture on top of it
-  if (!isCursorOrFoodTool(state.ui.selectedTool)) return;
-  const world = screenToWorld(sx, sy, state.camera);
-  const { col, row } = worldToTile(world.x, world.y);
-  const picked = pickUpBuildingForMove(state, col, row);
-  if (!picked) return;
-  movingBuilding = { fromCol: col, fromRow: row, buildingId: picked.type, data: picked.data };
+  if (movingBuilding != null || (isFanAimingActive() && fanAimingMoveData != null)) return;
+  pipetteAtWorld(screenToWorld(sx, sy, state.camera));
 });
 
 // Build-mode drag-placement: while the left button is held and a build tool
@@ -3281,6 +3334,18 @@ function showReplaceNetCostText(worldX, worldY, netCost) {
     state.level.floatingTexts.push(createPickupText(worldX, worldY, `+$${gain}`, getCoinColor(gain)));
   } else {
     state.level.floatingTexts.push(createPickupText(worldX, worldY, `-$${netCost}`, '#ff6b6b'));
+  }
+}
+
+// Per direct request, any purchase shows a red negative cost like a coin pickup's
+// text: a fresh single building/fish at its spot, a Blueprint paste or Shift-line
+// as ONE aggregated number at the click. (A replace already uses the net-cost
+// version above.) Free purchases show nothing.
+function showPurchaseCostText(worldX, worldY, cost) {
+  if (cost > 0) {
+    const text = createPickupText(worldX, worldY, `-$${cost}`, '#ff6b6b');
+    text.center = true;
+    state.level.floatingTexts.push(text);
   }
 }
 
@@ -3540,18 +3605,9 @@ input.keydownHandlers.push((e) => {
         cancelArmedFanPlacement();
       } else {
         const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
-        const fish = findFishForPipetteAt(state, world.x, world.y);
-        if (fish) {
-          pipetteSelectSpecies(state, fish.speciesId);
-        } else {
-          const { col, row } = worldToTile(world.x, world.y);
-          const tileType = getTile(state.level.grid, col, row);
-          if (tileType && tileType !== TILE_EMPTY) {
-            pipetteSelectBuilding(state, tileType, `${row},${col}`);
-          } else if (state.ui.lastArmedTool) {
-            if (state.ui.lastArmedTool.startsWith('fish:')) pipetteSelectSpecies(state, state.ui.lastArmedTool.slice('fish:'.length));
-            else if (state.ui.lastArmedTool.startsWith('build:')) pipetteSelectBuilding(state, state.ui.lastArmedTool.slice('build:'.length));
-          }
+        if (!pipetteAtWorld(world) && state.ui.lastArmedTool) {
+          if (state.ui.lastArmedTool.startsWith('fish:')) pipetteSelectSpecies(state, state.ui.lastArmedTool.slice('fish:'.length));
+          else if (state.ui.lastArmedTool.startsWith('build:')) pipetteSelectBuilding(state, state.ui.lastArmedTool.slice('build:'.length));
         }
       }
       break;
@@ -3809,6 +3865,7 @@ function updateBuildDrag() {
       showReplaceNetCostText(col * TILE_SIZE + TILE_SIZE / 2, row * TILE_SIZE + TILE_SIZE / 2, buildResult.info.netCost);
     } else {
       pushUndoEntry({ type: 'place', col, row, buildingId });
+      showPurchaseCostText(col * TILE_SIZE + TILE_SIZE / 2, row * TILE_SIZE, buildResult.info.netCost);
     }
   }
   if (placed && (buildingId === TILE_MANUFACTURER || buildingId === TILE_POWER_PLANT)) {
@@ -3912,6 +3969,8 @@ function updateBuildDrag() {
 // to succeed; the `if (!result.placed) break` is a defensive fallback only.
 function placeSnapLineTiles(state, buildingId, snap) {
   if (snap.netCost > state.level.money) return;
+  let lineNetCost = 0;
+  let lastPlaced = null;
   for (const t of snap.tiles) {
     const result = placeTileWithReplace(state, t.col, t.row, buildingId, 0, true);
     if (!result.placed) break;
@@ -3922,12 +3981,20 @@ function placeSnapLineTiles(state, buildingId, snap) {
     // the original start tile.
     state.ui.lastPlacedTileCol = t.col;
     state.ui.lastPlacedTileRow = t.row;
+    lineNetCost += result.info.netCost;
+    lastPlaced = t;
     if (result.replaced) {
       pushUndoEntry({ type: 'replace', col: t.col, row: t.row, oldBuildingId: result.oldBuildingId, oldData: result.oldData, netCost: result.info.netCost });
-      showReplaceNetCostText(t.col * TILE_SIZE + TILE_SIZE / 2, t.row * TILE_SIZE + TILE_SIZE / 2, result.info.netCost);
     } else {
       pushUndoEntry({ type: 'place', col: t.col, row: t.row, buildingId });
     }
+  }
+  // ONE aggregated readout for the whole line, at its last tile, instead of one per tile.
+  if (lastPlaced) {
+    const wx = lastPlaced.col * TILE_SIZE + TILE_SIZE / 2;
+    const wy = lastPlaced.row * TILE_SIZE;
+    if (lineNetCost > 0) showPurchaseCostText(wx, wy, lineNetCost);
+    else if (lineNetCost < 0) showReplaceNetCostText(wx, wy, lineNetCost);
   }
 }
 
@@ -4370,8 +4437,17 @@ function update(dtMs) {
     lastItemsRoutedSampleTime = now;
   }
 
-  powerSampleAccumMs += dtMs;
-  if (powerSampleAccumMs >= 1000) {
+  // Per direct report ("electricity continues to be consumed when time is
+  // paused... batteries deplete and buildings show the out of electricity
+  // visuals"): this once-a-second sample is the ONLY place demand/supply, the
+  // battery's charge/draw, powerEfficiency (which drives every no-power visual
+  // and intake gate), the power history (HUD/graph) and the deficit/surplus
+  // streaks are computed — and it's fed by dtMs, not by anything Pause Time
+  // gates. Not advancing it while time is paused skips the whole calculation:
+  // everything it writes simply stays frozen at its pre-pause value (so buildings
+  // can be placed that overload the grid and nothing shows it until unpaused).
+  if (!state.ui.timePaused) powerSampleAccumMs += dtMs;
+  if (!state.ui.timePaused && powerSampleAccumMs >= 1000) {
     powerSampleAccumMs -= 1000;
     // Turret demand is tracked as its own running accumulator, not included
     // in computeCurrentPowerDemand's own snapshot — see that function's own
@@ -4548,7 +4624,7 @@ function renderFishShadowsOnDecor(ctx, state) {
   shadowLayerCtx.setTransform(SHADOW_MASK_SCALE, 0, 0, SHADOW_MASK_SCALE, 0, 0);
   for (const { e, pos } of casters) {
     if (e.type === 'fish') {
-      drawFishShadow(shadowLayerCtx, pos.x, pos.y, e.speciesId, e.stage);
+      drawFishShadow(shadowLayerCtx, pos.x, pos.y, e.speciesId, e.stage, e.starTier || 1);
     } else {
       const baseRadius = (e.radius ?? ALIEN_RADIUS) * state.camera.zoom;
       const flashFrac = e.hitFlashMs / ALIEN_HIT_FLASH_MS;
@@ -4842,7 +4918,7 @@ function updateCanvasCursor() {
   // would otherwise immediately stomp that back to the plain cursor/food
   // glyph the very next frame, since lastCursorTool has no way to know
   // about the override.
-  if (chestAimDragKey != null || chestClearDragKey != null) return;
+  if (chestAimDragKey != null) return;
   const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
   const effectiveTool = effectiveToolAt(world.y);
   // Per direct request ("built into the food cursor tool via the D
@@ -5580,7 +5656,13 @@ function render() {
     ctx.globalAlpha = Math.max(0, alpha);
     ctx.fillStyle = ft.color;
     ctx.font = 'bold 13px sans-serif';
-    ctx.fillText(ft.text, pos.x - 12, pos.y);
+    if (ft.center) {
+      ctx.textAlign = 'center';
+      ctx.fillText(ft.text, pos.x, pos.y);
+      ctx.textAlign = 'left';
+    } else {
+      ctx.fillText(ft.text, pos.x - 12, pos.y);
+    }
     ctx.globalAlpha = 1;
   }
 
@@ -5798,30 +5880,21 @@ function render() {
     // Eye direction must be a normalized unit vector, not a raw target
     // point — drawFish has no way to verify a target's coordinate space
     // matches (pos.x, pos.y), so the direction is resolved here instead,
-    // from world-space positions (fish.x/y, food/cursor), before normalizing.
+    // from world-space positions, before normalizing. Per direct request the
+    // eyes ALWAYS follow the cursor, unless the fish is hungry and swimming
+    // toward food — then they look at that food. updateFish already finds that
+    // target every tick and leaves it on the fish (fish.seeking/seekX/seekY),
+    // so this does no scan over the item list at all (it used to search every
+    // food item for every adult fish every frame), and the unit vector is
+    // written into one reused object instead of allocating a new one per fish.
     let eyeDirection = null;
     if (isFullyGrown) {
-      let nearestFood = null;
-      let nearestFoodDist = Infinity;
-      for (const item of state.level.items) {
-        if (item.type !== 'food') continue;
-        const d = Math.hypot(item.x - fish.x, item.y - fish.y);
-        if (d < nearestFoodDist) { nearestFoodDist = d; nearestFood = item; }
-      }
-      const cursorDist = Math.hypot(cursorWorld.x - fish.x, cursorWorld.y - fish.y);
-      // The cursor only wins this comparison (gets looked at over nearby
-      // Food) once it's the CLOSER of the two — that comparison is the real
-      // "range" for cursor-tracking. Per direct request ("double the range
-      // for when the fish starts looking at the cursor"), the cursor's
-      // distance is halved here (never the raw value used for the actual
-      // look-direction math below) so it out-competes Food from twice as
-      // far away as before.
-      const cursorLookDist = cursorDist / 2;
-      const lookTarget = nearestFood && nearestFoodDist < cursorLookDist ? nearestFood : cursorWorld;
-      const dx = lookTarget.x - fish.x;
-      const dy = lookTarget.y - fish.y;
+      const dx = (fish.seeking ? fish.seekX : cursorWorld.x) - fish.x;
+      const dy = (fish.seeking ? fish.seekY : cursorWorld.y) - fish.y;
       const dist = Math.hypot(dx, dy) || 1;
-      eyeDirection = { x: dx / dist, y: dy / dist };
+      eyeDirScratch.x = dx / dist;
+      eyeDirScratch.y = dy / dist;
+      eyeDirection = eyeDirScratch;
     }
 
     // Slightly green once a fish is hungry enough to actively seek food (the
@@ -5898,7 +5971,7 @@ function render() {
       ctx.scale(bounceX, bounceY);
       ctx.translate(-pos.x, -pos.y);
     }
-    drawFish(ctx, pos.x, pos.y, fish.speciesId, fish.stage, facing, fish.tailPhase, eyeDirection, fish.starTier || 1, sickness, grayed, state.meta.equippedHatId);
+    drawFish(ctx, pos.x, pos.y, fish.speciesId, fish.stage, facing, fish.tailPhase, eyeDirection, fish.starTier || 1, sickness, grayed, state.meta.equippedHatId, state.level.elapsed, fish.growthOrbitPhase || 0, fish.starAnimStartedAt != null ? state.level.elapsed - fish.starAnimStartedAt : -1);
     if (bounceX !== 1 || bounceY !== 1) ctx.restore();
 
     // A fish's health bar only ever renders while it's actually missing
@@ -6564,14 +6637,14 @@ function render() {
   // the cursor is over a building, add to the legend in the bottom left,
   // 'Right-click to Adjust' or 'Right-click to Move'... If they right click
   // the building, add... 'Left-click to accept' and 'Right-click to
-  // cancel'"), with the arming half later moved to middle-click ("right-
-  // click to move is changed to middle-click to move" — UI.js's updateHUD
-  // is what actually swaps the legend text). Computed here into state.ui
+  // cancel'"), with the arming half later moved to middle-click and then to a
+  // right-click-drag (UI.js's updateHUD is what actually swaps the legend text). Computed here into state.ui
   // rather than drawn on canvas — UI.js's updateHUD reads it to drive the
   // bottom-left legend, the same cross-module-flag pattern this file
   // already uses for wasteTurretAmmoGainedPending/chestItemAbsorbedPending,
   // since UI.js can't be imported back into here without a circular
   // dependency.
+  state.ui.buildingMoveDragging = movingBuilding != null && rightMoveDragging; // mid right-drag: the legend says "release to place" instead of the click-to-accept wording
   if (movingBuilding != null || (isFanAimingActive() && fanAimingMoveData != null)) {
     state.ui.buildingMoveArmed = true;
     state.ui.buildingMoveHoverLabel = null;
@@ -6580,8 +6653,11 @@ function render() {
     if (isCursorOrFoodTool(hoverEffectiveTool) && input.mouse.inside && !state.ui.paused) {
       const { col: hoverCol, row: hoverRow } = worldToTile(hoverWorld.x, hoverWorld.y);
       const hoverTile = getTile(state.level.grid, hoverCol, hoverRow);
+      // Moving now needs the plain cursor (a right-click with the Food tool armed just
+      // cancels it), so the Food tool only gets the 'delete' hint.
+      const canMove = state.ui.selectedTool === 'cursor';
       state.ui.buildingMoveHoverLabel = hoverTile && hoverTile !== TILE_EMPTY
-        ? (FAN_BUILDING_IDS.includes(hoverTile) ? 'adjust' : (PLATFORM_BUILDING_IDS.includes(hoverTile) ? 'move-platform' : 'move'))
+        ? (!canMove ? 'delete' : FAN_BUILDING_IDS.includes(hoverTile) ? 'adjust' : (PLATFORM_BUILDING_IDS.includes(hoverTile) ? 'move-platform' : 'move'))
         : null;
     } else {
       state.ui.buildingMoveHoverLabel = null;

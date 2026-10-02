@@ -375,9 +375,8 @@ let crackGrowStartMs = -Infinity;
 // dome (always on), plus a small gold arrow bobbing above it. Per a later
 // direct request, the arrow only shows while the gold pulse glow does (2x the
 // next purchase's cost banked — shouldPulseMound/shouldPulseScienceLab), and
-// the Science Lab gets it too. The arrow is baked once; the rim is one
-// polyline of the sprite's own outline arc, so this adds a couple of draw
-// calls per frame and nothing else.
+// the Science Lab gets it too. The arrow is baked once, and so is the rim
+// (see bakeRimSprites), so this adds a couple of drawImage calls per frame.
 const RIM_PERIOD_MS = 2400;
 const ARROW_BOB_PERIOD_MS = 900;
 let moundArrowSprite = null;
@@ -400,31 +399,77 @@ function bakeMoundArrow() {
   c.stroke();
   return canvas;
 }
-function drawMoundRim(ctx, state, topLeft) {
-  const { camera } = state;
-  const zoom = camera.zoom;
-  const t = state.level.elapsed;
-  const pulse = 0.5 + 0.5 * Math.sin((t / RIM_PERIOD_MS) * Math.PI * 2);
+// The glowing rim is baked, not stroked live: each frame a rim is two drawImage
+// calls (a soft wide stroke and a thin bright one, each with its own pulsing
+// alpha) instead of re-tracing and stroking a path twice. Per direct request the
+// Science Lab gets the Mound's rim too ("so it stands out visually as
+// interactable") and the animation had to stay cheap, so both share this. The
+// sprites are cached per zoom (they're drawn 1:1 at screen scale, so a zoom change
+// just rebakes them once).
+const RIM_WIDE_WIDTH = 7; // stroke widths at zoom 1 — the same as the old live strokes
+const RIM_THIN_WIDTH = 1.6;
+function bakeRimSprites(trace, w, h, zoom) {
+  const pad = Math.ceil((RIM_WIDE_WIDTH / 2) * zoom) + 2;
+  const make = (lineWidth) => {
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(w) + pad * 2;
+    canvas.height = Math.ceil(h) + pad * 2;
+    const c = canvas.getContext('2d');
+    c.lineJoin = 'round';
+    c.lineCap = 'round';
+    c.strokeStyle = '#ffd76b';
+    c.lineWidth = lineWidth;
+    c.beginPath();
+    trace(c, pad, pad, zoom);
+    c.stroke();
+    return canvas;
+  };
+  return { zoom, pad, wide: make(RIM_WIDE_WIDTH * zoom), thin: make(Math.max(1, RIM_THIN_WIDTH * zoom)) };
+}
+function drawBakedRim(ctx, rim, x, y, elapsedMs) {
+  const pulse = 0.5 + 0.5 * Math.sin((elapsedMs / RIM_PERIOD_MS) * Math.PI * 2);
+  const prevAlpha = ctx.globalAlpha;
+  ctx.globalAlpha = prevAlpha * (0.1 + 0.1 * pulse);
+  ctx.drawImage(rim.wide, x - rim.pad, y - rim.pad);
+  ctx.globalAlpha = prevAlpha * (0.4 + 0.3 * pulse);
+  ctx.drawImage(rim.thin, x - rim.pad, y - rim.pad);
+  ctx.globalAlpha = prevAlpha;
+}
+function traceMoundRim(c, ox, oy, k) {
   const outline = moundSprite.outline;
   const arcEnd = outline.length - 2; // the last two points are the base corners dipping under the floor — not part of the visible arc
-  ctx.save();
-  ctx.lineJoin = 'round';
-  ctx.lineCap = 'round';
-  ctx.strokeStyle = '#ffd76b';
-  ctx.beginPath();
   for (let i = 0; i < arcEnd; i++) {
-    const x = topLeft.x + outline[i].x * zoom;
-    const y = topLeft.y + outline[i].y * zoom;
-    if (i === 0) ctx.moveTo(x, y);
-    else ctx.lineTo(x, y);
+    const x = ox + outline[i].x * k;
+    const y = oy + outline[i].y * k;
+    if (i === 0) c.moveTo(x, y);
+    else c.lineTo(x, y);
   }
-  ctx.globalAlpha = 0.1 + 0.1 * pulse;
-  ctx.lineWidth = 7 * zoom;
-  ctx.stroke();
-  ctx.globalAlpha = 0.4 + 0.3 * pulse;
-  ctx.lineWidth = Math.max(1, 1.6 * zoom);
-  ctx.stroke();
-  ctx.restore();
+}
+// The Lab's visible outline, without the bottom edge: the glass dome's arc, out along the top of the
+// steel base (0.1w..0.9w wide), and down its two vertical sides.
+function traceLabRim(c, ox, oy, k) {
+  const w = MOUND_WIDTH_PX * k;
+  const h = (MOUND_HEIGHT_PX + TILE_SIZE) * k;
+  const r = w * 0.32;
+  const baseTop = oy + h * 0.55;
+  c.moveTo(ox + w * 0.1, oy + h);
+  c.lineTo(ox + w * 0.1, baseTop);
+  c.lineTo(ox + w / 2 - r, baseTop);
+  c.arc(ox + w / 2, baseTop, r, Math.PI, 0);
+  c.lineTo(ox + w * 0.9, baseTop);
+  c.lineTo(ox + w * 0.9, oy + h);
+}
+let moundRim = null;
+let labRim = null;
+function drawMoundRim(ctx, state, topLeft) {
+  const zoom = state.camera.zoom;
+  if (!moundRim || moundRim.zoom !== zoom) moundRim = bakeRimSprites(traceMoundRim, MOUND_WIDTH_PX * zoom, (MOUND_HEIGHT_PX + TILE_SIZE) * zoom, zoom);
+  drawBakedRim(ctx, moundRim, topLeft.x, topLeft.y, state.level.elapsed);
+}
+function drawLabRim(ctx, state, topLeft) {
+  const zoom = state.camera.zoom;
+  if (!labRim || labRim.zoom !== zoom) labRim = bakeRimSprites(traceLabRim, MOUND_WIDTH_PX * zoom, (MOUND_HEIGHT_PX + TILE_SIZE) * zoom, zoom);
+  drawBakedRim(ctx, labRim, topLeft.x, topLeft.y, state.level.elapsed);
 }
 
 // The bobbing arrow, centered on screen x `cx`, sitting just above `topY` (the
@@ -663,6 +708,7 @@ export function renderScienceLab(ctx, state) {
   if (!labSprite) labSprite = bakeLabSprite(MOUND_WIDTH_PX, MOUND_HEIGHT_PX + TILE_SIZE);
   const z = camera.zoom / labSprite.scale;
   ctx.drawImage(labSprite.canvas, topLeft.x - labSprite.pad * camera.zoom, topLeft.y - labSprite.pad * camera.zoom, labSprite.canvas.width * z, labSprite.canvas.height * z);
+  drawLabRim(ctx, state, topLeft); // always-on glowing rim, like the Mound's, so it reads as interactable
 
   // Shimmer, clipped to the Lab's own silhouette (the base rect plus the
   // dome's upper half-circle, traced as one path) so the sweep can't paint

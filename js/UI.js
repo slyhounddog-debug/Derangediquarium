@@ -98,14 +98,14 @@ import { getAvailableSpecies, getAvailableBuildings, loadLevel } from './Levels.
 import {
   getFishPurchaseCost, effectiveScienceCapacity, countTankItemsByType, resolveMergeTutorialPair,
   computeTheoreticalGoldPerMinute, computeTheoreticalCoinCountPerMinute, computeTheoreticalSciencePerMinute, computeTheoreticalFoodNeededPerMinute,
-  computeTheoreticalWastePerMinute, computeTheoreticalManufacturerOutputPerMinute, computeTheoreticalBiomassPerMinute,
-  computeFishInfoModalStats, describeFishMergeOptions,
+  computeTheoreticalWastePerMinute, computeTheoreticalWasteEatenPerMinute, computeTheoreticalManufacturerOutputPerMinute, computeTheoreticalBiomassPerMinute,
+  computeFishInfoModalStats, describeFishMergeOptions, createPickupText,
 } from './Entities.js';
 import {
   getTile, worldToTile, getBuildingCost, FAN_STATS,
   findNearestWasteTurretAndWaste, getRecipeBuildingKeyAt, renderTileShape,
   getBuildingCurrentPowerDraw, getBuildingUptimeFraction, applyRecipeToBuilding,
-  getChestKeyAt, armChestTrickle, toggleChestTrickle, findPlacedChestKey,
+  getChestKeyAt, armChestTrickle, setChestPourMode, findPlacedChestKey,
   getUnlockedWorldH,
 } from './Grid.js';
 import { worldToScreen } from './Engine.js';
@@ -116,6 +116,37 @@ import { computeProductionInfo } from './ProductionInfo.js';
 import { hasSaveGame, saveGame, loadSaveGame, isGuidedTutorialsEnabled, setGuidedTutorialsEnabled } from './Save.js';
 import { pushGameNotification } from './Notifications.js';
 
+let rangeSliderPressed = false; // true from pressing the fan range slider until just after release (see its overlay-click guard)
+const BUILDING_MODAL_EDGE_MARGIN_PX = 8; // keeps a building pop-up off the very edge of the screen
+const BUILDING_MODAL_SIDE_GAP_PX = 10; // gap between the building and a pop-up placed beside it
+// Places a building pop-up (recipe menu, building info, Platform/Fan filter, Storage
+// Chest). Per direct request it prefers sitting above the building, but when that spot
+// would be cut off by a screen edge it falls back to the building's RIGHT side, then its
+// LEFT, and finally above with the card clamped into the screen. The card's real size is
+// measured each call (transforms don't affect offsetWidth/Height, so this is right even
+// mid fly-out). The anchor's modal-side-right/-left class picks the matching CSS transform.
+function placeBuildingModal(state, anchorEl, menuEl, worldX, worldTopY) {
+  const screen = worldToScreen(worldX, worldTopY, state.camera);
+  const tilePx = TILE_SIZE * state.camera.zoom;
+  const w = menuEl.offsetWidth;
+  const h = menuEl.offsetHeight;
+  const m = BUILDING_MODAL_EDGE_MARGIN_PX;
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const fitsAbove = screen.y - MOUND_MENU_GAP_PX - h >= m && screen.x - w / 2 >= m && screen.x + w / 2 <= vw - m;
+  const rightX = screen.x + tilePx / 2 + BUILDING_MODAL_SIDE_GAP_PX;
+  const leftX = screen.x - tilePx / 2 - BUILDING_MODAL_SIDE_GAP_PX;
+  const placement = fitsAbove ? 'top' : (rightX + w <= vw - m ? 'right' : (leftX - w >= m ? 'left' : 'top'));
+  anchorEl.classList.toggle('modal-side-right', placement === 'right');
+  anchorEl.classList.toggle('modal-side-left', placement === 'left');
+  if (placement === 'top') {
+    anchorEl.style.left = `${Math.max(w / 2 + m, Math.min(vw - w / 2 - m, screen.x))}px`;
+    anchorEl.style.top = `${screen.y - MOUND_MENU_GAP_PX}px`;
+  } else {
+    anchorEl.style.left = `${placement === 'right' ? rightX : leftX}px`;
+    anchorEl.style.top = `${Math.max(m + h / 2, Math.min(vh - m - h / 2, screen.y + tilePx / 2))}px`;
+  }
+}
 const MOUND_MENU_GAP_PX = 12; // screen px of breathing room between the popup's bottom edge and the Mound's top edge
 const MOUND_MENU_TRANSITION_MS = 220; // must match #mound-menu's CSS transition duration
 const LAB_MENU_TRANSITION_MS = 220; // must match #lab-modal's CSS transition duration — see openLabMenu/closeLabMenu below
@@ -470,6 +501,11 @@ export function initUI(state) {
     platformFilterItems: document.getElementById('platform-filter-items'),
     platformFilterHint: document.getElementById('platform-filter-hint'),
     platformFilterFanNote: document.getElementById('platform-filter-fan-note'),
+    platformFilterRangeWrap: document.getElementById('platform-filter-range-wrap'),
+    platformFilterRangeLabel: document.getElementById('platform-filter-range-label'),
+    platformFilterRange: document.getElementById('platform-filter-range'),
+    chestModePour: document.getElementById('chest-mode-pour'),
+    chestModeTrickle: document.getElementById('chest-mode-trickle'),
     storageChestOverlay: document.getElementById('storage-chest-overlay'),
     storageChestAnchor: document.getElementById('storage-chest-anchor'),
     storageChestMenu: document.getElementById('storage-chest-menu'),
@@ -565,7 +601,19 @@ export function initUI(state) {
     if (e.target === els.fishInfoOverlay) closeFishInfoMenu(state); // same "click anywhere else closes it" precedent as every other fly-out pop-up here
   });
   els.platformFilterOverlay.addEventListener('click', (e) => {
+    if (rangeSliderPressed) return; // a slider drag released over the backdrop makes the browser fire its click there — don't treat that as "click outside"
     if (e.target === els.platformFilterOverlay) closePlatformFilterMenu(); // same "click anywhere else closes it" precedent as every other fly-out pop-up here
+  });
+  // Fan range slider (1-100%), per direct request — edits the open fan's own
+  // rangePct live (Grid.js's refreshFanCache/renderFanIndicators read it).
+  els.platformFilterRange.addEventListener('pointerdown', () => { rangeSliderPressed = true; });
+  window.addEventListener('pointerup', () => { if (rangeSliderPressed) setTimeout(() => { rangeSliderPressed = false; }, 0); });
+  els.platformFilterRange.addEventListener('input', () => {
+    const target = activeFilterTarget(state);
+    if (!target || !target.isFan) return;
+    const pct = Math.max(1, Math.min(100, Math.round(Number(els.platformFilterRange.value))));
+    target.data.rangePct = pct;
+    els.platformFilterRangeLabel.textContent = `Range: ${pct}%`;
   });
   els.platformFilterClearBtn.addEventListener('click', () => clearPlatformFilter(state));
   els.fishInfoFilterClearBtn.addEventListener('click', () => clearFishInfoFilter(state));
@@ -592,15 +640,15 @@ export function initUI(state) {
       closeStorageChestModal();
     });
   }
+  // Pour/Trickle toggle (the button id is a leftover of the old Pause Trickle
+  // button it replaced, per direct request).
   els.storageChestStopBtn.addEventListener('click', () => {
     if (!storageChestTileKey) return;
-    toggleChestTrickle(state, storageChestTileKey);
+    const data = state.level.buildingData[storageChestTileKey];
+    if (!data) return;
+    setChestPourMode(state, storageChestTileKey, data.pourMode === false); // flips it
     refreshStorageChestModal(state);
   });
-  // No Clear Chest button any more — per direct request, replaced entirely
-  // by the right-click-drag gesture (main.js's chestClearDragKey/
-  // clearChestContents call), which mimics the left-drag trickle-arm
-  // gesture exactly but fires an immediate staggered dump instead.
 
   // Gene-Splicing moved to the Tank Upgrades panel (see buildTankPanel) — no
   // longer purchased here, per direct request ("unlocked through the tank
@@ -1063,11 +1111,7 @@ export function closeBuildingInfoMenu(state) {
 function updateBuildingInfoMenuPosition(state) {
   if (!buildingInfoTileKey) return;
   const [row, col] = buildingInfoTileKey.split(',').map(Number);
-  const worldX = col * TILE_SIZE + TILE_SIZE / 2;
-  const worldY = row * TILE_SIZE;
-  const screen = worldToScreen(worldX, worldY, state.camera);
-  els.buildingInfoAnchor.style.left = `${screen.x}px`;
-  els.buildingInfoAnchor.style.top = `${screen.y - MOUND_MENU_GAP_PX}px`;
+  placeBuildingModal(state, els.buildingInfoAnchor, els.buildingInfoMenu, col * TILE_SIZE + TILE_SIZE / 2, row * TILE_SIZE);
 }
 
 // Only rebuilds on open (same "don't rebuild every frame" fix the recipe
@@ -1274,7 +1318,7 @@ export function refreshFishInfoMenu(state) {
   const iconCtx = els.fishInfoIconCanvas.getContext('2d');
   const iconSize = els.fishInfoIconCanvas.width;
   iconCtx.clearRect(0, 0, iconSize, iconSize);
-  drawFish(iconCtx, iconSize / 2, iconSize / 2, fish.speciesId, def.growthStages.length - 1, 1, 0, { x: 1, y: 0 }, fish.starTier || 1);
+  drawFish(iconCtx, iconSize / 2, iconSize / 2, fish.speciesId, def.growthStages.length - 1, 1, 0, { x: 1, y: 0 }, fish.starTier || 1, 0, 0, 'none', state.level.elapsed, fish.growthOrbitPhase || 0);
 
   const stats = computeFishInfoModalStats(state, fish);
   const rows = [];
@@ -1353,15 +1397,13 @@ function activeFilterTarget(state) {
   const data = state.level.buildingData[platformFilterTileKey];
   if (!data) return null;
   const [row, col] = platformFilterTileKey.split(',').map(Number);
-  return { array: data.filterItems, isFan: BUILDING_FAMILIES.fan.includes(data.type), worldX: col * TILE_SIZE + TILE_SIZE / 2, worldY: row * TILE_SIZE };
+  return { data, array: data.filterItems, isFan: BUILDING_FAMILIES.fan.includes(data.type), worldX: col * TILE_SIZE + TILE_SIZE / 2, worldY: row * TILE_SIZE };
 }
 
 function updatePlatformFilterMenuPosition(state) {
   const target = activeFilterTarget(state);
   if (!target) return;
-  const screen = worldToScreen(target.worldX, target.worldY, state.camera);
-  els.platformFilterAnchor.style.left = `${screen.x}px`;
-  els.platformFilterAnchor.style.top = `${screen.y - MOUND_MENU_GAP_PX}px`;
+  placeBuildingModal(state, els.platformFilterAnchor, els.platformFilterMenu, target.worldX, target.worldY);
 }
 
 // One filter-grid button (real item art + label + check/X badge) — shared by
@@ -1425,6 +1467,14 @@ function refreshPlatformFilterMenu(state) {
   // cone/arrow visuals (main.js's KeyG handler), only relevant while this
   // popup is actually open for a Fan.
   els.platformFilterFanNote.classList.toggle('hidden', !target.isFan);
+  // Per direct request the range slider replaces Clear All on a Fan's pop-up (a Platform keeps Clear All).
+  els.platformFilterClearBtn.classList.toggle('hidden', target.isFan);
+  els.platformFilterRangeWrap.classList.toggle('hidden', !target.isFan);
+  if (target.isFan) {
+    const pct = target.data.rangePct ?? 100;
+    els.platformFilterRange.value = String(pct);
+    els.platformFilterRangeLabel.textContent = `Range: ${pct}%`;
+  }
 
   els.platformFilterItems.innerHTML = '';
   for (const itemDef of PLATFORM_FILTER_ITEM_TYPES) {
@@ -1516,11 +1566,7 @@ export function closeStorageChestModal() {
 function updateStorageChestModalPosition(state) {
   if (!storageChestTileKey) return;
   const [row, col] = storageChestTileKey.split(',').map(Number);
-  const worldX = col * TILE_SIZE + TILE_SIZE / 2;
-  const worldY = row * TILE_SIZE;
-  const screen = worldToScreen(worldX, worldY, state.camera);
-  els.storageChestAnchor.style.left = `${screen.x}px`;
-  els.storageChestAnchor.style.top = `${screen.y - MOUND_MENU_GAP_PX}px`;
+  placeBuildingModal(state, els.storageChestAnchor, els.storageChestMenu, col * TILE_SIZE + TILE_SIZE / 2, row * TILE_SIZE);
 }
 
 // Re-run on open and after every button press (not every frame — same
@@ -1552,23 +1598,18 @@ function refreshStorageChestModal(state) {
       : '';
     els.storageChestCount.textContent = `${data.count} / ${capacity} ${label}${totalValueSuffix}`;
   }
-  // A genuine toggle now, per direct request — only disabled while there's
-  // no remembered direction to pause/resume at all yet (never dragged).
-  // Once a direction's been aimed, clicking this always flips
-  // trickleActive without ever forgetting trickleAngle/trickleDistanceTiles
-  // (see Grid.js's toggleChestTrickle), so the label just tracks which
-  // action the NEXT click will take.
-  els.storageChestStopBtn.disabled = data.trickleAngle === null;
-  els.storageChestStopBtn.textContent = data.trickleActive ? 'Pause Trickle' : 'Resume Trickle';
-  // Per direct request — mentions the right-click-drag clear gesture that
-  // replaced the old Clear Chest button, alongside the existing left-drag
-  // trickle instructions.
-  els.storageChestHint.textContent = (data.trickleActive
-    ? 'Trickling out on its own. Drag away from the chest again to re-aim it.'
-    : data.trickleAngle !== null
-      ? 'Paused. Press Resume Trickle to pick back up where it left off, or drag away from the chest to re-aim it.'
-      : 'Drag away from the chest to aim, then let go to start trickling it back out.')
-    + ' Right click and drag to clear the chest.';
+  // Pour/Trickle toggle, per direct request (replaces the Pause/Resume Trickle
+  // button): what releasing a drag away from the chest does. Pour is the default.
+  const pour = data.pourMode !== false;
+  els.storageChestStopBtn.classList.toggle('on', !pour);
+  els.storageChestStopBtn.setAttribute('aria-checked', String(!pour));
+  els.chestModePour.classList.toggle('chest-mode-active', pour);
+  els.chestModeTrickle.classList.toggle('chest-mode-active', !pour);
+  els.storageChestHint.textContent = pour
+    ? 'Pour mode: drag away from the chest and let go to pour everything out in that direction. Click Mode to switch to Trickle.'
+    : (data.trickleActive
+      ? 'Trickle mode: trickling out on its own. Drag away from the chest again to re-aim it.'
+      : 'Trickle mode: drag away from the chest and let go to start trickling it back out.');
 }
 
 // Toggled from red x's to green checks and back — re-clicking an already-
@@ -1603,6 +1644,7 @@ export function copyPlatformFilter(state, sourceKey, targetKey) {
   if (!sourceData || !targetData) return;
   targetData.filterItems = [...sourceData.filterItems];
   if (platformFilterMenuOpen && platformFilterTileKey === targetKey) refreshPlatformFilterMenu(state);
+  pushSettingsCopiedText(state, targetKey);
 }
 
 // Tracks the clicked tile's live on-screen position so the popup stays
@@ -1610,11 +1652,7 @@ export function copyPlatformFilter(state, sourceKey, targetKey) {
 function updateRecipeMenuPosition(state) {
   if (!recipeMenuTileKey) return;
   const [row, col] = recipeMenuTileKey.split(',').map(Number);
-  const worldX = col * TILE_SIZE + TILE_SIZE / 2;
-  const worldY = row * TILE_SIZE;
-  const screen = worldToScreen(worldX, worldY, state.camera);
-  els.recipeMenuAnchor.style.left = `${screen.x}px`;
-  els.recipeMenuAnchor.style.top = `${screen.y - MOUND_MENU_GAP_PX}px`;
+  placeBuildingModal(state, els.recipeMenuAnchor, els.recipeMenu, col * TILE_SIZE + TILE_SIZE / 2, row * TILE_SIZE);
 }
 
 // Rebuilds the icon row for whichever building (Manufacturer or Power
@@ -1725,6 +1763,16 @@ export function copyBuildingRecipe(state, sourceKey, targetKey) {
   if (!sourceData || !targetData || sourceData.type !== targetData.type) return;
   applyRecipeToBuilding(targetData, sourceData.recipeId);
   if (recipeMenuOpen && recipeMenuTileKey === targetKey) refreshRecipeMenu(state);
+  pushSettingsCopiedText(state, targetKey);
+}
+
+// Per direct request, a recipe/filter drag-copied onto a building shows a small
+// light "Settings copied!" just above it that fades out like a coin pickup's text.
+function pushSettingsCopiedText(state, tileKey) {
+  const [row, col] = tileKey.split(',').map(Number);
+  const text = createPickupText(col * TILE_SIZE + TILE_SIZE / 2, row * TILE_SIZE, 'Settings copied!', '#e6f3ff');
+  text.center = true;
+  state.level.floatingTexts.push(text);
 }
 
 // Tracks the Mound's live on-screen position so the popup stays glued to it
@@ -3195,6 +3243,22 @@ function drawItemIconCanvas(canvas, itemType) {
 // time a shop selection's stats are built) never redraw or re-encode the
 // same icon twice.
 const itemIconDataUrlCache = new Map();
+// A baked, cached <img> of a fish species' real adult look (same one-time
+// canvas->data URL approach as itemIconImgHtml) for HTML-string UI like the
+// Base Stats rows.
+function fishIconImgHtml(speciesId, sizePx = 16) {
+  const cacheKey = `fish:${speciesId}:${sizePx}`;
+  let dataUrl = itemIconDataUrlCache.get(cacheKey);
+  if (!dataUrl) {
+    const canvas = document.createElement('canvas');
+    canvas.width = sizePx;
+    canvas.height = sizePx;
+    drawFishIconCanvas(canvas, speciesId);
+    dataUrl = canvas.toDataURL();
+    itemIconDataUrlCache.set(cacheKey, dataUrl);
+  }
+  return `<img src="${dataUrl}" class="stat-item-icon" width="${sizePx}" height="${sizePx}" alt="">`;
+}
 function itemIconImgHtml(itemType, sizePx = 14) {
   const cacheKey = `${itemType}:${sizePx}`;
   let dataUrl = itemIconDataUrlCache.get(cacheKey);
@@ -3857,8 +3921,10 @@ function updateTabReminder(state) {
 // request ("Add in an icon of the actual object in the info tab for each
 // stat"). Only Food/min and Coin/min actually pass one; every other row is
 // unchanged (no icon requested for Gold/min or anything else here).
-function statsPanelRowHtml(label, value, iconColor = null) {
-  const icon = iconColor ? `<span class="stats-panel-row-icon" style="background:${iconColor}"></span>` : '';
+// extraIconHtml, when given, goes right after the dot (used to tag the Waste-eaten
+// row with a fish icon, since only fish — not buildings — are counted there).
+function statsPanelRowHtml(label, value, iconColor = null, extraIconHtml = '') {
+  const icon = (iconColor ? `<span class="stats-panel-row-icon" style="background:${iconColor}"></span>` : '') + extraIconHtml;
   return `<div class="stats-panel-row"><span class="stats-panel-row-label">${icon}${label}</span><span class="stats-panel-row-value">${value}</span></div>`;
 }
 function refreshStatsPanel(state) {
@@ -3879,6 +3945,10 @@ function refreshStatsPanel(state) {
   rows.push(statsPanelRowHtml('Coin/min', computeTheoreticalCoinCountPerMinute(state).toFixed(1), COIN_TIERS[1].color));
   rows.push(statsPanelRowHtml('Food/min needed', computeTheoreticalFoodNeededPerMinute(state).toFixed(1), FOOD_COLOR));
   rows.push(statsPanelRowHtml('Waste/min', computeTheoreticalWastePerMinute(state).toFixed(1)));
+  // Per direct request: Waste the FISH eat per minute (Scavengers only — no
+  // buildings), under the produced figure, tagged with a fish icon so it's
+  // clear only fish are counted.
+  rows.push(statsPanelRowHtml('Waste eaten/min', computeTheoreticalWasteEatenPerMinute(state).toFixed(1), WASTE_COLOR, fishIconImgHtml('suckerfish', 16)));
 
   const researcherUnlocked = state.meta.speciesUnlocked.some((id) => SPECIES[id].behavior.includes('RESEARCHER'));
   if (researcherUnlocked) {
@@ -4240,6 +4310,8 @@ export function pipetteSelectBuilding(state, buildingId, tileKey = null) {
   if (!data) return;
   if (buildingId === TILE_MANUFACTURER || buildingId === TILE_POWER_PLANT) state.ui.pipetteRecipeId = data.recipeId || null;
   if (data.filterItems) state.ui.pipetteFilterItems = [...data.filterItems];
+  if (typeof data.pourMode === 'boolean') state.ui.pipetteChestPourMode = data.pourMode; // a chest's Pour/Trickle toggle
+  if (typeof data.rangePct === 'number') state.ui.pipetteFanRangePct = data.rangePct; // a fan's range slider
 }
 
 // Buildings share the exact same preview window as species (same box, same
@@ -4255,6 +4327,8 @@ function selectBuildingForPreview(state, building) {
   // comment in main.js's initial ui state.
   state.ui.pipetteRecipeId = null;
   state.ui.pipetteFilterItems = null;
+  state.ui.pipetteChestPourMode = null;
+  state.ui.pipetteFanRangePct = null;
   stopPreviewAnimation(); // no idle-swim animation for a building — it's a static tile icon
   els.previewEmpty.classList.add('hidden');
   els.previewContent.classList.remove('hidden');
@@ -4867,6 +4941,7 @@ export function updateHUD(state) {
   // the popup if the underlying tile gets demolished out from under it.
   if (recipeMenuOpen && !state.level.buildingData[recipeMenuTileKey]) closeRecipeMenu();
   if (recipeMenuOpen || recipeMenuClosing) updateRecipeMenuPosition(state);
+  state.ui.filterModalTileKey = platformFilterMenuOpen ? platformFilterTileKey : null; // mirrored for Grid.js's Fan-cone highlight (it can't read this module's own vars)
   if (buildingInfoMenuOpen && !state.level.buildingData[buildingInfoTileKey]) closeBuildingInfoMenu(state); // the tile it's showing got demolished (or moved) out from under it
   if (buildingInfoMenuOpen) refreshBuildingInfoLiveStats(state);
   if (buildingInfoMenuOpen || buildingInfoMenuClosing) updateBuildingInfoMenuPosition(state);
@@ -5003,10 +5078,9 @@ export function updateHUD(state) {
   // getBoundingClientRect call on a frame either one is actually visible.
   // Building-move legend — replaces the old on-canvas hover tooltip (main.js
   // used to draw a 🖱️ bubble over the cursor for Fans specifically). Per
-  // direct request ("right-click to move is changed to middle-click to
-  // move"), arming a move is now "Middle-click to Adjust" (Fan)/"Middle-
-  // click to Move" (anything else) while just hovering a placed building
-  // with nothing else going on; cancelling an already-in-progress move
+  // direct request (a right-click-drag moves a building now), hovering a placed
+  // building with the plain cursor shows "Right-click and drag to Adjust" (Fan)/
+  // "...to Move" (anything else); cancelling an already-in-progress move
   // stayed on right-click, per the later "make right-click a universal
   // cancel button" request — "Left-click to accept" + "Right-click to
   // cancel" while a move (or a moved Fan's own angle-choosing step) is
@@ -5018,12 +5092,19 @@ export function updateHUD(state) {
   // buildLegendVisible true), so it shares the same anchor position.
   const buildingMoveLegendVisible = !tutorialActive && (state.ui.buildingMoveArmed || state.ui.buildingMoveHoverLabel != null);
   if (state.ui.buildingMoveArmed) {
-    els.buildingMoveLegendLine1.textContent = 'Left-click to accept';
-    els.buildingMoveLegendLine2.textContent = 'Right-click to cancel';
+    // Mid right-drag: let go to drop it (an invalid spot snaps it back); otherwise it's a moved
+    // Fan's angle step, which is still left-click to accept / right-click to cancel.
+    els.buildingMoveLegendLine1.textContent = state.ui.buildingMoveDragging ? 'Release to place' : 'Left-click to accept';
+    els.buildingMoveLegendLine2.textContent = state.ui.buildingMoveDragging ? 'An invalid spot snaps it back' : 'Right-click to cancel';
     els.buildingMoveLegendLine2.classList.remove('hidden');
     els.buildingMoveLegendLine3.classList.add('hidden'); // deleting mid-move isn't a thing
+  } else if (state.ui.buildingMoveHoverLabel === 'delete') {
+    // Food tool armed: moving needs the plain cursor, so only the delete hint applies.
+    els.buildingMoveLegendLine1.textContent = '(D) to Delete';
+    els.buildingMoveLegendLine2.classList.add('hidden');
+    els.buildingMoveLegendLine3.classList.add('hidden');
   } else if (state.ui.buildingMoveHoverLabel != null) {
-    els.buildingMoveLegendLine1.textContent = state.ui.buildingMoveHoverLabel === 'adjust' ? 'Middle-click to Adjust' : 'Middle-click to Move';
+    els.buildingMoveLegendLine1.textContent = state.ui.buildingMoveHoverLabel === 'adjust' ? 'Right-click and drag to Adjust' : 'Right-click and drag to Move';
     // Hovering a placed Platform (any of its 5 variants) also shows a
     // second "(R) to Rotate" line — per direct request — reusing this same
     // bubble's own line2 slot (normally only used for the armed "Right-

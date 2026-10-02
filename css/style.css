@@ -2154,6 +2154,24 @@ body.alt-mode #production-info { display: none !important; }
   margin-bottom: 12px;
 }
 #platform-filter-clear-btn:hover { background: #ebdccb; }
+/* Fan range slider (replaces Clear All on a Fan's filter pop-up) */
+#platform-filter-range-wrap { margin-bottom: 12px; }
+#platform-filter-range-wrap.hidden { display: none; }
+#platform-filter-range-label { font-size: 11px; font-weight: 800; color: #6b4c6b; margin-bottom: 4px; }
+#platform-filter-range { width: 100%; accent-color: #c25f8f; cursor: pointer; }
+#platform-filter-clear-btn.hidden { display: none; }
+
+/* Left/right placement fallback for the building pop-ups (UI.js's placeBuildingModal): when the
+   default above-the-building spot would be cut off by a screen edge, the card sits to the right
+   (or left) of the building instead, flying out from the matching side. */
+#recipe-menu-anchor.modal-side-right, #building-info-anchor.modal-side-right,
+#platform-filter-anchor.modal-side-right, #storage-chest-anchor.modal-side-right { transform: translate(0, -50%); }
+#recipe-menu-anchor.modal-side-left, #building-info-anchor.modal-side-left,
+#platform-filter-anchor.modal-side-left, #storage-chest-anchor.modal-side-left { transform: translate(-100%, -50%); }
+#recipe-menu-anchor.modal-side-right #recipe-menu, #building-info-anchor.modal-side-right #building-info-menu,
+#platform-filter-anchor.modal-side-right #platform-filter-menu, #storage-chest-anchor.modal-side-right #storage-chest-menu { transform-origin: 0% 50%; }
+#recipe-menu-anchor.modal-side-left #recipe-menu, #building-info-anchor.modal-side-left #building-info-menu,
+#platform-filter-anchor.modal-side-left #platform-filter-menu, #storage-chest-anchor.modal-side-left #storage-chest-menu { transform-origin: 100% 50%; }
 #platform-filter-items {
   display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;
   margin-bottom: 10px;
@@ -2205,22 +2223,34 @@ body.alt-mode #production-info { display: none !important; }
   font-size: 13px; font-weight: 800;
 }
 #storage-chest-icon img { width: 26px; height: 26px; display: block; }
+/* Pour/Trickle mode: a big toggle switch (knob left = Pour, right = Trickle) with the
+   "Pour/Trickle" label beside it, the active word highlighted. */
+#storage-chest-mode-row { display: flex; align-items: center; justify-content: center; gap: 12px; margin-bottom: 10px; }
 #storage-chest-stop-btn {
-  width: 100%;
-  font-size: 10.5px; font-weight: 800; color: #6b4c6b;
-  background: #f3e9dd;
-  border: 2px solid #ffffff;
-  border-radius: 12px;
-  padding: 8px 4px;
+  position: relative; flex-shrink: 0;
+  width: 72px; height: 36px;
+  padding: 0;
+  background: #ffb3d1;
+  border: 3px solid #ffffff;
+  border-radius: 18px;
   cursor: pointer;
-  margin-bottom: 8px;
-  box-shadow: 0 3px 8px rgba(107, 76, 107, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.6);
-  transition: background 0.1s ease, transform 0.1s ease;
+  box-shadow: 0 3px 8px rgba(107, 76, 107, 0.2), inset 0 2px 4px rgba(107, 76, 107, 0.18);
+  transition: background 0.18s ease;
 }
-#storage-chest-stop-btn:hover { background: #ebdccb; transform: scale(1.02); }
-#storage-chest-stop-btn:active { transform: scale(0.98); }
-#storage-chest-stop-btn:disabled { opacity: 0.45; cursor: default; }
-#storage-chest-stop-btn:disabled:hover { background: #f3e9dd; transform: scale(1); }
+#storage-chest-stop-btn.on { background: #7ed6a5; }
+.chest-switch-knob {
+  position: absolute; top: 2px; left: 2px;
+  width: 26px; height: 26px;
+  background: #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 2px 5px rgba(107, 76, 107, 0.35);
+  transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+#storage-chest-stop-btn.on .chest-switch-knob { transform: translateX(36px); }
+#storage-chest-stop-btn:hover .chest-switch-knob { box-shadow: 0 2px 7px rgba(107, 76, 107, 0.5); }
+#storage-chest-mode-label { font-size: 15px; font-weight: 800; color: #b9a8b9; white-space: nowrap; }
+#storage-chest-mode-label .chest-mode-active { color: #c25f8f; }
+#storage-chest-mode-label .chest-mode-sep { margin: 0 3px; }
 #storage-chest-hint { font-size: 10px; color: #8a7a8a; line-height: 1.3; }
 
 /* Science Lab: a real branching tech tree now, per direct request — a

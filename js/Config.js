@@ -1470,7 +1470,9 @@ export const SPECIES = {
     // elsewhere in this file), applied as a per-species multiplier on the
     // shared WASTE_POOP_INTERVAL_MS baseline instead of a flat override, so
     // it stays correctly relative if that shared constant is ever retuned.
-    wastePoopIntervalMultiplier: 1 / 0.9,
+    // Per a later direct request, Dartfin now produces 50% MORE waste (1.5x
+    // the rate) — that 1/0.9 baseline divided by 1.5.
+    wastePoopIntervalMultiplier: 1 / 0.9 / 1.5,
     unlockedByDefault: true,
   },
   blimpfish: {
@@ -2769,6 +2771,9 @@ export const SCIENCE_LAB_UPGRADES = {
     scienceCost: 300, scienceGreenCost: 150, goldCost: 25000,
     requires: ['science_cap_5'],
     grants: {},
+    // Literals (not built from ECONOMY_FISH_COST_GROWTH_RATE/FISH_SCALING_COST_GROWTH_RATE) because
+    // those consts are declared further down this file — keep in sync with them.
+    description: 'Fish get cheaper to scale: every fish you already own of a species now raises that species\' price by 12.5% instead of 30%. Applies to the Guppy, Dartfin, Blimpfish, Suckerfish, Electric Eel and Science Octopus prices the moment it\'s bought.',
   },
   // ---- The end-game secret: Escape the Fish Tank (internally still
   // "Mother Alien Fish" throughout the rest of the codebase — the boss
@@ -3007,7 +3012,12 @@ export const DYNAMIC_PRICED_SPECIES_IDS = [...ECONOMY_SPECIES_IDS, ...UTILITY_SP
 // rather than tracked as a running counter. Applies to every id in
 // DYNAMIC_PRICED_SPECIES_IDS, economy and utility alike — the name predates
 // utility fish getting the same treatment, kept as-is rather than renamed.
-export const ECONOMY_FISH_COST_GROWTH_RATE = 1.25; // was 1.4, reduced per direct request for a gentler cost curve
+export const ECONOMY_FISH_COST_GROWTH_RATE = 1.3; // was 1.4, cut to 1.25 for a gentler curve, then raised ~20% on the scaling part (1.25 -> 1.3) per direct request
+// What the Fish Scaling lab node drops the rate to — its own fixed value, per
+// direct request ("leaving the fish scaling upgrade scale amount unchanged")
+// when the base rate above was raised: it used to be derived as half the base
+// rate's scaling (1.25 -> 1.125) and would have drifted to 1.15.
+export const FISH_SCALING_COST_GROWTH_RATE = 1.125;
 
 // Two Adult economy fish of the exact same species AND exact same star tier
 // can be combined (dragged onto each other) into one Adult fish of the next
@@ -3016,9 +3026,9 @@ export const ECONOMY_FISH_COST_GROWTH_RATE = 1.25; // was 1.4, reduced per direc
 // change); each combine step multiplies the adult coin dropValue by
 // FISH_STAR_TIER_VALUE_MULTIPLIER over the previous tier's, capped at
 // FISH_STAR_TIER_MAX (a Tier-4 pair can no longer be combined further).
-// FISH_STAR_COUNT_BY_TIER is the number of stars FishRenderer.js overlays on
-// the adult sprite per tier — deliberately NOT a plain tier-1 count (Tier 2
-// jumps straight to 2 stars, not 1), per the design spec's exact table.
+// FISH_STAR_COUNT_BY_TIER is the number of stars FishRenderer.js orbits around
+// the adult sprite per tier — per direct request every adult gets one orbiting
+// star at Tier 1, then one more per tier (so the count equals the tier).
 export const FISH_STAR_TIER_MAX = 4;
 export const FISH_STAR_TIER_VALUE_MULTIPLIER = 2; // was 1.8 (before that 1.5) — raised per direct request so a Tier 4 fish makes exactly double a Tier 3 fish of the same species (and each tier step doubles the previous, since this is a flat per-step multiplier — see Entities.js's Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, starTier - 1) usage)
 // Each combine step also makes the resulting fish 10% less hungry than the
@@ -3030,12 +3040,53 @@ export const FISH_STAR_TIER_VALUE_MULTIPLIER = 2; // was 1.8 (before that 1.5) �
 // poop block — so a Tier-4 fish still only ever poops the same single Waste
 // item per interval as a Tier-1 adult, per direct request.
 export const FISH_STAR_TIER_HUNGER_MULTIPLIER = 0.9;
-export const FISH_STAR_COUNT_BY_TIER = { 1: 0, 2: 2, 3: 3, 4: 4 };
+export const FISH_STAR_COUNT_BY_TIER = { 1: 1, 2: 2, 3: 3, 4: 4 };
 export const FISH_STAR_COLOR = '#ffd700';
-export const FISH_STAR_OUTER_RADIUS_RATIO = 0.09; // fraction of the fish's current size
-export const FISH_STAR_INNER_RADIUS_FRACTION = 0.45; // fraction of a star's own outer radius
-export const FISH_STAR_SPACING_RATIO = 2.4; // fraction of a star's outer radius, between star centers
-export const FISH_STAR_Y_OFFSET_RATIO = 0.55; // how far above the fish's center the star row sits, relative to size
+// Orbiting-star look (FishRenderer.js's drawOrbitStars) — per direct request:
+// golden stars shaped/outlined like the Mound's pointing arrow (same fill and
+// outline colors as Mound.js's bakeMoundArrow), a bit bigger than the old
+// static stars, circling the fish's middle in a slow flat horizontal ellipse.
+// Everything is a ratio of the fish's own on-screen size so it scales with growth.
+// Only ECONOMY fish (the ones that can merge up a tier) get stars/the orbit oval, per direct request.
+export const FISH_STAR_SPRITE_FILL = '#ffd76b';
+export const FISH_STAR_SPRITE_OUTLINE = '#8a5a14';
+export const FISH_STAR_RADIUS_RATIO = 0.176; // outer radius of one star (0.09 for the old static stars, 0.16 at first, +10% per direct request)
+export const FISH_STAR_ORBIT_PERIOD_MS = 7000 / 1.1; // one full lap — slow and continuous (7s at first, 10% faster per direct request)
+export const FISH_STAR_ORBIT_RX_RATIO = 0.85; // horizontal half-width of the orbit ellipse
+export const FISH_STAR_ORBIT_RY_RATIO = 0.22; // vertical half-height — flat, like a ring seen from slightly above
+export const FISH_STAR_DEPTH_SCALE = 0.2; // near-side stars are up to this much bigger (far side smaller)
+// The new star a merge adds: drops in from above while fading in, stops above
+// the head and spins, then glides into the orbit (relaxed ~2.8s total, per
+// direct pick). Only combineFish starts it (fish.starAnimStartedAt).
+export const FISH_STAR_MERGE_HOVER_RATIO = 1.05; // where it stops above the fish's centre, as a fraction of size
+export const FISH_STAR_MERGE_DROP_RATIO = 0.8; // how far above that stop it starts falling from
+export const FISH_STAR_MERGE_DROP_MS = 800;
+export const FISH_STAR_MERGE_SPIN_MS = 1200;
+export const FISH_STAR_MERGE_GLIDE_MS = 800;
+export const FISH_STAR_MERGE_SPIN_TURNS = 2;
+// Tier 2+ rim — per direct request, NOT gold any more (it clashed with some
+// fish's darkened outline): a lighter shade of the fish's own color drawn as a
+// band just INSIDE the existing dark outline (FishRenderer.js's strokeRimBand),
+// pulsing on the Mound rim's 2.4s period. Tier 2 is a thin faint band, Tier 3
+// and 4 a wider brighter one. Width is a fraction of the fish's size; alpha
+// pulses between min and max.
+export const FISH_RIM_PERIOD_MS = 2400;
+export const FISH_RIM_LIGHTEN = 0.55; // how far toward white the fish color is lightened for the band
+export const FISH_RIM_BAND_BY_TIER = {
+  2: { width: 0.05, minAlpha: 0.3, maxAlpha: 0.5 },
+  3: { width: 0.09, minAlpha: 0.55, maxAlpha: 0.85 },
+  4: { width: 0.09, minAlpha: 0.55, maxAlpha: 0.85 },
+};
+// The faint oval tracing the stars' orbit (FishRenderer.js's getOrbitRingSprite):
+// a lighter shade of the fish's own color, drawn under the stars.
+export const FISH_ORBIT_RING_LIGHTEN = 0.5;
+export const FISH_ORBIT_RING_ALPHA = 0.4;
+export const FISH_ORBIT_RING_WIDTH_RATIO = 0.05; // line width as a fraction of the fish's size
+// Tier 4 extras — per direct request: the pupil takes the fish's own color
+// (instead of black) and the body is 5% bigger. The size bump is RENDER-ONLY:
+// the hit radius, eat radius and physics still read the species' own scale,
+// so nothing about collision or clicking changes.
+export const FISH_TIER4_SIZE_MULTIPLIER = 1.05;
 // Hit-test radius (as a fraction of the fish's current on-screen size) used
 // by main.js's drag-to-combine mousedown/mouseup and the live hover-target
 // check — generous enough to grab a fish without needing pixel precision,

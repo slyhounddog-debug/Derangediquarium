@@ -27,7 +27,7 @@ export function createInput(canvas) {
     mouseDown: false, // left button held — build-mode drag-placement reads this each tick, see main.js
     clickHandlers: [],
     rightClickHandlers: [], // now main.js's universal-cancel + in-progress-move/blueprint cancel; contextmenu is prevented so it never opens the browser menu
-    middleClickHandlers: [], // building-move pick-up — moved here from right-click per direct request ("right-click to move is changed to middle-click to move"); fired on mousedown (button 1) since there's no middle-click equivalent of the contextmenu event, with its own default (OS autoscroll) prevented below
+    middleClickHandlers: [], // middle-click = pipette (main.js); fired on mousedown (button 1) since there's no middle-click equivalent of the contextmenu event, with its own default (OS autoscroll) prevented below
     mouseDownInterceptors: [], // checked BEFORE mouseDownHandlers on a left press — if any returns true the press is consumed (no other handler sees it); main.js's Shift-drag production-info box select uses this so item/chest/recipe drags don't also start
     clickInterceptors: [], // same idea for the native click that follows — true swallows it
     mouseDownHandlers: [], // fired once, at press — main.js uses this to arm an Economy Fish Combining drag when the press lands on a combinable fish
@@ -74,8 +74,7 @@ export function createInput(canvas) {
   });
   canvas.addEventListener('mousedown', (e) => {
     if (e.button === 1) {
-      // Middle-click — building-move pick-up (see middleClickHandlers' own
-      // comment). preventDefault stops the browser's own middle-click
+      // Middle-click — pipette (see middleClickHandlers' own comment). preventDefault stops the browser's own middle-click
       // autoscroll mode from engaging at the same time.
       e.preventDefault();
       const rect = canvas.getBoundingClientRect();

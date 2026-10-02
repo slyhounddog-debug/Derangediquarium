@@ -660,20 +660,18 @@ export function armChestTrickle(state, key, angle, distanceTiles) {
   data.trickleTimerMs = 0;
 }
 
-// The chest popup's "Pause Trickle"/"Resume Trickle" button — per direct
-// request, a genuine toggle: pausing only ever flips trickleActive off,
-// leaving trickleAngle/trickleDistanceTiles completely untouched, so a
-// later press flips it straight back on along that exact same remembered
-// trajectory and strength with no re-drag needed. Resuming resets
-// trickleTimerMs to 0 (same as a fresh armChestTrickle) so the next
-// ejection fires almost immediately rather than waiting out however much
-// of the interval had already elapsed before the pause. A no-op if this
-// chest has never been aimed at all yet (trickleAngle still null) — see
-// UI.js's refreshStorageChestModal, which disables the button in that case.
-export function toggleChestTrickle(state, key) {
+// The chest popup's Pour/Trickle toggle — per direct request, replaces the
+// old Pause/Resume Trickle button. The mode decides what releasing the aim-
+// drag does (main.js): Pour releases everything staggered along the drag's aim
+// (clearChestContents), Trickle arms the auto-trickle (armChestTrickle).
+// Switching to Pour stops any running trickle (the aim is remembered, so
+// switching back to Trickle resumes along it, with the timer reset like a
+// fresh arm so the next ejection fires almost immediately).
+export function setChestPourMode(state, key, pour) {
   const data = state.level.buildingData[key];
   if (!data) return;
-  if (data.trickleActive) {
+  data.pourMode = pour;
+  if (pour) {
     data.trickleActive = false;
   } else if (data.trickleAngle !== null) {
     data.trickleActive = true;
@@ -681,8 +679,9 @@ export function toggleChestTrickle(state, key) {
   }
 }
 
-// The right-click-drag "clear" gesture's own trigger — per direct request,
-// replaces the old Clear Chest button entirely. Always takes a FRESH angle/
+// The aim-drag's Pour release (a chest in pour mode) — originally the
+// right-click-drag "clear" gesture, per direct request replacing the old Clear
+// Chest button entirely. Always takes a FRESH angle/
 // distance from the gesture that just triggered it (unlike the old button,
 // which reused whatever trickleAngle happened to already be armed) — doesn't
 // dump everything on the same tick; just arms `clearing` plus this
@@ -930,38 +929,36 @@ export function computeSnapLine(state, lastCol, lastRow, cursorCol, cursorRow, b
 
     const existingType = state.level.grid[row][col];
     const occupied = existingType !== TILE_EMPTY;
-    let freeSwap = false;
     let tileCost = 0;
     if (occupied) {
       anyReplace = true;
-      freeSwap = sameBuildingFamily(existingType, buildingId);
-      if (!freeSwap) {
-        const existingBuilding = BUILDING_TYPES[existingType];
-        if (existingBuilding) {
-          const removedSoFar = removedCounts[existingType] || 0;
-          const placedSoFar = extraCounts[existingType] || 0;
-          // -1: refund off what THIS tile actually cost when placed (its own
-          // count excluding itself) — same fix computeBlueprintCostWithReplace's
-          // own comment explains in full.
-          const nExisting = Math.max(0, countPlacedOfType(state.level.grid, existingType) - removedSoFar + placedSoFar - 1);
-          totalRefund += Math.floor(Math.ceil(existingBuilding.cost * Math.pow(buildingCostGrowthRate(existingBuilding.cost), nExisting)) * TILE_REFUND_FRACTION);
-        }
+      const existingBuilding = BUILDING_TYPES[existingType];
+      if (existingBuilding) {
+        const removedSoFar = removedCounts[existingType] || 0;
+        const placedSoFar = extraCounts[existingType] || 0;
+        // -1: refund off what THIS tile actually cost when placed (its own
+        // count excluding itself) — same fix computeBlueprintCostWithReplace's
+        // own comment explains in full. Same-family tiles pay this net too (they
+        // used to be free swaps — see describeReplacement's comment).
+        const nExisting = Math.max(0, countPlacedOfType(state.level.grid, existingType) - removedSoFar + placedSoFar - 1);
+        const existingCost = PLATFORM_FLAT_COST_TILES.has(existingType)
+          ? PLATFORM_FLAT_COST
+          : Math.ceil(existingBuilding.cost * Math.pow(buildingCostGrowthRate(existingBuilding.cost), nExisting));
+        totalRefund += Math.floor(existingCost * TILE_REFUND_FRACTION);
       }
       removedCounts[existingType] = (removedCounts[existingType] || 0) + 1;
     }
-    if (!freeSwap) {
-      if (PLATFORM_FLAT_COST_TILES.has(buildingId)) {
-        tileCost = PLATFORM_FLAT_COST;
-      } else {
-        const removedSoFarOfNew = removedCounts[buildingId] || 0;
-        const extra = extraCounts[buildingId] || 0;
-        const n = Math.max(0, countPlacedOfType(state.level.grid, buildingId) - removedSoFarOfNew + extra);
-        tileCost = getBuildingCostAtCount(buildingId, n);
-      }
-      totalCost += tileCost;
+    if (PLATFORM_FLAT_COST_TILES.has(buildingId)) {
+      tileCost = PLATFORM_FLAT_COST;
+    } else {
+      const removedSoFarOfNew = removedCounts[buildingId] || 0;
+      const extra = extraCounts[buildingId] || 0;
+      const n = Math.max(0, countPlacedOfType(state.level.grid, buildingId) - removedSoFarOfNew + extra);
+      tileCost = getBuildingCostAtCount(buildingId, n);
     }
+    totalCost += tileCost;
     extraCounts[buildingId] = (extraCounts[buildingId] || 0) + 1;
-    result.tiles.push({ col, row, cost: tileCost, occupied, freeSwap, replacedType: occupied ? existingType : null });
+    result.tiles.push({ col, row, cost: tileCost, occupied, freeSwap: false, replacedType: occupied ? existingType : null });
   }
 
   result.totalCost = totalCost;
@@ -1090,7 +1087,7 @@ function writeFreshBuildingData(state, col, row, buildingId, angle) {
     // just applied to computeFanForce's own per-item force loop instead of
     // collision. Empty by default, so a fresh Fan blows every item type
     // exactly as it always has until the player opens its filter pop-up.
-    state.level.buildingData[buildingKey(col, row)] = { type: buildingId, angle, filterItems: [] };
+    state.level.buildingData[buildingKey(col, row)] = { type: buildingId, angle, filterItems: [], rangePct: 100 }; // rangePct: the filter pop-up's range slider (1-100% of the tier's max range)
   } else if (COLLECTOR_TILES.has(buildingId)) {
     state.level.buildingData[buildingKey(col, row)] = { type: buildingId, angle };
   } else if (TURRET_TILES.has(buildingId)) {
@@ -1170,6 +1167,7 @@ function writeFreshBuildingData(state, col, row, buildingId, angle) {
     // see updateBuildings' own intake scan and ejectOneFromChest below.
     state.level.buildingData[buildingKey(col, row)] = {
       type: buildingId, lockedItemType: null, count: 0, coinQueue: [],
+      pourMode: true, // what releasing the aim-drag does: true = pour everything out (default), false = arm the auto-trickle — toggled in the chest popup, see setChestPourMode
       trickleActive: false, trickleAngle: null, trickleDistanceTiles: null,
       clearing: false, clearTimerMs: 0, clearAngle: null, clearDistanceTiles: null,
       recentEjections: [],
@@ -1286,8 +1284,9 @@ export function removeTile(state, col, row) {
 // difference (can be negative — the player profits). Two buildings of the
 // SAME FAMILY (Fan any tier, Turret any tier, Refinery any tier, Storage
 // Chest any tier, Platform any variant, or the exact same Manufacturer/Power
-// Plant) are a free in-place tier-swap that genuinely never interrupts
-// whatever's mid-process — see applyReplacementMutation below. A precomputed
+// Plant) are an in-place tier-swap (same net cost as any replace) that
+// genuinely never interrupts whatever's mid-process — see
+// applyReplacementMutation below. A precomputed
 // FAMILY_BY_TYPE lookup (built once off Config.js's own BUILDING_FAMILIES,
 // the same grouping the shop palette itself uses) is the single source of
 // truth for "family," so this can never disagree with what the shop already
@@ -1352,23 +1351,23 @@ export function describeReplacement(state, col, row, buildingId, shiftHeld, igno
     return { ok: affordable, reason: affordable ? null : 'cannot afford', replacing: false, replacedType: null, sameFamily: false, refund: 0, newCost: cost, netCost: cost };
   }
   if (!shiftHeld) return { ok: false, reason: 'occupied', replacing: false, netCost: 0 };
-  if (sameBuildingFamily(existingType, buildingId)) {
-    // Always exactly free, regardless of the two tiers' own price gap —
-    // deliberately NOT run through the real cost formula (which would let
-    // downgrading-then-upgrading-in-place quietly farm a small profit off
-    // the compounding cost curve). A genuine tier swap, not a sale.
-    return { ok: true, reason: null, replacing: true, replacedType: existingType, sameFamily: true, refund: 0, newCost: 0, netCost: 0 };
-  }
   // getBuildingCostExcluding, not getBuildingCost — refund off what THIS
   // tile actually cost when placed (its own count excluding itself), not
   // the current live shop price for a fresh one (which is one compounding
   // step higher and used to let a replace round trip mint free money — see
-  // removeTile's own comment for the full bug writeup).
+  // removeTile's own comment for the full bug writeup). Same-family tier
+  // swaps (Fan -> Turbo Fan, Collector -> Advanced Collector...) used to be
+  // always free; per direct report ("you can shift+click and replace for
+  // free") they now pay this same net (new price minus the old one's refund,
+  // negative for a downgrade) as any replace — the excluding-this-tile counts
+  // make a swap and its reverse cancel exactly, so there's nothing to farm.
+  // sameFamily still decides below whether the old building's in-progress
+  // state (recipe/ammo/angle/chest contents) is kept.
   const refund = Math.floor(getBuildingCostExcluding(state, existingType, col, row) * TILE_REFUND_FRACTION);
   const newCost = getBuildingCostExcluding(state, buildingId, col, row);
   const netCost = newCost - refund;
   const affordable = ignoreCost || netCost <= state.level.money;
-  return { ok: affordable, reason: affordable ? null : 'cannot afford', replacing: true, replacedType: existingType, sameFamily: false, refund, newCost, netCost };
+  return { ok: affordable, reason: affordable ? null : 'cannot afford', replacing: true, replacedType: existingType, sameFamily: sameBuildingFamily(existingType, buildingId), refund, newCost, netCost };
 }
 
 // The actual grid/buildingData/money mutation for one cell, given an already
@@ -1494,6 +1493,12 @@ export function applyPipetteData(state, col, row, buildingId) {
   if (state.ui.pipetteFilterItems && data.filterItems) {
     data.filterItems = [...state.ui.pipetteFilterItems];
   }
+  // Per direct request: the pipette (Q or middle-click) also carries a Storage
+  // Chest's Pour/Trickle mode (a Fan's angle is deliberately NOT copied).
+  if (state.ui.pipetteFanRangePct != null && FAN_TILES.has(data.type)) data.rangePct = state.ui.pipetteFanRangePct;
+  if (state.ui.pipetteChestPourMode != null && STORAGE_CHEST_TILES.has(data.type)) {
+    setChestPourMode(state, buildingKey(col, row), state.ui.pipetteChestPourMode);
+  }
 }
 
 // ---- Blueprint tool ("Stamp") — per direct request: click-and-drag a box
@@ -1533,6 +1538,8 @@ export function captureBlueprint(state, colA, rowA, colB, rowB) {
         // so placeBlueprint/placeBlueprintWithReplace below can tell "no
         // filter to copy" apart from "copy this empty/cleared filter."
         filterItems: (data && data.filterItems) ? [...data.filterItems] : null,
+        rangePct: (data && FAN_TILES.has(type)) ? (data.rangePct ?? 100) : null, // a fan's range slider rides along too
+        pourMode: (data && STORAGE_CHEST_TILES.has(type)) ? data.pourMode !== false : null, // a chest's Pour/Trickle toggle rides along too, per direct request
       });
     }
   }
@@ -1613,6 +1620,8 @@ export function placeBlueprint(state, baseCol, baseRow, cells) {
         const data = state.level.buildingData[buildingKey(col, row)];
         if (data && data.filterItems) data.filterItems = [...cell.filterItems];
       }
+      if (cell.pourMode != null) setChestPourMode(state, buildingKey(col, row), cell.pourMode);
+      if (cell.rangePct != null) { const rd = state.level.buildingData[buildingKey(col, row)]; if (rd) rd.rangePct = cell.rangePct; }
       placedCells.push({ col, row, buildingId: cell.buildingId });
     }
   }
@@ -1684,29 +1693,26 @@ export function computeBlueprintCostWithReplace(state, baseCol, baseRow, cells, 
     const existingType = state.level.grid[row][col];
     const occupied = existingType !== TILE_EMPTY;
     if (occupied && !shiftHeld) continue; // same silent-skip precedent computeBlueprintCost already has
-    let freeSwap = false;
     if (occupied) {
       anyReplace = true;
-      freeSwap = sameBuildingFamily(existingType, cell.buildingId);
-      if (!freeSwap) {
-        const existingBuilding = BUILDING_TYPES[existingType];
-        if (existingBuilding) {
-          const removedSoFar = removedCounts[existingType] || 0;
-          const placedSoFar = extraCounts[existingType] || 0;
-          // -1: refund off what THIS tile actually cost when placed (its own
-          // count excluding itself), not the live count including it — same
-          // fix as describeReplacement/removeTile's own (see removeTile's
-          // comment for the full bug writeup: using the inclusive count
-          // systematically overpaid every refund by one compounding step).
-          const nExisting = Math.max(0, countPlacedOfType(state.level.grid, existingType) - removedSoFar + placedSoFar - 1);
-          totalRefund += Math.floor(Math.ceil(existingBuilding.cost * Math.pow(buildingCostGrowthRate(existingBuilding.cost), nExisting)) * TILE_REFUND_FRACTION);
-        }
+      const existingBuilding = BUILDING_TYPES[existingType];
+      if (existingBuilding) {
+        const removedSoFar = removedCounts[existingType] || 0;
+        const placedSoFar = extraCounts[existingType] || 0;
+        // -1: refund off what THIS tile actually cost when placed (its own
+        // count excluding itself), not the live count including it — same
+        // fix as describeReplacement/removeTile's own (see removeTile's
+        // comment for the full bug writeup: using the inclusive count
+        // systematically overpaid every refund by one compounding step).
+        // Same-family cells pay this net too now (they used to be free
+        // swaps — see describeReplacement's comment).
+        const nExisting = Math.max(0, countPlacedOfType(state.level.grid, existingType) - removedSoFar + placedSoFar - 1);
+        const existingCost = PLATFORM_FLAT_COST_TILES.has(existingType)
+          ? PLATFORM_FLAT_COST
+          : Math.ceil(existingBuilding.cost * Math.pow(buildingCostGrowthRate(existingBuilding.cost), nExisting));
+        totalRefund += Math.floor(existingCost * TILE_REFUND_FRACTION);
       }
       removedCounts[existingType] = (removedCounts[existingType] || 0) + 1;
-      if (freeSwap) {
-        extraCounts[cell.buildingId] = (extraCounts[cell.buildingId] || 0) + 1;
-        continue;
-      }
     }
     if (PLATFORM_FLAT_COST_TILES.has(cell.buildingId)) {
       totalCost += PLATFORM_FLAT_COST;
@@ -1751,6 +1757,8 @@ export function placeBlueprintWithReplace(state, baseCol, baseRow, cells, shiftH
       const data = state.level.buildingData[buildingKey(col, row)];
       if (data) applyRecipeToBuilding(data, cell.recipeId);
     }
+    if (cell.pourMode != null) setChestPourMode(state, buildingKey(col, row), cell.pourMode);
+    if (cell.rangePct != null) { const rd = state.level.buildingData[buildingKey(col, row)]; if (rd) rd.rangePct = cell.rangePct; }
     if (cell.filterItems) {
       const data = state.level.buildingData[buildingKey(col, row)];
       if (data && data.filterItems) data.filterItems = [...cell.filterItems];
@@ -1873,6 +1881,10 @@ export function cyclePlatformAt(state, worldX, worldY) {
 // (beginItemPhysicsStep) into a small list holding a reference to each fan's
 // own live buildingData entry, so aim/filter edits still apply immediately and
 // the math below is unchanged.
+// A fan's range slider (1-100%): scales how far its cone reaches AND where the force falls to zero.
+function fanRangeScale(data) {
+  return Math.max(0.01, Math.min(1, (data.rangePct ?? 100) / 100));
+}
 let fanCache = { state: null, step: -1, fans: [] };
 function refreshFanCache(state) {
   const fans = [];
@@ -1881,7 +1893,7 @@ function refreshFanCache(state) {
     const stats = FAN_STATS[data.type];
     if (!stats) continue; // not a fan (e.g. the Auto-Feeder's own buildingData entry)
     const [row, col] = key.split(',').map(Number);
-    fans.push({ data, stats, fanX: col * TILE_SIZE + TILE_SIZE / 2, fanY: row * TILE_SIZE + TILE_SIZE / 2 });
+    fans.push({ data, stats, range: stats.maxRange * fanRangeScale(data), fanX: col * TILE_SIZE + TILE_SIZE / 2, fanY: row * TILE_SIZE + TILE_SIZE / 2 });
   }
   fanCache = { state, step: sleepStepCounter, fans };
 }
@@ -1891,7 +1903,7 @@ export function computeFanForce(state, item) {
   const efficiency = state.level.powerEfficiency;
   if (fanCache.state !== state || fanCache.step !== sleepStepCounter) refreshFanCache(state);
   for (const fan of fanCache.fans) {
-    const { data, stats } = fan;
+    const { data, stats, range } = fan;
     // Per direct request ("make fans work as filters the same as
     // platforms") — a Fan whitelists which item types it IGNORES, same
     // filterItems shape/semantics as a Platform's own (see
@@ -1902,7 +1914,7 @@ export function computeFanForce(state, item) {
     const dx = item.x - fan.fanX;
     const dy = item.y - fan.fanY;
     const dist = Math.hypot(dx, dy);
-    if (dist > stats.maxRange) continue;
+    if (dist > range) continue;
     const angleToItem = Math.atan2(dy, dx);
     let angleDiff = angleToItem - data.angle;
     angleDiff = Math.atan2(Math.sin(angleDiff), Math.cos(angleDiff)); // normalize to [-PI, PI]
@@ -1911,7 +1923,7 @@ export function computeFanForce(state, item) {
     // a power-costing tier (Electric/Turbo) gets throttled by the live grid
     // efficiency, same "only power-costing buildings are affected at all"
     // rule every other building below follows.
-    const magnitude = stats.maxForce * (1 - dist / stats.maxRange) * (stats.powerCost > 0 ? efficiency : 1);
+    const magnitude = stats.maxForce * (1 - dist / range) * (stats.powerCost > 0 ? efficiency : 1);
     fx += Math.cos(data.angle) * magnitude;
     fy += Math.sin(data.angle) * magnitude;
   }
@@ -3990,7 +4002,9 @@ function renderFanIndicators(ctx, state, canvasWidth, canvasHeight) {
   // fan's cone hidden — the whole point of opening the modal is to see what
   // that specific fan is doing. state.ui.buildingInfoTileKey is UI.js's own
   // open-modal tile mirrored onto state (see openBuildingInfoMenu).
-  const highlightedKey = state.ui.buildingInfoTileKey;
+  // (A Fan's own click opens the Fan Filter pop-up rather than the building-info
+  // one, so that pop-up's tile counts too — see UI.js's updateHUD mirroring it.)
+  const highlightedKey = state.ui.filterModalTileKey || state.ui.buildingInfoTileKey;
   for (const key in state.level.buildingData) {
     const data = state.level.buildingData[key];
     if (!FAN_TILES.has(data.type)) continue;
@@ -4001,13 +4015,13 @@ function renderFanIndicators(ctx, state, canvasWidth, canvasHeight) {
     const centerX = col * TILE_SIZE + TILE_SIZE / 2;
     const centerY = row * TILE_SIZE + TILE_SIZE / 2;
     const screen = worldToScreen(centerX, centerY, camera);
-    const range = FAN_STATS[data.type].maxRange * camera.zoom;
+    const range = FAN_STATS[data.type].maxRange * camera.zoom; // full range — a conservative bound for the culling check below
     if (
       screen.x + range < 0 || screen.x - range > canvasWidth ||
       screen.y + range < 0 || screen.y - range > canvasHeight
     ) continue;
     const size = TILE_SIZE * camera.zoom;
-    renderDirectionIndicator(ctx, data.type, screen.x - size / 2, screen.y - size / 2, size, data.angle, camera.zoom, true, isHighlighted);
+    renderDirectionIndicator(ctx, data.type, screen.x - size / 2, screen.y - size / 2, size, data.angle, camera.zoom, true, isHighlighted, fanRangeScale(data));
   }
 }
 
@@ -5352,19 +5366,19 @@ function renderPowerShortageOverlay(ctx, x, y, size, zoom, efficiency, elapsedMs
 // location" per direct report. Once click 1 arms a cell (main.js's
 // isFanAimingActive() branch), the cone reappears and rotates live with the
 // cursor for the real aiming step.
-function renderDirectionIndicator(ctx, type, x, y, size, angle, zoom, showCone = true, highlight = false) {
+function renderDirectionIndicator(ctx, type, x, y, size, angle, zoom, showCone = true, highlight = false, rangeScale = 1) {
   if (!FAN_TILES.has(type) || !showCone) return;
   const cx = x + size / 2;
   const cy = y + size / 2;
   const stats = FAN_STATS[type];
-  const range = stats.maxRange * zoom;
+  const range = stats.maxRange * rangeScale * zoom;
   ctx.save();
-  // Per direct request, a Fan's cone reads as highlighted while its own
-  // building-info modal is open (see renderFanIndicators' highlightedKey) —
-  // a brighter gold fill/outline instead of the plain dim white every other
-  // fan's always-on cone uses, so it's unmistakable which fan the open modal
-  // belongs to even with several other cones on screen.
-  ctx.globalAlpha = highlight ? 0.3 : 0.12;
+  // Per direct request, a Fan's cone reads as (slightly) highlighted while its own
+  // modal is open (see renderFanIndicators' highlightedKey) — a touch brighter
+  // gold fill and a soft outline instead of the plain dim white every other
+  // fan's always-on cone uses, so it's still clear which fan the open modal
+  // belongs to. The plain cone is 10% less opaque than it was (0.12 -> 0.108).
+  ctx.globalAlpha = highlight ? 0.2 : 0.108;
   ctx.fillStyle = highlight ? '#ffd45e' : '#ffffff';
   ctx.beginPath();
   ctx.moveTo(cx, cy);
@@ -5372,9 +5386,9 @@ function renderDirectionIndicator(ctx, type, x, y, size, angle, zoom, showCone =
   ctx.closePath();
   ctx.fill();
   if (highlight) {
-    ctx.globalAlpha = 0.85;
+    ctx.globalAlpha = 0.5;
     ctx.strokeStyle = '#ffd45e';
-    ctx.lineWidth = Math.max(1.5, 2.5 * zoom);
+    ctx.lineWidth = Math.max(1.5, 2 * zoom);
     ctx.stroke();
   }
   ctx.restore();
@@ -5427,7 +5441,7 @@ export function renderBuildGhost(ctx, state, worldX, worldY, buildingId, angle, 
   }
   ctx.globalAlpha = 1;
   if (check.ok && FAN_TILES.has(buildingId)) {
-    renderDirectionIndicator(ctx, buildingId, screen.x, screen.y, size, angle, state.camera.zoom, showCone);
+    renderDirectionIndicator(ctx, buildingId, screen.x, screen.y, size, angle, state.camera.zoom, showCone, false, (state.ui.pipetteFanRangePct ?? 100) / 100); // a pipetted fan's range shows on the placement ghost too
   }
 }
 
@@ -5451,7 +5465,8 @@ export function renderFanAimGhost(ctx, state, worldX, worldY, buildingId, angle)
   ctx.fillStyle = '#8fe0b8';
   ctx.fillRect(screen.x, screen.y, size, size);
   ctx.globalAlpha = 1;
-  renderDirectionIndicator(ctx, buildingId, screen.x, screen.y, size, angle, state.camera.zoom, true);
+  const aimedData = state.level.buildingData[buildingKey(col, row)];
+  renderDirectionIndicator(ctx, buildingId, screen.x, screen.y, size, angle, state.camera.zoom, true, false, aimedData ? fanRangeScale(aimedData) : 1);
 }
 
 // The right-click-to-move mechanic's own ghost — per direct request, "a

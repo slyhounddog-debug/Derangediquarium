@@ -77,6 +77,7 @@ import {
   ECONOMY_SPECIES_IDS,
   DYNAMIC_PRICED_SPECIES_IDS,
   ECONOMY_FISH_COST_GROWTH_RATE,
+  FISH_SCALING_COST_GROWTH_RATE,
   FISH_SCALING_LAB_ID,
   FISH_STAR_TIER_MAX,
   FISH_STAR_TIER_VALUE_MULTIPLIER,
@@ -383,6 +384,22 @@ export function computeTheoreticalWastePerMinute(state) {
     if (def.behavior.includes('SCAVENGER')) continue;
     const interval = WASTE_POOP_INTERVAL_MS * (def.wastePoopIntervalMultiplier || 1);
     total += 60000 / interval;
+  }
+  return total;
+}
+
+// How much Waste the tank's FISH (not buildings — Refineries/Turrets aren't
+// counted) can eat per minute: every living Scavenger's eat-cooldown rate, the
+// same per-fish figure computeFishInfoModalStats reports as wasteEatenPerMin.
+// Theoretical like its siblings — assumes Waste is always within reach.
+export function computeTheoreticalWasteEatenPerMinute(state) {
+  let total = 0;
+  for (const fish of state.level.entities) {
+    if (fish.type !== 'fish' || fish.dying) continue;
+    const def = SPECIES[fish.speciesId];
+    if (!def.behavior.includes('SCAVENGER')) continue;
+    const stageDef = def.growthStages[fish.stage];
+    total += 60000 / (stageDef.eatCooldownMs ?? stageDef.dropInterval);
   }
   return total;
 }
@@ -1252,6 +1269,10 @@ export function createFish(speciesId, x, y, state, { grown = false, starTier = 1
     // state.level.elapsed is always defined by the time any fish is ever
     // created (level load seeds it to 0 first).
     shimmerStartedAt: state.level.elapsed,
+    seeking: false, // true while a hungry fish is swimming toward a Food/Waste target (recomputed every tick in updateFish); seekX/seekY are that target's position — the render reads these for the eyes instead of scanning items itself
+    seekX: 0,
+    seekY: 0,
+    starAnimStartedAt: null, // set by combineFish only — drives the merge's drop-in/spin/join animation for the new orbiting star (FishRenderer.js's drawOrbitStars); null otherwise
   };
 }
 
@@ -1589,9 +1610,7 @@ export function countLivingFishOfSpecies(state, speciesId) {
 // effect on every already-placed species' price immediately, no re-roll
 // needed.
 export function effectiveFishCostGrowthRate(state) {
-  const scaling = ECONOMY_FISH_COST_GROWTH_RATE - 1;
-  const hasFishScaling = state.meta.labUpgradesPurchased.includes(FISH_SCALING_LAB_ID);
-  return 1 + (hasFishScaling ? scaling / 2 : scaling);
+  return state.meta.labUpgradesPurchased.includes(FISH_SCALING_LAB_ID) ? FISH_SCALING_COST_GROWTH_RATE : ECONOMY_FISH_COST_GROWTH_RATE;
 }
 
 export function getFishPurchaseCost(state, speciesId) {
@@ -1704,6 +1723,7 @@ export function combineFish(state, a, b) {
   if (idxB !== -1) state.level.entities.splice(idxB, 1);
 
   const fish = createFish(speciesId, x, y, state, { grown: true, starTier: newTier });
+  fish.starAnimStartedAt = state.level.elapsed; // per direct request, the star this merge adds drops in and joins the orbit
   state.level.entities.push(fish);
   pushFishMergeEffects(state, fish);
   state.level.floatingTexts.push(
@@ -3061,11 +3081,15 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
   // by stage, so starvation timing is unaffected either way.
   if (fish.eatCooldownRemainingMs > 0) fish.eatCooldownRemainingMs = Math.max(0, fish.eatCooldownRemainingMs - dtMs);
 
+  fish.seeking = false; // set true below only while actually swimming toward a target — main.js's render points the eyes at it (otherwise at the cursor)
   if (fish.hunger >= HUNGER_SEEK_THRESHOLD) {
     const target = isScavenger
       ? findNearestWaste(state.level.items, fish.x, fish.y)
       : findNearestFoodOrMutagen(state.level.items, fish.x, fish.y);
     if (target) {
+      fish.seeking = true;
+      fish.seekX = target.x;
+      fish.seekY = target.y;
       const dx = target.x - fish.x;
       const dy = target.y - fish.y;
       const dist = Math.hypot(dx, dy) || 1;

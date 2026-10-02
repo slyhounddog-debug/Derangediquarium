@@ -207,7 +207,7 @@
      live off the Shop button" treatment as the two legends above (see their
      own comment for why), mutually exclusive with both: shown while
      hovering a placed building on the cursor/Food tool with nothing else
-     going on ("Middle-click to Adjust"/"Middle-click to Move", plus "(R) to
+     going on ("Right-click and drag to Adjust"/"...to Move", plus "(R) to
      Rotate" for a Platform and/or "(D) to Delete" for anything — lines 2/3
      hidden otherwise), or while a move (or a moved Fan's own angle step) is
      actually in progress ("Left-click to accept" / "Right-click to
@@ -370,6 +370,10 @@
     <div id="platform-filter-menu">
       <div id="platform-filter-title">Item Filter</div>
       <button id="platform-filter-clear-btn" title="Back to a plain, always-solid Platform — everything blocked">Clear All</button>
+      <div id="platform-filter-range-wrap" class="hidden">
+        <div id="platform-filter-range-label">Range: 100%</div>
+        <input id="platform-filter-range" type="range" min="1" max="100" step="1" value="100" title="How far this fan reaches, as a percentage of its full range">
+      </div>
       <div id="platform-filter-items"></div>
       <div id="platform-filter-hint">Everything is blocked by default — click an item to let it pass through.</div>
       <div id="platform-filter-fan-note" class="hidden">Press G to toggle fan visuals</div>
@@ -385,8 +389,11 @@
         <span id="storage-chest-icon"></span>
         <span id="storage-chest-count">Empty</span>
       </div>
-      <button id="storage-chest-stop-btn" title="Toggle the auto-trickle on/off without losing its aimed direction">Pause Trickle</button>
-      <div id="storage-chest-hint">Drag away from the chest to aim, then let go to start trickling it back out. Right click and drag to clear the chest.</div>
+      <div id="storage-chest-mode-row">
+        <button id="storage-chest-stop-btn" role="switch" aria-checked="false" title="What releasing a drag away from the chest does: Pour everything out (left), or start a slow Trickle (right)"><span class="chest-switch-knob"></span></button>
+        <span id="storage-chest-mode-label"><span id="chest-mode-pour">Pour</span><span class="chest-mode-sep">/</span><span id="chest-mode-trickle">Trickle</span></span>
+      </div>
+      <div id="storage-chest-hint">Drag away from the chest to aim, then let go to pour it out or start a trickle (see Mode).</div>
     </div>
   </div>
 </div>

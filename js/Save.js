@@ -120,6 +120,7 @@ export function loadSaveGame() {
     if (!parsed || typeof parsed !== 'object' || !parsed.meta || !parsed.level) return null;
     migrateTurretAmmoFields(parsed.level);
     migrateChestCoinFields(parsed.level);
+    migrateChestPourMode(parsed.level);
     migrateGridSize(parsed.level);
     // The Solar Refinery moved from the Mound's $500 crack to its $75 purchase — a save that already made the $75 purchase (but not the $500 one) never received it.
     if (parsed.level.moundTeased && Array.isArray(parsed.meta.buildingsUnlocked) && !parsed.meta.buildingsUnlocked.includes(TILE_REFINERY)) {
@@ -285,6 +286,17 @@ function migrateChestCoinFields(level) {
       }
       delete data.coinValueSum;
     }
+  }
+}
+
+// Chests now have a Pour/Trickle toggle (pourMode, default Pour). A chest saved
+// while trickling keeps trickling: it migrates to Trickle mode. Everything else
+// has no field and reads as Pour (`pourMode !== false`).
+function migrateChestPourMode(level) {
+  if (!level || !level.buildingData) return;
+  for (const key in level.buildingData) {
+    const data = level.buildingData[key];
+    if (data && data.pourMode === undefined && data.trickleActive === true) data.pourMode = false;
   }
 }
 
