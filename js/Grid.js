@@ -4694,7 +4694,11 @@ function drawWastePoopIcon(ctx, cx, cy, r, color = WASTE_COLOR) {
   ctx.lineCap = 'round';
   ctx.beginPath();
   ctx.arc(cx, cy - r * 0.05, r * 0.48, Math.PI * 0.12, Math.PI * 0.82);
-  ctx.stroke(); // no glint on Waste/Bio-Sludge, per direct request
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.32)'; // muted Food-style glint, same as main.js's drawWastePoop
+  ctx.beginPath();
+  ctx.arc(cx - r * 0.28, cy - r * 0.28, r * 0.28, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 // A recipe identifier marking a Manufacturer/Power Plant's chosen recipe —

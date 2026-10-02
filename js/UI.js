@@ -3181,7 +3181,11 @@ function drawItemIconCanvas(canvas, itemType) {
     ctx.beginPath();
     ctx.arc(cx, cy - r * 0.05, r * 0.48, Math.PI * 0.12, Math.PI * 0.82);
     ctx.stroke();
-    return; // no glint on Waste/Bio-Sludge, per direct request
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.32)'; // muted Food-style glint, same as main.js's drawWastePoop
+    ctx.beginPath();
+    ctx.arc(cx - r * 0.28, cy - r * 0.28, r * 0.28, 0, Math.PI * 2);
+    ctx.fill();
+    return;
   }
   if (itemType === 'coin') {
     // Matches main.js's own drawFlatCoin, per direct request ("update the

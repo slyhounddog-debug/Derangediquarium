@@ -884,10 +884,10 @@ const WASTE_VISUAL_Y_OFFSET_FRACTION = 0.1;
 // applied to ITS radius (ALIEN_DNA_RADIUS), not Waste's. Purely visual: the
 // real collision radius is untouched, same as for Waste.
 // Rolling, per direct request ("make most of the objects roll"): the sprite
-// this draws is ROTATED at blit time, so it carries no glint at all any more
-// (a fixed-light glint would have to be a second unrotated sprite, and per
-// direct request Waste/Bio-Sludge no longer have one — the wrinkle lines below
-// are their only surface detail). The old WASTE_VISUAL_Y_OFFSET_FRACTION nudge
+// this draws is ROTATED at blit time. Its glint is pre-baked into the sprite
+// like Food's generic one below (just a bit more muted — 0.32 alpha vs Food's
+// 0.45), so it simply rolls with the blob rather than being a second unrotated
+// overlay, per direct request. The old WASTE_VISUAL_Y_OFFSET_FRACTION nudge
 // isn't baked in here either: the blob has to rotate about its OWN center, so
 // the render loop applies that same offset to the sprite's pivot (sprite.dy).
 function drawWastePoop(ctx, cx, cy, r, color = WASTE_COLOR) {
@@ -909,6 +909,10 @@ function drawWastePoop(ctx, cx, cy, r, color = WASTE_COLOR) {
   ctx.beginPath();
   ctx.arc(cx, cy + r * 0.32, r * 0.38, Math.PI * 1.12, Math.PI * 1.75);
   ctx.stroke();
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.32)';
+  ctx.beginPath();
+  ctx.arc(cx - r * 0.32, cy - r * 0.32, r * 0.32, 0, Math.PI * 2);
+  ctx.fill();
 }
 
 // Per direct request (populated-tank performance) — every Food/Coin/Waste/
@@ -1170,9 +1174,9 @@ function getItemSprite(item, foodStaleStep) {
   if (item.type === 'food' && foodStaleStep > 0) itemColor = lerpRgbToString(hexToRgb(FOOD_COLOR), hexToRgb(FOOD_STALE_COLOR), foodStaleStep / FOOD_STALE_STEPS);
   // Rolling (see the item render loop): flasks bake their glint into a
   // SECOND, unrotated sprite so the light stays fixed while the body turns;
-  // waste/sludge (no glint, per direct request) carry the old "sit a bit
-  // lower" nudge as sprite.dy (applied to the pivot, so the blob turns about
-  // its own center).
+  // waste/sludge have theirs baked in (it rolls with them, per direct
+  // request) and carry the old "sit a bit lower" nudge as sprite.dy (applied
+  // to the pivot, so the blob turns about its own center).
   const splitHighlight = item.type === 'science' || item.type === 'science_green';
   drawItemShape(sctx, item, half, half, itemColor, splitHighlight ? 'body' : 'all');
   let hl = null;
