@@ -1885,6 +1885,16 @@ function mergePairOutcome(state, fish, other, combineSource, spliceSource, splic
 }
 
 export function describeFishMergeOptions(state, fish) {
+  // Per direct request the Alien-Egg friendly alien counts as a fish here: its
+  // only merge is the Bio Fish splice with a grown Octopus.
+  if (fish.type === 'friendly_alien') {
+    if (!state.meta.speciesUnlocked.includes('xeno_octopus')) return null;
+    const entries = [];
+    if (state.level.entities.some((e) => e.type === 'fish' && !e.dying && canSpliceOctopusWithAlien(state, e, fish))) {
+      entries.push({ text: `Splice with ${SPECIES.octopus.name} → ${SPECIES.xeno_octopus.name}`, otherSpeciesId: 'octopus', resultSpeciesId: 'xeno_octopus' });
+    }
+    return entries.length > 0 ? entries : [{ text: 'No available fish to merge.', otherSpeciesId: null, resultSpeciesId: null }];
+  }
   const combineSource = isCombinableFish(state, fish);
   const spliceSource = isSpliceSource(state, fish);
   const spliceTarget = isSpliceTargetCandidate(state, fish);
@@ -1892,6 +1902,14 @@ export function describeFishMergeOptions(state, fish) {
   const entries = [];
   const seen = new Set();
   for (const other of state.level.entities) {
+    if (other.type === 'friendly_alien') {
+      // An Octopus can also splice with an egg-hatched friendly alien (Bio Fish) — listed with a text label, since there's no fish icon for the alien.
+      if (canSpliceOctopusWithAlien(state, fish, other) && !seen.has('alien')) {
+        seen.add('alien');
+        entries.push({ text: `Splice with Friendly Alien → ${SPECIES.xeno_octopus.name}`, otherSpeciesId: null, otherLabel: 'Alien', resultSpeciesId: 'xeno_octopus' });
+      }
+      continue;
+    }
     if (other.type !== 'fish' || other.id === fish.id || other.dying) continue;
     const outcome = mergePairOutcome(state, fish, other, combineSource, spliceSource, spliceTarget);
     if (outcome && !seen.has(outcome.text)) { seen.add(outcome.text); entries.push({ text: outcome.text, otherSpeciesId: other.speciesId, resultSpeciesId: outcome.resultSpeciesId }); }
@@ -1899,21 +1917,77 @@ export function describeFishMergeOptions(state, fish) {
   return entries.length > 0 ? entries : [{ text: 'No available fish to merge.', otherSpeciesId: null, resultSpeciesId: null }];
 }
 
-// Every living fish `fish` could currently merge or splice with — the same
-// pairing rules as describeFishMergeOptions, but the fish themselves (not
-// deduped text), so main.js's Merge-tool hover highlight can draw a glow on
-// each and a line out to it.
+// Every living fish (or egg-hatched friendly alien, which counts as a fish for
+// this — per direct request) `fish` could currently merge or splice with — the
+// same pairing rules as describeFishMergeOptions, but the entities themselves
+// (not deduped text), as { entity, resultSpeciesId }, so main.js's merge hover
+// highlight can draw a glow on each, a line out to it, and the result fish's
+// icon in a bubble at the line's midpoint.
 export function findFishMergePartners(state, fish) {
+  const partners = [];
+  if (fish.type === 'friendly_alien') {
+    for (const other of state.level.entities) {
+      if (other.type === 'fish' && !other.dying && canSpliceOctopusWithAlien(state, other, fish)) partners.push({ entity: other, resultSpeciesId: 'xeno_octopus' });
+    }
+    return partners;
+  }
   const combineSource = isCombinableFish(state, fish);
   const spliceSource = isSpliceSource(state, fish);
   const spliceTarget = isSpliceTargetCandidate(state, fish);
-  const partners = [];
-  if (!combineSource && !spliceSource && !spliceTarget) return partners;
   for (const other of state.level.entities) {
+    if (other.type === 'friendly_alien') {
+      if (canSpliceOctopusWithAlien(state, fish, other)) partners.push({ entity: other, resultSpeciesId: 'xeno_octopus' });
+      continue;
+    }
+    if (!combineSource && !spliceSource && !spliceTarget) continue;
     if (other.type !== 'fish' || other.id === fish.id || other.dying) continue;
-    if (mergePairOutcome(state, fish, other, combineSource, spliceSource, spliceTarget)) partners.push(other);
+    const outcome = mergePairOutcome(state, fish, other, combineSource, spliceSource, spliceTarget);
+    if (outcome) partners.push({ entity: other, resultSpeciesId: outcome.resultSpeciesId });
   }
   return partners;
+}
+
+// The fish — or, per direct request, egg-hatched friendly alien — under a world
+// point (fish win by being checked first), for the right-click-drag move/merge
+// gesture and its hover feedback. excludeId skips the dragged one.
+export function findMergeSubjectAt(state, worldX, worldY, excludeId = null) {
+  const fish = findFishAt(state, worldX, worldY, excludeId);
+  if (fish) return fish;
+  let best = null;
+  let bestDist = Infinity;
+  for (const entity of state.level.entities) {
+    if (entity.type !== 'friendly_alien' || entity.id === excludeId) continue;
+    const dx = entity.x - worldX;
+    const dy = entity.y - worldY;
+    const d2 = dx * dx + dy * dy;
+    const r = (entity.radius ?? ALIEN_RADIUS) * ALIEN_CLICK_RADIUS_MULTIPLIER;
+    if (d2 <= r * r && d2 < bestDist) { bestDist = d2; best = entity; }
+  }
+  return best;
+}
+
+// Whether dropping `a` onto `b` (either order) would merge, splice, or make a
+// Bio Fish — each a fish or a friendly alien.
+export function canMergeOrSplicePair(state, a, b) {
+  if (a.type === 'friendly_alien' || b.type === 'friendly_alien') {
+    const octopus = a.type === 'fish' ? a : b;
+    const alien = a.type === 'friendly_alien' ? a : b;
+    return octopus.type === 'fish' && alien.type === 'friendly_alien' && canSpliceOctopusWithAlien(state, octopus, alien);
+  }
+  return canCombineFish(state, a, b) || canSpliceFish(state, a, b) || canSpliceFish(state, b, a);
+}
+
+// Per direct request, the first time a fish becomes an adult and has something
+// to merge with, main.js's partner highlight plays on it automatically for a
+// few seconds as a one-off reminder that merging exists (state.level.mergeHint,
+// read by main.js's render). An adult with nothing to pair with yet doesn't use
+// it up — it waits for the first adult that does.
+function maybeStartMergeHint(state, fish) {
+  const flags = state.level.tutorialFlags;
+  if (flags.firstAdultMergeHintShown) return;
+  if (findFishMergePartners(state, fish).length === 0) return;
+  flags.firstAdultMergeHintShown = true;
+  state.level.mergeHint = { fishId: fish.id, startedAtMs: state.level.elapsed };
 }
 
 const FIRST_SPLICE_MESSAGE =
@@ -2721,6 +2795,7 @@ function awardTankPoint(state, fish) {
   // Point!") is gone entirely — the plain notification below is the only
   // explanation a first-ever Tank Point still gets.
   if (isFirst) pushStoryNotification(state, TANK_POINT_TUTORIAL_MESSAGE);
+  maybeStartMergeHint(state, fish);
 }
 
 // Starts the death animation instead of removing the fish outright, per

@@ -5029,7 +5029,7 @@ function refreshFishMergeLegendIcons(entries) {
   header.textContent = 'Right-click and drag: Move/Merge';
   els.fishMergeLegend.appendChild(header);
   for (const entry of entries) {
-    if (entry.otherSpeciesId == null) {
+    if (entry.otherSpeciesId == null && entry.resultSpeciesId == null) {
       // The "No available fish to merge." entry — no icons to show.
       const div = document.createElement('div');
       div.textContent = entry.text;
@@ -5038,7 +5038,14 @@ function refreshFishMergeLegendIcons(entries) {
     }
     const row = document.createElement('div');
     row.className = 'fish-merge-icon-row';
-    row.appendChild(buildFishMergeIconCanvas(entry.otherSpeciesId));
+    if (entry.otherSpeciesId != null) {
+      row.appendChild(buildFishMergeIconCanvas(entry.otherSpeciesId));
+    } else {
+      // A friendly alien partner (Bio Fish splice) has no fish icon — a text label stands in.
+      const label = document.createElement('span');
+      label.textContent = entry.otherLabel;
+      row.appendChild(label);
+    }
     const arrow = document.createElement('span');
     arrow.className = 'fish-merge-arrow';
     arrow.textContent = '→';

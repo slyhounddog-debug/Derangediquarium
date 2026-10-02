@@ -180,6 +180,8 @@ import {
   spliceFish,
   describeFishMergeOptions,
   findFishMergePartners,
+  findMergeSubjectAt,
+  canMergeOrSplicePair,
   canSpliceOctopusWithAlien,
   spliceOctopusWithAlien,
   createMotherAlienFish,
@@ -1526,6 +1528,8 @@ function hostileAliensActive(state) {
 // lines are a single batched path — so the per-frame cost is a handful of draw
 // calls, and exactly zero unless the plain cursor is hovering/dragging a fish.
 const MERGE_HOVER_REFRESH_MS = 300;
+const MERGE_HINT_MS = 3000; // the one-off first-adult reminder holds this long...
+const MERGE_HINT_FADE_MS = 750; // ...then fades off over this
 const MERGE_HOVER_PULSE_PERIOD_MS = 1200;
 let mergeHoverSubjectId = null;
 let mergeHoverPartners = [];
@@ -1548,7 +1552,29 @@ function bakeMergeHoverGlow() {
   c.fillRect(0, 0, size, size);
   return canvas;
 }
-function renderMergeToolPartnerHighlight(ctx, state, subject, nowMs) {
+// Per direct request, a bubble sits at the exact midpoint of each line, showing
+// the fish that pair would make at 66% of its real on-screen size. Icons are
+// baked once per species (adult stage, facing right) so the per-frame cost is
+// one drawImage each.
+const MERGE_BUBBLE_ICON_SCALE = 0.66;
+const MERGE_BUBBLE_ICON_BAKE = 2; // bake resolution multiplier
+const MERGE_BUBBLE_ICON_HALF = 100; // px each side of center the baked canvas covers — enough for the longest hybrid (Eel body, Octopus tentacles)
+const mergeBubbleIcons = {};
+function getMergeBubbleIcon(speciesId) {
+  let icon = mergeBubbleIcons[speciesId];
+  if (icon) return icon;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = MERGE_BUBBLE_ICON_HALF * 2 * MERGE_BUBBLE_ICON_BAKE;
+  const c = canvas.getContext('2d');
+  c.scale(MERGE_BUBBLE_ICON_BAKE, MERGE_BUBBLE_ICON_BAKE);
+  const def = SPECIES[speciesId];
+  drawFish(c, MERGE_BUBBLE_ICON_HALF, MERGE_BUBBLE_ICON_HALF, speciesId, def.growthStages.length - 1, 1, 0, { x: 1, y: 0 });
+  icon = mergeBubbleIcons[speciesId] = { canvas, radius: MERGE_BUBBLE_ICON_SCALE * FISH_BASE_SIZE * def.growthStages[def.growthStages.length - 1].scale * 1.35 + 4 };
+  return icon;
+}
+
+// fade (0-1) scales every alpha — the auto-played first-adult reminder fades off with it.
+function renderMergeToolPartnerHighlight(ctx, state, subject, nowMs, fade = 1) {
   if (subject.id !== mergeHoverSubjectId || nowMs >= mergeHoverRefreshAtMs) {
     mergeHoverSubjectId = subject.id;
     mergeHoverPartners = findFishMergePartners(state, subject);
@@ -1557,26 +1583,67 @@ function renderMergeToolPartnerHighlight(ctx, state, subject, nowMs) {
   if (mergeHoverPartners.length === 0) return;
   if (!mergeHoverGlowSprite) mergeHoverGlowSprite = bakeMergeHoverGlow();
   const pulse = 0.5 + 0.5 * Math.sin((nowMs / MERGE_HOVER_PULSE_PERIOD_MS) * Math.PI * 2);
+  const lineAlpha = (0.12 + 0.3 * pulse) * fade;
+  const glowAlpha = (0.35 + 0.55 * pulse) * fade;
   const subjectPos = worldToScreen(subject.x, subject.y, state.camera);
   ctx.save();
-  // Lines first (so the glows sit over their ends), one path for all of them.
-  ctx.globalAlpha = 0.12 + 0.3 * pulse;
+  // Lines first (one path for all of them), each broken around its bubble, then the glows, then the bubbles.
+  ctx.globalAlpha = lineAlpha;
   ctx.strokeStyle = '#ffe27a';
   ctx.lineWidth = Math.max(1, 1.5 * state.camera.zoom);
   ctx.beginPath();
-  for (const partner of mergeHoverPartners) {
-    if (partner.dying) continue;
-    const p = worldToScreen(partner.x, partner.y, state.camera);
+  for (const { entity, resultSpeciesId } of mergeHoverPartners) {
+    if (entity.dying) continue;
+    const p = worldToScreen(entity.x, entity.y, state.camera);
+    const dx = p.x - subjectPos.x;
+    const dy = p.y - subjectPos.y;
+    const len = Math.hypot(dx, dy);
+    const gap = getMergeBubbleIcon(resultSpeciesId).radius;
+    if (len <= gap * 2 + 6) continue; // the bubble covers the whole gap
+    const ux = dx / len;
+    const uy = dy / len;
+    const mx = subjectPos.x + dx / 2;
+    const my = subjectPos.y + dy / 2;
     ctx.moveTo(subjectPos.x, subjectPos.y);
+    ctx.lineTo(mx - ux * gap, my - uy * gap);
+    ctx.moveTo(mx + ux * gap, my + uy * gap);
     ctx.lineTo(p.x, p.y);
   }
   ctx.stroke();
-  ctx.globalAlpha = 0.35 + 0.55 * pulse;
-  for (const partner of mergeHoverPartners) {
-    if (partner.dying) continue;
-    const p = worldToScreen(partner.x, partner.y, state.camera);
-    const r = FISH_BASE_SIZE * SPECIES[partner.speciesId].growthStages[partner.stage].scale * state.camera.zoom * (1.5 + 0.2 * pulse);
+  ctx.globalAlpha = glowAlpha;
+  for (const { entity } of mergeHoverPartners) {
+    if (entity.dying) continue;
+    const p = worldToScreen(entity.x, entity.y, state.camera);
+    const baseR = entity.type === 'fish'
+      ? FISH_BASE_SIZE * SPECIES[entity.speciesId].growthStages[entity.stage].scale
+      : (entity.radius ?? ALIEN_RADIUS) * 1.1;
+    const r = baseR * state.camera.zoom * (1.5 + 0.2 * pulse);
     ctx.drawImage(mergeHoverGlowSprite, p.x - r, p.y - r, r * 2, r * 2);
+  }
+  // The bubbles: a big version of the fish/building bubbles in the line's color,
+  // dead center on each line, fading with it, holding the resulting fish.
+  for (const { entity, resultSpeciesId } of mergeHoverPartners) {
+    if (entity.dying) continue;
+    const p = worldToScreen(entity.x, entity.y, state.camera);
+    const mx = (subjectPos.x + p.x) / 2;
+    const my = (subjectPos.y + p.y) / 2;
+    const icon = getMergeBubbleIcon(resultSpeciesId);
+    const r = icon.radius;
+    ctx.globalAlpha = Math.min(1, lineAlpha * 2.2);
+    ctx.fillStyle = 'rgba(255, 226, 122, 0.16)';
+    ctx.beginPath();
+    ctx.arc(mx, my, r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = '#ffe27a';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.fillStyle = '#fff4c2'; // the small highlight, same as a fish bubble's
+    ctx.beginPath();
+    ctx.arc(mx - r * 0.45, my - r * 0.45, r * 0.14, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = glowAlpha;
+    const half = MERGE_BUBBLE_ICON_HALF * MERGE_BUBBLE_ICON_SCALE;
+    ctx.drawImage(icon.canvas, mx - half, my - half, half * 2, half * 2);
   }
   ctx.restore();
 }
@@ -1621,7 +1688,7 @@ input.rightMouseDownHandlers.push((sx, sy) => {
   // drag step (which teaches exactly this gesture).
   if (state.level.tutorialFlow && !isMergeDragTutorialStepActive(state)) return;
   const world = screenToWorld(sx, sy, state.camera);
-  const fish = findFishAt(state, world.x, world.y);
+  const fish = findMergeSubjectAt(state, world.x, world.y); // a fish, or an egg-hatched friendly alien (which counts as one for moving/merging)
   if (!fish) return;
   rightPressFishId = fish.id;
   rightPressStartSx = sx;
@@ -1638,39 +1705,34 @@ input.rightMouseDownHandlers.push((sx, sy) => {
 // dropped and resumes swimming.
 function resolveFishDrop(dragged, world) {
   if (hostileAliensActive(state)) return;
-  const target = findFishAt(state, world.x, world.y, dragged.id);
-  if (dragged && target) {
-    if (canCombineFish(state, dragged, target)) {
-      combineFish(state, dragged, target);
-      // The first-time merge guided tutorial's own final step — a no-op
-      // unless that exact flow/step is currently active (see UI.js's
-      // advanceTutorialFlow), so this is safe to call on every ordinary
-      // combine outside the tutorial too.
-      advanceTutorialFlow(state, 'mergefish', 'drag');
-    } else if (canSpliceFish(state, dragged, target)) {
-      spliceFish(state, dragged, target);
-    } else if (canSpliceFish(state, target, dragged)) {
-      // The reverse ordering — the player grabbed the TARGET half of the
-      // pair (an ordinary economy/hybrid fish) and dropped it onto the
-      // utility fish, instead of the other way around. spliceFish always
-      // wants (state, utilityFish, targetFish) regardless of which one was
-      // actually dragged, so `target` (here, the real utility fish) goes
-      // first.
-      spliceFish(state, target, dragged);
+  const target = findMergeSubjectAt(state, world.x, world.y, dragged.id);
+  if (!target) return;
+  if (dragged.type === 'friendly_alien' || target.type === 'friendly_alien') {
+    // Bio Fish: a grown Octopus + an egg-hatched friendly alien, dragged either way round.
+    const octopus = dragged.type === 'fish' ? dragged : target;
+    const alien = dragged.type === 'friendly_alien' ? dragged : target;
+    if (octopus.type === 'fish' && alien.type === 'friendly_alien' && canSpliceOctopusWithAlien(state, octopus, alien)) {
+      spliceOctopusWithAlien(state, octopus, alien);
     }
-  } else if (dragged) {
-    // Bio Fish's own one-off splice target is a friendly alien, not a fish —
-    // findFishAt (fish-only) never matches it, so this only runs as a
-    // fallback once no fish target was found, reusing the same hit-test
-    // radius the click-damage loop above already uses for aliens.
-    let alienTarget = null;
-    for (const entity of state.level.entities) {
-      if (entity.type !== 'friendly_alien') continue;
-      if (Math.hypot(entity.x - world.x, entity.y - world.y) <= (entity.radius ?? ALIEN_RADIUS) * ALIEN_CLICK_RADIUS_MULTIPLIER) { alienTarget = entity; break; }
-    }
-    if (alienTarget && canSpliceOctopusWithAlien(state, dragged, alienTarget)) {
-      spliceOctopusWithAlien(state, dragged, alienTarget);
-    }
+    return;
+  }
+  if (canCombineFish(state, dragged, target)) {
+    combineFish(state, dragged, target);
+    // The first-time merge guided tutorial's own final step — a no-op
+    // unless that exact flow/step is currently active (see UI.js's
+    // advanceTutorialFlow), so this is safe to call on every ordinary
+    // combine outside the tutorial too.
+    advanceTutorialFlow(state, 'mergefish', 'drag');
+  } else if (canSpliceFish(state, dragged, target)) {
+    spliceFish(state, dragged, target);
+  } else if (canSpliceFish(state, target, dragged)) {
+    // The reverse ordering — the player grabbed the TARGET half of the
+    // pair (an ordinary economy/hybrid fish) and dropped it onto the
+    // utility fish, instead of the other way around. spliceFish always
+    // wants (state, utilityFish, targetFish) regardless of which one was
+    // actually dragged, so `target` (here, the real utility fish) goes
+    // first.
+    spliceFish(state, target, dragged);
   }
 }
 
@@ -3858,7 +3920,7 @@ function updateKeyDDelete() {
 // starved the same tick), this just clears the drag rather than erroring.
 function updateFishDrag() {
   if (rightPressFishId == null || !rightPressDragCandidate) return;
-  const dragged = state.level.entities.find((e) => e.id === rightPressFishId && e.type === 'fish' && !e.dying);
+  const dragged = state.level.entities.find((e) => e.id === rightPressFishId && ((e.type === 'fish' && !e.dying) || e.type === 'friendly_alien'));
   if (!dragged) { draggedFishId = null; rightPressFishId = null; rightPressDragCandidate = false; return; }
   if (draggedFishId == null) {
     // A right-press only becomes a drag once the cursor has actually moved, so a plain right-click (a hybrid's ability toggle) never nudges the fish.
@@ -5470,15 +5532,13 @@ function render() {
   if (draggedFishId != null) {
     const dragged = state.level.entities.find((e) => e.id === draggedFishId);
     if (dragged) {
-      const hoverTarget = findFishAt(state, cursorWorld.x, cursorWorld.y, draggedFishId);
+      const hoverTarget = findMergeSubjectAt(state, cursorWorld.x, cursorWorld.y, draggedFishId);
       if (hoverTarget) {
         combineHoverTargetId = hoverTarget.id;
         // Tries both splice orderings — see the mouseup handler's own
         // identical fix above for why: whichever half of a splice pair got
         // grabbed first, dropping it on the other half should show as valid.
-        combineHoverValid = canCombineFish(state, dragged, hoverTarget)
-          || canSpliceFish(state, dragged, hoverTarget)
-          || canSpliceFish(state, hoverTarget, dragged);
+        combineHoverValid = canMergeOrSplicePair(state, dragged, hoverTarget);
       }
     }
   }
@@ -5604,19 +5664,41 @@ function render() {
     if (pos.x < -40 || pos.x > canvas.width + 40 || pos.y < -40 || pos.y > canvas.height + 40) continue;
     const facing = alien.vx >= 0 ? 1 : -1;
     drawAlienBody(ctx, pos.x, pos.y, alien.radius * state.camera.zoom, facing, FRIENDLY_ALIEN_COLOR, facing > 0 ? 0 : Math.PI, 0, alien.bodyWidthMul, alien.bodyHeightMul, false, null, alien.id, true);
+    // Same drag/drop rings a fish gets, since a friendly alien counts as one for moving/merging.
+    if (alien.id === draggedFishId || alien.id === combineHoverTargetId) {
+      ctx.strokeStyle = alien.id === draggedFishId ? 'rgba(255, 255, 255, 0.9)' : (combineHoverValid ? '#4dff88' : '#ff4d4d');
+      ctx.lineWidth = alien.id === draggedFishId ? 2 : 3;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, alien.radius * state.camera.zoom * 1.4, 0, Math.PI * 2);
+      ctx.stroke();
+    }
   }
 
   perfMark('r: shadow pass + aliens', ctx);
   // Merge partner highlight, drawn under the fish below — see renderMergeToolPartnerHighlight.
-  // Per direct request: with nothing armed (plain cursor), while hovering a fish or dragging one, and
-  // never while hostile aliens are alive (fish can't be moved or merged then).
+  // Per direct request: with nothing armed (plain cursor), while hovering a fish (or egg-hatched
+  // friendly alien) or dragging one, and never while hostile aliens are alive (fish can't be
+  // moved or merged then). Otherwise, the one-off first-adult reminder (state.level.mergeHint)
+  // plays on its fish for MERGE_HINT_MS, then fades off over MERGE_HINT_FADE_MS.
+  let mergeHighlightSubject = null;
+  let mergeHighlightFade = 1;
   if (state.ui.selectedTool === 'cursor' && hoverWorld && !state.ui.paused && !hostileAliensActive(state)) {
-    const mergeHoverFish = draggedFishId != null
-      ? state.level.entities.find((e) => e.id === draggedFishId && e.type === 'fish')
-      : findFishAt(state, hoverWorld.x, hoverWorld.y);
-    if (mergeHoverFish) renderMergeToolPartnerHighlight(ctx, state, mergeHoverFish, performance.now());
-    else mergeHoverSubjectId = null;
+    mergeHighlightSubject = draggedFishId != null
+      ? state.level.entities.find((e) => e.id === draggedFishId)
+      : findMergeSubjectAt(state, hoverWorld.x, hoverWorld.y);
   }
+  if (!mergeHighlightSubject && state.level.mergeHint) {
+    const hintAge = state.level.elapsed - state.level.mergeHint.startedAtMs;
+    const hintFish = state.level.entities.find((e) => e.id === state.level.mergeHint.fishId && e.type === 'fish' && !e.dying);
+    if (!hintFish || hintAge < 0 || hintAge >= MERGE_HINT_MS + MERGE_HINT_FADE_MS) {
+      state.level.mergeHint = null;
+    } else if (!hostileAliensActive(state)) {
+      mergeHighlightSubject = hintFish;
+      mergeHighlightFade = hintAge < MERGE_HINT_MS ? 1 : 1 - (hintAge - MERGE_HINT_MS) / MERGE_HINT_FADE_MS;
+    }
+  }
+  if (mergeHighlightSubject) renderMergeToolPartnerHighlight(ctx, state, mergeHighlightSubject, performance.now(), mergeHighlightFade);
+  else mergeHoverSubjectId = null;
   for (const fish of state.level.entities) {
     if (fish.type !== 'fish') continue; // state.level.entities also holds Alien Invasion aliens now — rendered separately above, BEFORE this loop, so fish (and their health bars) always draw on top and never disappear behind an alien
     const pos = worldToScreen(fish.x, fish.y, state.camera);
@@ -6454,7 +6536,7 @@ function render() {
     draggedFishId == null && !state.ui.buildingMoveArmed && state.ui.buildingMoveHoverLabel == null &&
     blueprintClipboard == null && !hostileAliensActive(state)
   ) {
-    const hoverFish = findFishAt(state, hoverWorld.x, hoverWorld.y);
+    const hoverFish = findMergeSubjectAt(state, hoverWorld.x, hoverWorld.y);
     if (hoverFish) {
       const nowMs = performance.now();
       if (hoverFish.id !== mergeLegendFishId || nowMs >= mergeLegendRefreshAtMs) {

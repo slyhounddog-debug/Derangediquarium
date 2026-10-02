@@ -2149,3 +2149,11 @@ Verified in a browser (Playwright, zero JS errors; the only console error is the
 
 Also in this commit: the octopus "sick" tint after a Bubble-Cap-blocked science drop lasts 4s (`SCIENCE_BLOCKED_SICK_MS`, was 1s).
 
+## Friendly Alien Counts as a Fish for Move/Merge, Result-Icon Bubbles on the Merge Lines, First-Adult Merge Reminder
+
+**The Alien-Egg friendly alien counts as a fish** for right-click-drag moving, the hover legend and the glow/lines. `Entities.js`: `findMergeSubjectAt` (fish first, else a friendly alien within `radius * ALIEN_CLICK_RADIUS_MULTIPLIER`), `canMergeOrSplicePair`, and `describeFishMergeOptions`/`findFishMergePartners` handle a `friendly_alien` subject (its only partner is a grown Octopus, result Bio Fish) and list friendly aliens as an Octopus's partners (legend entry has `otherLabel: 'Alien'` instead of an icon). `findFishMergePartners` now returns `{ entity, resultSpeciesId }` entries. `main.js`: the right-press, `updateFishDrag`, `resolveFishDrop` (Bio Fish splice either way round) and the green/red/white drag rings all treat the alien like a fish; hostile-alien blocking is unchanged.
+
+**Bubbles on the lines.** `renderMergeToolPartnerHighlight`: each line is broken around a bubble at its exact midpoint — a big gold version of the fish bubble (ring, faint fill, highlight dot) holding the resulting fish at `MERGE_BUBBLE_ICON_SCALE` (0.66) of its real size (icons baked once per species by `getMergeBubbleIcon`, one `drawImage` each), pulsing with the lines. Fish aren't zoom-scaled in this renderer, so neither are the bubbles/icons.
+
+**First-adult reminder.** `Entities.js`'s `maybeStartMergeHint` (from `awardTankPoint`, the single adult-transition hook): the first time a fish becomes an adult AND has at least one merge partner (an adult with nothing to pair with yet doesn't use it up), sets `state.level.mergeHint` and `tutorialFlags.firstAdultMergeHintShown`; `main.js`'s render plays the same highlight on that fish for `MERGE_HINT_MS` (3s) then fades it off over `MERGE_HINT_FADE_MS` (0.75s), unless the player is hovering/dragging something else or hostile aliens are alive.
+
