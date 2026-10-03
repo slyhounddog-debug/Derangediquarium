@@ -715,7 +715,11 @@ function drawFishOne(f) {
   ctx.save();
   ctx.globalAlpha = f.alpha;
   ctx.translate(f.x, f.y);
-  ctx.scale(scale * f.sx, scale);
+  // Minimum width applies only when drawing — clamping the stored value itself
+  // snaps it back every frame on high-refresh displays (the per-frame step is
+  // smaller than the clamp), leaving the fish stuck edge-on mid-turn.
+  const sx = Math.abs(f.sx) < 0.12 ? (f.sx < 0 ? -0.12 : 0.12) : f.sx;
+  ctx.scale(scale * sx, scale);
   drawFish(ctx, 0, 0, f.species, f.stage, 1, ts.t * 5 + f.phase, { x: 1, y: 0 });
   ctx.restore();
 }
@@ -865,7 +869,6 @@ function step(dt) {
     // drops to zero there, so it can't be derived from |vx| any more).
     const target = orbitVx(f.theta) * Math.sign(f.omega) >= 0 ? 1 : -1;
     f.sx += (target - f.sx) * Math.min(1, dt * 7);
-    if (Math.abs(f.sx) < 0.12) f.sx = f.sx < 0 ? -0.12 : 0.12;
     f.alpha = clamp(age / 0.4, 0, 1) * (exiting ? clamp(1 - et / 0.7, 0, 1) : 1);
     if (!exiting) {
       f.bubbleT -= dt;
