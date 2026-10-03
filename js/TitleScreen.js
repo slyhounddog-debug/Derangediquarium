@@ -91,10 +91,11 @@ const ITEM_DRAG = 1.3; // per-second velocity decay — terminal sink speed is g
 const ITEM_THROW_MAX = 900;
 const ITEM_GRAB_RADIUS_MULT = 1.7;
 
-const BUBBLE_MAX = 220;
+const BUBBLE_MAX = 480;
 const AMBIENT_BUBBLES_PER_S = 9;
-const SLAM_BUBBLE_COUNT = 130; // 5x the original 26, per direct request
-const FALL_BUBBLES_PER_S = 300; // SANITY sheds bubbles the whole way down, per direct request
+const SLAM_BUBBLE_COUNT = 280; // was 26, then 130 — and now drawn in front of the words, per direct request
+const FISH_BUBBLE_INTERVAL_S = [1, 2]; // per direct request — every fish blows a bubble every 1-2s
+const FALL_BUBBLES_PER_S = 420; // SANITY sheds bubbles the whole way down, per direct request
 const BACKDROP_SCALE = 0.5;
 
 // ---- Module state ----
@@ -596,9 +597,21 @@ function itemSprite(kind) {
 }
 
 // ---- Bubbles ----
-function spawnBubble(x, y, vx, vy, r, life = 99) {
+// opts: front (drawn over the words), ay (buoyancy acceleration, negative = up)
+// and damp (per-second velocity drag) — the last two are what let a crash-spray
+// bubble shoot down and out, slow, then turn around and float up.
+function spawnBubble(x, y, vx, vy, r, life = 99, opts) {
   if (ts.bubbles.length >= BUBBLE_MAX) ts.bubbles.shift();
-  ts.bubbles.push({ x, y, vx, vy, r, a: rand(0.55, 0.95), phase: Math.random() * 6.28, life, age: 0 });
+  ts.bubbles.push({ x, y, vx, vy, r, a: rand(0.55, 0.95), phase: Math.random() * 6.28, life, age: 0, front: !!(opts && opts.front), ay: (opts && opts.ay) || 0, damp: (opts && opts.damp) || 0 });
+}
+
+function drawBubbles(front) {
+  for (const b of ts.bubbles) {
+    if (b.front !== front) continue;
+    ctx.globalAlpha = b.a * (b.age > b.life - 0.4 ? clamp((b.life - b.age) / 0.4, 0, 1) : 1);
+    ctx.drawImage(bubbleSprite, b.x - b.r, b.y - b.r, b.r * 2, b.r * 2);
+  }
+  ctx.globalAlpha = 1;
 }
 
 function updateBubbles(dt) {
@@ -606,9 +619,11 @@ function updateBubbles(dt) {
   for (let i = list.length - 1; i >= 0; i--) {
     const b = list[i];
     b.age += dt;
+    if (b.damp) { const k = Math.exp(-b.damp * dt); b.vx *= k; b.vy *= k; }
+    b.vy += b.ay * dt;
     b.x += (b.vx + Math.sin(ts.t * 2 + b.phase) * 10) * dt;
     b.y += b.vy * dt;
-    if (b.y < -20 || b.age > b.life) { list[i] = list[list.length - 1]; list.pop(); }
+    if (b.y < -20 || b.y > ts.h + 60 || b.age > b.life) { list[i] = list[list.length - 1]; list.pop(); }
   }
 }
 
@@ -628,6 +643,7 @@ function makeFish(i) {
     phase: Math.random() * 6.28,
     coinT: 0,
     wasteT: 0,
+    bubbleT: 0,
     x: 0, y: 0, z: 0, sx: 1, alpha: 0, grow: 0, born: false,
   };
 }
@@ -671,8 +687,13 @@ function slamBurst() {
   const sw = ts.sanity.textW;
   const x0 = L.sanityX + ts.sanity.padX;
   const cy = L.sanityY + ts.sanity.baseY - ts.sanity.capH * 0.4;
+  // The crash spray: thrown down and outward from where SANITY lands (away from
+  // its center), then buoyancy and drag slow them, turn them around and let
+  // them float up. In front of the words (opts.front).
   for (let i = 0; i < SLAM_BUBBLE_COUNT; i++) {
-    spawnBubble(x0 + Math.random() * sw, cy + rand(-20, 30), rand(-70, 70), rand(-190, -50), rand(3, 9), rand(1.2, 2.4));
+    const bx = x0 + Math.random() * sw;
+    const out = (bx - (x0 + sw / 2)) / (sw / 2); // -1 (left end) .. 1 (right end)
+    spawnBubble(bx, cy + rand(-10, 50), out * rand(120, 320) + rand(-70, 70), rand(120, 430), rand(3, 10), rand(2.0, 3.6), { front: true, ay: -330, damp: 2.2 });
   }
   for (let i = 0; i < 6; i++) {
     addItem(randomCoinKind(), x0 + (0.1 + 0.8 * Math.random()) * sw, cy + rand(10, 40), rand(-110, 110), rand(50, 150));
@@ -799,7 +820,7 @@ function step(dt) {
     const yMid = L.sanityY + off + ts.sanity.baseY - ts.sanity.capH * 0.4;
     while (ts.fallAcc >= 1) {
       ts.fallAcc -= 1;
-      spawnBubble(x0 + Math.random() * ts.sanity.textW, yMid + rand(-ts.sanity.capH * 0.5, ts.sanity.capH * 0.6), rand(-40, 40), rand(-130, -30), rand(3, 8), rand(0.8, 1.8));
+      spawnBubble(x0 + Math.random() * ts.sanity.textW, yMid + rand(-ts.sanity.capH * 0.5, ts.sanity.capH * 0.6), rand(-40, 40), rand(-60, 40), rand(3, 8), rand(0.8, 1.8), { front: true });
     }
   }
 
@@ -822,6 +843,7 @@ function step(dt) {
       f.born = true;
       f.coinT = rand(COIN_INTERVAL_S[0], COIN_INTERVAL_S[1]);
       f.wasteT = rand(WASTE_INTERVAL_S[0], WASTE_INTERVAL_S[1]);
+      f.bubbleT = rand(FISH_BUBBLE_INTERVAL_S[0], FISH_BUBBLE_INTERVAL_S[1]);
     }
     const age = t - f.spawnAt;
     f.grow = easeOutCubic(clamp(age / FISH_ORBIT_GROW_S, 0, 1));
@@ -834,6 +856,14 @@ function step(dt) {
     f.sx = (vx >= 0 ? 1 : -1) * Math.max(0.12, Math.min(1, Math.abs(vx) * 3.5));
     f.alpha = clamp(age / 0.4, 0, 1) * (exiting ? clamp(1 - et / 0.7, 0, 1) : 1);
     if (!exiting) {
+      f.bubbleT -= dt;
+      if (f.bubbleT <= 0) {
+        f.bubbleT = rand(FISH_BUBBLE_INTERVAL_S[0], FISH_BUBBLE_INTERVAL_S[1]);
+        // Blown from the mouth, and on the same side of the words as the fish.
+        const scale = FISH_DRAW_SCALE * (0.88 + 0.14 * f.z);
+        const dir = f.sx >= 0 ? 1 : -1;
+        spawnBubble(f.x + dir * 20 * scale, f.y - 2 * scale, dir * rand(6, 22), rand(-75, -42), rand(2.5, 5.5), rand(2, 3.5), { front: f.z >= 0 });
+      }
       f.coinT -= dt;
       f.wasteT -= dt;
       if (f.coinT <= 0) { f.coinT = rand(COIN_INTERVAL_S[0], COIN_INTERVAL_S[1]); addItem(randomCoinKind(), f.x, f.y + 10, rand(-18, 18), 8); }
@@ -914,11 +944,7 @@ function draw() {
   }
 
   // ---- bubbles behind everything ----
-  for (const b of ts.bubbles) {
-    ctx.globalAlpha = b.a * (b.age > b.life - 0.4 ? clamp((b.life - b.age) / 0.4, 0, 1) : 1);
-    ctx.drawImage(bubbleSprite, b.x - b.r, b.y - b.r, b.r * 2, b.r * 2);
-  }
-  ctx.globalAlpha = 1;
+  drawBubbles(false);
 
   // ---- fish behind the words ----
   for (const f of ts.fish) if (f.born && f.z < 0 && f.alpha > 0) drawFishOne(f);
@@ -937,6 +963,7 @@ function draw() {
 
   // ---- fish in front ----
   for (const f of ts.fish) if (f.born && f.z >= 0 && f.alpha > 0) drawFishOne(f);
+  drawBubbles(true); // crash spray and in-front fish bubbles, over the words
 
   // ---- loose coins/waste on top, so they can always be grabbed ----
   const exitFade = ts.exiting ? clamp(1 - et / 0.5, 0, 1) : 1;
