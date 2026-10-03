@@ -18,7 +18,7 @@
 // at the bottom, same one-directional import discipline as FishRenderer.js.
 
 import { drawFish } from './FishRenderer.js';
-import { SPECIES, COIN_TIERS, WASTE_COLOR } from './Config.js';
+import { SPECIES, COIN_TIERS, COIN_RADIUS, WASTE_COLOR } from './Config.js';
 
 const FONT_STACK = "'Fredoka', 'Baloo 2', 'Segoe UI', system-ui, sans-serif";
 const glyphFont = (px) => `700 ${px}px ${FONT_STACK}`;
@@ -85,13 +85,16 @@ const ITEM_MAX = 30;
 const ITEM_FADE_AFTER_S = 30;
 const ITEM_FADE_S = 1.5;
 const ITEM_RADIUS = 11;
+const ITEM_SPRITE_SCALE = 2;
 const ITEM_GRAVITY = 75;
 const ITEM_DRAG = 1.3; // per-second velocity decay — terminal sink speed is gravity/drag, ~58 px/s
 const ITEM_THROW_MAX = 900;
 const ITEM_GRAB_RADIUS_MULT = 1.7;
 
-const BUBBLE_MAX = 90;
+const BUBBLE_MAX = 220;
 const AMBIENT_BUBBLES_PER_S = 9;
+const SLAM_BUBBLE_COUNT = 130; // 5x the original 26, per direct request
+const FALL_BUBBLES_PER_S = 300; // SANITY sheds bubbles the whole way down, per direct request
 const BACKDROP_SCALE = 0.5;
 
 // ---- Module state ----
@@ -119,10 +122,10 @@ const ts = {
   trailAccSanity: 0,
   trailAccFin: 0,
   slamFired: false,
+  fallAcc: 0,
   nextItemId: 1,
   drag: null,
   hoverItem: false,
-  floor: 0,
   dt: 0,
 };
 
@@ -493,12 +496,70 @@ function bakeSmallSprites() {
 // Same blob/coin looks as the in-game items (main.js's drawWastePoop and coin
 // render), duplicated here per this codebase's own module-boundary convention
 // instead of imported across modules — simplified, since these are title-only.
+// The in-game flat coin (main.js's drawFlatCoin + drawCoinDollarMark), reused
+// per direct request because it looks better than the first title-only coin —
+// duplicated rather than imported, per the module-boundary convention.
+function mixHex(hex, to, t) {
+  const n = parseInt(hex.slice(1), 16);
+  const ch = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((v) => Math.round(v + (to - v) * t));
+  return `rgb(${ch[0]}, ${ch[1]}, ${ch[2]})`;
+}
+
+function drawFlatCoin(c, cx, cy, r, baseColor) {
+  c.beginPath();
+  c.arc(cx, cy, r, 0, Math.PI * 2);
+  c.fillStyle = mixHex(baseColor, 0, 0.32);
+  c.fill();
+  c.beginPath();
+  c.arc(cx, cy, r * 0.8, 0, Math.PI * 2);
+  c.fillStyle = mixHex(baseColor, 255, 0.12);
+  c.fill();
+  c.strokeStyle = 'rgba(0, 0, 0, 0.25)';
+  c.lineWidth = Math.max(0.6, r * 0.05);
+  c.beginPath();
+  c.arc(cx, cy, r * 0.84, 0, Math.PI * 2);
+  c.stroke();
+  c.strokeStyle = 'rgba(255, 255, 255, 0.55)';
+  c.lineWidth = Math.max(0.6, r * 0.06);
+  c.beginPath();
+  c.arc(cx, cy, r * 0.78, 0, Math.PI * 2);
+  c.stroke();
+  // embossed "$", drawn before the sheen so the sheen glazes over it
+  c.save();
+  c.font = `bold ${Math.max(7, r * 1.05)}px sans-serif`;
+  c.textAlign = 'center';
+  c.textBaseline = 'middle';
+  const textY = cy + r * 0.04;
+  const emboss = Math.max(0.6, r * 0.07);
+  c.fillStyle = 'rgba(0, 0, 0, 0.5)';
+  c.fillText('$', cx + emboss, textY + emboss);
+  c.fillStyle = 'rgba(255, 255, 255, 0.65)';
+  c.fillText('$', cx - emboss * 0.7, textY - emboss * 0.7);
+  c.strokeStyle = 'rgba(0, 0, 0, 0.55)';
+  c.lineWidth = Math.max(0.8, r * 0.09);
+  c.lineJoin = 'round';
+  c.strokeText('$', cx, textY);
+  c.fillStyle = mixHex(baseColor, 0, 0.2);
+  c.fillText('$', cx, textY);
+  c.restore();
+  c.save();
+  c.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+  c.lineWidth = Math.max(1, r * 0.14);
+  c.lineCap = 'round';
+  c.beginPath();
+  c.arc(cx, cy, r * 0.52, Math.PI * 1.12, Math.PI * 1.42);
+  c.stroke();
+  c.restore();
+}
+
 function itemSprite(kind) {
   if (itemSprites.has(kind)) return itemSprites.get(kind);
   const size = ITEM_RADIUS * 3;
   const cv = document.createElement('canvas');
-  cv.width = cv.height = size;
+  cv.width = cv.height = size * ITEM_SPRITE_SCALE;
+  cv.logical = size; // drawn at this size; baked at ITEM_SPRITE_SCALE for crispness, same as main.js's item sprites
   const c = cv.getContext('2d');
+  c.scale(ITEM_SPRITE_SCALE, ITEM_SPRITE_SCALE);
   const cx = size / 2;
   const cy = size / 2;
   const r = ITEM_RADIUS;
@@ -528,30 +589,7 @@ function itemSprite(kind) {
     c.fill();
   } else {
     const tier = COIN_TIERS[kind === 'coin_silver' ? 1 : kind === 'coin_bronze' ? 0 : 2];
-    const g = c.createRadialGradient(cx - r * 0.3, cy - r * 0.35, r * 0.1, cx, cy, r);
-    g.addColorStop(0, '#ffffff');
-    g.addColorStop(0.3, tier.color);
-    g.addColorStop(1, tier.color);
-    c.beginPath();
-    c.arc(cx, cy, r, 0, Math.PI * 2);
-    c.fillStyle = tier.color;
-    c.fill();
-    c.fillStyle = 'rgba(255,255,255,0.25)';
-    c.beginPath();
-    c.arc(cx, cy - r * 0.15, r * 0.75, Math.PI, 0);
-    c.fill();
-    c.strokeStyle = 'rgba(0,0,0,0.45)';
-    c.lineWidth = 1.4;
-    c.beginPath();
-    c.arc(cx, cy, r, 0, Math.PI * 2);
-    c.stroke();
-    c.font = `bold ${r * 1.15}px sans-serif`;
-    c.textAlign = 'center';
-    c.textBaseline = 'middle';
-    c.fillStyle = 'rgba(255,255,255,0.6)';
-    c.fillText('$', cx - 0.6, cy - 0.4);
-    c.fillStyle = 'rgba(70,45,0,0.75)';
-    c.fillText('$', cx, cy + 0.6);
+    drawFlatCoin(c, cx, cy, COIN_RADIUS * tier.sizeMultiplier, tier.color);
   }
   itemSprites.set(kind, cv);
   return cv;
@@ -607,13 +645,15 @@ function randomCoinKind() {
 }
 
 function updateItems(dt) {
-  const fy = ts.floor;
   const decay = Math.exp(-ITEM_DRAG * dt);
   for (let i = ts.items.length - 1; i >= 0; i--) {
     const it = ts.items[i];
     it.age += dt;
     if (it.age >= ITEM_FADE_AFTER_S + ITEM_FADE_S) { ts.items[i] = ts.items[ts.items.length - 1]; ts.items.pop(); continue; }
     if (ts.drag && ts.drag.item === it) continue;
+    // Per direct request there is no floor — items sink right off the bottom of
+    // the screen and are dropped the moment they're fully out of sight.
+    if (it.y - ITEM_RADIUS > ts.h) { ts.items[i] = ts.items[ts.items.length - 1]; ts.items.pop(); continue; }
     it.vy += ITEM_GRAVITY * dt;
     it.vx *= decay;
     it.vy *= decay;
@@ -621,7 +661,6 @@ function updateItems(dt) {
     it.y += it.vy * dt;
     it.spin += it.vy * dt * 0.05;
     const r = ITEM_RADIUS;
-    if (it.y > fy - r) { it.y = fy - r; it.vy = 0; it.vx *= 0.9; }
     if (it.x < r) { it.x = r; it.vx = Math.abs(it.vx) * 0.5; }
     if (it.x > ts.w - r) { it.x = ts.w - r; it.vx = -Math.abs(it.vx) * 0.5; }
   }
@@ -632,8 +671,8 @@ function slamBurst() {
   const sw = ts.sanity.textW;
   const x0 = L.sanityX + ts.sanity.padX;
   const cy = L.sanityY + ts.sanity.baseY - ts.sanity.capH * 0.4;
-  for (let i = 0; i < 26; i++) {
-    spawnBubble(x0 + Math.random() * sw, cy + rand(-20, 30), rand(-70, 70), rand(-190, -50), rand(2, 7), rand(1.2, 2.4));
+  for (let i = 0; i < SLAM_BUBBLE_COUNT; i++) {
+    spawnBubble(x0 + Math.random() * sw, cy + rand(-20, 30), rand(-70, 70), rand(-190, -50), rand(3, 9), rand(1.2, 2.4));
   }
   for (let i = 0; i < 6; i++) {
     addItem(randomCoinKind(), x0 + (0.1 + 0.8 * Math.random()) * sw, cy + rand(10, 40), rand(-110, 110), rand(50, 150));
@@ -749,6 +788,20 @@ function step(dt) {
 
   // Slam impact: fires once, the frame SANITY lands.
   if (!ts.slamFired && t >= IMPACT_S) { ts.slamFired = true; slamBurst(); }
+
+  // While SANITY is dropping, it throws off bubbles along its whole body from
+  // wherever it currently is (same fall curve draw() uses).
+  if (t >= SLAM_START_S && t < IMPACT_S) {
+    ts.fallAcc += dt * FALL_BUBBLES_PER_S;
+    const p = easeInQuad((t - SLAM_START_S) / SLAM_DUR_S);
+    const off = -(1 - p) * (L.sanityY + ts.sanity.h + 40);
+    const x0 = L.sanityX + ts.sanity.padX;
+    const yMid = L.sanityY + off + ts.sanity.baseY - ts.sanity.capH * 0.4;
+    while (ts.fallAcc >= 1) {
+      ts.fallAcc -= 1;
+      spawnBubble(x0 + Math.random() * ts.sanity.textW, yMid + rand(-ts.sanity.capH * 0.5, ts.sanity.capH * 0.6), rand(-40, 40), rand(-130, -30), rand(3, 8), rand(0.8, 1.8));
+    }
+  }
 
   // Ambient bubbles drifting up from behind the letters.
   if (!exiting) {
@@ -892,11 +945,11 @@ function draw() {
     const fade = it.age > ITEM_FADE_AFTER_S ? clamp(1 - (it.age - ITEM_FADE_AFTER_S) / ITEM_FADE_S, 0, 1) : 1;
     ctx.globalAlpha = fade * exitFade;
     if (it.kind === 'waste') {
-      ctx.drawImage(sprite, it.x - sprite.width / 2, it.y - sprite.height / 2);
+      ctx.drawImage(sprite, it.x - sprite.logical / 2, it.y - sprite.logical / 2, sprite.logical, sprite.logical);
     } else {
       const sx = Math.max(0.15, Math.abs(Math.cos(it.spin)));
-      const w = sprite.width * sx;
-      ctx.drawImage(sprite, it.x - w / 2, it.y - sprite.height / 2, w, sprite.height);
+      const w = sprite.logical * sx;
+      ctx.drawImage(sprite, it.x - w / 2, it.y - sprite.logical / 2, w, sprite.logical);
     }
   }
   ctx.globalAlpha = 1;
@@ -928,7 +981,7 @@ function onPointerMove(e) {
   if (ts.drag) {
     const it = ts.drag.item;
     it.x = clamp(e.clientX, ITEM_RADIUS, ts.w - ITEM_RADIUS);
-    it.y = clamp(e.clientY, ITEM_RADIUS, ts.floor - ITEM_RADIUS);
+    it.y = Math.max(ITEM_RADIUS, e.clientY);
     const now = performance.now();
     ts.drag.samples.push({ t: now, x: e.clientX, y: e.clientY });
     while (ts.drag.samples.length > 2 && now - ts.drag.samples[0].t > 100) ts.drag.samples.shift();
@@ -957,10 +1010,6 @@ function onPointerUp() {
 function sizeCanvases() {
   ts.w = window.innerWidth;
   ts.h = window.innerHeight;
-  // Top edge of the plank row, mirrored from style.css (bottom: 3.2vh, height:
-  // clamp(46px, 7vh, 64px)) instead of measured from the DOM, so no layout read
-  // ever happens per frame. Loose coins/waste come to rest on top of the planks.
-  ts.floor = ts.h * (1 - 0.032) - clamp(ts.h * 0.07, 46, 64) + 6;
   canvasEl.width = ts.w;
   canvasEl.height = ts.h;
 }
@@ -1011,6 +1060,7 @@ export function showTitle(now) {
   ts.exitT = 0;
   ts.lastNow = now;
   ts.slamFired = false;
+  ts.fallAcc = 0;
   ts.items.length = 0;
   ts.bubbles.length = 0;
   ts.fish = FISH_LINEUP.map((_, i) => makeFish(i));
