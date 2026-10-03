@@ -79,6 +79,15 @@ const EXIT_FIN_BUBBLES_PER_S = 30; // fewer than SANITY's, per direct request
 // ---- Fish / loose items ----
 const FISH_LINEUP = ['guppy', 'guppy', 'dartfin', 'dartfin', 'blimpfish', 'blimpfish'];
 const FISH_DRAW_SCALE = 1.5;
+const FISH_ORBIT_SCALE = 0.9; // orbits 10% smaller than the first pass, per direct request
+const FISH_ORBIT_SPEED_SCALE = 0.9; // and 10% slower around the loop
+// Horizontal position blends a cosine with a triangle wave. A plain cosine
+// crawls through the far ends of the ellipse; the triangle wave never slows
+// down, so mixing it in keeps fish from lingering at the edges (per direct
+// request) while still easing the turn-around.
+const ORBIT_COS_WEIGHT = 0.45;
+const orbitX = (th) => ORBIT_COS_WEIGHT * Math.cos(th) + (1 - ORBIT_COS_WEIGHT) * (2 / Math.PI) * Math.asin(Math.cos(th));
+const orbitVx = (th) => -ORBIT_COS_WEIGHT * Math.sin(th) - (1 - ORBIT_COS_WEIGHT) * (2 / Math.PI) * Math.sign(Math.sin(th));
 const COIN_INTERVAL_S = [5, 10];
 const WASTE_INTERVAL_S = [10, 15];
 const ITEM_MAX = 30;
@@ -95,7 +104,7 @@ const BUBBLE_MAX = 480;
 const AMBIENT_BUBBLES_PER_S = 9;
 const SLAM_BUBBLE_COUNT = 280; // was 26, then 130 — and now drawn in front of the words, per direct request
 const FISH_BUBBLE_INTERVAL_S = [1, 2]; // per direct request — every fish blows a bubble every 1-2s
-const FALL_BUBBLES_PER_S = 420; // SANITY sheds bubbles the whole way down, per direct request
+const FALL_BUBBLES_PER_S = 700; // SANITY sheds bubbles the whole way down, per direct request
 const BACKDROP_SCALE = 0.5;
 
 // ---- Module state ----
@@ -634,10 +643,10 @@ function makeFish(i) {
   return {
     species,
     stage: SPECIES[species].growthStages.length - 1,
-    rx: rand(0.3, 0.46) * ts.w,
-    ry: rand(34, 92),
+    rx: rand(0.3, 0.46) * ts.w * FISH_ORBIT_SCALE,
+    ry: rand(34, 92) * FISH_ORBIT_SCALE,
     cyOff: rand(-0.16, 0.2) * ts.layout.S,
-    omega: dir * rand(0.2, 0.34),
+    omega: dir * rand(0.2, 0.34) * FISH_ORBIT_SPEED_SCALE,
     theta: Math.random() * Math.PI * 2,
     spawnAt: FISH_SPAWN_START_S + Math.random() * FISH_SPAWN_WINDOW_S,
     phase: Math.random() * 6.28,
@@ -693,7 +702,7 @@ function slamBurst() {
   for (let i = 0; i < SLAM_BUBBLE_COUNT; i++) {
     const bx = x0 + Math.random() * sw;
     const out = (bx - (x0 + sw / 2)) / (sw / 2); // -1 (left end) .. 1 (right end)
-    spawnBubble(bx, cy + rand(-10, 50), out * rand(120, 320) + rand(-70, 70), rand(120, 430), rand(3, 10), rand(2.0, 3.6), { front: true, ay: -330, damp: 2.2 });
+    spawnBubble(bx, cy + rand(-10, 50), out * rand(120, 320) + rand(-70, 70), rand(-170, 420), rand(3, 10), rand(2.0, 3.6), { front: true, ay: -330, damp: 2.2 });
   }
   for (let i = 0; i < 6; i++) {
     addItem(randomCoinKind(), x0 + (0.1 + 0.8 * Math.random()) * sw, cy + rand(10, 40), rand(-110, 110), rand(50, 150));
@@ -849,11 +858,14 @@ function step(dt) {
     f.grow = easeOutCubic(clamp(age / FISH_ORBIT_GROW_S, 0, 1));
     f.theta += f.omega * dt;
     const sin = Math.sin(f.theta);
-    f.x = L.cx + Math.cos(f.theta) * f.rx * f.grow;
+    f.x = L.cx + orbitX(f.theta) * f.rx * f.grow;
     f.y = L.cy + f.cyOff * f.grow + sin * f.ry * f.grow;
     f.z = f.grow < 0.6 ? -1 : sin; // newly spawned fish stay behind the letters so their spawn is hidden
-    const vx = -sin * Math.sign(f.omega);
-    f.sx = (vx >= 0 ? 1 : -1) * Math.max(0.12, Math.min(1, Math.abs(vx) * 3.5));
+    // Facing eases through the turn-around (the orbit's own speed no longer
+    // drops to zero there, so it can't be derived from |vx| any more).
+    const target = orbitVx(f.theta) * Math.sign(f.omega) >= 0 ? 1 : -1;
+    f.sx += (target - f.sx) * Math.min(1, dt * 7);
+    if (Math.abs(f.sx) < 0.12) f.sx = f.sx < 0 ? -0.12 : 0.12;
     f.alpha = clamp(age / 0.4, 0, 1) * (exiting ? clamp(1 - et / 0.7, 0, 1) : 1);
     if (!exiting) {
       f.bubbleT -= dt;
@@ -1046,7 +1058,7 @@ function rebuild() {
   bakeSprites();
   // Fish orbits are sized off the viewport, so re-roll their extents (keeping
   // each one's current phase/timers) rather than leave them stale.
-  for (const f of ts.fish) { f.rx = rand(0.3, 0.46) * ts.w; }
+  for (const f of ts.fish) { f.rx = rand(0.3, 0.46) * ts.w * FISH_ORBIT_SCALE; }
   ts.backdropDirty = true;
   ts.backdropReady = false;
 }
