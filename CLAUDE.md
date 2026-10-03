@@ -2239,6 +2239,10 @@ Per direct request:
 
 Verified in a browser (Playwright, zero JS errors; the only console error is the pre-existing 404 for `lighting effect.mp4`): idle/intro/slam/exit frames, coin drag with throw velocity, Achievements/Help/Settings layering and title pause/resume, resize rebuild, Continue after a save, loading screen.
 
+## Smooth Turn-Around for Fish and Aliens
+
+Per direct request, the title screen's squash-through-edge-on turn now applies to every fish, hostile alien and friendly alien instead of snapping left/right. Implemented as a transform, not new sprites: `main.js`'s `easeTurn` eases `entity.turn` toward `entity.turnTarget` (±1, flipped only once |vx| exceeds `TURN_VX_DEADZONE`, so a fish hovering near vx = 0 cannot flicker and sit edge-on) at `TURN_EASE_PER_S`; while `turn !== turnTarget` the existing `drawFish`/`drawAlienBody` output is drawn facing right through one `ctx.scale(turn, 1)` (`beginTurnSquash`; eye direction / alien gaze are mirrored once past edge-on), and an entity that is not turning takes the exact unscaled path it always did. So the cost is a few arithmetic ops per entity per frame plus a save/scale/restore only for the ~0.3s of an actual turn. The minimum edge-on width is applied at draw time only (clamping the stored value is what froze the title fish — see the title section). Dying fish keep their fixed `deathFacing`. `turn`/`turnTarget` are plain numbers on the entity, so saves stay JSON-safe and old saves initialize them lazily.
+
 ## Working Convention: Leave the Dev Server Running
 
 Never stop or kill the local dev server (`node server.js`, port 8080) when finishing a task or after testing. Start it in the background if it isn't already running before browser-verifying a change, but leave it up afterwards — the user keeps the game open at http://localhost:8080 and only needs a reload to see changes (the server just serves static files).

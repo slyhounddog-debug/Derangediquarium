@@ -4698,6 +4698,44 @@ function renderFishShadowsOnDecor(ctx, state) {
   ctx.drawImage(shadowLayerCanvas, 0, 0, w, h, 0, 0, canvas.width, canvas.height);
 }
 
+// ---- Smooth turn-around (fish, aliens) ----
+// Per direct request, a fish/alien that changes direction no longer snaps its
+// sprite left/right — it squashes through edge-on and out the other side, the
+// same turn the title screen's fish use. Deliberately NOT a new sprite: the
+// existing drawFish/drawAlienBody output is just drawn through one ctx.scale
+// while an entity is mid-turn (about 0.3s of its life), and an entity that
+// isn't turning takes the exact same unscaled path as before, so the steady
+// state costs one number compare. entity.turn eases toward entity.turnTarget
+// (±1); the target only flips once |vx| clears TURN_VX_DEADZONE, so a fish
+// hovering around vx = 0 can't flicker its target and sit edge-on forever.
+const TURN_EASE_PER_S = 7;
+const TURN_MIN_WIDTH = 0.12; // applied only when drawing; the stored value itself passes freely through zero
+const TURN_VX_DEADZONE = 2;
+let turnDtS = 0;
+let turnLastNow = 0;
+function beginTurnFrame(nowMs) {
+  turnDtS = turnLastNow ? Math.min(0.05, (nowMs - turnLastNow) / 1000) : 0;
+  turnLastNow = nowMs;
+}
+// Returns entity.turn after easing it one frame toward the way `vx` points.
+function easeTurn(e) {
+  if (e.turnTarget === undefined) { e.turnTarget = e.vx >= 0 ? 1 : -1; e.turn = e.turnTarget; }
+  if (e.vx > TURN_VX_DEADZONE) e.turnTarget = 1;
+  else if (e.vx < -TURN_VX_DEADZONE) e.turnTarget = -1;
+  if (e.turn !== e.turnTarget) {
+    e.turn += (e.turnTarget - e.turn) * Math.min(1, TURN_EASE_PER_S * turnDtS);
+    if (Math.abs(e.turnTarget - e.turn) < 0.01) e.turn = e.turnTarget;
+  }
+  return e.turn;
+}
+// Opens the horizontal squash about (x, y); caller must ctx.restore() after.
+function beginTurnSquash(ctx, x, y, turn) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(Math.abs(turn) < TURN_MIN_WIDTH ? (turn < 0 ? -TURN_MIN_WIDTH : TURN_MIN_WIDTH) : turn, 1);
+  ctx.translate(-x, -y);
+}
+
 // A lit/rimmed/grained look for aliens, per direct request (same retweak as
 // the boulders/mound/seaweed, and — unlike the regular fish — WITH the
 // speckled grain). `color` is hex or the "rgb(...)" a hit-flash blend
@@ -5319,6 +5357,7 @@ function render() {
   updateCanvasCursor();
   fpsCounter++;
   const now = performance.now();
+  beginTurnFrame(now);
   if (now - lastFpsTime >= 1000) {
     fpsDisplay = fpsCounter;
     fpsCounter = 0;
@@ -5827,7 +5866,9 @@ function render() {
     const radius = baseRadius * bounceScaleMul;
     const alienBaseColor = alien.color || ALIEN_COLOR;
     const color = flashFrac > 0 ? lerpRgbToString(hexToRgb(alienBaseColor), ALIEN_HIT_FLASH_COLOR, flashFrac) : alienBaseColor;
-    const facing = alien.vx >= 0 ? 1 : -1;
+    const turn = easeTurn(alien);
+    const turning = turn !== alien.turnTarget;
+    const facing = turning ? 1 : alien.turnTarget; // mid-turn the body is drawn facing right and squashed (mirrored once past edge-on)
     // Nearest fish, for the cyclops eye's pupil to track — a plain O(n)
     // scan over entities is cheap enough here (at most ALIEN_MAX_ALIVE
     // aliens, each doing this once per frame). Falls back to looking
@@ -5839,8 +5880,13 @@ function render() {
       const d = Math.hypot(other.x - alien.x, other.y - alien.y);
       if (d < nearestDist) { nearestDist = d; nearestFish = other; }
     }
-    const gazeAngle = nearestFish ? Math.atan2(nearestFish.y - alien.y, nearestFish.x - alien.x) : (facing > 0 ? 0 : Math.PI);
+    let gazeAngle = nearestFish ? Math.atan2(nearestFish.y - alien.y, nearestFish.x - alien.x) : (alien.turnTarget > 0 ? 0 : Math.PI);
+    if (turning) {
+      if (turn < 0) gazeAngle = Math.PI - gazeAngle; // the squash mirrors the pupil's direction too
+      beginTurnSquash(ctx, pos.x, pos.y, turn);
+    }
     drawAlienBody(ctx, pos.x, pos.y, radius, facing, color, gazeAngle, alien.spikes, alien.bodyWidthMul, alien.bodyHeightMul, alien.glow, alienBaseColor, alien.id);
+    if (turning) ctx.restore();
 
     // Per direct spec ("when mother alien fish is on screen, have a
     // universal boss health bar at the top middle of the screen instead of
@@ -5882,8 +5928,12 @@ function render() {
     if (alien.type !== 'friendly_alien') continue;
     const pos = worldToScreen(alien.x, alien.y, state.camera);
     if (pos.x < -40 || pos.x > canvas.width + 40 || pos.y < -40 || pos.y > canvas.height + 40) continue;
-    const facing = alien.vx >= 0 ? 1 : -1;
-    drawAlienBody(ctx, pos.x, pos.y, alien.radius * state.camera.zoom, facing, FRIENDLY_ALIEN_COLOR, facing > 0 ? 0 : Math.PI, 0, alien.bodyWidthMul, alien.bodyHeightMul, false, null, alien.id, true);
+    const turn = easeTurn(alien);
+    const turning = turn !== alien.turnTarget;
+    const facing = turning ? 1 : alien.turnTarget;
+    if (turning) beginTurnSquash(ctx, pos.x, pos.y, turn);
+    drawAlienBody(ctx, pos.x, pos.y, alien.radius * state.camera.zoom, facing, FRIENDLY_ALIEN_COLOR, (turning ? turn : alien.turnTarget) > 0 ? 0 : Math.PI, 0, alien.bodyWidthMul, alien.bodyHeightMul, false, null, alien.id, true);
+    if (turning) ctx.restore();
     // Same drag/drop rings a fish gets, since a friendly alien counts as one for moving/merging.
     if (alien.id === draggedFishId || alien.id === combineHoverTargetId) {
       ctx.strokeStyle = alien.id === draggedFishId ? 'rgba(255, 255, 255, 0.9)' : (combineHoverValid ? '#4dff88' : '#ff4d4d');
@@ -5945,7 +5995,9 @@ function render() {
     }
 
     const size = FISH_BASE_SIZE * def.growthStages[fish.stage].scale;
-    const facing = fish.vx >= 0 ? 1 : -1;
+    const turn = easeTurn(fish);
+    const turning = turn !== fish.turnTarget;
+    const facing = turning ? 1 : fish.turnTarget; // mid-turn: drawn facing right through a squash, mirrored once past edge-on
     const isFullyGrown = fish.stage === def.growthStages.length - 1;
 
     // Eye direction must be a normalized unit vector, not a raw target
@@ -5966,6 +6018,7 @@ function render() {
       eyeDirScratch.x = dx / dist;
       eyeDirScratch.y = dy / dist;
       eyeDirection = eyeDirScratch;
+      if (turning && turn < 0) eyeDirScratch.x = -eyeDirScratch.x; // the squash mirrors the eyes' direction too
     }
 
     // Slightly green once a fish is hungry enough to actively seek food (the
@@ -6042,7 +6095,9 @@ function render() {
       ctx.scale(bounceX, bounceY);
       ctx.translate(-pos.x, -pos.y);
     }
+    if (turning) beginTurnSquash(ctx, pos.x, pos.y, turn);
     drawFish(ctx, pos.x, pos.y, fish.speciesId, fish.stage, facing, fish.tailPhase, eyeDirection, fish.starTier || 1, sickness, grayed, state.meta.equippedHatId, state.level.elapsed, fish.growthOrbitPhase || 0, fish.starAnimStartedAt != null ? state.level.elapsed - fish.starAnimStartedAt : -1);
+    if (turning) ctx.restore();
     if (bounceX !== 1 || bounceY !== 1) ctx.restore();
 
     // A fish's health bar only ever renders while it's actually missing
