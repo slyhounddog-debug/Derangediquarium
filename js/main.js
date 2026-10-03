@@ -236,6 +236,7 @@ import {
 import { isPointOnMound, crackMound, renderMound, centerCameraOnMound, isPointOnScienceLab, renderScienceLab, renderMoundMask } from './Mound.js';
 import { drawFish, drawFishShadow } from './FishRenderer.js';
 import { perfMark, perfUpdateBegin, perfUpdateEnd, perfRenderBegin, perfRenderEnd } from './PerfOverlay.js';
+import { loadTitleFonts, initTitleScreen, showTitle, updateTitle, exitTitle, titleBlocksWorldRender, titleNeedsBackdrop, captureTitleBackdrop } from './TitleScreen.js';
 import { oneShotShimmerProgress, drawShimmerSweep, shimmerFadeAlpha, createShimmerTimer, updateShimmerTimer } from './Shimmer.js';
 import {
   initUI,
@@ -1200,41 +1201,13 @@ function getItemSprite(item, foodStaleStep) {
 window.addEventListener('pointerdown', resumeAudio, { once: true });
 window.addEventListener('keydown', resumeAudio, { once: true });
 
-// One-shot title splash (see index.html/style.css's #splash-screen). The
-// title itself grows/fades in and back out via a pure CSS animation on
-// #splash-title; each letter ALSO gets its own independent bounce, which
-// needs a per-letter <span> to animate individually — built here from the
-// element's plain text rather than hardcoded in index.html, so the markup
-// stays just the word itself. GROW_IN_DURATION_S must match splash-grow-fade's
-// own 25% keyframe (4.5s total * 0.25) so letters don't start bouncing until
-// the word has actually finished growing in.
-//
-// The per-letter spans are still built eagerly here at load — but per
-// direct request, #splash-screen itself starts fully invisible (not just
-// "not yet animating" — see its own opacity:0 in style.css) and the
-// animation doesn't start automatically either: both are gated on a single
-// .play class added to #splash-screen (not #splash-title — see style.css's
-// descendant selectors) by triggerSplash() below, once the player actually
-// clicks Start on the new start screen, not on page load. This also means
-// the splash can never bleed through the start screen's blurred backdrop
-// the way it could while only the animation (not the visibility) was gated.
-const splashScreen = document.getElementById('splash-screen');
-const splashTitle = splashScreen.querySelector('#splash-title');
-const SPLASH_GROW_IN_DURATION_S = 1.125;
-const SPLASH_LETTER_STAGGER_S = 0.06;
-const splashLetters = [...splashTitle.textContent];
-splashTitle.textContent = '';
-for (const [i, char] of splashLetters.entries()) {
-  const span = document.createElement('span');
-  span.className = 'splash-letter';
-  span.textContent = char;
-  span.style.animationDelay = `${SPLASH_GROW_IN_DURATION_S + i * SPLASH_LETTER_STAGGER_S}s`;
-  splashTitle.appendChild(span);
-}
-const START_TUTORIAL_DELAY_AFTER_SPLASH_MS = 1000; // per direct request (cut from 2000, itself cut from 3000) — the game-start guided tutorial no longer starts the instant Start is clicked; it waits this long after the splash screen has actually finished fading away
-splashTitle.addEventListener('animationend', (e) => {
-  if (e.target !== splashTitle) return; // ignore bubbled per-letter animationend events, only the title's own grow-fade ending means it's done
-  splashScreen.remove();
+// Game-start guided tutorial timing. Per direct request (title screen rework),
+// the old "Finsanity" grow-fade splash is gone — TitleScreen.js's bubble-trail
+// exit replaces it — so this now runs off the end of that exit instead of the
+// splash's own animationend, and again off every pause-menu Restart (see
+// UI.js's restartLevel, which arms state.ui.replayStartTutorialPending).
+const START_TUTORIAL_DELAY_AFTER_SPLASH_MS = 1000; // per direct request (cut from 2000, itself cut from 3000) — the game-start guided tutorial no longer starts the instant Start is clicked; it waits this long after the title has actually left the screen
+function startTutorialAfterDelay() {
   setTimeout(() => {
     if (!state.level.tutorialFlags.startTutorialShown) {
       state.level.tutorialFlags.startTutorialShown = true;
@@ -1248,25 +1221,6 @@ splashTitle.addEventListener('animationend', (e) => {
       state.level.tutorialFlow = { id: 'start', step: state.ui.shopCollapsed ? 'shop' : 'guppy' };
     }
   }, START_TUTORIAL_DELAY_AFTER_SPLASH_MS);
-});
-// Idempotent/replayable — per direct request, the splash also plays again
-// every time the pause menu's Restart button is used (see UI.js's
-// restartLevel, which calls this after loadLevel), not just once on the
-// very first Start click. The FIRST time this runs, splashScreen is still
-// attached (nothing has removed it yet) and has no 'play' class yet, so the
-// remove-reflow-readd below is a harmless no-op beyond adding the class.
-// Every time after the first, though, the element has already been
-// .remove()'d from the document entirely (see splashTitle's own
-// animationend listener above) — re-appending it is what makes a replay
-// actually visible at all, and the same forced-reflow trick this codebase
-// already uses to restart a CSS animation (see UI.js's playFlash) is what
-// makes it replay from the very beginning rather than being a no-op since
-// the 'play' class never actually left in between.
-function triggerSplash() {
-  if (!splashScreen.isConnected) document.body.appendChild(splashScreen);
-  splashScreen.classList.remove('play');
-  void splashScreen.offsetWidth;
-  splashScreen.classList.add('play');
 }
 
 // ---- Root state (§3.1) — plain, JSON-serializable, meta/level split ----
@@ -1524,13 +1478,12 @@ const state = {
     toastText: null,
     // Same cross-module-flag pattern as
     // wasteTurretAmmoGainedPending above — set by UI.js's restartLevel
-    // (the pause menu's Restart button) the instant it calls loadLevel, per
-    // direct request ("make the splash screen animation happen again").
-    // triggerSplash() itself is a main.js-local function (closes over the
-    // splashScreen/splashTitle DOM refs), so UI.js can't call it directly
-    // without a circular import — read and cleared by render() below on the
-    // very next frame instead.
-    replaySplashPending: false,
+    // (the pause menu's Restart button) the instant it calls loadLevel, so the
+    // guided start tutorial replays after a restart. startTutorialAfterDelay()
+    // is a main.js-local function, so UI.js can't call it directly without a
+    // circular import — read and cleared by render() below on the very next
+    // frame instead.
+    replayStartTutorialPending: false,
   },
   debug: {
     overlayVisible: false,
@@ -3783,19 +3736,17 @@ input.keydownHandlers.push((e) => {
 initUI(state);
 
 // First-launch start screen (index.html's #start-overlay) — Start un-gates
-// the sim loop (state.ui.gameStarted, checked in update() below) and kicks
-// off the title splash, which used to play automatically on load but per
-// direct request now waits for this instead.
+// the sim loop (state.ui.gameStarted, checked in update() below) and plays
+// TitleScreen.js's exit animation over the now-live tank.
 initStartScreen(state, () => {
   state.ui.gameStarted = true;
   startGameMusic(); // per direct request — only Start/Continue (both funnel through this one callback) should ever start the music, not Settings/Help
   causticVideo.play().catch(() => {}); // retries the caustic overlay's autoplay, in case the browser blocked it before this first real user gesture
-  triggerSplash();
+  exitTitle(startTutorialAfterDelay); // per direct request — SANITY/FIN fly up in bubble trails, and the guided tutorial starts once they've left
   scheduleShopButtonReminder(state); // per direct request — bounces the shop toggle until it's opened for the first time
   // Game-start guided tutorial (Shop -> Guppy -> buy your first fish) no
-  // longer starts here — see the splashTitle 'animationend' handler above,
-  // which now starts it START_TUTORIAL_DELAY_AFTER_SPLASH_MS after the
-  // splash has actually finished fading away, per direct request.
+  // longer starts here — startTutorialAfterDelay() runs it once the title
+  // exit has finished, per direct request.
 });
 
 // ---- Loading screen ----
@@ -3860,6 +3811,7 @@ async function runLoadingSequence() {
     preloadAudioFile('audio/Battle.mp3'),
     preloadAudioFile('audio/Boss.mp3'),
     document.fonts ? document.fonts.ready : Promise.resolve(),
+    loadTitleFonts(), // the title logo is baked into sprites once, so its font has to be ready first
   ];
   let completed = 0;
   updateLoadingBar(0);
@@ -3873,7 +3825,9 @@ async function runLoadingSequence() {
   updateLoadingBar(1);
   loadingDone = true;
   loadingOverlay.classList.add('hidden');
+  initTitleScreen();
   document.getElementById('start-overlay').classList.remove('hidden');
+  showTitle(performance.now());
 }
 runLoadingSequence();
 
@@ -4336,17 +4290,11 @@ function updateBattleMusic(state) {
 }
 
 function update(dtMs) {
-  // Ambience (bubbles/seaweed) deliberately does NOT run before the game
-  // has started — the start screen's #start-overlay blurs the tank behind
-  // it with a real backdrop-filter (a compositor-level blur, recomputed
-  // every frame the content behind it changes), so a continuously-animating
-  // scene under a full-viewport blur risked a genuinely laggy/unresponsive
-  // page on slower hardware, which could easily read as "nothing can be
-  // clicked" and "it never goes away" — not because the click handlers
-  // were broken, but because the page itself was struggling to keep up.
-  // Freezing ambience means the blurred backdrop is one static frame the
-  // compositor only has to blur once, not forty times a second, while still
-  // satisfying "the tank blurry behind it" — it's just not animating.
+  // Ambience (bubbles/seaweed) deliberately does NOT run before the game has
+  // started — the start screen's tank backdrop is a one-time half-resolution
+  // snapshot (TitleScreen.js's captureTitleBackdrop), so the first rendered
+  // frame is the whole scene as far as the title is concerned, and nothing
+  // behind it needs to animate.
   if (state.ui.gameStarted) {
     updateAmbience(dtMs);
     // Per direct request ("moving the cursor creates bubbles... based on
@@ -5359,10 +5307,15 @@ function applyGuidedTutorialPreference(state) {
 
 function render() {
   applyGuidedTutorialPreference(state);
-  if (state.ui.replaySplashPending) {
-    state.ui.replaySplashPending = false;
-    triggerSplash();
+  if (state.ui.replayStartTutorialPending) {
+    state.ui.replayStartTutorialPending = false;
+    startTutorialAfterDelay();
   }
+  // Title screen (TitleScreen.js): drawn on its own canvas every frame it's up,
+  // and once its half-resolution backdrop snapshot exists the whole game world
+  // is skipped below — per direct request, so the title costs next to nothing.
+  updateTitle(performance.now());
+  if (titleBlocksWorldRender()) return;
   updateCanvasCursor();
   fpsCounter++;
   const now = performance.now();
@@ -6941,7 +6894,12 @@ function render() {
 
 createGameLoop({
   update: (dtMs) => { perfUpdateBegin(); update(dtMs); perfUpdateEnd(); },
-  render: () => { perfRenderBegin(); render(); perfRenderEnd(state, canvas.width, canvas.height); },
+  render: () => {
+    perfRenderBegin();
+    render();
+    if (titleNeedsBackdrop()) captureTitleBackdrop(canvas); // snapshot of this fully-drawn frame becomes the title's backdrop
+    perfRenderEnd(state, canvas.width, canvas.height);
+  },
   // state.ui.speedX2 (the player-facing 2x speed button/hotkey) stacks
   // multiplicatively on top of the debug time-scale cheat rather than
   // replacing it — the debug +/- keys are a dev tool independent of this
@@ -6951,4 +6909,3 @@ createGameLoop({
   simDtMs: SIM_DT_MS,
   maxFrameSkip: MAX_FRAME_SKIP,
 });
-

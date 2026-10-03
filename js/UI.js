@@ -115,6 +115,7 @@ import { playUpgrade, setMusicVolume, setSfxVolume, getMusicVolume, getSfxVolume
 import { computeProductionInfo } from './ProductionInfo.js';
 import { hasSaveGame, saveGame, loadSaveGame, isGuidedTutorialsEnabled, setGuidedTutorialsEnabled } from './Save.js';
 import { pushGameNotification } from './Notifications.js';
+import { setTitlePaused } from './TitleScreen.js';
 
 let rangeSliderPressed = false; // true from pressing the fan range slider until just after release (see its overlay-click guard)
 const BUILDING_MODAL_EDGE_MARGIN_PX = 8; // keeps a building pop-up off the very edge of the screen
@@ -549,10 +550,8 @@ export function initUI(state) {
     customizationGemsDisplay: document.getElementById('customization-gems-display'),
     customizationPreviewCanvas: document.getElementById('customization-preview-canvas'),
     startAchievementsBtn: document.getElementById('start-achievements-btn'),
-    startCustomizationBtn: document.getElementById('start-customization-btn'),
     startTankBackdrop: document.getElementById('start-tank-backdrop'),
     tankBackBtn: document.getElementById('tank-back-btn'),
-    startOverlay: document.getElementById('start-overlay'),
     startNewGameBtn: document.getElementById('start-new-game-btn'),
     startContinueBtn: document.getElementById('start-continue-btn'),
     startSettingsBtn: document.getElementById('start-settings-btn'),
@@ -2573,8 +2572,11 @@ export function initStartScreen(state, onStart) {
   // once here at page load, not re-checked afterward (nothing can create a
   // save before the start screen is even up).
   els.startContinueBtn.disabled = !hasSaveGame();
+  // Per direct request (new title screen), New Game/Continue no longer hide
+  // #start-overlay themselves — main.js's onStart hands off to
+  // TitleScreen.js's exit animation (SANITY/FIN fly up in bubble trails),
+  // which hides it once that has finished playing.
   els.startNewGameBtn.addEventListener('click', () => {
-    els.startOverlay.classList.add('hidden');
     playPanelClose();
     onStart();
   });
@@ -2590,7 +2592,6 @@ export function initStartScreen(state, onStart) {
       state.level = saved.level;
       centerCameraOnMound(state.camera); // same one-time re-center loadLevel's own callers already do, since a saved level has no camera position of its own
     }
-    els.startOverlay.classList.add('hidden');
     playPanelClose();
     onStart();
   });
@@ -2617,6 +2618,7 @@ export function initStartScreen(state, onStart) {
     // #tank-anchor home on close, below.
     document.body.appendChild(els.tankPanel);
     els.startTankBackdrop.classList.remove('hidden');
+    setTitlePaused(true); // the title animation stops behind #start-tank-backdrop's blur, so that blur only has one static frame to process instead of recomputing every frame
     els.tankPanel.classList.add('modal-mode');
     state.ui.tankPanelCollapsed = false;
     setTankPanelView(state, view);
@@ -2629,11 +2631,11 @@ export function initStartScreen(state, onStart) {
     updateTankPanelCollapse(state);
     els.tankPanel.classList.remove('modal-mode');
     els.startTankBackdrop.classList.add('hidden');
+    setTitlePaused(false);
     els.tankAnchor.appendChild(els.tankPanel); // back to its normal anchored home for in-game use
     playPanelClose();
   };
   els.startAchievementsBtn.addEventListener('click', () => openTankPanelFromStartScreen('achievements'));
-  els.startCustomizationBtn.addEventListener('click', () => openTankPanelFromStartScreen('customization'));
   els.startTankBackdrop.addEventListener('click', closeTankPanelToStartScreen);
   // Per direct request ("removing the tabs to switch between menus that you
   // don't have access to yet, and replace those tab buttons with a Back
@@ -2651,14 +2653,17 @@ export function initStartScreen(state, onStart) {
     showPauseSettings();
     playPanelOpen();
   });
+  // Help layers over #start-overlay (same pattern as Settings and the Tank
+  // panel above) instead of hiding it, so the title art stays behind the
+  // overlay's blur; the title animation is paused for the same reason as above.
   els.startHelpBtn.addEventListener('click', () => {
-    els.startOverlay.classList.add('hidden');
     els.startHelpOverlay.classList.remove('hidden');
+    setTitlePaused(true);
     playPanelOpen();
   });
   els.startHelpBackBtn.addEventListener('click', () => {
     els.startHelpOverlay.classList.add('hidden');
-    els.startOverlay.classList.remove('hidden');
+    setTitlePaused(false);
     playPanelClose();
   });
 }
@@ -2681,8 +2686,8 @@ function saveGameFromPause(state) {
 // (see initStartScreen below), just reachable mid-game too. Handles both
 // doors this shared Settings sub-view can be opened through: mid-game (just
 // resume with the loaded state) and via the start screen (mirrors Continue —
-// hide the start screen too and actually kick off onStart(), since the game
-// was never running yet).
+// actually kick off onStart() (which also plays the title's exit animation),
+// since the game was never running yet).
 function loadLastSaveFromPause(state) {
   const saved = loadSaveGame();
   if (!saved) {
@@ -2696,7 +2701,6 @@ function loadLastSaveFromPause(state) {
   if (settingsOpenedFromStartScreen) {
     settingsOpenedFromStartScreen = false;
     els.pauseOverlay.classList.add('hidden');
-    els.startOverlay.classList.add('hidden');
     playPanelClose();
     if (startOnStartCallback) startOnStartCallback();
   } else {
@@ -2713,13 +2717,13 @@ function restartLevel(state) {
   centerCameraOnMound(state.camera); // loadLevel resets camera.x to 0 — re-center on the Mound, same as the initial load
   refreshShopPanel(state);
   closePauseMenu(state);
-  // Per direct request, the title splash plays again on every Restart, not
-  // just the very first Start click — main.js's triggerSplash() is a local
-  // function closing over DOM refs this file can't import directly without
-  // a circular dependency, so this just arms the same cross-module pending-
-  // flag pattern wasteTurretAmmoGainedPending/chestItemAbsorbedPending
-  // already use; render() reads and clears it the very next frame.
-  state.ui.replaySplashPending = true;
+  // Restart re-runs the guided start tutorial, which used to ride on the
+  // title splash finishing — main.js's startTutorialAfterDelay() is a
+  // main.js-local function this file can't import without a circular
+  // dependency, so this arms the same cross-module pending-flag pattern
+  // wasteTurretAmmoGainedPending/chestItemAbsorbedPending already use;
+  // render() reads and clears it the very next frame.
+  state.ui.replayStartTutorialPending = true;
 }
 
 // Per direct request ("add a main menu button to the pause menu"), later

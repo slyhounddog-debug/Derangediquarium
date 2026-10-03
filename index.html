@@ -6,13 +6,11 @@
 <title>Finsanity</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Comic+Neue:wght@400;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Comic+Neue:wght@400;700&family=Fredoka:wght@600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 <canvas id="game-canvas"></canvas>
-
-<div id="splash-screen"><div id="splash-title">Finsanity</div></div>
 
 <!-- Loading screen, per direct request ("make sure everything in the game
      like the music is loaded before the start menu shows up") — sits above
@@ -22,7 +20,7 @@
      the bar as it fills. -->
 <div id="loading-overlay">
   <div id="loading-content">
-    <div id="loading-title">Finsanity</div>
+    <div id="loading-title"><span class="lt-fin">Fin</span><span class="lt-sanity">Sanity</span></div>
     <div id="loading-bar-track">
       <div id="loading-bar-fill"></div>
       <canvas id="loading-guppy-canvas" width="48" height="36"></canvas>
@@ -31,18 +29,26 @@
   </div>
 </div>
 
+<!-- Per direct request, the start screen is a fully reworked title: the tank
+     behind it is a cheap half-resolution snapshot (#title-backdrop, see
+     TitleScreen.js's captureTitleBackdrop) instead of a live backdrop-filter
+     blur, #title-canvas holds the animated logo/fish/bubbles/loose coins, and
+     the 5 menu options are 3D wooden planks along the bottom where the
+     toolbar normally lives. Customize is no longer on this screen (it's still
+     in the in-game Tank panel). -->
 <div id="start-overlay" class="hidden">
-  <div id="start-modal">
-    <button id="start-new-game-btn" class="pause-btn sheen-target">▶️ New Game</button>
-    <button id="start-continue-btn" class="pause-btn sheen-target" disabled>💾 Continue Game</button>
-    <button id="start-achievements-btn" class="pause-btn sheen-target">🎖️ Achievements</button>
-    <button id="start-customization-btn" class="pause-btn sheen-target">🎩 Customize</button>
-    <button id="start-settings-btn" class="pause-btn sheen-target">⚙️ Settings</button>
-    <button id="start-help-btn" class="pause-btn sheen-target">❓ Help</button>
+  <canvas id="title-backdrop"></canvas>
+  <canvas id="title-canvas"></canvas>
+  <div id="start-planks">
+    <button id="start-new-game-btn" class="plank-btn">New Game</button>
+    <button id="start-continue-btn" class="plank-btn" disabled>Continue</button>
+    <button id="start-achievements-btn" class="plank-btn">Achievements</button>
+    <button id="start-settings-btn" class="plank-btn">Settings</button>
+    <button id="start-help-btn" class="plank-btn">Help</button>
   </div>
 </div>
 
-<!-- Per direct request, Achievements/Customization are reachable from the
+<!-- Per direct request, Achievements are reachable from the
      start screen too, before a game has even started — rather than build a
      second copy of the Achievements list/hat grid, this just re-shows the
      SAME #tank-panel (see UI.js's setTankPanelView) as a centered modal

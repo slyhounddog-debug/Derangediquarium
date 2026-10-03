@@ -17,68 +17,6 @@ html, body {
   cursor: crosshair;
 }
 
-/* One-shot title splash — used to play automatically on load; now gated
-   behind the player clicking "Start" on the new start screen instead (per
-   direct request). #splash-screen starts fully invisible (opacity:0, not
-   just "not yet animating") so the word can never bleed through the start
-   screen's blur — main.js's triggerSplash() adds a single .play class
-   directly to #splash-screen once Start is actually clicked, which both
-   reveals it AND (via the descendant selectors below) kicks off both layers
-   of animation together: #splash-title itself fades/grows in, holds, then
-   fades back out (splash-grow-fade, on the whole word so the letters' own
-   bounce doesn't fight a separate opacity change); each .splash-letter span
-   (built by main.js from the title's plain text) plays its own independent
-   bounce (splash-letter-bounce), staggered by animation-delay so they hop in
-   sequence rather than all at once — timed to start only once the grow-in
-   has finished (see main.js's growInDuration). Pure decoration throughout:
-   pointer-events none so it never blocks a click, and main.js removes the
-   element entirely once #splash-title's own animation finishes (its
-   'animationend' listener filters to e.target === title, since child letter
-   animations also bubble the same event) rather than leaving a hidden node
-   sitting on top forever. */
-#splash-screen {
-  position: fixed; inset: 0;
-  display: flex; align-items: center; justify-content: center;
-  z-index: 500;
-  pointer-events: none;
-  opacity: 0;
-}
-#splash-screen.play { opacity: 1; }
-#splash-title {
-  font-size: 64px; font-weight: 900;
-  color: #fff6ea;
-  text-shadow: 0 0 24px rgba(255, 111, 174, 0.8), 0 6px 0 #c25f8f, 0 10px 18px rgba(0, 0, 0, 0.35);
-}
-#splash-screen.play #splash-title {
-  animation: splash-grow-fade 4.5s ease forwards;
-}
-@keyframes splash-grow-fade {
-  0% { transform: scale(0.3); opacity: 0; }
-  25% { transform: scale(1); opacity: 1; }
-  75% { transform: scale(1); opacity: 1; }
-  100% { transform: scale(1); opacity: 0; }
-}
-/* display:inline-block is required here unconditionally (not just once
-   .play is active) — a plain inline <span> ignores `transform` entirely per
-   the CSS spec, so without this the translateY bounce below would silently
-   do nothing even while its animation was correctly running. (This exact
-   line was lost in an earlier pass when the animation itself was split out
-   into the gated rule below it — restored here as its own always-on base
-   rule.) */
-.splash-letter {
-  display: inline-block;
-}
-#splash-screen.play .splash-letter {
-  animation: splash-letter-bounce 0.6s ease both;
-}
-@keyframes splash-letter-bounce {
-  0% { transform: translateY(0); }
-  30% { transform: translateY(-22px); }
-  50% { transform: translateY(4px); }
-  70% { transform: translateY(-8px); }
-  100% { transform: translateY(0); }
-}
-
 /* Alt-mode, per direct request — a toggle hotkey (Alt) that hides every
    piece of persistent HUD/UI chrome for a clean, unobstructed view of the
    tank itself (screenshots, recording, just looking at your fish). Toggled
@@ -1652,8 +1590,7 @@ body.alt-mode #production-info { display: none !important; }
      request, above the start screen (600) too: opening Settings from the
      start screen shows this SAME overlay layered on top of #start-overlay
      rather than swapping it out (see UI.js's initStartScreen), so the
-     latter's own blurred/dimmed backdrop keeps covering the game and the
-     not-yet-triggered splash underneath both. */
+     latter's own backdrop snapshot keeps covering the game underneath both. */
   z-index: 650;
 }
 #pause-overlay.hidden { display: none; }
@@ -1735,48 +1672,121 @@ body.alt-mode #production-info { display: none !important; }
 .toggle-row label { flex: 1; width: auto; cursor: pointer; }
 .toggle-row input[type="checkbox"] { width: 18px; height: 18px; accent-color: #ff6fae; cursor: pointer; }
 
-/* First-launch start screen — shown on page load, ahead of everything else
-   (highest z-index in the game), with a blurred/dimmed view of the tank
-   behind it via backdrop-filter (a compositor-level blur on this one static
-   overlay, nothing like the per-frame ctx.filter cost this codebase
-   otherwise avoids on the canvas itself). Settings opened from here reuses
-   the EXACT SAME #pause-settings sub-view the real pause menu uses (see
-   UI.js's initStartScreen/returnFromPauseSettings) rather than a second copy
-   of the sliders, so "Settings with the same settings as the pause menu" is
-   literally true, not just visually similar. */
+/* Start screen — per direct request, completely reworked: the tank behind it
+   is #title-backdrop, a half-resolution snapshot of the game canvas that the
+   browser upscales with bilinear smoothing (the "very slight blur", with no
+   backdrop-filter or per-frame filter at all — see TitleScreen.js's
+   captureTitleBackdrop), #title-canvas is the animated logo layer, and the
+   menu options are wooden planks along the bottom, where the toolbar lives
+   in-game. Settings opened from here still reuses the EXACT SAME
+   #pause-settings sub-view the real pause menu uses (see UI.js's
+   initStartScreen/returnFromPauseSettings). */
 #start-overlay {
   position: fixed; inset: 0;
-  display: flex; align-items: center; justify-content: center;
-  background: rgba(11, 37, 64, 0.45);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  z-index: 600; /* above the splash (500) — the splash only ever starts animating once this closes */
+  background: #0b2540; /* only visible for the frame or two before the backdrop snapshot lands */
+  overflow: hidden;
+  z-index: 600; /* above the game canvas and every HUD element */
 }
 #start-overlay.hidden { display: none; }
-/* Same size and look as #pause-menu, per direct request — identical width/
-   padding/border/radius/shadow recipe (just the outer overlay's own tint
-   differs, to read as "before the game" rather than "game paused"), and
-   flex-shrink:0/max-width so it can never be stretched to fill the
-   flex-centered overlay even in an unusual viewport. */
-#start-modal {
-  width: 280px;
-  max-width: 90vw;
-  flex-shrink: 0;
-  background: linear-gradient(165deg, #fffaf3 0%, #ffe4f2 100%);
-  color: #6b4c6b;
-  border-radius: 28px;
-  border: 3px solid #ffffff;
-  padding: 28px 24px;
-  box-shadow: 0 16px 40px rgba(107, 76, 107, 0.45), inset 0 2px 0 rgba(255, 255, 255, 0.7);
-  text-align: center;
+#title-backdrop, #title-canvas {
+  position: absolute; inset: 0;
+  width: 100%; height: 100%;
+  display: block;
 }
-/* Deliberately no title or tagline text at all any more, per direct request
-   for "a less is more type of visual" — just the three buttons. (Also means
-   the game's name is never shown here — the splash animation, once Start is
-   clicked, is the only place it appears, so it still reads as a reveal
-   rather than being shown twice/spoiled.) */
-#start-new-game-btn, #start-continue-btn { background: linear-gradient(160deg, #a8f0cb 0%, #7ad4a8 100%); color: #1f4a34; box-shadow: 0 3px 8px rgba(53, 145, 97, 0.35), inset 0 2px 0 rgba(255, 255, 255, 0.5); }
-#start-new-game-btn:hover, #start-continue-btn:hover { background: linear-gradient(160deg, #97e8bd 0%, #68c896 100%); }
+#title-backdrop { opacity: 0; }
+#title-backdrop.ready { opacity: 1; transition: opacity 0.35s ease; }
+/* Start pressed: the logo flies up (TitleScreen.js), the planks sink away, and
+   the snapshot fades out to reveal the live tank underneath. */
+#start-overlay.leaving { background: transparent; pointer-events: none; }
+#start-overlay.leaving #title-backdrop { opacity: 0; transition: opacity 1s ease 0.25s; }
+#start-planks {
+  position: absolute; left: 0; right: 0; bottom: 3.2vh;
+  display: flex; justify-content: center; align-items: flex-end;
+  gap: clamp(8px, 1.2vw, 18px);
+  padding: 0 16px;
+  pointer-events: none; /* only the planks themselves take clicks — the loose coins above them stay draggable */
+  transition: transform 0.55s cubic-bezier(0.5, 0, 0.8, 0.4), opacity 0.45s ease;
+}
+#start-overlay.leaving #start-planks { transform: translateY(190px); opacity: 0; }
+
+/* 3D wooden plank — all CSS (gradients + box-shadow), no images: repeating
+   gradients for the grain, a bright top-edge/dark bottom-edge inset for the
+   bevel, and two stacked hard shadows below for the plank's front face. */
+.plank-btn {
+  --tilt: 0deg;
+  --i: 0;
+  position: relative;
+  pointer-events: auto;
+  flex: 1 1 0; min-width: 0; max-width: 210px;
+  height: clamp(46px, 7vh, 64px);
+  padding: 0 22px;
+  border: 0; border-radius: 7px 9px 8px 7px;
+  font: 700 clamp(12px, 1.3vw, 18px)/1 'Fredoka', 'Baloo 2', sans-serif;
+  letter-spacing: 0.05em; text-transform: uppercase; white-space: nowrap;
+  color: #fff1d0;
+  text-shadow: 0 2px 0 #4a2610, 0 0 8px rgba(40, 18, 4, 0.5);
+  cursor: pointer;
+  background:
+    repeating-linear-gradient(92deg, transparent 0 9px, rgba(70, 35, 12, 0.14) 9px 10px, transparent 10px 23px, rgba(255, 225, 170, 0.09) 23px 25px),
+    repeating-linear-gradient(88deg, transparent 0 41px, rgba(60, 28, 8, 0.2) 41px 43px),
+    linear-gradient(180deg, #e0a964 0%, #c88642 45%, #b4733a 100%);
+  background-position: calc(var(--i) * 37px) 0, calc(var(--i) * 19px) 0, 0 0;
+  box-shadow:
+    inset 0 3px 0 rgba(255, 238, 195, 0.6),
+    inset 0 -3px 0 rgba(80, 40, 14, 0.35),
+    inset 3px 0 0 rgba(255, 230, 180, 0.25),
+    inset -3px 0 0 rgba(80, 40, 14, 0.22),
+    0 7px 0 #7a4720,
+    0 10px 0 #4a2a12,
+    0 16px 20px rgba(0, 0, 0, 0.45);
+  transform: rotate(var(--tilt));
+  transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
+  animation: plank-rise 0.55s cubic-bezier(0.2, 1.5, 0.4, 1) backwards; /* backwards, not both — a held end-state transform would override the hover/press transforms below */
+  animation-delay: calc(1.9s + var(--i) * 0.09s);
+}
+.plank-btn::before, .plank-btn::after {
+  content: '';
+  position: absolute; top: 50%;
+  width: 7px; height: 7px; margin-top: -3.5px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #e4e4e4 0 18%, #858585 60%, #3b3b3b 100%);
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.3), 0 -1px 1px rgba(0, 0, 0, 0.5);
+}
+.plank-btn::before { left: 9px; }
+.plank-btn::after { right: 9px; }
+.plank-btn:nth-child(1) { --tilt: -1.3deg; --i: 0; }
+.plank-btn:nth-child(2) { --tilt: 0.9deg; --i: 1; }
+.plank-btn:nth-child(3) { --tilt: -0.6deg; --i: 2; }
+.plank-btn:nth-child(4) { --tilt: 1.2deg; --i: 3; }
+.plank-btn:nth-child(5) { --tilt: -0.9deg; --i: 4; }
+.plank-btn:hover:not(:disabled) {
+  transform: rotate(0deg) translateY(-4px);
+  filter: brightness(1.1);
+  box-shadow:
+    inset 0 3px 0 rgba(255, 244, 210, 0.7),
+    inset 0 -3px 0 rgba(80, 40, 14, 0.35),
+    inset 3px 0 0 rgba(255, 230, 180, 0.25),
+    inset -3px 0 0 rgba(80, 40, 14, 0.22),
+    0 9px 0 #7a4720,
+    0 12px 0 #4a2a12,
+    0 20px 24px rgba(0, 0, 0, 0.5);
+}
+.plank-btn:active:not(:disabled) {
+  transform: rotate(0deg) translateY(5px);
+  box-shadow:
+    inset 0 3px 0 rgba(255, 238, 195, 0.45),
+    inset 0 -3px 0 rgba(80, 40, 14, 0.35),
+    0 2px 0 #7a4720,
+    0 4px 0 #4a2a12,
+    0 7px 10px rgba(0, 0, 0, 0.4);
+}
+.plank-btn:focus-visible { outline: 3px solid #fff6c9; outline-offset: 3px; }
+/* Continue with no save stays visible but reads as unavailable. */
+.plank-btn:disabled { cursor: not-allowed; filter: grayscale(0.6) brightness(0.72); }
+@keyframes plank-rise {
+  0% { transform: translateY(150px) rotate(var(--tilt)); opacity: 0; }
+  100% { transform: translateY(0) rotate(var(--tilt)); opacity: 1; }
+}
 
 /* Loading screen — per direct request, shown first (above #start-overlay,
    which starts hidden) while main.js preloads the 3 boss/game/battle music
@@ -1798,10 +1808,26 @@ body.alt-mode #production-info { display: none !important; }
   text-align: center;
 }
 #loading-title {
-  font-size: 26px; font-weight: 800; color: #fff;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
-  margin-bottom: 22px;
+  display: flex; justify-content: center; align-items: baseline; gap: 0.05em;
+  font: 700 46px/1 'Fredoka', 'Baloo 2', sans-serif;
+  margin-bottom: 26px;
 }
+/* Same Fin/Sanity colors and chunky outline as the title screen's logo
+   (TitleScreen.js), per direct request — a static text-only version: gradient
+   text with stacked drop-shadows for the white inner ring, dark border and
+   depth, cheap here because the loading screen is brief and nothing behind it
+   animates. */
+#loading-title span {
+  display: inline-block;
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent; color: transparent;
+  padding: 0 0.03em;
+  filter: drop-shadow(1.5px 0 0 #fff) drop-shadow(-1.5px 0 0 #fff) drop-shadow(0 1.5px 0 #fff) drop-shadow(0 -1.5px 0 #fff)
+    drop-shadow(2.5px 0 0 #1B263B) drop-shadow(-2.5px 0 0 #1B263B) drop-shadow(0 2.5px 0 #1B263B) drop-shadow(0 -2.5px 0 #1B263B)
+    drop-shadow(0 5px 0 #0e1624);
+}
+.lt-fin { background-image: linear-gradient(180deg, #8fe6ff 0%, #42C5F4 45%, #0077B6 100%); transform: rotate(-5deg) translateY(-3px); }
+.lt-sanity { font-size: 1.28em; background-image: linear-gradient(180deg, #FFB08A 0%, #FF7448 45%, #FF4500 100%); transform: rotate(2deg) translateY(3px); }
 #loading-bar-track {
   position: relative;
   height: 20px;
