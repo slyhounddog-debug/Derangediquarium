@@ -136,7 +136,7 @@ export function createInput(canvas) {
   return input;
 }
 
-// Panning is driven only by deliberate input, vertically only — WASD/arrows
+// Panning is driven only by deliberate input, vertically only — the arrow keys
 // and the scroll wheel. Mouse position alone never pans the camera (no
 // edge-scroll): it used to fire by accident during ordinary play (e.g.
 // moving the cursor toward the bottom of the screen to click a coin near the
@@ -156,12 +156,10 @@ export function updateCamera(camera, input, canvas, dtMs, worldBottomY = WORLD_H
   const dt = dtMs / 1000;
   let dy = 0;
 
-  // KeyS used to be deliberately unbound here (it was the shop collapse/
-  // expand hotkey) — that hotkey moved to Q, and later to E (freeing Q up
-  // for the Pipette Tool/Clear Cursor — see main.js's keydown handler), so S
-  // does what W already did for the opposite direction: pan down.
-  if (input.keysDown.has('KeyW') || input.keysDown.has('ArrowUp')) dy -= 1;
-  if (input.keysDown.has('KeyS') || input.keysDown.has('ArrowDown')) dy += 1;
+  // Arrow keys only, per direct request — W and S were freed up (S is now the
+  // Science Lab hotkey, see main.js's keydown handler).
+  if (input.keysDown.has('ArrowUp')) dy -= 1;
+  if (input.keysDown.has('ArrowDown')) dy += 1;
 
   camera.y += dy * CAMERA_PAN_SPEED * dt;
 

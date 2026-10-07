@@ -41,6 +41,7 @@ import {
   POWER_HISTORY_MAX,
   SCIENCE_LAB_UPGRADES,
   SCIENCE_LAB_UPGRADE_LIST,
+  MOUND_MAX_TIER,
   TANK_EXPANSION_UPGRADE_COSTS,
   TANK_EXPANSION_MAX_TIER,
   TANK_EXPANSION_ROWS_PER_TIER,
@@ -415,7 +416,6 @@ export function initUI(state) {
     buildingMoveLegendLine3: document.getElementById('building-move-legend-line3'),
     fishMergeLegend: document.getElementById('fish-merge-legend'),
     hotkeyLegendEsc: document.getElementById('hotkey-legend-esc'),
-    hotkeyLegendE: document.getElementById('hotkey-legend-e'),
     hotkeyLegendQ: document.getElementById('hotkey-legend-q'),
     hotkeyLegendUndo: document.getElementById('hotkey-legend-undo'),
     hotkeyLegendAlt: document.getElementById('hotkey-legend-alt'),
@@ -533,9 +533,14 @@ export function initUI(state) {
     labPurchaseCost: document.getElementById('lab-purchase-cost'),
     labPurchaseCancelBtn: document.getElementById('lab-purchase-cancel-btn'),
     labPurchaseConfirmBtn: document.getElementById('lab-purchase-confirm-btn'),
-    tankAnchor: document.getElementById('tank-anchor'),
+    tankOverlay: document.getElementById('tank-overlay'),
     tankPanel: document.getElementById('tank-panel'),
+    tankTitle: document.getElementById('tank-title'),
+    tankCloseBtn: document.getElementById('tank-close-btn'),
     tankCollapseBtn: document.getElementById('tank-collapse-btn'),
+    labCollapseBtn: document.getElementById('lab-collapse-btn'),
+    shopCloseBtn: document.getElementById('shop-close-btn'),
+    shopBuildingsTitle: document.getElementById('shop-buildings-title'),
     tankPointsDisplay: document.getElementById('tank-points-display'),
     tankUpgradeList: document.getElementById('tank-upgrade-list'),
     tankTabUpgradesBtn: document.getElementById('tank-tab-upgrades'),
@@ -551,7 +556,6 @@ export function initUI(state) {
     customizationPreviewCanvas: document.getElementById('customization-preview-canvas'),
     startAchievementsBtn: document.getElementById('start-achievements-btn'),
     startTankBackdrop: document.getElementById('start-tank-backdrop'),
-    tankBackBtn: document.getElementById('tank-back-btn'),
     startNewGameBtn: document.getElementById('start-new-game-btn'),
     startContinueBtn: document.getElementById('start-continue-btn'),
     startSettingsBtn: document.getElementById('start-settings-btn'),
@@ -725,6 +729,12 @@ export function initUI(state) {
   els.tankCollapseBtn.addEventListener('click', () => {
     toggleTankPanel(state);
   });
+  els.labCollapseBtn.addEventListener('click', () => toggleLabMenu(state));
+  // Shop's X — the only mouse way to close it, per direct request (clicking
+  // outside it must NOT close it, unlike the Tank/Lab windows). Same effect
+  // as the E hotkey, which keeps a selected fish selected (keepSelection) —
+  // the X doesn't, matching what the toggle button already did.
+  els.shopCloseBtn.addEventListener('click', () => toggleShopCollapse(state));
 
   // The dedicated pause-menu button is gone per direct request — Escape is
   // the only way to open/close the pause menu now (main.js's keydown
@@ -842,16 +852,18 @@ export function initUI(state) {
 // compete with a panel left open behind it. No sound of its own — whatever
 // triggered the close (opening the Lab, picking a tool, pressing Escape)
 // already has its own feedback.
-export function closeSidePanels(state) {
-  if (!state.ui.shopCollapsed) { state.ui.shopCollapsed = true; updateShopCollapse(state); }
+// keepShop: per direct request the Shop stays open until its own X/E closes
+// it, so everyday actions (picking a tool, right-click cancel, opening a
+// building pop-up) pass true and only the Tank window is closed.
+export function closeSidePanels(state, keepShop = false) {
+  if (!keepShop && !state.ui.shopCollapsed) { state.ui.shopCollapsed = true; updateShopCollapse(state); }
   if (!state.ui.tankPanelCollapsed) { state.ui.tankPanelCollapsed = true; updateTankPanelCollapse(state); }
 }
 
-// Called by the collapse button and the S hotkey (wired in main.js) alike,
-// so both paths share one place that actually flips the state. Expanding
-// the shop auto-collapses the Tank panel — they share the same on-screen
-// slot (see the CSS comment on #shop-panel, #tank-panel), so at most one is
-// ever expanded.
+// Called by the collapse button and the E hotkey (wired in main.js) alike,
+// so both paths share one place that actually flips the state. Opening the
+// shop closes the Tank and Lab windows — only one of the three centered
+// windows is ever open at a time.
 // keepSelection: the E hotkey passes true — per direct request it only ever
 // opens/closes the shop, so closing it must NOT deselect a selected fish (see
 // updateShopCollapse); every other close path still deselects.
@@ -860,6 +872,7 @@ export function toggleShopCollapse(state, keepSelection = false) {
   if (!state.ui.shopCollapsed) {
     state.ui.tankPanelCollapsed = true;
     updateTankPanelCollapse(state);
+    closeLabMenu();
     state.level.tutorialFlags.firstShopOpened = true; // stops scheduleShopButtonReminder's bounce for good, this playthrough
   }
   updateShopCollapse(state, keepSelection);
@@ -887,20 +900,29 @@ function updateShopCollapse(state, keepSelection = false) {
 }
 
 // Mirrors toggleShopCollapse/updateShopCollapse exactly, for the Tank
-// Upgrades panel's own button and its P hotkey (wired in main.js).
+// Upgrades window's own button and its T hotkey (wired in main.js).
 export function toggleTankPanel(state) {
   state.ui.tankPanelCollapsed = !state.ui.tankPanelCollapsed;
   if (!state.ui.tankPanelCollapsed) {
     state.ui.shopCollapsed = true;
     updateShopCollapse(state);
+    closeLabMenu();
     maybeBounceAchievementTabFirstOpen(state);
   }
   updateTankPanelCollapse(state);
   (state.ui.tankPanelCollapsed ? playPanelClose : playPanelOpen)();
 }
 
+// The Science Lab's button and S hotkey (wired in main.js) — a no-op until
+// the Mound has shattered into the Lab, same condition as clicking the Lab
+// itself in the tank (Mound.js's isPointOnScienceLab).
+export function toggleLabMenu(state) {
+  if (labMenuOpen) closeLabMenu();
+  else if (state.level.tier >= MOUND_MAX_TIER) openLabMenu(state);
+}
+
 function updateTankPanelCollapse(state) {
-  els.tankPanel.classList.toggle('collapsed', state.ui.tankPanelCollapsed);
+  els.tankOverlay.classList.toggle('collapsed', state.ui.tankPanelCollapsed);
   els.tankCollapseBtn.classList.toggle('panel-toggle-active', !state.ui.tankPanelCollapsed);
   if (state.ui.tankPanelCollapsed) {
     stopCustomizationPreviewAnimation(); // no point animating a preview nobody can see, regardless of which view was showing
@@ -958,6 +980,7 @@ function refreshTimeControlButtons(state) {
   setMusicUnderwaterMuffle(state.ui.timePaused);
   setMusicSpeedBoost(state.ui.speedX2);
   setMusicPaused(state.ui.timePaused); // per direct request ("slow down music 2% for paused time") — a small playbackRate dip layered on top of the existing muffle effect, see Sound.js
+  document.body.classList.toggle('time-paused', state.ui.timePaused); // per direct request — fades in #time-pause-overlay's tint so a paused game is visually obvious (purely cosmetic; the sim is paused by main.js, not here)
 }
 
 export function toggleTimePause(state) {
@@ -1039,7 +1062,7 @@ export function openRecipeMenu(state, tileKey) {
   recipeMenuClosing = false;
   recipeMenuTileKey = tileKey;
   if (recipeMenuCloseTimer !== null) { clearTimeout(recipeMenuCloseTimer); recipeMenuCloseTimer = null; }
-  closeSidePanels(state); // keep the Shop/Tank Upgrades panel from sitting open behind this, same as the Lab
+  closeSidePanels(state, true); // the Tank window shouldn't sit open behind this (the Shop stays, per direct request)
   els.recipeOverlay.classList.remove('hidden');
   refreshRecipeMenu(state);
   updateRecipeMenuPosition(state); // position it correctly before the reveal so it doesn't flash at (0,0) first
@@ -1081,7 +1104,7 @@ export function openBuildingInfoMenu(state, tileKey) {
   buildingInfoTileKey = tileKey;
   state.ui.buildingInfoTileKey = tileKey; // cross-module mirror — Grid.js can't import UI.js's own module-local var, see renderFanIndicators' fan-cone highlight
   if (buildingInfoMenuCloseTimer !== null) { clearTimeout(buildingInfoMenuCloseTimer); buildingInfoMenuCloseTimer = null; }
-  closeSidePanels(state);
+  closeSidePanels(state, true);
   els.buildingInfoOverlay.classList.remove('hidden');
   refreshBuildingInfoMenu(state);
   updateBuildingInfoMenuPosition(state);
@@ -1202,7 +1225,7 @@ export function openFishInfoMenu(state, fishId) {
   state.ui.fishInfoModalFrozenY = fish.y;
   state.ui.fishInfoModalFrozenGeneratedMw = fish.lastGeneratedMw || 0; // see this field's own comment in main.js's initial ui state
   if (fishInfoMenuCloseTimer !== null) { clearTimeout(fishInfoMenuCloseTimer); fishInfoMenuCloseTimer = null; }
-  closeSidePanels(state);
+  closeSidePanels(state, true);
   els.fishInfoOverlay.classList.remove('hidden');
   refreshFishInfoMenu(state);
   if (fish.speciesId === 'buffer_fish') refreshFishInfoFilterGrid(state, fish);
@@ -1364,7 +1387,7 @@ export function openPlatformFilterMenu(state, tileKey) {
   platformFilterMenuClosing = false;
   platformFilterTileKey = tileKey;
   if (platformFilterMenuCloseTimer !== null) { clearTimeout(platformFilterMenuCloseTimer); platformFilterMenuCloseTimer = null; }
-  closeSidePanels(state); // keep the Shop/Tank Upgrades panel from sitting open behind this, same as every other fly-out pop-up
+  closeSidePanels(state, true); // same as every other fly-out pop-up: closes the Tank window, leaves the Shop open
   els.platformFilterOverlay.classList.remove('hidden');
   refreshPlatformFilterMenu(state);
   updatePlatformFilterMenuPosition(state); // position it correctly before the reveal so it doesn't flash at (0,0) first
@@ -1537,7 +1560,7 @@ export function openStorageChestModal(state, tileKey) {
   storageChestMenuClosing = false;
   storageChestTileKey = tileKey;
   if (storageChestMenuCloseTimer !== null) { clearTimeout(storageChestMenuCloseTimer); storageChestMenuCloseTimer = null; }
-  closeSidePanels(state);
+  closeSidePanels(state, true);
   els.storageChestOverlay.classList.remove('hidden');
   refreshStorageChestModal(state);
   updateStorageChestModalPosition(state);
@@ -2599,27 +2622,13 @@ export function initStartScreen(state, onStart) {
   // ("add the achievements menu and the customization menu to the start
   // menu, allowing them to see/claim achievements, and customize their fish
   // there"). Same "layer on top, don't hide #start-overlay" pattern Settings
-  // already uses just above — #tank-panel's own .modal-mode class (see
-  // style.css) repositions it into a plain centered fixed modal with
-  // #start-tank-backdrop dimming everything behind it.
+  // already uses just above — #tank-overlay's .start-mode class (see
+  // style.css) lifts it above #start-overlay and hides the Upgrades tab,
+  // with #start-tank-backdrop dimming everything behind it.
   const openTankPanelFromStartScreen = (view) => {
-    // Real bug, caught during verification: #tank-panel's `position: fixed`
-    // gets TRAPPED inside #bottom-bar-row's own coordinate space, because
-    // that ancestor has a CSS `transform` on it (centering the row) — per
-    // spec, any transformed ancestor becomes the containing block for a
-    // fixed-position descendant, silently overriding "fixed relative to the
-    // viewport." That left the panel positioned relative to the toolbar row
-    // instead of the screen, AND z-index 610 only being compared within that
-    // row's own (much lower) local stacking context — so it rendered small,
-    // mispositioned, and visually BEHIND #start-overlay's blur despite the
-    // higher z-index. Reparenting to a direct child of <body> escapes every
-    // transformed ancestor entirely, which is what actually makes `position:
-    // fixed` behave the way it's meant to here — moved back to its normal
-    // #tank-anchor home on close, below.
-    document.body.appendChild(els.tankPanel);
     els.startTankBackdrop.classList.remove('hidden');
     setTitlePaused(true); // the title animation stops behind #start-tank-backdrop's blur, so that blur only has one static frame to process instead of recomputing every frame
-    els.tankPanel.classList.add('modal-mode');
+    els.tankOverlay.classList.add('start-mode');
     state.ui.tankPanelCollapsed = false;
     setTankPanelView(state, view);
     updateTankPanelCollapse(state);
@@ -2629,19 +2638,23 @@ export function initStartScreen(state, onStart) {
   const closeTankPanelToStartScreen = () => {
     state.ui.tankPanelCollapsed = true;
     updateTankPanelCollapse(state);
-    els.tankPanel.classList.remove('modal-mode');
+    els.tankOverlay.classList.remove('start-mode');
     els.startTankBackdrop.classList.add('hidden');
     setTitlePaused(false);
-    els.tankAnchor.appendChild(els.tankPanel); // back to its normal anchored home for in-game use
     playPanelClose();
   };
   els.startAchievementsBtn.addEventListener('click', () => openTankPanelFromStartScreen('achievements'));
-  els.startTankBackdrop.addEventListener('click', closeTankPanelToStartScreen);
-  // Per direct request ("removing the tabs to switch between menus that you
-  // don't have access to yet, and replace those tab buttons with a Back
-  // button") — #tank-back-btn (shown only while .modal-mode is present, see
-  // style.css) does exactly what clicking the backdrop already does.
-  els.tankBackBtn.addEventListener('click', closeTankPanelToStartScreen);
+  // The Tank window's X and a click on the (transparent, full-screen)
+  // #tank-overlay outside it both close it, like the Lab's — from the start
+  // screen that means back to the start screen, in-game it's the normal toggle.
+  const closeTankWindow = () => {
+    if (els.tankOverlay.classList.contains('start-mode')) closeTankPanelToStartScreen();
+    else toggleTankPanel(state);
+  };
+  els.tankCloseBtn.addEventListener('click', closeTankWindow);
+  els.tankOverlay.addEventListener('click', (e) => {
+    if (e.target === els.tankOverlay) closeTankWindow();
+  });
   els.startSettingsBtn.addEventListener('click', () => {
     // Deliberately does NOT hide #start-overlay — #pause-overlay layers on
     // top of it instead (see its own z-index comment), so the start
@@ -2779,7 +2792,7 @@ export function selectTool(state, tool) {
     return;
   }
   state.ui.selectedTool = tool;
-  closeSidePanels(state); // per direct request — picking a bottom-tool-bar tool (Food/Blueprint) closes the Shop/Tank Upgrades panel if it's open
+  closeSidePanels(state, true); // picking a bottom-tool-bar tool (Food/Blueprint) closes the Tank window; the Shop stays open until its own X/E, per direct request
   updateToolbar(state);
 }
 
@@ -3396,7 +3409,9 @@ function refreshFamilyButton(state, familyId) {
   f.btn.dataset.tool = `build:${currentId}`;
   f.btn.style.setProperty('--tile-color', building.color);
   drawBuildingIconCanvas(f.iconCanvas, currentId);
-  f.priceTag.textContent = `$${getBuildingCost(state, currentId)}`;
+  const familyCost = getBuildingCost(state, currentId);
+  f.priceTag.textContent = `$${familyCost}`;
+  f.btn.classList.toggle('unaffordable', state.level.money < familyCost);
   f.dotsWrap.innerHTML = '';
   for (const id of f.memberIds) {
     const dot = document.createElement('span');
@@ -3546,6 +3561,7 @@ function buildBuildPalette(state) {
   familyButtons = {};
   buildingPriceTags = {};
   const available = getAvailableBuildings(state);
+  els.shopBuildingsTitle.classList.toggle('hidden', available.length === 0); // no "Buildings" heading over an empty section before the first unlock
   const availableIds = new Set(available.map((b) => b.id));
   const familyOfBuilding = {};
   for (const [familyId, memberIds] of Object.entries(BUILDING_FAMILIES)) {
@@ -3612,30 +3628,37 @@ function describeFishHealthLevel(level) {
 // the whole list (which would fight the shop's own established rebuild-on-
 // unlock-change pattern for no reason, since these three cards never change
 // which ones exist, only their level/cost).
-function createUpgradeCard(name, icon) {
+function createUpgradeCard(name, icon, maxLevel) {
   const card = document.createElement('div');
   card.className = 'tank-upgrade-card sheen-target';
   const nameEl = document.createElement('div');
   nameEl.className = 'tank-upgrade-name';
   nameEl.textContent = `${icon} ${name}`;
+  const pipsEl = document.createElement('div');
+  pipsEl.className = 'tank-upgrade-pips';
+  for (let i = 0; i < maxLevel; i++) {
+    const pip = document.createElement('span');
+    pip.className = 'tank-upgrade-pip';
+    pipsEl.appendChild(pip);
+  }
   const levelEl = document.createElement('div');
   levelEl.className = 'tank-upgrade-level';
   const descEl = document.createElement('div');
   descEl.className = 'tank-upgrade-desc';
   const buyBtn = document.createElement('button');
   buyBtn.className = 'tank-upgrade-buy';
-  card.append(nameEl, levelEl, descEl, buyBtn);
-  return { card, levelEl, descEl, buyBtn };
+  card.append(nameEl, pipsEl, levelEl, descEl, buyBtn);
+  return { card, pipsEl, levelEl, descEl, buyBtn };
 }
 
-let tankCards = null; // { foodQuality, fishMovement, tankExpansion, fishHealth } — each { card, levelEl, descEl, buyBtn }. Splicing itself was never a purchase here — see Config.js's SCIENCE_LAB_UPGRADES' 3 flat hybrid nodes. Food Capacity retired entirely — see Config.js's FOOD_STATIONARY_TO_WASTE_MS. Coin Capacity is gone entirely, per direct request ("remove the coin cap limit from the game completely, and the upgrades for it"). "Gold/min Stat", "Electricity Graph" and "Wave Countdown" are gone too, per direct request(s) to give the player that info/access for free from the start — see Config.js's own comment where their cost constants used to live.
+let tankCards = null; // { foodQuality, fishMovement, tankExpansion, fishHealth } — each { card, pipsEl, levelEl, descEl, buyBtn }. Splicing itself was never a purchase here — see Config.js's SCIENCE_LAB_UPGRADES' 3 flat hybrid nodes. Food Capacity retired entirely — see Config.js's FOOD_STATIONARY_TO_WASTE_MS. Coin Capacity is gone entirely, per direct request ("remove the coin cap limit from the game completely, and the upgrades for it"). "Gold/min Stat", "Electricity Graph" and "Wave Countdown" are gone too, per direct request(s) to give the player that info/access for free from the start — see Config.js's own comment where their cost constants used to live.
 
 function buildTankPanel(state) {
   els.tankUpgradeList.innerHTML = '';
-  const foodQuality = createUpgradeCard('Food Quality', '🍽️');
-  const fishMovement = createUpgradeCard('Fish Movement', '🏊');
-  const tankExpansion = createUpgradeCard('Expand Tank', '🏗️');
-  const fishHealth = createUpgradeCard('Fish Health', '❤️');
+  const foodQuality = createUpgradeCard('Food Quality', '🍽️', FOOD_QUALITY_UPGRADE_MAX_LEVEL);
+  const fishMovement = createUpgradeCard('Fish Movement', '🏊', FISH_MOVEMENT_UPGRADE_MAX_LEVEL);
+  const tankExpansion = createUpgradeCard('Expand Tank', '🏗️', TANK_EXPANSION_MAX_TIER);
+  const fishHealth = createUpgradeCard('Fish Health', '❤️', FISH_HEALTH_UPGRADE_MAX_LEVEL);
   tankCards = { foodQuality, fishMovement, tankExpansion, fishHealth };
 
   foodQuality.buyBtn.addEventListener('click', () => {
@@ -3701,6 +3724,45 @@ function buildTankPanel(state) {
   refreshTankPanel(state);
 }
 
+// Per direct request — the Lab button only appears once the Mound has
+// shattered into the Lab, and each launcher (plus the Tank window's own tabs)
+// gets a red attention dot while something inside it is actionable: an
+// affordable Tank Upgrade, a claimable Achievement, or an affordable,
+// unlocked Lab node. The Shop gets no dot (nothing there is "pending").
+// Run every frame from updateHUD; every check is a short array scan.
+function updateWindowLaunchers(state) {
+  const labUnlocked = state.level.tier >= MOUND_MAX_TIER;
+  els.labCollapseBtn.classList.toggle('hidden', !labUnlocked);
+  els.labCollapseBtn.classList.toggle('panel-toggle-active', labMenuOpen);
+
+  const available = state.level.tankPoints.available;
+  const u = state.level.upgrades;
+  const upgradeAffordable =
+    (u.foodQuality < FOOD_QUALITY_UPGRADE_MAX_LEVEL && available >= FOOD_QUALITY_UPGRADE_COSTS[u.foodQuality]) ||
+    (u.fishMovement < FISH_MOVEMENT_UPGRADE_MAX_LEVEL && available >= FISH_MOVEMENT_UPGRADE_COSTS[u.fishMovement]) ||
+    (u.tankExpansionTier < TANK_EXPANSION_MAX_TIER && available >= TANK_EXPANSION_UPGRADE_COSTS[u.tankExpansionTier]) ||
+    (u.fishHealth < FISH_HEALTH_UPGRADE_MAX_LEVEL && available >= FISH_HEALTH_UPGRADE_COSTS[u.fishHealth]);
+  const achievementClaimable = state.meta.achievementsUnlocked.some((id) => !state.meta.achievementsClaimed.includes(id));
+  const tankOpen = !state.ui.tankPanelCollapsed;
+  els.tankCollapseBtn.querySelector('.attention-dot').classList.toggle('hidden', tankOpen || !(upgradeAffordable || achievementClaimable));
+  els.tankTabUpgradesBtn.querySelector('.attention-dot').classList.toggle('hidden', !upgradeAffordable);
+  els.tankTabAchievementsBtn.querySelector('.attention-dot').classList.toggle('hidden', !achievementClaimable);
+
+  let labNodeAffordable = false;
+  if (labUnlocked && !labMenuOpen) {
+    labNodeAffordable = SCIENCE_LAB_UPGRADE_LIST.some((node) =>
+      !state.meta.labUpgradesPurchased.includes(node.id) &&
+      node.requires.every((r) => state.meta.labUpgradesPurchased.includes(r)) &&
+      labNodeHasEnoughScience(state, node) && state.level.money >= node.goldCost);
+  }
+  els.labCollapseBtn.querySelector('.attention-dot').classList.toggle('hidden', !labNodeAffordable);
+}
+
+function fillUpgradePips(cardEntry, level) {
+  const pips = cardEntry.pipsEl.children;
+  for (let i = 0; i < pips.length; i++) pips[i].classList.toggle('filled', i < level);
+}
+
 // Re-checked every frame the panel is open (from updateHUD), same pattern
 // as refreshPreviewBuyButton/refreshMoundThrowButton — level/cost/afford
 // state can all change while the player has it open.
@@ -3711,6 +3773,7 @@ function refreshTankPanel(state) {
 
   const fqLevel = state.level.upgrades.foodQuality;
   foodQuality.levelEl.textContent = `Level ${fqLevel} / ${FOOD_QUALITY_UPGRADE_MAX_LEVEL}`;
+  fillUpgradePips(foodQuality, fqLevel);
   foodQuality.descEl.innerHTML = describeFoodQualityLevel(fqLevel);
   if (fqLevel >= FOOD_QUALITY_UPGRADE_MAX_LEVEL) {
     foodQuality.buyBtn.textContent = 'Maxed out';
@@ -3723,6 +3786,7 @@ function refreshTankPanel(state) {
 
   const fmLevel = state.level.upgrades.fishMovement;
   fishMovement.levelEl.textContent = `Level ${fmLevel} / ${FISH_MOVEMENT_UPGRADE_MAX_LEVEL}`;
+  fillUpgradePips(fishMovement, fmLevel);
   fishMovement.descEl.innerHTML = describeFishMovementLevel(fmLevel);
   if (fmLevel >= FISH_MOVEMENT_UPGRADE_MAX_LEVEL) {
     fishMovement.buyBtn.textContent = 'Maxed out';
@@ -3736,6 +3800,7 @@ function refreshTankPanel(state) {
   const teLevel = state.level.upgrades.tankExpansionTier;
   const rowsUnlocked = teLevel * TANK_EXPANSION_ROWS_PER_TIER;
   tankExpansion.levelEl.textContent = `Tier ${teLevel} / ${TANK_EXPANSION_MAX_TIER}`;
+  fillUpgradePips(tankExpansion, teLevel);
   if (teLevel >= TANK_EXPANSION_MAX_TIER) {
     tankExpansion.descEl.textContent = `Fully expanded — +${rowsUnlocked} extra rows of city unlocked.`;
     tankExpansion.buyBtn.textContent = 'Maxed out';
@@ -3750,6 +3815,7 @@ function refreshTankPanel(state) {
 
   const fhLevel = state.level.upgrades.fishHealth;
   fishHealth.levelEl.textContent = `Level ${fhLevel} / ${FISH_HEALTH_UPGRADE_MAX_LEVEL}`;
+  fillUpgradePips(fishHealth, fhLevel);
   fishHealth.descEl.innerHTML = describeFishHealthLevel(fhLevel);
   if (fhLevel >= FISH_HEALTH_UPGRADE_MAX_LEVEL) {
     fishHealth.buyBtn.textContent = 'Maxed out';
@@ -3778,6 +3844,12 @@ export function setTankPanelView(state, view) {
   els.tankTabUpgradesBtn.classList.toggle('active', view === 'upgrades');
   els.tankTabAchievementsBtn.classList.toggle('active', view === 'achievements');
   els.tankTabCustomizationBtn.classList.toggle('active', view === 'customization');
+  // One shared header row across the 3 views (the X lives there) — title and
+  // which currency pill shows follow the current view.
+  els.tankTitle.textContent = { upgrades: 'Tank Upgrades', achievements: 'Achievements', customization: 'Customize' }[view];
+  els.tankPointsDisplay.classList.toggle('hidden', view !== 'upgrades');
+  els.achievementGemsDisplay.classList.toggle('hidden', view !== 'achievements');
+  els.customizationGemsDisplay.classList.toggle('hidden', view !== 'customization');
   // The live hat-preview guppy only needs to animate while its own view is
   // actually the one showing — see startCustomizationPreviewAnimation's own
   // comment.
@@ -4043,12 +4115,21 @@ function buildAchievementPanel(state) {
     const descEl = document.createElement('div');
     descEl.className = 'achievement-desc';
     descEl.textContent = achievement.description;
+    // Per direct request — a progress bar toward the threshold, driven by
+    // the same state.meta.stats field Systems.js's updateAchievements checks.
+    const progressEl = document.createElement('div');
+    progressEl.className = 'achievement-progress';
+    const progressFillEl = document.createElement('div');
+    progressFillEl.className = 'achievement-progress-fill';
+    progressEl.appendChild(progressFillEl);
+    const progressTextEl = document.createElement('div');
+    progressTextEl.className = 'achievement-progress-text';
     const claimBtn = document.createElement('button');
     claimBtn.className = 'achievement-claim-btn';
     claimBtn.addEventListener('click', () => claimAchievement(state, achievement.id));
-    card.append(nameEl, descEl, claimBtn);
+    card.append(nameEl, descEl, progressEl, progressTextEl, claimBtn);
     els.achievementList.append(card);
-    achievementCards[achievement.id] = { card, claimBtn };
+    achievementCards[achievement.id] = { card, claimBtn, progressFillEl, progressTextEl };
   }
   refreshAchievementPanel(state);
 }
@@ -4101,13 +4182,25 @@ function celebrateAchievementClaim(card) {
 // Re-checked every frame this view is open — an achievement can go from
 // locked to unlocked at any moment (Systems.js's updateAchievements runs
 // every tick), and Claim itself needs to react immediately.
+function formatAchievementProgress(statField, value) {
+  if (statField === 'moneyEarned') return `$${Math.floor(value).toLocaleString()}`;
+  if (statField.endsWith('Ms')) return `${Math.floor(value / 1000)}s`; // the two power-streak stats are tracked in ms
+  return String(Math.floor(value));
+}
+
 function refreshAchievementPanel(state) {
   if (!achievementCards) return;
   for (const achievement of ACHIEVEMENT_LIST) {
-    const { claimBtn, card } = achievementCards[achievement.id];
+    const { claimBtn, card, progressFillEl, progressTextEl } = achievementCards[achievement.id];
     const unlocked = state.meta.achievementsUnlocked.includes(achievement.id);
     const claimed = state.meta.achievementsClaimed.includes(achievement.id);
     card.classList.toggle('claimed', claimed);
+    card.classList.toggle('claimable', unlocked && !claimed);
+    // Claimable first, then still-locked, then already-claimed at the bottom.
+    card.style.order = claimed ? 2 : (unlocked ? 0 : 1);
+    const progress = Math.min(achievement.threshold, state.meta.stats[achievement.statField] || 0);
+    progressFillEl.style.width = `${(progress / achievement.threshold) * 100}%`;
+    progressTextEl.textContent = `${formatAchievementProgress(achievement.statField, progress)} / ${formatAchievementProgress(achievement.statField, achievement.threshold)}`;
     const reward = ACHIEVEMENT_GEM_REWARD_BY_TIER[achievement.tier];
     if (claimed) {
       claimBtn.textContent = 'Claimed ✓';
@@ -4655,11 +4748,17 @@ function buildShopPanel(state) {
 // enough to just refresh every visible tag's text rather than tracking which
 // ones are actually dynamic separately.
 function refreshShopPrices(state) {
+  // Per direct request, anything the player can't currently afford is dimmed
+  // (.unaffordable) — the price tag's parent is the item's own button.
   for (const speciesId in speciesPriceTags) {
-    speciesPriceTags[speciesId].textContent = `$${getFishPurchaseCost(state, speciesId)}`;
+    const cost = getFishPurchaseCost(state, speciesId);
+    speciesPriceTags[speciesId].textContent = `$${cost}`;
+    speciesPriceTags[speciesId].parentElement.classList.toggle('unaffordable', state.level.money < cost);
   }
   for (const buildingId in buildingPriceTags) {
-    buildingPriceTags[buildingId].textContent = `$${getBuildingCost(state, buildingId)}`;
+    const cost = getBuildingCost(state, buildingId);
+    buildingPriceTags[buildingId].textContent = `$${cost}`;
+    buildingPriceTags[buildingId].parentElement.classList.toggle('unaffordable', state.level.money < cost);
   }
   for (const familyId in familyButtons) {
     refreshFamilyButton(state, familyId);
@@ -5010,6 +5109,7 @@ export function updateHUD(state) {
   if (storageChestMenuOpen || storageChestMenuClosing) updateStorageChestModalPosition(state);
   if (labMenuOpen) refreshLabTree(state); // no position-tracking needed any more — it's a centered modal now, not anchored to the Mound's screen position
   if (!state.ui.tankPanelCollapsed) refreshTankPanelView(state);
+  updateWindowLaunchers(state);
   if (statsPanelOpen) refreshStatsPanel(state);
   updateTabReminder(state);
   updateScienceCapArrow(state);
@@ -5185,11 +5285,10 @@ export function updateHUD(state) {
   // Escape handler condition exactly (labMenuOpen is this same module's own
   // transient, no cross-module flag needed).
   setText(els.hotkeyLegendEsc, `Esc: ${(labMenuOpen || !state.ui.shopCollapsed || !state.ui.tankPanelCollapsed) ? 'Close Menu' : 'Pause Menu'}`);
-  // Persistent E/Q hotkey reminder, bottom-left corner — per direct
-  // request, always visible (unlike the two legends above), re-worded live
-  // to match what each key actually does right now. `toolIsPurchasable` is
-  // already computed above (a build:/fish: tool armed).
-  setText(els.hotkeyLegendE, `E: ${state.ui.shopCollapsed ? 'Open Shop' : 'Close Shop'}`);
+  // Persistent Q hotkey reminder, bottom-left corner — per direct request,
+  // always visible (unlike the two legends above), re-worded live to match
+  // what the key actually does right now. (The E line was removed per direct
+  // request — the Shop button's own badge says it.)
   // Q is a genuine toggle, per direct request — Clear Cursor while ANY tool
   // is already armed ("something is being held" — build:/fish:, but also
   // Blueprint/Food per a later direct follow-up, not just

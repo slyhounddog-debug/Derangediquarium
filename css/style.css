@@ -47,17 +47,18 @@ body.alt-mode #tutorial-overlay,
 body.alt-mode #tutorial-text {
   display: none !important;
 }
-/* Per direct request, the Shop and Tank Upgrades panels stay openable by
-   their own hotkeys (E/P) even in Alt-mode — "floating in their normal
+/* Per direct request, the Shop and Tank Upgrades windows stay openable by
+   their own hotkeys (E/T) even in Alt-mode — "floating in their normal
    spots with no buttons under them." #bottom-bar-row itself is no longer
    blanket-hidden (it has no visible background of its own, just an
    invisible flex container — see its own CSS comment — so leaving it
-   visible is harmless); only its two toggle buttons and the food/merge/
+   visible is harmless); only its toggle buttons and the food/merge/
    blueprint/favorites toolbar are hidden, exactly the "no buttons under
-   them" part. #shop-panel/#tank-panel's own .collapsed class (E/P's real
-   open/close toggle) is completely untouched by Alt-mode either way. */
+   them" part. #shop-panel's own .collapsed class and #tank-overlay's (E/T's
+   real open/close toggle) are completely untouched by Alt-mode either way. */
 body.alt-mode #shop-collapse-btn,
 body.alt-mode #tank-collapse-btn,
+body.alt-mode #lab-collapse-btn,
 body.alt-mode #bottom-tool-bar {
   display: none !important;
 }
@@ -767,12 +768,12 @@ body.alt-mode #production-info { display: none !important; }
 
 /* 50% bigger than the original 36px/18px (a later "50% bigger" pass from an
    earlier request), per direct request ("make the shop and tank upgrade
-   icons 50% bigger" — these two toggle buttons). Now flex children of
-   #bottom-bar-row (see the bottom-tool-bar section below) instead of a
-   standalone top-right cluster — per direct request, Shop moved to the left
-   of the bottom toolbar, Tank Upgrades to the right of it. */
-#shop-collapse-btn, #tank-collapse-btn {
-  position: relative; /* anchors .panel-toggle-hotkey below */
+   icons 50% bigger" — these toggle buttons). Flex children of
+   #bottom-bar-row (see the bottom-tool-bar section below): Shop on the left
+   of the bottom toolbar, Science Lab and Tank Upgrades on the right of it,
+   per direct request. */
+#shop-collapse-btn, #tank-collapse-btn, #lab-collapse-btn {
+  position: relative; /* anchors .panel-toggle-hotkey and .attention-dot below */
   flex: none;
   width: 54px; height: 54px;
   display: flex; align-items: center; justify-content: center;
@@ -784,10 +785,11 @@ body.alt-mode #production-info { display: none !important; }
   box-shadow: 0 3px 8px rgba(255, 150, 200, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.8);
   transition: transform 0.12s ease, background 0.12s ease;
 }
-/* A persistent "E"/"P" hotkey badge on the Shop/Tank Upgrades toggle
-   buttons themselves — per direct request ("so the player can glance at
-   the buttons and be able to tell how to use them"), rather than relying on
-   the existing hover-only title tooltip. A small solid badge at the
+#lab-collapse-btn.hidden { display: none; } /* until the Mound shatters into the Lab — see UI.js's updateHUD */
+/* A persistent "E"/"T"/"S" hotkey badge on the Shop/Tank Upgrades/Science Lab
+   toggle buttons themselves — per direct request ("so the player can glance
+   at the buttons and be able to tell how to use them"), rather than relying
+   on the existing hover-only title tooltip. A small solid badge at the
    button's top edge, sized/positioned independent of the emoji it overlaps
    (an absolutely-positioned sibling, not a flex child, so it never pushes
    the emoji off-center). */
@@ -807,96 +809,106 @@ body.alt-mode #production-info { display: none !important; }
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
   pointer-events: none;
 }
-#shop-collapse-btn:hover, #tank-collapse-btn:hover { background: linear-gradient(160deg, #ffdcee 0%, #ffb0d8 100%); transform: scale(1.08); }
-/* Whichever panel is currently open needs to be obvious at a glance — both
-   buttons stay visible and identical-looking regardless of panel state
-   otherwise, since only one panel is ever expanded but both toggles remain
-   on screen. A filled ring + a solid color swap (not just a subtle shadow)
-   reads clearly even at this small a size. */
-#shop-collapse-btn.panel-toggle-active, #tank-collapse-btn.panel-toggle-active {
+#shop-collapse-btn:hover, #tank-collapse-btn:hover, #lab-collapse-btn:hover { background: linear-gradient(160deg, #ffdcee 0%, #ffb0d8 100%); transform: scale(1.08); }
+/* Whichever window is currently open needs to be obvious at a glance — the
+   toggle buttons stay visible and identical-looking regardless of window
+   state otherwise, since only one window is ever open but every toggle
+   remains on screen. A filled ring + a solid color swap (not just a subtle
+   shadow) reads clearly even at this small a size. */
+#shop-collapse-btn.panel-toggle-active, #tank-collapse-btn.panel-toggle-active, #lab-collapse-btn.panel-toggle-active {
   background: #ff6fae;
   box-shadow: 0 0 0 3px #ffffff, 0 0 0 6px #ff6fae, 0 2px 8px rgba(255, 111, 174, 0.55);
   transform: scale(1.1);
 }
-#shop-collapse-btn.panel-toggle-active:hover, #tank-collapse-btn.panel-toggle-active:hover { background: #ff5aa0; }
+#shop-collapse-btn.panel-toggle-active:hover, #tank-collapse-btn.panel-toggle-active:hover, #lab-collapse-btn.panel-toggle-active:hover { background: #ff5aa0; }
 
-/* Shop and Tank Upgrades are fly-out modals anchored to their own toggle
-   button, per direct request ("should look the same as they do now, but
-   only half as tall" — later "show up right above their respective icons
-   instead of on the far left and right of the screen"). #shop-anchor/
-   #tank-anchor (position:relative wrappers around each toggle button, see
-   #bottom-bar-row below) are what make that second request work: the panel
-   is now a true positioned CHILD of the same wrapper the button lives in
-   (position:absolute; bottom:100%+gap), so it tracks the button's REAL
-   on-screen position automatically — including the button not actually
-   sitting at the screen edge, since #bottom-bar-row itself is centered —
-   rather than the old approach (position:fixed; left/right:14px) which
-   just assumed the button was pinned to the screen edge, true before the
-   toggle buttons moved into this centered row but wrong afterward. No JS
-   needed for the positioning itself, same as before. */
-#shop-anchor, #tank-anchor { position: relative; }
-
-#shop-panel, #tank-panel {
+/* "Something here needs you" dot, per direct request — on the Tank/Lab
+   buttons and the Tank window's own Upgrades/Achievements tabs. Toggled live
+   by UI.js's updateHUD. */
+.attention-dot {
   position: absolute;
-  bottom: calc(100% + 25px); /* just above the button, with a visual buffer gap — widened from +10px per direct request ("have a visual buffer between the icons and their menus") */
-  width: 286px;
-  height: calc((100vh - 28px) / 2); /* half of the old full-height slot (100vh - 14px top - 14px bottom) */
-  background: linear-gradient(165deg, #fff8f0 0%, #ffe4f2 100%);
-  color: #6b4c6b;
-  z-index: 10;
-  border-radius: 26px;
+  top: -3px; right: -3px;
+  width: 16px; height: 16px;
+  border-radius: 50%;
+  background: #ff4757;
   border: 2px solid #ffffff;
-  box-shadow: 0 8px 26px rgba(107, 76, 107, 0.25), inset 0 2px 0 rgba(255, 255, 255, 0.7);
-  /* Centered on its own anchor button (left:50% + translateX(-50%), same
-     centering pattern #bottom-bar-row itself already uses) — per direct
-     request ("have the center of the shop line up with the center of the
-     shop button"), replacing the old left:0/right:0 edge-alignment, which
-     put the panel's center off to one side of the button instead since the
-     panel (286px) is much wider than the button (54px). The translateX has
-     to stay part of the SAME transform property the open/close scale
-     animation below also drives (a single `transform` can't be split across
-     two rules without one clobbering the other), so it's baked into both
-     this base rule and the .collapsed rule beneath it. */
-  left: 50%;
-  transform: translateX(-50%);
-  transform-origin: 50% 100%; /* grows from/shrinks into its icon, now centered under it */
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+  animation: attention-dot-pulse 1.4s ease-in-out infinite;
+}
+.attention-dot.hidden { display: none; }
+@keyframes attention-dot-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.25); }
+}
+
+/* Shop and Tank Upgrades are centered, detached windows now, matching the
+   Science Lab (#lab-overlay/#lab-modal) — per direct request ("I just want it
+   all to feel cohesive and seamless"). Same size family, border, gradient,
+   shadow and pop-in animation as the Lab; no backdrop dim/blur and no pause
+   on any of the three, per direct request ("so the player doesn't think
+   the game is paused"). */
+#shop-panel, #tank-panel {
+  width: 720px;
+  max-width: 92vw;
+  height: 560px;
+  max-height: 86vh;
+  background: linear-gradient(165deg, #fffaf3 0%, #ffe4f2 100%);
+  color: #6b4c6b;
+  border: 3px solid #ffffff;
+  border-radius: 28px;
+  padding: 22px 24px;
+  box-shadow: 0 16px 40px rgba(107, 76, 107, 0.45), inset 0 2px 0 rgba(255, 255, 255, 0.7);
+  display: flex;
+  flex-direction: column;
+  transform-origin: 50% 50%;
+  opacity: 1;
   transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.18s ease;
 }
-/* Shop got an extra 10% on top of that half-height (then another +10% on
-   both axes per a later direct request — combined into one *1.21 height
-   multiplier and a 315px width, up from the shared 286px). #tank-panel (now
-   a 3-tab switcher between Tank Upgrades/Achievements/Customization, all
-   sharing this one panel) later got the SAME height multiplier per a direct
-   request ("increase the size of the menu for the tank upgrades/achievement/
-   customization to match the size of the shop height, while keeping the
-   width") — same *1.21 height, but its own 286px width from the shared rule
-   above stays untouched, deliberately narrower than the Shop's 315px. */
-#shop-panel { height: calc((100vh - 28px) / 2 * 1.21); width: 315px; }
-#tank-panel { height: calc((100vh - 28px) / 2 * 1.21); }
-#shop-panel.collapsed, #tank-panel.collapsed {
-  transform: translateX(-50%) scale(0.05);
-  opacity: 0;
-  pointer-events: none;
-}
-
-/* Per direct request, the Tank panel (Upgrades/Achievements/Customization)
-   is also reachable from the start screen, before a game exists — rather
-   than build a second copy of its content, this CSS override repositions
-   the exact same #tank-panel element into a plain centered fixed modal
-   (instead of its usual "grows from its own anchor button" spot) whenever
-   UI.js adds this class, with a dedicated dimmed backdrop underneath it
-   (#start-tank-backdrop) and a z-index above #start-overlay (600) so it
-   actually renders on top instead of hidden behind it. */
-#tank-panel.modal-mode {
+/* #shop-panel is its own fixed, centered element — no full-screen overlay —
+   so clicks outside it still reach the tank (per direct request, only its X
+   or E closes it). Under #bottom-bar-row (15) so the toolbar stays on top. */
+#shop-panel {
   position: fixed;
-  top: 50%; left: 50%; bottom: auto;
-  transform: translate(-50%, -50%);
-  transform-origin: 50% 50%;
-  z-index: 610;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%) scale(1);
+  z-index: 14;
 }
-#tank-panel.modal-mode.collapsed {
-  transform: translate(-50%, -50%) scale(0.05);
+#shop-panel.collapsed {
+  transform: translate(-50%, -50%) scale(0.85);
+  opacity: 0;
+  visibility: hidden; /* delayed until the shrink-out finishes, so it can't be clicked or tabbed into while closed */
+  pointer-events: none;
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.18s ease, visibility 0s linear 0.22s;
 }
+/* #tank-overlay is full-screen and transparent, same as #lab-overlay — a
+   click on it (outside the window) closes the window, per direct request
+   ("the tank menu can mimic the science lab in this way"). */
+#tank-overlay {
+  position: fixed; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  z-index: 210; /* same as #lab-overlay */
+}
+#tank-overlay.collapsed {
+  visibility: hidden;
+  pointer-events: none;
+  transition: visibility 0s linear 0.22s;
+}
+#tank-overlay.collapsed #tank-panel {
+  transform: scale(0.85);
+  opacity: 0;
+}
+#tank-panel { transform: scale(1); }
+
+/* Per direct request, the Tank window (Achievements/Customization) is also
+   reachable from the start screen, before a game exists — rather than build
+   a second copy of its content, UI.js adds this class to the exact same
+   #tank-overlay, with a dedicated dimmed backdrop underneath it
+   (#start-tank-backdrop) and a z-index above #start-overlay (600) so it
+   actually renders on top. Tank Upgrades genuinely isn't reachable before a
+   game has started, so its tab is hidden here. */
+#tank-overlay.start-mode { z-index: 610; }
+#tank-overlay.start-mode #tank-tab-upgrades { display: none; }
 #start-tank-backdrop {
   position: fixed; inset: 0;
   background: rgba(11, 37, 64, 0.45);
@@ -906,29 +918,39 @@ body.alt-mode #production-info { display: none !important; }
 }
 #start-tank-backdrop.hidden { display: none; }
 
-/* #tank-back-btn is the .modal-mode-only replacement for the normal 3-tab
-   row — per direct request ("removing the tabs to switch between menus
-   that you don't have access to yet, and replace those tab buttons with a
-   Back button"), since Tank Upgrades genuinely isn't reachable before a
-   game has started. Hidden by default (in-game use); swapped with #tank-tabs
-   only while .modal-mode is present — see UI.js's openTankPanelFromStartScreen. */
-#tank-back-btn { display: none; margin-bottom: 12px; }
-#tank-panel.modal-mode #tank-tabs { display: none; }
-#tank-panel.modal-mode #tank-back-btn { display: block; }
+/* Shared header row for both windows — title on the left, readout pill(s),
+   red X on the right, same order as #lab-header-row. */
+#shop-header-row, #tank-header-row {
+  display: flex; align-items: center; gap: 14px;
+  margin-bottom: 16px;
+  flex: none;
+}
+#shop-header, #tank-title { flex: 1; font-size: 20px; font-weight: 800; color: #c25f8f; }
+#tank-header-row .hidden { display: none; }
+/* A plain circular red X, shared by the Lab, Shop and Tank windows. */
+.lab-close-x-btn {
+  flex: none; width: 32px; height: 32px; padding: 0; margin-bottom: 0;
+  border-radius: 50%;
+  background: linear-gradient(160deg, #ff9a9a 0%, #ff5a5a 100%);
+  color: #ffffff;
+  border: 2px solid #ffffff;
+  font-size: 15px; font-weight: 800; line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 3px 9px rgba(255, 90, 90, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  display: flex; align-items: center; justify-content: center;
+}
+.lab-close-x-btn:hover { filter: brightness(1.08); }
 
-/* The actual scrolling now happens on an INNER wrapper, inset from the
-   card's own edges, rather than on #shop-panel/#tank-panel directly — per
-   direct report, a scrollbar that spans the full height of an element that
-   ALSO has border-radius gets its top/bottom visually clipped by the
-   curve (the browser clips overflow content, scrollbar included, to the
-   rounded shape, and the corner radius eats into the scrollbar's own
-   corners right where it's flush with the box edge). Insetting this inner
-   box by the same 14px the old padding used keeps the exact same content
-   layout as before, but now the scrollbar belongs to a plain, un-rounded
-   rectangle safely inside the curve — both shorter (it stops 14px short of
-   the card's real top/bottom) and never clipped. */
+#shop-body, #tank-body {
+  flex: 1; min-height: 0;
+  display: flex; gap: 16px;
+}
+
+/* The actual scrolling happens on an inner box, not the rounded window
+   itself — per direct report, a scrollbar flush against a border-radius gets
+   its top/bottom corners clipped by the curve. */
 #shop-panel-scroll, #tank-panel-scroll {
-  position: absolute; inset: 14px;
+  flex: 1; min-width: 0;
   overflow-y: auto;
   overflow-x: hidden;
   /* Custom scrollbar — matches #notification-log's pink/rounded style
@@ -941,42 +963,15 @@ body.alt-mode #production-info { display: none !important; }
 #shop-panel-scroll::-webkit-scrollbar-track, #tank-panel-scroll::-webkit-scrollbar-track { background: #fff0f6; border-radius: 999px; }
 #shop-panel-scroll::-webkit-scrollbar-thumb, #tank-panel-scroll::-webkit-scrollbar-thumb { background: #ffb6d5; border-radius: 999px; }
 #shop-panel-scroll::-webkit-scrollbar-thumb:hover, #tank-panel-scroll::-webkit-scrollbar-thumb:hover { background: #ff9ac4; }
+#shop-panel-scroll { padding: 4px 8px 0 6px; } /* room for the icons' hover-grow and price tags, which poke past their own boxes */
 
-/* Per direct request, #shop-money/#tank-points-display sit inline with
-   their panel's own title now — the only HUD-style readout either panel
-   carries (see UI.js's updateHUD's own comment on #hud being the one
-   always-visible copy of everything else) — pushed to the row's far end via
-   space-between while the title itself stays left. */
-/* The header row + preview card stay pinned to the top of the scrollable
-   shop, per direct request ("make the shop window at the top sticky, so
-   it's always showing and can't be scrolled off") — wrapping both in one
-   sticky container (rather than making each sticky individually) avoids
-   having to hand-compute a second `top` offset for the preview to stack
-   correctly under the header row. Needs its own opaque background (matching
-   the panel's own gradient) since the icon grid scrolls up underneath it,
-   plus a bottom border as the visual break the same request asked for
-   between the sticky window and the scrolling shop items below. Only
-   #shop-panel has this wrapper — #tank-panel's simpler card list was never
-   part of this request. */
-#shop-sticky-header {
-  position: sticky;
-  top: 0;
-  padding-bottom: 10px;
-  background: linear-gradient(165deg, #fff8f0 0%, #ffe4f2 100%);
+.shop-section-title {
+  font-size: 13px; font-weight: 800; color: #c25f8f;
+  padding-bottom: 4px;
   border-bottom: 2px solid rgba(255, 182, 213, 0.6);
-  z-index: 2;
 }
-/* .tank-header-row/.tank-header are classes now (not ids), reused across the
-   Tank Upgrades/Achievements/Customization views — see UI.js's
-   setTankPanelView — but read identically to #shop-header-row/#shop-header,
-   which stay id-selected since the Shop panel has only ever needed the one
-   copy of each. */
-#shop-header-row, .tank-header-row {
-  display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 8px;
-}
-#shop-header, .tank-header { font-size: 17px; font-weight: 800; color: #c25f8f; }
-#tank-upgrades-note { font-size: 12px; font-weight: 700; color: #8a7a8a; margin: -2px 0 8px; }
+.shop-section-title.hidden { display: none; }
+#tank-upgrades-note { font-size: 12px; font-weight: 700; color: #8a7a8a; margin: -2px 0 10px; }
 
 #shop-money, #tank-points-display, #achievement-gems-display, #customization-gems-display {
   display: inline-block;
@@ -987,6 +982,23 @@ body.alt-mode #production-info { display: none !important; }
   border-radius: 999px;
   box-shadow: 0 3px 9px rgba(107, 76, 107, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.85);
 }
+
+/* Pause Time (button or Space) — a subtle cool tint plus a soft vignette
+   fades in over the whole screen, per direct request, so it's visually
+   obvious time is stopped. Under the pop-up menus (190+) so they stay
+   crisp, over the HUD and toolbar. Pure cosmetic: click-through, and the
+   simulation/physics aren't touched. */
+#time-pause-overlay {
+  position: fixed; inset: 0;
+  z-index: 150;
+  pointer-events: none;
+  opacity: 0;
+  background:
+    radial-gradient(ellipse at center, rgba(40, 70, 140, 0) 50%, rgba(40, 70, 140, 0.3) 100%),
+    rgba(130, 170, 230, 0.1);
+  transition: opacity 0.5s ease;
+}
+body.time-paused #time-pause-overlay { opacity: 1; }
 /* Bubble Cap arrow — see UI.js's updateScienceCapArrow. The wrapper fades in/out
    over its 4s life (SCIENCE_CAP_ARROW_MS); restarting that animation is how a
    repeat block restarts the timer. The svg bobs; .alert (a repeat block while
@@ -1152,10 +1164,11 @@ body.alt-mode #production-info { display: none !important; }
    even with just one child group left). */
 #tool-bar {
   display: grid;
-  grid-template-columns: repeat(3, 56px);
-  justify-content: center; /* was 'start' — left-aligning the grid tracks put the leftmost column flush against the panel edge, clipping its hover-grow scale (.tool-btn:hover) against that edge; centering leaves room on both sides */
-  gap: 6px; /* tightened slightly (was 8px), same vertical-compacting request as #shop-species-grid above */
-  margin-bottom: 6px;
+  grid-template-columns: repeat(auto-fill, 56px); /* as many per row as the wider Shop window fits — was a fixed 3 when the Shop was a narrow side panel */
+  justify-content: start;
+  gap: 16px 14px; /* extra row gap leaves room for each building's price tag, which pokes out below it */
+  margin-top: 12px;
+  margin-bottom: 10px;
 }
 .tool-btn {
   position: relative; /* anchors .panel-toggle-hotkey (the 1-6 badges) — see index.html's own comment */
@@ -1305,10 +1318,10 @@ body.alt-mode #production-info { display: none !important; }
 #shop-species-grid {
   display: flex;
   flex-wrap: wrap;
-  justify-content: center; /* was left-aligned by default (flex-start) — clipped the leftmost icon's hover-grow scale (.species-icon-btn:hover) against the panel edge, same fix as #tool-bar above */
-  gap: 10px 10px; /* tightened slightly (was 14px 12px) per direct request to compact the shop vertically so less scrolling is needed below the sticky header */
-  margin-top: 12px; /* now the gap below #shop-sticky-header, which owns the visual break itself */
-  margin-bottom: 10px;
+  justify-content: flex-start; /* #shop-panel-scroll's own padding leaves room for the leftmost icon's hover-grow scale (.species-icon-btn:hover) */
+  gap: 14px 14px;
+  margin-top: 12px;
+  margin-bottom: 18px; /* room for the price tags poking out below the last row */
 }
 .species-icon-btn {
   position: relative;
@@ -1338,32 +1351,21 @@ body.alt-mode #production-info { display: none !important; }
   white-space: nowrap;
 }
 
-/* A genuinely FIXED height, not min-height — per direct request ("I don't
-   want it pushing the shop items up and down every time I click a different
-   option"). An earlier pass made this min-height instead of a hard height so
-   a tall stats block (the Processor family's 4 stat lines) wouldn't clip,
-   but that meant the icon grid below still visibly shifted every time the
-   box grew/shrank between selections, which is exactly what's being fixed
-   here. Sized generously enough that every real building/species' content
-   fits without scrolling in practice; #shop-preview-content's own
-   overflow-y:auto (below) is a safety net for anything that somehow doesn't,
-   scrolling INSIDE the fixed box instead of resizing it. Cut 232 -> 208px per
-   a later direct request ("reduce the size of the shop window slightly") —
-   this also moves #shop-sticky-header's own border-bottom (the "break"
-   between the window and the scrolling item grid below) up by the same
-   amount, satisfying that same request's other half with no separate change
-   needed. Re-checked after this cut that every species/building (including
-   the Manufacturer/Power Plant recipe pop-up's own stats, the tallest
-   content this box ever holds) still fits with no scrolling. */
+/* The preview/detail card is a fixed side column of the Shop window now, per
+   direct request (the Shop became a centered window), instead of a sticky
+   box above the icon grid — so a taller or shorter description can't push
+   the icons around. #shop-preview-content's own overflow-y:auto (below) is a
+   safety net for anything that somehow doesn't fit, scrolling INSIDE the
+   column. */
 #shop-preview {
-  height: 208px;
+  flex: none;
+  width: 250px;
   display: flex;
   flex-direction: column;
   background: linear-gradient(165deg, #fffaf3 0%, #fff0f6 100%);
   border-radius: 18px;
   border: 2px solid #ffffff;
-  padding: 12px;
-  margin-bottom: 0; /* #shop-sticky-header's own padding-bottom provides the gap now that this sits inside it */
+  padding: 14px;
   box-shadow: 0 4px 12px rgba(107, 76, 107, 0.16), inset 0 2px 0 rgba(255, 255, 255, 0.7);
 }
 #shop-preview-empty {
@@ -1444,15 +1446,15 @@ body.alt-mode #production-info { display: none !important; }
   margin: -2px 1px 0;
 }
 
-/* Tank Upgrades panel — a stack of cards (leveled ladders like Food Quality/
-   Fish Movement/Coin Capacity, plus one-time unlocks like Electricity Graph/
-   Gold-per-min/Wave Countdown), each with a level readout, a description of
-   the current effect, and a Buy button. Same visual language as the shop's
-   preview/buy button, just stacked as a list instead of one big preview. */
+/* Tank Upgrades view — a 2-column grid of cards (leveled ladders: Food
+   Quality, Fish Health, Fish Movement, Expand Tank), each with a pip meter,
+   a description of the current effect, and a Buy button. Same visual
+   language as the shop's preview/buy button. */
 #tank-upgrade-list {
-  display: flex; flex-direction: column; gap: 14px;
+  display: grid; grid-template-columns: 1fr 1fr; gap: 14px;
 }
 .tank-upgrade-card {
+  display: flex; flex-direction: column;
   background: linear-gradient(165deg, #fffaf3 0%, #fff0f6 100%);
   border-radius: 18px;
   border: 2px solid #ffffff;
@@ -1460,12 +1462,22 @@ body.alt-mode #production-info { display: none !important; }
   box-shadow: 0 4px 12px rgba(107, 76, 107, 0.16), inset 0 2px 0 rgba(255, 255, 255, 0.7);
 }
 .tank-upgrade-card.locked { opacity: 0.6; }
-.tank-upgrade-name { font-size: 14px; font-weight: 800; color: #c25f8f; margin-bottom: 2px; }
-.tank-upgrade-level { font-size: 11px; font-weight: 700; opacity: 0.7; margin-bottom: 6px; }
-.tank-upgrade-desc { font-size: 11px; line-height: 1.4; opacity: 0.85; margin-bottom: 10px; }
+.tank-upgrade-name { font-size: 15px; font-weight: 800; color: #c25f8f; margin-bottom: 4px; }
+/* One pip per level, filled up to the current one — per direct request, a
+   quick-read meter on top of the "Level N / M" text. */
+.tank-upgrade-pips { display: flex; gap: 5px; margin-bottom: 4px; }
+.tank-upgrade-pip {
+  flex: 1; height: 8px;
+  border-radius: 999px;
+  background: rgba(107, 76, 107, 0.15);
+}
+.tank-upgrade-pip.filled { background: linear-gradient(90deg, #7ad4a8, #4fb98a); }
+.tank-upgrade-level { font-size: 11px; font-weight: 700; opacity: 0.7; margin-bottom: 8px; }
+.tank-upgrade-desc { font-size: 12px; line-height: 1.4; opacity: 0.85; margin-bottom: 12px; }
 .tank-upgrade-desc .stat-current { color: #ff4757; font-weight: 800; } /* same red as the money-spend flash */
 .tank-upgrade-desc .stat-next { color: #2ecc71; font-weight: 800; } /* same green as the money-pickup flash */
 .tank-upgrade-buy {
+  margin-top: auto;
   width: 100%;
   background: linear-gradient(160deg, #a8f0cb 0%, #7ad4a8 100%); color: #1f4a34; border: none; border-radius: 12px;
   padding: 9px; cursor: pointer; font-size: 13px; font-weight: 800;
@@ -1477,37 +1489,46 @@ body.alt-mode #production-info { display: none !important; }
   background: #e6dcd0; color: #a99; opacity: 0.7; cursor: not-allowed; box-shadow: none; transform: none;
 }
 
-/* Tank panel's 3-way view switcher — Upgrades/Achievements/Customization,
-   see UI.js's setTankPanelView. Sits above the sticky-feeling header row
-   inside the same panel every view shares, so switching never changes the
-   panel's own size/position, only what's inside it. */
+/* Tank window's 3-way view switcher — Upgrades/Achievements/Customization,
+   see UI.js's setTankPanelView. A labeled vertical rail down the left side
+   (instead of three emoji-only tabs), so switching never changes the
+   window's own size/position, only what's inside it. */
 #tank-tabs {
-  display: flex; gap: 6px;
-  margin-bottom: 12px;
+  flex: none; width: 160px;
+  display: flex; flex-direction: column; gap: 8px;
 }
 .tank-tab-btn {
-  flex: 1;
+  position: relative;
+  display: flex; align-items: center; gap: 10px;
+  text-align: left;
   background: linear-gradient(160deg, #fffdf8 0%, #ffe9f4 100%);
   border: 2px solid #ffffff;
-  border-radius: 12px;
-  padding: 7px 0;
-  font-size: 16px;
+  border-radius: 14px;
+  padding: 10px 12px;
+  color: #6b4c6b;
+  font-size: 13px; font-weight: 800;
   cursor: pointer;
   box-shadow: 0 2px 6px rgba(107, 76, 107, 0.16), inset 0 2px 0 rgba(255, 255, 255, 0.7);
   transition: transform 0.1s ease, background 0.1s ease;
 }
-.tank-tab-btn:hover { transform: scale(1.05); }
+.tank-tab-icon { font-size: 20px; line-height: 1; }
+.tank-tab-btn .attention-dot { top: 50%; right: 8px; margin-top: -8px; }
+.tank-tab-btn:hover { transform: scale(1.04); }
 .tank-tab-btn.active {
   background: linear-gradient(160deg, #ff9ac4 0%, #ff5aa0 100%);
+  color: #ffffff;
   box-shadow: 0 2px 8px rgba(255, 90, 160, 0.5), inset 0 2px 0 rgba(255, 255, 255, 0.4);
 }
 #tank-view-upgrades.hidden, #tank-view-achievements.hidden, #tank-view-customization.hidden { display: none; }
 
 /* Achievements — same card language as .tank-upgrade-card, plus a tier
    stripe (color-coded easy/medium/hard, matching each achievement's own
-   Fishy-Gem payout) and a Claim button instead of a leveled Buy one. */
-#achievement-list { display: flex; flex-direction: column; gap: 12px; }
+   Fishy-Gem payout), a progress bar toward its threshold, and a Claim
+   button instead of a leveled Buy one. UI.js sorts claimable cards first via
+   `order`. */
+#achievement-list { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .achievement-card {
+  display: flex; flex-direction: column;
   background: linear-gradient(165deg, #fffaf3 0%, #fff0f6 100%);
   border-radius: 18px;
   border: 2px solid #ffffff;
@@ -1518,9 +1539,27 @@ body.alt-mode #production-info { display: none !important; }
 .achievement-card.tier-easy { border-left-color: #7ad4a8; }
 .achievement-card.tier-medium { border-left-color: #ffb84d; }
 .achievement-card.tier-hard { border-left-color: #ff6b8a; }
+.achievement-card.claimable { box-shadow: 0 0 0 3px rgba(122, 212, 168, 0.55), 0 4px 12px rgba(107, 76, 107, 0.16), inset 0 2px 0 rgba(255, 255, 255, 0.7); }
 .achievement-card.claimed { opacity: 0.6; }
 .achievement-name { font-size: 14px; font-weight: 800; color: #c25f8f; margin-bottom: 2px; }
 .achievement-desc { font-size: 11px; line-height: 1.4; opacity: 0.85; margin-bottom: 8px; }
+.achievement-progress {
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(107, 76, 107, 0.15);
+  overflow: hidden;
+  margin-top: auto;
+}
+.achievement-progress-fill {
+  height: 100%; width: 0;
+  border-radius: 999px;
+  background: #cccccc; /* overridden per-tier below */
+  transition: width 0.3s ease;
+}
+.achievement-card.tier-easy .achievement-progress-fill { background: #7ad4a8; }
+.achievement-card.tier-medium .achievement-progress-fill { background: #ffb84d; }
+.achievement-card.tier-hard .achievement-progress-fill { background: #ff6b8a; }
+.achievement-progress-text { font-size: 11px; font-weight: 800; opacity: 0.7; text-align: right; margin: 3px 0 8px; }
 .achievement-claim-btn {
   width: 100%;
   background: linear-gradient(160deg, #a8f0cb 0%, #7ad4a8 100%); color: #1f4a34; border: none; border-radius: 12px;
@@ -1533,21 +1572,24 @@ body.alt-mode #production-info { display: none !important; }
   background: #e6dcd0; color: #a99; opacity: 0.7; cursor: not-allowed; box-shadow: none; transform: none;
 }
 
-/* Live "what will my fish look like" preview — an adult Guppy, the equipped
-   hat rendered right on it, per direct request. */
+/* Customization — the live preview ("what will my fish look like", an adult
+   Guppy with the previewed hat rendered right on it, per direct request)
+   stays pinned on the left while the hat grid scrolls beside it. */
+#tank-view-customization { display: grid; grid-template-columns: 150px 1fr; gap: 16px; align-items: start; }
+#tank-view-customization.hidden { display: none; }
 #customization-preview-wrap {
+  position: sticky; top: 0;
   display: flex; align-items: center; justify-content: center;
   background: linear-gradient(180deg, #cdeaf7 0%, #9fd0e8 100%);
   border-radius: 14px;
   border: 2px solid #ffffff;
-  margin-bottom: 12px;
   padding: 6px 0;
 }
 
 /* Customization (hats) — a small icon grid, each cell showing the hat's own
    emoji, name, cost, and a Buy/Equip/Equipped button. */
 #hat-grid {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
 }
 .hat-card {
   background: linear-gradient(165deg, #fffaf3 0%, #fff0f6 100%);
@@ -2287,7 +2329,9 @@ body.alt-mode #production-info { display: none !important; }
 #lab-overlay {
   position: fixed; inset: 0;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(107, 76, 107, 0.35);
+  /* No dim/blur backdrop, per direct request — the game behind it keeps
+     running and shouldn't look paused. Still full-screen so a click outside
+     the window closes it. */
   z-index: 210; /* above the pause menu (200) — the Lab and pause menu are never open together, but this keeps the stacking order sensible if that ever changes */
 }
 #lab-overlay.hidden { display: none; }
@@ -2351,21 +2395,6 @@ body.alt-mode #production-info { display: none !important; }
   width: 32px; height: 32px; padding: 0; margin-bottom: 0;
   font-size: 18px; font-weight: 800; line-height: 1;
 }
-/* A plain circular red X, matching this game's other circular icon buttons
-   (#lab-zoom-controls' own +/-, the shop/tank toggle buttons) — replacing
-   the old text "Close" button, per direct request. */
-#lab-close-btn.lab-close-x-btn {
-  flex: none; width: 32px; height: 32px; padding: 0; margin-bottom: 0;
-  border-radius: 50%;
-  background: linear-gradient(160deg, #ff9a9a 0%, #ff5a5a 100%);
-  color: #ffffff;
-  border: 2px solid #ffffff;
-  font-size: 15px; font-weight: 800; line-height: 1;
-  cursor: pointer;
-  box-shadow: 0 3px 9px rgba(255, 90, 90, 0.45), inset 0 1px 0 rgba(255, 255, 255, 0.6);
-  display: flex; align-items: center; justify-content: center;
-}
-#lab-close-btn.lab-close-x-btn:hover { filter: brightness(1.08); }
 
 /* Filter buttons — per direct request ("Filter icon buttons... No filter,
    Buildings, Recipes, Fish, Other. That darkens all other nodes... except
@@ -2578,3 +2607,7 @@ body.alt-mode #production-info { display: none !important; }
   pointer-events: none;
 }
 #debug-overlay.hidden { display: none; }
+
+/* Shop items the player can't currently afford are dimmed, per direct
+   request — toggled live by UI.js's refreshShopPrices. */
+.species-icon-btn.unaffordable, .tool-btn-build.unaffordable { filter: grayscale(0.6); opacity: 0.7; }

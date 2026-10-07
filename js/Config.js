@@ -272,7 +272,7 @@ export const TIME_SCALE_STEPS = [0, 1, 2, 5, 10]; // cycled by +/- ; 0 = pause
 export const DEFAULT_TIME_SCALE_INDEX = 1; // starts at 1x
 
 // ---- Camera (§3.3) ----
-export const CAMERA_PAN_SPEED = 500; // world px/sec for WASD/arrow pan
+export const CAMERA_PAN_SPEED = 500; // world px/sec for arrow-key pan
 export const CAMERA_WATER_COLUMN_FIT_FRACTION = 0.85; // the default zoom fits the water column into this fraction of the viewport height (not all of it) — the remaining 15% shows a peek of the seabed city below, so resting items don't look like they float at the bottom edge and the player can see there's more to scroll to
 // Panning is deliberately never triggered by mouse position (edge-scroll)
 // — it kept firing by accident during normal play (moving toward the

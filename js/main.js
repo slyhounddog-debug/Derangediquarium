@@ -246,6 +246,7 @@ import {
   refreshShopPanel,
   toggleShopCollapse,
   toggleTankPanel,
+  toggleLabMenu,
   openMoundMenu,
   openLabMenu,
   closeLabMenu,
@@ -3292,7 +3293,7 @@ input.rightClickHandlers.push(() => {
 // one right-click genuinely clears everything back to the plain cursor.
 input.rightClickHandlers.push(() => {
   if (state.ui.paused || state.level.tutorialFlow) return;
-  closeSidePanels(state);
+  closeSidePanels(state, true); // right-click cancels the tool but leaves the Shop open until its own X/E, per direct request
   cancelActiveTool(state);
   // A Fan's pending angle-adjust step (fanAimingCell) isn't itself part of
   // selectedTool, so cancelActiveTool above clearing the tool back to
@@ -3692,14 +3693,15 @@ input.keydownHandlers.push((e) => {
       }
       break;
     }
-    case 'KeyP': // toggle-collapse the Tank Upgrades panel
-      toggleTankPanel(state);
-      break;
-    case 'KeyT': { // cycle the tile under the cursor through every building type, free
+    case 'KeyT': { // toggles the Tank Upgrades window (moved off KeyP per direct request); Shift+T keeps the old debug cheat — cycles the tile under the cursor through every building type, free
+      if (!e.shiftKey) { toggleTankPanel(state); break; }
       const world = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
       cycleTileCheat(state, world.x, world.y);
       break;
     }
+    case 'KeyS': // toggles the Science Lab window, per direct request (S no longer pans the camera down — see Engine.js's updateCamera)
+      toggleLabMenu(state);
+      break;
     case 'KeyN': { // force-crack the Mound to the next real tier, free
       // Calls the REAL crackMound() repeatedly (topping up money before each
       // call so affordability is never the blocker) until the tier genuinely

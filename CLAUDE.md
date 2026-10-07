@@ -44,7 +44,7 @@ state = {
     elapsed,                  // number, ms since level start — written by Engine.js sim loop
   },
   camera: { x, y, zoom },     // written by Engine.js only; zoom is auto-fit to the water column height by main.js on load/resize
-  ui: { selectedTool, shopCollapsed, tankPanelCollapsed, paused }, // selectedTool: which click-tool a canvas click performs ('food', 'demolish', or 'build:<tileId>'); shopCollapsed/tankPanelCollapsed/paused: toggled by UI.js (shop button/S key, tank button/P key, Escape/pause menu) — paused is read by main.js's update() to freeze the sim entirely; opening one of the two side panels auto-collapses the other
+  ui: { selectedTool, shopCollapsed, tankPanelCollapsed, paused }, // selectedTool: which click-tool a canvas click performs ('food', 'demolish', or 'build:<tileId>'); shopCollapsed/tankPanelCollapsed/paused: toggled by UI.js (shop button/E key, tank button/T key, Escape/pause menu) — paused is read by main.js's update() to freeze the sim entirely; opening one of the three centered windows (Shop, Tank, Science Lab) closes the others
   debug: { ... },              // overlay toggles, time scale, selected species for G key — written by Engine.js/UI.js
 }
 ```
@@ -274,7 +274,7 @@ Toggled by `` ` ``. Overlay shows: FPS, sim tick rate, entity count, item count,
 - `G` — spawn selected species at cursor; `Shift+G` spawns it fully grown
 - `U` — unlock all species and tech
 - `K` — clear all items
-- Phase 2: `T` cycles tile under cursor; `N` force-cracks the Mound to the next tier for free, skipping the tease if it hasn't happened yet (grants that tier's meta unlocks immediately, for quickly testing Tier progression without grinding money); `P` toggles the Tank Upgrades panel (mirrors `S` for the shop)
+- Phase 2: `Shift+T` cycles tile under cursor; `N` force-cracks the Mound to the next tier for free, skipping the tease if it hasn't happened yet (grants that tier's meta unlocks immediately, for quickly testing Tier progression without grinding money); `T` toggles the Tank Upgrades window (mirrors `E` for the shop)
 - Phase 3: spike toxicity, zero toxicity, toggle power blackout
 - Phase 4: fill science
 - `Y` — force the next Alien Invasion wave to start immediately, skipping the real (now deterministic, 3.5-4.5 minute) `ALIEN_WAVE_INTERVAL_EARLY/LATE_MS` gap — see the Alien Invasion changelog entry
@@ -2247,3 +2247,13 @@ Per direct request, the title screen's squash-through-edge-on turn now applies t
 
 Never stop or kill the local dev server (`node server.js`, port 8080) when finishing a task or after testing. Start it in the background if it isn't already running before browser-verifying a change, but leave it up afterwards — the user keeps the game open at http://localhost:8080 and only needs a reload to see changes (the server just serves static files).
 
+## Shop, Tank Upgrades and Science Lab as Cohesive Centered Windows
+
+Per direct request ("I just want it all to feel cohesive and seamless"), the three menus share one look and behavior.
+- **Shop** (`#shop-panel`, E): a fixed, centered window — header (title, money pill, red X), Fish and Buildings sections on the left, a fixed-width preview/detail column on the right. No full-screen overlay, so clicks outside it reach the tank; only the X or E closes it. Everyday actions (picking a tool, right-click cancel, opening a building/fish pop-up) call `closeSidePanels(state, true)` so they leave it open; Esc, opening the Tank/Lab, and tutorial steps still close it. Items the player can't afford get `.unaffordable`.
+- **Tank Upgrades** (`#tank-overlay` > `#tank-panel`, T): a Lab-style window (transparent full-screen overlay, click outside closes) with a labeled vertical tab rail (Upgrades / Achievements / Customize). Upgrades are a 2x2 card grid with pip meters; Achievements have progress bars (`state.meta.stats[statField] / threshold`) and claimable-first ordering; Customize pins the live preview beside the hat grid. From the start screen the same window gets `.start-mode` (z-index above the start overlay, Upgrades tab hidden) — the old reparenting/`modal-mode`/Back button are gone.
+- **Science Lab** (S): now has a toolbar button (hidden until `state.level.tier >= MOUND_MAX_TIER`) and `toggleLabMenu`; S no longer pans the camera (panning is arrow keys only). The three launcher buttons carry E/S/T badges; the E line was removed from the bottom-left legend.
+- **Attention dots** (`updateWindowLaunchers`): Tank button + Upgrades/Achievements tabs (affordable upgrade / claimable achievement), Lab button (an affordable, unlocked node). None on the Shop.
+- **No dim/blur, no pause:** none of the windows dims or blurs the game or pauses it. Pausing time (button/Space) instead fades in `#time-pause-overlay` (cool tint + vignette, `body.time-paused`, click-through, z-index 150).
+- Debug: `Shift+T` is the old tile-cycling cheat (plain `T` is the Tank window now).
+- Verified in a browser (Playwright): every window opens/closes by hotkey, X and outside-click as specified, start-screen Achievements path, zero JS errors (apart from the pre-existing `lighting effect.mp4` 404 under `node server.js`, which does not serve that file).

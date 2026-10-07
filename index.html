@@ -52,7 +52,7 @@
      start screen too, before a game has even started — rather than build a
      second copy of the Achievements list/hat grid, this just re-shows the
      SAME #tank-panel (see UI.js's setTankPanelView) as a centered modal
-     (via the .modal-mode CSS override) with this dimmed backdrop behind it,
+     (via #tank-overlay's .start-mode class) with this dimmed backdrop behind it,
      mirroring the exact "layer on top, don't hide #start-overlay" pattern
      Settings-from-the-start-screen already established. -->
 <div id="start-tank-backdrop" class="hidden"></div>
@@ -183,7 +183,7 @@
      positionBottomLeftLegends (the shop button's own on-screen position
      isn't static CSS — #bottom-bar-row centers itself, so its width
      depends on live content), instead of the old `position: absolute`
-     relative to #shop-anchor. -->
+     relative to the Shop button's old wrapper. -->
 <!-- Per direct request, this legend shows the live "Cost: $N" for whatever
      build:/fish: tool is armed (or the currently-captured Blueprint stamp's
      own total) — UI.js's updateHUD overwrites this text every frame, this
@@ -238,12 +238,12 @@
 
 <!-- Persistent, always-on hotkey reminder, bottom-left corner — per direct
      request. Small white text, dynamically re-worded by UI.js's updateHUD
-     every frame: E flips between "Open Shop"/"Close Shop" (state.ui.
-     shopCollapsed), Q between "Pipette Tool"/"Clear Cursor" (whether any
+     every frame: Q between "Pipette Tool"/"Clear Cursor" (whether any
      tool is currently armed), F between "Add Favorite"/"Remove Favorite"
      (hidden entirely when F would have nothing to do — see UI.js's own
-     favoriteLegendText) — see main.js's KeyE/KeyQ/KeyF handlers for what
-     each actually does. The Esc line was removed once (per an EARLIER
+     favoriteLegendText) — see main.js's KeyQ/KeyF handlers for what each
+     actually does. The E line was removed per direct request — the Shop
+     button's own E badge already says it. The Esc line was removed once (per an EARLIER
      direct request, "make it so the esc hotkey always opens and closes the
      pause menu... Esc's job is no longer context-dependent"), then brought
      back by a LATER direct request once Escape's job became
@@ -258,7 +258,6 @@
      re-worded live by UI.js's updateHUD same as every other line here. -->
 <div id="hotkey-legend">
   <div id="hotkey-legend-esc">Esc: Pause Menu</div>
-  <div id="hotkey-legend-e">E: Open Shop</div>
   <div id="hotkey-legend-q">Q: Pipette Tool</div>
   <div id="hotkey-legend-undo" class="hidden">Ctrl+Z: Undo</div>
   <div id="hotkey-legend-alt">Alt: Turn on Alt-mode</div>
@@ -475,46 +474,101 @@
   </div>
 </div>
 
-<div id="bottom-bar-row">
-  <div id="shop-anchor">
-    <button id="shop-collapse-btn" title="Shop (E)">🛍️<span class="panel-toggle-hotkey">E</span></button>
-    <div id="shop-panel">
-      <div id="shop-panel-scroll">
-        <div id="shop-sticky-header">
-          <div id="shop-header-row">
-            <div id="shop-header">Shop</div>
-            <div id="shop-money" class="sheen-target">💰 $0</div>
-          </div>
-
-          <div id="shop-preview" class="sheen-target">
-            <div id="shop-preview-empty"><div>Tap a fish or building below to see it here!<div id="shop-preview-empty-hint">3/4/5: Set Favorite</div></div></div>
-            <div id="shop-preview-content" class="hidden">
-              <div id="shop-preview-top">
-                <canvas id="shop-preview-canvas" width="60" height="60"></canvas>
-                <div id="shop-preview-text">
-                  <div id="shop-preview-name"></div>
-                  <div id="shop-preview-desc"></div>
-                </div>
-              </div>
-              <div id="shop-preview-stats" class="hidden"></div>
-              <div id="shop-preview-hint">Click in the tank to place it</div>
-            </div>
+<!-- Shop, Tank Upgrades, and the Science Lab are all centered, detached windows
+     now, per direct request ("I want it all to feel cohesive and seamless") —
+     same header row (title, readout pill(s), red X) and same pop-in animation
+     across all three. None of them dims or blurs the game behind it, and none
+     pauses it, per direct request ("so the player doesn't think the game is
+     paused"). Plain top-level siblings of #bottom-bar-row rather than children
+     of it: #bottom-bar-row's own transform would otherwise become the
+     containing block for their position:fixed. #shop-panel never covers the
+     rest of the screen, so clicks outside it still reach the tank, and only
+     its X/E close it, per direct request; #tank-overlay (like #lab-overlay)
+     is full-screen so a click outside the window closes it. -->
+<div id="shop-panel" class="collapsed">
+  <div id="shop-header-row">
+    <div id="shop-header">Shop</div>
+    <div id="shop-money" class="sheen-target">💰 $0</div>
+    <button id="shop-close-btn" class="lab-close-x-btn" title="Close (E)">✕</button>
+  </div>
+  <div id="shop-body">
+    <div id="shop-panel-scroll">
+      <div class="shop-section-title">Fish</div>
+      <div id="shop-species-grid"></div>
+      <div id="shop-buildings-title" class="shop-section-title">Buildings</div>
+      <div id="tool-bar">
+        <div id="build-tool-grid"></div>
+      </div>
+    </div>
+    <div id="shop-preview" class="sheen-target">
+      <div id="shop-preview-empty"><div>Tap a fish or building to see it here!<div id="shop-preview-empty-hint">3/4/5: Set Favorite</div></div></div>
+      <div id="shop-preview-content" class="hidden">
+        <div id="shop-preview-top">
+          <canvas id="shop-preview-canvas" width="60" height="60"></canvas>
+          <div id="shop-preview-text">
+            <div id="shop-preview-name"></div>
+            <div id="shop-preview-desc"></div>
           </div>
         </div>
+        <div id="shop-preview-stats" class="hidden"></div>
+        <div id="shop-preview-hint">Click in the tank to place it</div>
+      </div>
+    </div>
+  </div>
+</div>
 
-        <div id="shop-species-grid"></div>
-
-        <div id="tool-bar">
-          <div id="build-tool-grid"></div>
+<div id="tank-overlay" class="collapsed">
+  <div id="tank-panel">
+    <!-- Per direct request, one window switches between 3 views via the tab
+         rail on the left — Upgrades, Achievements, and Customization. See
+         UI.js's setTankPanelView. When this same window is opened from the
+         start screen instead (before a game exists), Tank Upgrades isn't
+         reachable yet — #tank-overlay gets .start-mode, which hides the
+         Upgrades tab (see style.css). -->
+    <div id="tank-header-row">
+      <div id="tank-title">Tank Upgrades</div>
+      <div id="tank-points-display" class="sheen-target">🏆 0</div>
+      <div id="achievement-gems-display" class="sheen-target hidden">💎 0</div>
+      <div id="customization-gems-display" class="sheen-target hidden">💎 0</div>
+      <button id="tank-close-btn" class="lab-close-x-btn" title="Close">✕</button>
+    </div>
+    <div id="tank-body">
+      <div id="tank-tabs">
+        <button id="tank-tab-upgrades" class="tank-tab-btn active" title="Tank Upgrades"><span class="tank-tab-icon">🏆</span><span class="tank-tab-label">Upgrades</span><span class="attention-dot hidden"></span></button>
+        <button id="tank-tab-achievements" class="tank-tab-btn" title="Achievements"><span class="tank-tab-icon">🎖️</span><span class="tank-tab-label">Achievements</span><span class="attention-dot hidden"></span></button>
+        <button id="tank-tab-customization" class="tank-tab-btn" title="Customize"><span class="tank-tab-icon">🎩</span><span class="tank-tab-label">Customize</span></button>
+      </div>
+      <div id="tank-panel-scroll">
+        <div id="tank-view-upgrades">
+          <div id="tank-upgrades-note">Grow fish to adults to earn points</div>
+          <div id="tank-upgrade-list"></div>
+        </div>
+        <div id="tank-view-achievements" class="hidden">
+          <div id="achievement-list"></div>
+        </div>
+        <div id="tank-view-customization" class="hidden">
+          <!-- Per direct request, a live preview of an adult Guppy wearing
+               whatever hat is currently equipped — the real FishRenderer.js
+               drawFish, same idle tail-wiggle animation the shop's own
+               species preview uses, so a hat can be seen before ever
+               starting a game. -->
+          <div id="customization-preview-wrap">
+            <canvas id="customization-preview-canvas" width="110" height="90"></canvas>
+          </div>
+          <div id="hat-grid"></div>
         </div>
       </div>
     </div>
   </div>
+</div>
+
+<div id="bottom-bar-row">
+  <button id="shop-collapse-btn" title="Shop (E)">🛍️<span class="panel-toggle-hotkey">E</span></button>
 
   <!-- Per direct request ("add in badges to the 1-6 tools in the toolbar,
        like the E and P badges on the shop and tank point menu") — every
        button here reuses that exact same .panel-toggle-hotkey badge (see
-       css/style.css's own comment on it), just showing 1-6 instead of E/P.
+       css/style.css's own comment on it), just showing 1-6 instead of E/T.
        The 3 static tools' badges are plain markup below; the 3 Favorite
        slots' own badges are injected live by UI.js's refreshFavoriteSlots
        (their whole innerHTML is rebuilt every time a favorite changes, so a
@@ -538,59 +592,17 @@
     <button id="tool-favorite-3-btn" class="tool-btn sheen-target tool-btn-favorite"></button>
   </div>
 
-  <div id="tank-anchor">
-    <button id="tank-collapse-btn" title="Tank Upgrades (P)">🏆<span class="panel-toggle-hotkey">P</span></button>
-    <div id="tank-panel" class="collapsed">
-      <div id="tank-panel-scroll">
-        <!-- Per direct request, one panel (same size/position as the old
-             Tank Upgrades panel) now switches between 3 views via these
-             tabs — Upgrades, Achievements, and Customization — each showing
-             the other two as buttons too, so any view is reachable from any
-             other. See UI.js's setTankPanelView. When this same panel is
-             opened from the start screen instead (before a game exists),
-             Tank Upgrades isn't reachable yet — #tank-tabs is hidden and
-             #tank-back-btn (a plain Back button returning to the start
-             screen) shows in its place instead, per a later direct request. -->
-        <div id="tank-tabs">
-          <button id="tank-tab-upgrades" class="tank-tab-btn active" title="Tank Upgrades">🏆</button>
-          <button id="tank-tab-achievements" class="tank-tab-btn" title="Achievements">🎖️</button>
-          <button id="tank-tab-customization" class="tank-tab-btn" title="Customize">🎩</button>
-        </div>
-        <button id="tank-back-btn" class="pause-btn sheen-target">← Back</button>
-        <div id="tank-view-upgrades">
-          <div class="tank-header-row">
-            <div class="tank-header">Tank Upgrades</div>
-            <div id="tank-points-display" class="sheen-target">🏆 0</div>
-          </div>
-          <div id="tank-upgrades-note">Grow fish to adults to earn points</div>
-          <div id="tank-upgrade-list"></div>
-        </div>
-        <div id="tank-view-achievements" class="hidden">
-          <div class="tank-header-row">
-            <div class="tank-header">Achievements</div>
-            <div id="achievement-gems-display" class="sheen-target">💎 0</div>
-          </div>
-          <div id="achievement-list"></div>
-        </div>
-        <div id="tank-view-customization" class="hidden">
-          <div class="tank-header-row">
-            <div class="tank-header">Customize</div>
-            <div id="customization-gems-display" class="sheen-target">💎 0</div>
-          </div>
-          <!-- Per direct request, a live preview of an adult Guppy wearing
-               whatever hat is currently equipped — the real FishRenderer.js
-               drawFish, same idle tail-wiggle animation the shop's own
-               species preview uses, so a hat can be seen before ever
-               starting a game. -->
-          <div id="customization-preview-wrap">
-            <canvas id="customization-preview-canvas" width="110" height="90"></canvas>
-          </div>
-          <div id="hat-grid"></div>
-        </div>
-      </div>
-    </div>
-  </div>
+  <!-- Science Lab launcher, per direct request — hidden until the Mound has
+       shattered into the Lab (UI.js's updateHUD toggles .hidden), since
+       there's nothing to open before then. -->
+  <button id="lab-collapse-btn" class="hidden" title="Science Lab (S)">🔬<span class="panel-toggle-hotkey">S</span><span class="attention-dot hidden"></span></button>
+  <button id="tank-collapse-btn" title="Tank Upgrades (T)">🏆<span class="panel-toggle-hotkey">T</span><span class="attention-dot hidden"></span></button>
 </div>
+
+<!-- Pause Time (button or Space) fades this subtle tint + vignette in over the
+     whole screen, per direct request, so it's visually obvious time is
+     stopped. Purely cosmetic and click-through (pointer-events: none). -->
+<div id="time-pause-overlay"></div>
 
 <div id="debug-overlay" class="hidden">
   <div id="debug-lines"></div>
