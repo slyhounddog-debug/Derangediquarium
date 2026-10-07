@@ -108,7 +108,7 @@ import {
 } from './Config.js';
 import { worldToScreen } from './Engine.js';
 import { bakeSeabedCanvas } from './SeabedArt.js';
-import { playBuildPlace, playDemolish, playTurretShoot, playIntake, playDispense } from './Sound.js';
+import { playBuildPlace, playBuildDrop, playDemolish, playTurretShoot, playIntake, playDispense } from './Sound.js';
 import { pushGameNotification } from './Notifications.js';
 
 // One-time story/tutorial notifications — see state.level.tutorialFlags and
@@ -1058,11 +1058,12 @@ export function pickUpBuildingForMove(state, col, row) {
 // carried over exactly as-is). Returns the same { ok, reason } shape
 // canPlaceTile does, so callers can show a real failure reason
 // (handleBuildPlacementFailure) without a placement actually happening.
-export function putDownMovedBuilding(state, col, row, buildingId, data) {
+export function putDownMovedBuilding(state, col, row, buildingId, data, animate = true) {
   const check = canPlaceTile(state, col, row, buildingId, true);
   if (!check.ok) return check;
   state.level.grid[row][col] = buildingId;
   if (data) state.level.buildingData[buildingKey(col, row)] = data;
+  if (animate) startTileDropAnimation(col, row); // a real move gets the drop-in; a cancelled move put back where it was does not (animate = false)
   return check;
 }
 
@@ -1200,6 +1201,7 @@ export function placeTile(state, col, row, buildingId, angle = 0) {
   writeFreshBuildingData(state, col, row, buildingId, angle);
   bumpPlacementBookkeeping(state, buildingId);
   playBuildPlace();
+  startTileDropAnimation(col, row);
   return true;
 }
 
@@ -1382,6 +1384,7 @@ function applyReplacementMutation(state, col, row, buildingId, angle, info) {
     state.level.grid[row][col] = buildingId;
     writeFreshBuildingData(state, col, row, buildingId, angle);
     state.level.money -= info.netCost;
+    startTileDropAnimation(col, row);
     return { replaced: false, oldBuildingId: null, oldData: null };
   }
   const existingType = info.replacedType;
@@ -1432,6 +1435,7 @@ function applyReplacementMutation(state, col, row, buildingId, angle, info) {
     writeFreshBuildingData(state, col, row, buildingId, angle);
   }
   state.level.money -= info.netCost;
+  startTileDropAnimation(col, row);
   return { replaced: true, oldBuildingId: existingType, oldData: snapshot };
 }
 
@@ -3793,6 +3797,19 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
         const screen = worldToScreen(col * TILE_SIZE, row * TILE_SIZE, camera);
         const size = TILE_SIZE * camera.zoom;
         const data = state.level.buildingData[buildingKey(col, row)];
+        const dropAnim = tileDropAnims.get(buildingKey(col, row));
+        let dropActive = false;
+        if (dropAnim) {
+          const dropT = performance.now() - dropAnim.startAt;
+          if (dropT < 0) continue; // waiting its turn in a batch — not dropped in yet
+          if (dropT < DROP_TOTAL_MS) {
+            dropActive = true;
+            ctx.save();
+            applyDropTransform(ctx, dropAnim, dropT, screen.x, screen.y, size);
+            const variant = (((col * 73856093) ^ (row * 19349663)) >>> 0) % TILE_SPRITE_VARIANTS; // same pick as the static layer
+            ctx.drawImage(getTileSprite(type, building.color, variant), screen.x, screen.y, size, size);
+          }
+        }
         renderTileDynamic(ctx, type, building.color, screen.x, screen.y, size, data, state.level.elapsed);
         // Fans are drawn separately below (renderFanIndicators), over EVERY
         // fan in state.level.buildingData rather than just the on-screen-tile-
@@ -3866,8 +3883,10 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
         if (currentPowerDraw > 0 || blockedFromAccepting) {
           renderPowerShortageOverlay(ctx, screen.x, screen.y, size, camera.zoom, state.level.powerEfficiency, state.level.elapsed);
         }
+        if (dropActive) ctx.restore();
       }
     }
+    renderDropDust(ctx, camera, performance.now());
   }
 
   renderFanIndicators(ctx, state, canvasWidth, canvasHeight);
@@ -4982,6 +5001,102 @@ function renderTileDynamic(ctx, type, color, x, y, size, data, elapsedMs) {
   }
 }
 
+// ---- Building drop-in animation (purely visual) ----
+// Per direct request: a freshly placed (or moved) building looks dropped into
+// the world — it starts slightly enlarged, tilts so ONE randomly chosen corner
+// lands first (a little off-kilter, as if not dropped perfectly), Drop.mp3 plays
+// and a small plume of dust kicks up at that moment, then the building rocks
+// back flat and ends exactly as it always looked. Nothing here touches the grid
+// or the building's data: the real tile is in place (and fully functional) from
+// the first tick; this only changes how it is DRAWN for ~0.6s. While it plays
+// the tile is clipped out of the cached static layer (no re-bake) and drawn
+// transformed instead — see renderStaticTileLayer / renderSeabedGrid. A burst
+// of placements (blueprint paste, snap line) is staggered so they cascade.
+const DROP_FALL_MS = 240; // start -> corner impact
+const DROP_SETTLE_MS = 340; // impact -> flat and still
+const DROP_TOTAL_MS = DROP_FALL_MS + DROP_SETTLE_MS;
+const DROP_DUST_MS = 520;
+const DROP_START_SCALE = 1.3;
+const DROP_IMPACT_SCALE = 1.1; // size at the moment the corner lands
+const DROP_TILT_RAD = 0.1;
+const DROP_STAGGER_MS = 55;
+const DROP_MAX_DELAY_MS = 600; // however big the batch, the last one starts within this
+const DROP_PUFF_COUNT = 9;
+const tileDropAnims = new Map(); // "row,col" -> { startAt, pivotX, pivotY, kx, ky, skew, puffs }
+let lastDropStartAt = 0;
+
+export function startTileDropAnimation(col, row) {
+  const now = performance.now();
+  const startAt = Math.min(now + DROP_MAX_DELAY_MS, Math.max(now, lastDropStartAt + DROP_STAGGER_MS));
+  lastDropStartAt = startAt;
+  const pivotX = Math.random() < 0.5 ? 0 : 1; // the corner that lands first (0/1 = left/right, top/bottom)
+  const pivotY = Math.random() < 0.5 ? 0 : 1;
+  const puffs = [];
+  for (let i = 0; i < DROP_PUFF_COUNT; i++) {
+    const nearPivot = Math.random() < 0.55; // most of the dust kicks up around the corner that hit
+    const x0 = nearPivot ? (pivotX ? 1 - Math.random() * 0.3 : Math.random() * 0.3) : Math.random();
+    puffs.push({
+      x0,
+      y0: 0.9 + Math.random() * 0.1,
+      vx: (x0 - 0.5 + (Math.random() - 0.5) * 0.4) * 0.9,
+      vy: -(0.1 + Math.random() * 0.3),
+      r0: 0.06 + Math.random() * 0.05,
+      delay: Math.random() * 70,
+    });
+  }
+  tileDropAnims.set(buildingKey(col, row), {
+    startAt, pivotX, pivotY, puffs,
+    kx: 0.06 + Math.random() * 0.06, // how much the far side stretches while tilted
+    ky: 0.02 + Math.random() * 0.04,
+    skew: (Math.random() < 0.5 ? -1 : 1) * (0.02 + Math.random() * 0.04),
+  });
+  setTimeout(playBuildDrop, startAt - now + DROP_FALL_MS); // the corner hits
+}
+
+// Scales/rotates/skews around an anchor that slides from the tile's centre to
+// the landing corner as it falls, so the corner stays on its true spot at impact.
+function applyDropTransform(ctx, anim, t, x, y, size) {
+  let scale, tilt, anchorBlend;
+  if (t < DROP_FALL_MS) {
+    const f = t / DROP_FALL_MS;
+    scale = DROP_START_SCALE + (DROP_IMPACT_SCALE - DROP_START_SCALE) * f * f;
+    tilt = Math.pow(f, 1.5);
+    anchorBlend = f * f * f;
+    ctx.globalAlpha = Math.min(1, t / 70);
+  } else {
+    const u = (t - DROP_FALL_MS) / DROP_SETTLE_MS;
+    const rock = Math.exp(-3.2 * u) * Math.cos(u * Math.PI * 2.5) * (1 - u * u * u); // damped rock back to flat, tapering to exactly 0
+    scale = 1 + (DROP_IMPACT_SCALE - 1) * rock;
+    tilt = rock;
+    anchorBlend = 1;
+  }
+  const ax = x + size * (0.5 + (anim.pivotX - 0.5) * anchorBlend);
+  const ay = y + size * (0.5 + (anim.pivotY - 0.5) * anchorBlend);
+  ctx.translate(ax, ay);
+  ctx.rotate(DROP_TILT_RAD * tilt * (anim.pivotX === anim.pivotY ? 1 : -1));
+  ctx.transform(1, 0, anim.skew * tilt, 1, 0, 0);
+  ctx.scale(scale + anim.kx * tilt, scale + anim.ky * tilt);
+  ctx.translate(-ax, -ay);
+}
+
+function renderDropDust(ctx, camera, now) {
+  const size = TILE_SIZE * camera.zoom;
+  for (const [key, anim] of tileDropAnims) {
+    const sinceImpact = now - anim.startAt - DROP_FALL_MS;
+    if (sinceImpact < 0 || sinceImpact > DROP_DUST_MS + 70) continue;
+    const [row, col] = key.split(',').map(Number);
+    const origin = worldToScreen(col * TILE_SIZE, row * TILE_SIZE, camera);
+    for (const p of anim.puffs) {
+      const prog = (sinceImpact - p.delay) / DROP_DUST_MS;
+      if (prog < 0 || prog > 1) continue;
+      ctx.fillStyle = `rgba(226, 205, 165, ${0.55 * Math.pow(1 - prog, 1.3)})`;
+      ctx.beginPath();
+      ctx.arc(origin.x + size * (p.x0 + p.vx * prog), origin.y + size * (p.y0 + p.vy * prog), size * p.r0 * (1 + 1.2 * prog), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
 // ---- Cached static tile layer ----
 // Performance: measured at ~0.13ms PER TILE just to blit its baked sprite, so
 // a few hundred buildings cost tens of ms a frame by themselves. Since a
@@ -5038,7 +5153,32 @@ function renderStaticTileLayer(ctx, state) {
   }
   const { camera } = state;
   const topLeft = worldToScreen(0, SEABED_ROW_START * TILE_SIZE, camera);
-  ctx.drawImage(tileLayerCanvas, topLeft.x, topLeft.y, WORLD_TILES_W * TILE_SIZE * camera.zoom, rows * TILE_SIZE * camera.zoom);
+  const layerW = WORLD_TILES_W * TILE_SIZE * camera.zoom;
+  const layerH = rows * TILE_SIZE * camera.zoom;
+  // Tiles mid drop-in are cut out of this frame's blit (they're drawn animated
+  // by renderSeabedGrid instead); expired animations are dropped here.
+  const now = performance.now();
+  const hidden = [];
+  for (const [key, anim] of tileDropAnims) {
+    if (now > anim.startAt + DROP_TOTAL_MS + DROP_DUST_MS) { tileDropAnims.delete(key); continue; }
+    if (now < anim.startAt + DROP_TOTAL_MS) hidden.push(key);
+  }
+  if (!hidden.length) {
+    ctx.drawImage(tileLayerCanvas, topLeft.x, topLeft.y, layerW, layerH);
+    return;
+  }
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(topLeft.x, topLeft.y, layerW, layerH);
+  const cell = TILE_SIZE * camera.zoom;
+  for (const key of hidden) {
+    const [row, col] = key.split(',').map(Number);
+    const p = worldToScreen(col * TILE_SIZE, row * TILE_SIZE, camera);
+    ctx.rect(p.x, p.y, cell, cell);
+  }
+  ctx.clip('evenodd');
+  ctx.drawImage(tileLayerCanvas, topLeft.x, topLeft.y, layerW, layerH);
+  ctx.restore();
 }
 
 // A column of PROCESS_DOTS_COUNT (4) dots down the left edge of a

@@ -2715,7 +2715,7 @@ function performUndo() {
     const picked = pickUpBuildingForMove(state, entry.toCol, entry.toRow);
     if (picked) {
       const result = putDownMovedBuilding(state, entry.fromCol, entry.fromRow, picked.type, picked.data);
-      if (!result.ok) putDownMovedBuilding(state, entry.toCol, entry.toRow, picked.type, picked.data); // couldn't go back — put it right back where undo found it rather than losing it
+      if (!result.ok) putDownMovedBuilding(state, entry.toCol, entry.toRow, picked.type, picked.data, false); // couldn't go back — put it right back where undo found it rather than losing it
     }
   } else if (entry.type === 'demolish') {
     const result = putDownMovedBuilding(state, entry.col, entry.row, entry.buildingId, entry.data);
@@ -2864,7 +2864,7 @@ input.rightMouseUpHandlers.push((sx, sy) => {
   const failure = confirmBuildingMoveAt(screenToWorld(sx, sy, state.camera));
   if (failure) {
     handleBuildPlacementFailure(failure);
-    putDownMovedBuilding(state, movingBuilding.fromCol, movingBuilding.fromRow, movingBuilding.buildingId, movingBuilding.data); // snap back
+    putDownMovedBuilding(state, movingBuilding.fromCol, movingBuilding.fromRow, movingBuilding.buildingId, movingBuilding.data, false); // snap back
     movingBuilding = null;
   }
 });
@@ -2892,7 +2892,7 @@ function updateBuildingMove() {
     rightMoveCandidate = null;
   }
   if (movingBuilding != null && !isCursorOrFoodTool(state.ui.selectedTool)) {
-    putDownMovedBuilding(state, movingBuilding.fromCol, movingBuilding.fromRow, movingBuilding.buildingId, movingBuilding.data);
+    putDownMovedBuilding(state, movingBuilding.fromCol, movingBuilding.fromRow, movingBuilding.buildingId, movingBuilding.data, false);
     movingBuilding = null;
   }
   // Same self-healing for a moved Fan's own angle-choosing step — it never
@@ -2901,7 +2901,7 @@ function updateBuildingMove() {
   // player did something that should cancel this" for that case, restoring
   // the Fan at its ORIGINAL spot since it was already picked up off the grid.
   if (fanAimingCell != null && fanAimingMoveData != null && !isCursorOrFoodTool(state.ui.selectedTool)) {
-    putDownMovedBuilding(state, fanAimingMoveOrigin.fromCol, fanAimingMoveOrigin.fromRow, fanAimingCell.buildingId, fanAimingMoveData);
+    putDownMovedBuilding(state, fanAimingMoveOrigin.fromCol, fanAimingMoveOrigin.fromRow, fanAimingCell.buildingId, fanAimingMoveData, false);
     fanAimingCell = null;
     fanAimingMoveData = null;
     fanAimingMoveOrigin = null;
@@ -3277,12 +3277,12 @@ input.rightClickHandlers.push(() => {
 input.rightClickHandlers.push(() => {
   if (state.ui.paused || state.level.tutorialFlow) return;
   if (movingBuilding != null) {
-    putDownMovedBuilding(state, movingBuilding.fromCol, movingBuilding.fromRow, movingBuilding.buildingId, movingBuilding.data);
+    putDownMovedBuilding(state, movingBuilding.fromCol, movingBuilding.fromRow, movingBuilding.buildingId, movingBuilding.data, false);
     movingBuilding = null;
     return;
   }
   if (isFanAimingActive() && fanAimingMoveData != null) {
-    putDownMovedBuilding(state, fanAimingMoveOrigin.fromCol, fanAimingMoveOrigin.fromRow, fanAimingCell.buildingId, fanAimingMoveData);
+    putDownMovedBuilding(state, fanAimingMoveOrigin.fromCol, fanAimingMoveOrigin.fromRow, fanAimingCell.buildingId, fanAimingMoveData, false);
     fanAimingCell = null;
     fanAimingMoveData = null;
     fanAimingMoveOrigin = null;

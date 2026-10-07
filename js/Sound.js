@@ -138,6 +138,7 @@ function ensureContext() {
   sfxGain = ctx.createGain();
   sfxGain.gain.value = sfxVolume * SFX_VOLUME_MAX_GAIN;
   sfxGain.connect(ctx.destination);
+  loadDropSound();
   return ctx;
 }
 
@@ -426,9 +427,9 @@ function playNoise(duration, { gain = 0.15, when = 0, destination = null } = {})
 // not global: two DIFFERENT sounds landing together still both play.
 const SFX_COOLDOWN_MS = 50;
 const sfxLastPlayedAt = {};
-function sfxOnCooldown(name) {
+function sfxOnCooldown(name, cooldownMs = SFX_COOLDOWN_MS) {
   const now = performance.now();
-  if (now - (sfxLastPlayedAt[name] ?? -Infinity) < SFX_COOLDOWN_MS) return true;
+  if (now - (sfxLastPlayedAt[name] ?? -Infinity) < cooldownMs) return true;
   sfxLastPlayedAt[name] = now;
   return false;
 }
@@ -527,6 +528,30 @@ export function playBuildPlace() {
   if (sfxOnCooldown('playBuildPlace')) return;
   playTone(196, 0.08, { type: 'square', gain: 0.13 }); // G3
   playTone(261.63, 0.12, { type: 'square', gain: 0.15, when: 0.06 }); // C4
+}
+
+// The building drop-in animation's landing sound (audio/Drop.mp3), per direct
+// request — played by Grid.js at the instant the dropped building's corner hits
+// the ground. Decoded once into a buffer so overlapping drops (a blueprint paste
+// or snap line) can each fire it without re-fetching; a slightly longer cooldown
+// than the default keeps a long staggered line from becoming a roar.
+const DROP_SOUND_COOLDOWN_MS = 90;
+let dropBuffer = null;
+function loadDropSound() {
+  fetch('audio/Drop.mp3')
+    .then((res) => res.arrayBuffer())
+    .then((data) => ctx.decodeAudioData(data))
+    .then((buffer) => { dropBuffer = buffer; })
+    .catch(() => {});
+}
+export function playBuildDrop() {
+  const audioCtx = ensureContext();
+  if (!audioCtx || audioCtx.state !== 'running' || !dropBuffer) return;
+  if (sfxOnCooldown('playBuildDrop', DROP_SOUND_COOLDOWN_MS)) return;
+  const src = audioCtx.createBufferSource();
+  src.buffer = dropBuffer;
+  src.connect(sfxGain);
+  src.start();
 }
 
 // A short crunch — demolishing a building.
