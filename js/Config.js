@@ -3714,11 +3714,10 @@ export const ACHIEVEMENT_LIST = Object.values(ACHIEVEMENTS);
 // later direct request ("make it so the more expensive hats are a little
 // cheaper, so they don't have such a range in cost, and so the total Fishy
 // gem cost for all of them is closer to 80% (about ~216 gems) of the total
-// fishy gems that can be earned instead of the 94% it is now") — a plain
-// linear ramp from 12 to 24 gems (a 12-gem spread, down from the original
-// 12-30/18-gem spread) across all 12 hats sums to EXACTLY 216, i.e. exactly
-// 80% of the 270 gems every achievement combined pays out (see
-// ACHIEVEMENT_GEM_REWARD_BY_TIER's own total). `none` is the always-
+// fishy gems that can be earned instead of the 94% it is now") — a linear
+// ramp from 12 to 24 gems. Per a later direct request every hat now costs a
+// flat 15 gems (12 x 15 = 180, about 67% of the 270 gems every achievement
+// combined pays out — see ACHIEVEMENT_GEM_REWARD_BY_TIER's own total). `none` is the always-
 // available, free default (no hat) — not counted toward "a dozen different
 // hats," since it isn't really a hat.
 //
@@ -3733,18 +3732,18 @@ export const ACHIEVEMENT_LIST = Object.values(ACHIEVEMENTS);
 // old slot in the cost ramp; `party_hat` is a new id replacing Star Struck.
 export const HATS = {
   none: { id: 'none', name: 'No Hat', icon: '🚫', gemCost: 0 },
-  guppy_cap: { id: 'guppy_cap', name: "Lil' Guppy Cap", icon: '🧢', gemCost: 12 },
-  fancy_fin: { id: 'fancy_fin', name: 'Fancy Fin Top Hat', icon: '🎩', gemCost: 13 },
-  beach_bum: { id: 'beach_bum', name: 'Beach Bum Sun Hat', icon: '👒', gemCost: 14 },
+  guppy_cap: { id: 'guppy_cap', name: "Lil' Guppy Cap", icon: '🧢', gemCost: 15 },
+  fancy_fin: { id: 'fancy_fin', name: 'Fancy Fin Top Hat', icon: '🎩', gemCost: 15 },
+  beach_bum: { id: 'beach_bum', name: 'Beach Bum Sun Hat', icon: '👒', gemCost: 15 },
   incognito: { id: 'incognito', name: 'Incognito Disguise', icon: '🥸', gemCost: 15 },
-  turret_tech: { id: 'turret_tech', name: 'Turret Tech Helmet', icon: '🪖', gemCost: 16 },
-  bubble_scholar: { id: 'bubble_scholar', name: 'Bubble Scholar Cap', icon: '🎓', gemCost: 17 },
-  lucky_clover: { id: 'lucky_clover', name: 'Lucky Clover', icon: '🍀', gemCost: 19 },
-  witch_hat: { id: 'witch_hat', name: "Witch's Hat", icon: '🧙', gemCost: 20 },
-  pumpkin_head: { id: 'pumpkin_head', name: 'Pumpkin Head', icon: '🎃', gemCost: 21 },
-  party_hat: { id: 'party_hat', name: 'Party Hat', icon: '🎉', gemCost: 22 },
-  shark_fin: { id: 'shark_fin', name: 'Shark Fin', icon: '🦈', gemCost: 23 },
-  tank_royalty: { id: 'tank_royalty', name: 'Tank Royalty Crown', icon: '👑', gemCost: 24 },
+  turret_tech: { id: 'turret_tech', name: 'Turret Tech Helmet', icon: '🪖', gemCost: 15 },
+  bubble_scholar: { id: 'bubble_scholar', name: 'Bubble Scholar Cap', icon: '🎓', gemCost: 15 },
+  lucky_clover: { id: 'lucky_clover', name: 'Lucky Clover', icon: '🍀', gemCost: 15 },
+  witch_hat: { id: 'witch_hat', name: "Witch's Hat", icon: '🧙', gemCost: 15 },
+  pumpkin_head: { id: 'pumpkin_head', name: 'Pumpkin Head', icon: '🎃', gemCost: 15 },
+  party_hat: { id: 'party_hat', name: 'Party Hat', icon: '🎉', gemCost: 15 },
+  shark_fin: { id: 'shark_fin', name: 'Shark Fin', icon: '🦈', gemCost: 15 },
+  tank_royalty: { id: 'tank_royalty', name: 'Tank Royalty Crown', icon: '👑', gemCost: 15 },
 };
 export const HAT_LIST = Object.values(HATS).filter((h) => h.id !== 'none');
 

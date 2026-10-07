@@ -57,6 +57,35 @@
      Settings-from-the-start-screen already established. -->
 <div id="start-tank-backdrop" class="hidden"></div>
 
+<!-- Per direct request, New Game first asks which kind of player this is —
+     "New player" turns the guided tutorial on, "Experienced player" turns it
+     off. That pick overrides whatever the guided-tutorial setting was before
+     (UI.js's initStartScreen calls Save.js's setGuidedTutorialsEnabled), and
+     any change made in Settings afterward is remembered between sessions the
+     same way it always was. Same layer-on-top pattern as the Help overlay
+     below. -->
+<div id="start-mode-overlay" class="hidden">
+  <div id="start-mode-modal">
+    <div id="start-mode-header-row">
+      <div id="start-mode-title">How would you like to start?</div>
+      <button id="start-mode-back-btn" class="pause-btn sheen-target">← Back</button>
+    </div>
+    <div id="start-mode-cards">
+      <button id="start-mode-new-btn" class="start-mode-card">
+        <canvas id="start-mode-new-canvas" width="260" height="170"></canvas>
+        <div class="start-mode-card-title">New player</div>
+        <div class="start-mode-card-desc">The guided tutorial is turned <b>on</b> — step-by-step prompts walk you through your first fish, the shop, aliens and more.</div>
+      </button>
+      <button id="start-mode-exp-btn" class="start-mode-card">
+        <canvas id="start-mode-exp-canvas" width="260" height="170"></canvas>
+        <div class="start-mode-card-title">Experienced player</div>
+        <div class="start-mode-card-desc">The guided tutorial is turned <b>off</b> — jump straight in with no hand-holding.</div>
+      </button>
+    </div>
+    <div id="start-mode-note">You can change this anytime in Settings.</div>
+  </div>
+</div>
+
 <div id="start-help-overlay" class="hidden">
   <div id="start-help-modal">
     <div id="start-help-header-row">
@@ -503,14 +532,15 @@
     <div id="shop-preview" class="sheen-target">
       <div id="shop-preview-empty"><div>Tap a fish or building to see it here!<div id="shop-preview-empty-hint">3/4/5: Set Favorite</div></div></div>
       <div id="shop-preview-content" class="hidden">
+        <!-- Per direct request, name, description and stats each live in
+             their own fixed-size container so nothing in this column moves
+             when a different shop item is clicked. -->
         <div id="shop-preview-top">
           <canvas id="shop-preview-canvas" width="60" height="60"></canvas>
-          <div id="shop-preview-text">
-            <div id="shop-preview-name"></div>
-            <div id="shop-preview-desc"></div>
-          </div>
+          <div id="shop-preview-name"></div>
         </div>
-        <div id="shop-preview-stats" class="hidden"></div>
+        <div id="shop-preview-desc" class="shop-preview-box"></div>
+        <div id="shop-preview-stats" class="shop-preview-box"></div>
         <div id="shop-preview-hint">Click in the tank to place it</div>
       </div>
     </div>

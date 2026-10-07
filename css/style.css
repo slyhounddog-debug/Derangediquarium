@@ -1395,6 +1395,7 @@ body.time-paused #time-pause-overlay { opacity: 1; }
 #shop-preview-content::-webkit-scrollbar-thumb:hover { background: #ff9ac4; }
 #shop-preview-top {
   display: flex; align-items: center; gap: 12px;
+  height: 64px; flex: none; /* fixed, so a one- vs two-line name never shifts the boxes below */
   margin-bottom: 10px;
 }
 #shop-preview-canvas {
@@ -1403,16 +1404,28 @@ body.time-paused #time-pause-overlay { opacity: 1; }
   background: #ffe9f2;
   box-shadow: 0 2px 6px rgba(107, 76, 107, 0.2);
 }
-#shop-preview-text { flex: 1; min-width: 0; }
 /* Per direct request ("there's too much small text in the shop... reduce
    the amount of text in everything and increase the size of the font") —
    every size in this preview block bumped up a notch, alongside actually
    removing text elsewhere (speciesStatsHtml dropping its Role/Cost lines —
    see UI.js). */
-#shop-preview-name { font-size: 17px; font-weight: 800; color: #c25f8f; }
+#shop-preview-name { flex: 1; min-width: 0; font-size: 17px; font-weight: 800; color: #c25f8f; }
+/* Name, description and stats are separate fixed-size containers, per direct
+   request, so nothing in the info column moves when a different shop item is
+   clicked — the description box has a set height and the stats box takes the
+   rest of the column, each scrolling internally rather than resizing. */
+.shop-preview-box {
+  background: rgba(255, 255, 255, 0.55);
+  border-radius: 12px;
+  padding: 8px 10px;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #ffb6d5 #fff0f6;
+}
 #shop-preview-desc {
-  font-size: 13px; line-height: 1.4; opacity: 0.85; margin-top: 2px;
-  overflow: hidden; /* clip rather than grow the fixed-height box, if a future longer description would otherwise overflow */
+  flex: none; height: 92px;
+  font-size: 13px; line-height: 1.4; opacity: 0.85;
+  margin-bottom: 8px;
 }
 /* No Buy button any more — a fish is armed as the active click-tool exactly
    like a building is (see UI.js's selectSpeciesForPreview/main.js's click
@@ -1427,10 +1440,10 @@ body.time-paused #time-pause-overlay { opacity: 1; }
    ("show the stats associated with that building"). A small wrapped row of
    compact stat chips rather than a paragraph, so it reads at a glance. */
 #shop-preview-stats {
-  display: flex; flex-wrap: wrap; gap: 5px 10px;
-  margin-top: 6px;
+  flex: 1; min-height: 0;
+  display: flex; flex-wrap: wrap; align-content: flex-start; gap: 5px 10px;
+  margin-bottom: 8px;
 }
-#shop-preview-stats.hidden { display: none; }
 .building-stat {
   font-size: 13px;
   color: #6b4c6b;
@@ -1728,6 +1741,7 @@ body.time-paused #time-pause-overlay { opacity: 1; }
   background: #0b2540; /* only visible for the frame or two before the backdrop snapshot lands */
   overflow: hidden;
   z-index: 600; /* above the game canvas and every HUD element */
+  cursor: var(--shell-cursor, auto); /* the in-game shell cursor, per direct request — set by main.js; the planks and draggable title coins keep their own pointer/grab */
 }
 #start-overlay.hidden { display: none; }
 #title-backdrop, #title-canvas {
@@ -1910,6 +1924,59 @@ body.time-paused #time-pause-overlay { opacity: 1; }
   z-index: 600;
 }
 #start-help-overlay.hidden { display: none; }
+
+/* New Game's "New player / Experienced player" chooser — same blurred-
+   backdrop, layer-on-top treatment as the Help overlay above. Two large
+   cards, each a picture (UI.js's drawStartModeArt) over a title and a short
+   description. */
+#start-mode-overlay {
+  position: fixed; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(11, 37, 64, 0.45);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 600;
+}
+#start-mode-overlay.hidden { display: none; }
+#start-mode-modal {
+  width: 720px;
+  max-width: 94vw;
+  background: linear-gradient(165deg, #fffaf3 0%, #ffe4f2 100%);
+  color: #6b4c6b;
+  border-radius: 28px;
+  border: 3px solid #ffffff;
+  padding: 22px 24px;
+  box-shadow: 0 20px 50px rgba(11, 37, 64, 0.5), inset 0 2px 0 rgba(255, 255, 255, 0.7);
+}
+#start-mode-header-row { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+#start-mode-title { font-size: 20px; font-weight: 800; color: #c25f8f; flex: 1; }
+#start-mode-back-btn { flex: none; width: auto; padding: 9px 16px; margin-bottom: 0; }
+#start-mode-cards { display: flex; gap: 18px; }
+.start-mode-card {
+  flex: 1; min-width: 0;
+  display: flex; flex-direction: column; align-items: stretch; gap: 10px;
+  background: linear-gradient(160deg, #fffdf8 0%, #fff0dc 100%);
+  border: 3px solid #ffffff;
+  border-radius: 22px;
+  padding: 12px;
+  color: #6b4c6b;
+  font: inherit;
+  text-align: center;
+  cursor: pointer;
+  box-shadow: 0 6px 16px rgba(107, 76, 107, 0.2), inset 0 2px 0 rgba(255, 255, 255, 0.7);
+  transition: transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+}
+.start-mode-card:hover { transform: translateY(-4px) scale(1.02); border-color: #ff9ac4; box-shadow: 0 10px 22px rgba(255, 90, 160, 0.3), inset 0 2px 0 rgba(255, 255, 255, 0.7); }
+.start-mode-card canvas {
+  width: 100%; height: auto;
+  border-radius: 14px;
+  border: 2px solid #ffffff;
+  background: linear-gradient(180deg, #cdeaf7 0%, #7fc0e0 100%);
+}
+.start-mode-card-title { font-size: 20px; font-weight: 800; color: #c25f8f; }
+.start-mode-card-desc { font-size: 13px; line-height: 1.45; }
+.start-mode-card-desc b { color: #c25f8f; }
+#start-mode-note { margin-top: 14px; text-align: center; font-size: 12.5px; font-weight: 700; opacity: 0.7; }
 #start-help-modal {
   width: 520px;
   max-width: 92vw;

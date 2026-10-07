@@ -559,6 +559,12 @@ export function initUI(state) {
     startNewGameBtn: document.getElementById('start-new-game-btn'),
     startContinueBtn: document.getElementById('start-continue-btn'),
     startSettingsBtn: document.getElementById('start-settings-btn'),
+    startModeOverlay: document.getElementById('start-mode-overlay'),
+    startModeBackBtn: document.getElementById('start-mode-back-btn'),
+    startModeNewBtn: document.getElementById('start-mode-new-btn'),
+    startModeExpBtn: document.getElementById('start-mode-exp-btn'),
+    startModeNewCanvas: document.getElementById('start-mode-new-canvas'),
+    startModeExpCanvas: document.getElementById('start-mode-exp-canvas'),
     startHelpBtn: document.getElementById('start-help-btn'),
     startHelpOverlay: document.getElementById('start-help-overlay'),
     startHelpBackBtn: document.getElementById('start-help-back-btn'),
@@ -2588,6 +2594,26 @@ function returnFromPauseSettings(state) {
 // (kicks off the splash animation and un-gates the sim loop) — UI.js
 // doesn't reach into main.js directly, same one-directional import
 // discipline every other main.js/UI.js hookup in this file already follows.
+// The two New Game cards' pictures, drawn with the real in-game fish renderer
+// (same drawFish the Customization preview uses): a Guppy in a Bubble Scholar
+// cap for "New player," a gold-eyed 4-star Guppy in the Tank Royalty crown
+// for "Experienced player." Drawn fresh each time the chooser opens — it's
+// two static frames.
+function drawStartModeArt() {
+  const adultStage = SPECIES.guppy.growthStages.length - 1;
+  const draw = (canvas, starTier, hatId) => {
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.save();
+    ctx.translate(canvas.width / 2, canvas.height / 2 + 8);
+    ctx.scale(2.6, 2.6);
+    drawFish(ctx, 0, 0, 'guppy', adultStage, 1, 0, { x: 1, y: 0 }, starTier, 0, 0, hatId);
+    ctx.restore();
+  };
+  draw(els.startModeNewCanvas, 1, 'bubble_scholar');
+  draw(els.startModeExpCanvas, 4, 'tank_royalty');
+}
+
 export function initStartScreen(state, onStart) {
   startOnStartCallback = onStart;
   // Continue Game stays visible but grayed out/disabled unless a save
@@ -2599,9 +2625,35 @@ export function initStartScreen(state, onStart) {
   // #start-overlay themselves — main.js's onStart hands off to
   // TitleScreen.js's exit animation (SANITY/FIN fly up in bubble trails),
   // which hides it once that has finished playing.
+  // Per direct request, New Game first asks "New player" vs. "Experienced
+  // player" (see #start-mode-overlay in index.html) — the pick sets the
+  // guided-tutorial preference outright (overriding any earlier choice, and
+  // marking it user-set so Save.js's auto-off never second-guesses it), then
+  // carries on into the game exactly as before. Changing the setting later
+  // in Settings persists between sessions through the same Save.js call.
   els.startNewGameBtn.addEventListener('click', () => {
+    drawStartModeArt();
+    els.startModeOverlay.classList.remove('hidden');
+    setTitlePaused(true);
+    playPanelOpen();
+  });
+  const closeStartModeOverlay = () => {
+    els.startModeOverlay.classList.add('hidden');
+    setTitlePaused(false);
+  };
+  const startNewGameWithTutorials = (guided) => {
+    setGuidedTutorialsEnabled(guided);
+    closeStartModeOverlay();
     playPanelClose();
     onStart();
+  };
+  els.startModeNewBtn.addEventListener('click', () => startNewGameWithTutorials(true));
+  els.startModeExpBtn.addEventListener('click', () => startNewGameWithTutorials(false));
+  els.startModeBackBtn.addEventListener('click', () => { closeStartModeOverlay(); playPanelClose(); });
+  els.startModeOverlay.addEventListener('click', (e) => {
+    if (e.target !== els.startModeOverlay) return; // clicked the modal, not the backdrop
+    closeStartModeOverlay();
+    playPanelClose();
   });
   els.startContinueBtn.addEventListener('click', () => {
     const saved = loadSaveGame();
@@ -4390,7 +4442,6 @@ function selectSpeciesForPreview(state, species) {
   // show — see fishEconomyStatsHtml.
   const statsHtml = speciesStatsHtml(state, species.id);
   els.previewStats.innerHTML = statsHtml;
-  els.previewStats.classList.toggle('hidden', !statsHtml);
   // Name/price text is set live in refreshPreviewInfo (called both here and
   // every frame from updateHUD) since an economy species' price is dynamic —
   // see Config.js's ECONOMY_FISH_COST_GROWTH_RATE.
@@ -4470,7 +4521,6 @@ function selectBuildingForPreview(state, building) {
   els.previewDesc.textContent = building.description;
   const statsHtml = buildingStatsHtml(building.id);
   els.previewStats.innerHTML = statsHtml;
-  els.previewStats.classList.toggle('hidden', !statsHtml);
   refreshPreviewInfo(state);
   renderPreviewCanvas();
   state.ui.selectedTool = `build:${building.id}`;
@@ -4690,7 +4740,6 @@ function refreshPreviewInfo(state) {
     // fishEconomyStatsHtml.
     const statsHtml = speciesStatsHtml(state, currentPreviewSpecies.id);
     els.previewStats.innerHTML = statsHtml;
-    els.previewStats.classList.toggle('hidden', !statsHtml);
   } else if (currentPreviewBuilding) {
     els.previewName.textContent = currentPreviewBuilding.name;
   }

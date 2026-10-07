@@ -1580,6 +1580,7 @@ let rightPressStartSy = 0;
 let rightPressGrabOffset = { x: 0, y: 0 }; // fish position minus cursor world position at press, so the fish doesn't jump onto the cursor
 let rightPressAlienNoticeShown = false;
 const FISH_DRAG_ALIEN_MESSAGE = "Can't move or merge fish while aliens are on screen!";
+const ALIEN_CLICK_PAUSED_MESSAGE = "Can't attack aliens while time is paused!";
 
 // Per direct request, fish can't be moved or merged while a hostile alien is
 // alive — checked against the live entity list, so it holds even under Pause
@@ -1599,7 +1600,7 @@ function hostileAliensActive(state) {
 // lines are a single batched path — so the per-frame cost is a handful of draw
 // calls, and exactly zero unless the plain cursor is hovering/dragging a fish.
 const MERGE_HOVER_REFRESH_MS = 300;
-const MERGE_HINT_MS = 3000; // the one-off first-adult reminder holds this long...
+const MERGE_HINT_MS = 2000; // the new-adult reminder holds this long (was 3000 — shortened by a second per direct request, it read like a tutorial)...
 const MERGE_HINT_FADE_MS = 750; // ...then fades off over this
 const MERGE_HOVER_PULSE_PERIOD_MS = 1200;
 let mergeHoverSubjectId = null;
@@ -3038,6 +3039,12 @@ input.clickHandlers.push((sx, sy) => {
   for (const entity of state.level.entities) {
     if (entity.type !== 'alien' || entity.hp <= 0) continue;
     if (Math.hypot(entity.x - world.x, entity.y - world.y) <= (entity.radius ?? ALIEN_RADIUS) * ALIEN_CLICK_RADIUS_MULTIPLIER) {
+      // Per direct request — no click-attacks while Pause Time is on, with
+      // the same red cursor text as trying to move fish during an attack.
+      if (state.ui.timePaused) {
+        showBuildError(ALIEN_CLICK_PAUSED_MESSAGE);
+        return;
+      }
       entity.hp -= ALIEN_CLICK_DAMAGE;
       entity.lastDamageSource = 'click'; // turret_kills_25 achievement — see Entities.js's updateAlien death branch, checked only at the moment of an actual kill
       entity.hitFlashMs = ALIEN_HIT_FLASH_MS; // per direct request — a hit flashes red and "bounces," read back by the render loop below
@@ -5008,6 +5015,10 @@ const CURSOR_BY_TOOL = {
   // real rendered glyph still doesn't line up.
   cursor: emojiCursorCss('🐚', 24, 6, 16, 30, 44, 32),
 };
+// Per direct request, the main menu uses the same shell cursor as the game —
+// exposed as a CSS variable so style.css's #start-overlay can pick it up
+// without duplicating the glyph/hotspot tuning above.
+document.documentElement.style.setProperty('--shell-cursor', CURSOR_BY_TOOL.cursor);
 let lastCursorTool = null;
 function updateCanvasCursor() {
   // The Storage Chest aim-drag (updateChestAimDrag, above — either the
@@ -5950,7 +5961,7 @@ function render() {
   // Merge partner highlight, drawn under the fish below — see renderMergeToolPartnerHighlight.
   // Per direct request: with nothing armed (plain cursor), while hovering a fish (or egg-hatched
   // friendly alien) or dragging one, and never while hostile aliens are alive (fish can't be
-  // moved or merged then). Otherwise, the one-off first-adult reminder (state.level.mergeHint)
+  // moved or merged then). Otherwise, the new-adult reminder (state.level.mergeHint)
   // plays on its fish for MERGE_HINT_MS, then fades off over MERGE_HINT_FADE_MS.
   let mergeHighlightSubject = null;
   let mergeHighlightFade = 1;

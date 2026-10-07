@@ -1999,16 +1999,14 @@ export function canMergeOrSplicePair(state, a, b) {
   return canCombineFish(state, a, b) || canSpliceFish(state, a, b) || canSpliceFish(state, b, a);
 }
 
-// Per direct request, the first time a fish becomes an adult and has something
-// to merge with, main.js's partner highlight plays on it automatically for a
-// few seconds as a one-off reminder that merging exists (state.level.mergeHint,
-// read by main.js's render). An adult with nothing to pair with yet doesn't use
-// it up — it waits for the first adult that does.
+// Per direct request, EVERY time a fish becomes an adult and has something to
+// merge with, main.js's partner highlight plays on that fish automatically for
+// a couple of seconds (state.level.mergeHint, read by main.js's render) —
+// lines from just that new adult to each fish it could merge with. (It used to
+// play only for the first adult ever, via a one-shot flag.) An adult with
+// nothing to pair with shows nothing and leaves any hint already playing alone.
 function maybeStartMergeHint(state, fish) {
-  const flags = state.level.tutorialFlags;
-  if (flags.firstAdultMergeHintShown) return;
   if (findFishMergePartners(state, fish).length === 0) return;
-  flags.firstAdultMergeHintShown = true;
   state.level.mergeHint = { fishId: fish.id, startedAtMs: state.level.elapsed };
 }
 

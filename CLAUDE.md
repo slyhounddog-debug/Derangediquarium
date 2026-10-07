@@ -2257,3 +2257,12 @@ Per direct request ("I just want it all to feel cohesive and seamless"), the thr
 - **No dim/blur, no pause:** none of the windows dims or blurs the game or pauses it. Pausing time (button/Space) instead fades in `#time-pause-overlay` (cool tint + vignette, `body.time-paused`, click-through, z-index 150).
 - Debug: `Shift+T` is the old tile-cycling cheat (plain `T` is the Tank window now).
 - Verified in a browser (Playwright): every window opens/closes by hotkey, X and outside-click as specified, start-screen Achievements path, zero JS errors (apart from the pre-existing `lighting effect.mp4` 404 under `node server.js`, which does not serve that file).
+
+### Follow-ups: Shop info column, hats, paused attacks, merge hint, menu cursor, New Game chooser
+- **Shop info column:** name row, description box and stats box are separate fixed-size containers (`#shop-preview-top`, `#shop-preview-desc`, `#shop-preview-stats`, scrolling internally), so the column's layout is identical for every fish/building — verified across all items. The stats box no longer toggles `.hidden`.
+- **Hats:** every hat costs a flat 15 gems (Config.js's `HATS`).
+- **Paused attacks:** clicking a living alien while `state.ui.timePaused` does nothing and shows the red cursor text "Can't attack aliens while time is paused!" (same `showBuildError` path as the fish-move-during-attack message).
+- **Merge hint:** `state.level.mergeHint` now starts for EVERY fish that becomes an adult and has merge partners (lines from just that fish to its partners) instead of once ever; the `firstAdultMergeHintShown` flag is gone. Hold time cut from 3000ms to 2000ms (`MERGE_HINT_MS`, plus the unchanged 750ms fade).
+- **Menu cursor:** main.js publishes the shell cursor as the `--shell-cursor` CSS variable; `#start-overlay` uses it (planks keep pointer, draggable title coins keep grab).
+- **New Game chooser:** New Game opens `#start-mode-overlay` with two cards — "New player" (guided tutorial on) and "Experienced player" (off) — pictures drawn with the real `drawFish` (`drawStartModeArt`). The pick calls `setGuidedTutorialsEnabled`, overriding any earlier setting; the Settings toggle still persists across sessions through the same call. Back button/backdrop click returns to the title. Continue skips the chooser.
+- Test scripts that click New Game must now also click a card ("New player"/"Experienced player").
