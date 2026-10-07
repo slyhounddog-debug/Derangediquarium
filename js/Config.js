@@ -3215,7 +3215,7 @@ export const IDLE_PURCHASE_HINT_DELAY_MS = 60000;
 // after the last open. Either way it then repeats every TAB_REMINDER_REPEAT_MS
 // (so never-opened: 1.5, 3, 4.5 min...; after an open at t: t+5, t+6.5, t+8 min...)
 // until the panel is opened again. UI.js's updateTabReminder.
-// ---- Production info (Shift-drag box select, UI.js's production-info modal) ----
+// ---- Production info (Ctrl-drag box select, UI.js's production-info modal) ----
 // Per direct request: a building counts as active if it was running within this
 // long (smooths the on/off flicker of a machine waiting on its next item), and
 // its rates/electricity are scaled by its rolling 3-minute uptime. How often
@@ -3262,7 +3262,7 @@ export const AUTOSAVE_INTERVAL_MS = 300000; // 5 minutes
 // player has encountered all of them (finished or skipped, it counts either
 // way) the Settings toggle switches itself off for future sessions — see
 // Save.js's noteTutorialFlowEnded.
-export const GUIDED_TUTORIAL_IDS = ['start', 'chest', 'alienintro', 'mergefish', 'postalien', 'wastedrag'];
+export const GUIDED_TUTORIAL_IDS = ['start', 'chest', 'alienintro', 'mergefish', 'postalien', 'wastedrag', 'hunger'];
 
 // ---- Alien Invasion (Aliens.js) ----
 // A "wave" is one spawn burst — a handful of aliens emerging from portals at

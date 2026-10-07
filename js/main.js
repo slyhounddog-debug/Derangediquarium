@@ -167,6 +167,7 @@ import {
   getCoinTier,
   createCoin,
   createPickupText,
+  updatePickupText,
   getFishPurchaseCost,
   findFishAt,
   findFishForPipetteAt,
@@ -223,7 +224,10 @@ import {
   armChestTrickle,
   setChestPourMode,
   clearChestContents,
-  isBuildingStalledOrPowerless,
+  getBuildingAlertKind,
+  pickUpBuildingsInBox,
+  renderGroupMoveGhost,
+  placeGroupMove,
   describeReplacement,
   placeTileWithReplace,
   applyPipetteData,
@@ -584,18 +588,21 @@ minimapExpandBtnEl.addEventListener('click', toggleTankZoomMode);
 // second/critical hunger stage (HUNGER_CRITICAL_THRESHOLD — the same
 // threshold that shows the on-screen "!!" indicator, see updateFish), and a
 // building that's stalled or without power (Grid.js's
-// isBuildingStalledOrPowerless — the exact same conditions already driving
+// getBuildingAlertKind — the exact same conditions already driving
 // the on-tile stalled badges/power-shortage overlay, reused here so the
 // minimap can never disagree with what those already show). Deliberately
 // NOT every fish/building — that would defeat the whole "minimal, glance at
 // what needs attention" point the alien dots already established.
 const MINIMAP_ALERT_DOT_COLOR = '#ff3b30';
-function renderMinimapAlertDot(mctx, cx, cy, elapsedMs) {
+// Per direct request, a building's dot flashes white when it's idle and yellow
+// when it's out of power (red stays for the fish hunger dots).
+const MINIMAP_BUILDING_ALERT_COLORS = { idle: '#ffffff', powerless: '#ffd23f' };
+function renderMinimapAlertDot(mctx, cx, cy, elapsedMs, color = MINIMAP_ALERT_DOT_COLOR) {
   const pulse = 0.55 + 0.45 * Math.sin(elapsedMs / 220);
   const r = 2 + pulse * 1.2;
   mctx.save();
   mctx.globalAlpha = pulse;
-  mctx.fillStyle = MINIMAP_ALERT_DOT_COLOR;
+  mctx.fillStyle = color;
   mctx.beginPath();
   mctx.arc(cx, cy, r, 0, Math.PI * 2);
   mctx.fill();
@@ -632,10 +639,11 @@ function renderMinimap(state) {
     const data = state.level.buildingData[key];
     const [row, col] = key.split(',').map(Number);
     const type = state.level.grid[row]?.[col];
-    if (type == null || !isBuildingStalledOrPowerless(state, type, data)) continue;
+    const alertKind = type == null ? null : getBuildingAlertKind(state, type, data);
+    if (!alertKind) continue;
     const cx = (col * TILE_SIZE + TILE_SIZE / 2) * scale;
     const cy = (row * TILE_SIZE + TILE_SIZE / 2) * scale;
-    renderMinimapAlertDot(mctx, cx, cy, state.level.elapsed);
+    renderMinimapAlertDot(mctx, cx, cy, state.level.elapsed, MINIMAP_BUILDING_ALERT_COLORS[alertKind]);
   }
   const viewX = Math.max(0, state.camera.x * scale);
   const viewY = Math.max(0, state.camera.y * scale);
@@ -1839,9 +1847,9 @@ input.rightMouseUpHandlers.push((sx, sy) => {
   if (fish && TOGGLEABLE_FISH_SPECIES.includes(fish.speciesId)) toggleFishAbility(state, fish);
 });
 
-// ---- Production info: Shift + left-drag box select ----
-// Per direct request: with nothing armed (the plain cursor), holding Shift and
-// dragging draws a selection box, and a modal above it (UI.js's
+// ---- Production info: Ctrl + left-drag box select ----
+// Per direct request (moved off Shift, which is the group move now): with
+// nothing armed (the plain cursor), holding Ctrl and dragging draws a selection box, and a modal above it (UI.js's
 // updateProductionInfoModal) shows what the fish/buildings inside produce and
 // consume, their electricity, and the items/chests inside. The box is in
 // WORLD space (anchored to the tank as the camera moves) and, unlike the
@@ -1855,7 +1863,7 @@ let prodSelectSwallowClick = false; // the native click after a selection's mous
 
 input.mouseDownInterceptors.push((sx, sy) => {
   prodSelectSwallowClick = false; // a lost release (mouseup outside the window) must not leave a stale swallow
-  if (!isShiftHeld() || state.ui.selectedTool !== 'cursor' || state.ui.paused || state.level.tutorialFlow) return false;
+  if (!isCtrlHeld() || state.ui.selectedTool !== 'cursor' || state.ui.paused || state.level.tutorialFlow) return false;
   const world = screenToWorld(sx, sy, state.camera);
   prodSelect = { x0: world.x, y0: world.y };
   return true;
@@ -1873,6 +1881,61 @@ input.clickInterceptors.push(() => {
   prodSelectSwallowClick = false;
   return true;
 });
+
+// ---- Group move: Shift + left-drag box select ----
+// Per direct request, mimics the Blueprint tool but moves the buildings: with
+// the plain cursor, Shift + drag draws a tile-snapped box and lifts every
+// building in it (Grid.js's pickUpBuildingsInBox); the group then follows the
+// cursor as a ghost until a click drops it (free, one Ctrl+Z for the whole
+// move). Shift + click on the drop replaces buildings in the way (they're sold
+// for their refund); without Shift an overlapping drop is refused. Right-click,
+// Esc, Q, opening the pause menu or picking another tool puts everything back.
+let groupMoveDragStart = null; // { col, row } tile where the box began, or null
+let groupMove = null; // { cells, level } while the lifted group is being carried
+let groupMoveSwallowClick = false; // the native click after the box's mouseup must not also drop the group
+
+input.mouseDownInterceptors.push((sx, sy) => {
+  groupMoveSwallowClick = false;
+  if (groupMove != null || movingBuilding != null || !isShiftHeld() || state.ui.selectedTool !== 'cursor' || state.ui.paused || state.level.tutorialFlow) return false;
+  const world = screenToWorld(sx, sy, state.camera);
+  if (world.y < SEABED_FLOOR_Y) return false; // buildings only live in the seabed
+  groupMoveDragStart = worldToTile(world.x, world.y);
+  return true;
+});
+
+input.mouseUpHandlers.push((sx, sy) => {
+  if (!groupMoveDragStart) return;
+  const start = groupMoveDragStart;
+  groupMoveDragStart = null;
+  groupMoveSwallowClick = true;
+  const world = screenToWorld(sx, sy, state.camera);
+  const end = worldToTile(world.x, world.y);
+  const cells = pickUpBuildingsInBox(state, start.col, start.row, end.col, end.row);
+  if (cells.length > 0) groupMove = { cells, level: state.level };
+});
+
+input.clickInterceptors.push(() => {
+  if (!groupMoveSwallowClick) return false;
+  groupMoveSwallowClick = false;
+  return true;
+});
+
+function cancelGroupMove() {
+  if (!groupMove) return;
+  for (const cell of groupMove.cells) putDownMovedBuilding(state, cell.fromCol, cell.fromRow, cell.buildingId, cell.data, false);
+  groupMove = null;
+}
+
+input.rightClickHandlers.push(() => {
+  if (!state.ui.paused) cancelGroupMove();
+});
+
+// Called every tick: a carried group is put back if the player pauses or arms a
+// real tool, and quietly dropped if the level it was lifted from is gone.
+function updateGroupMoveGate() {
+  if (groupMove && groupMove.level !== state.level) groupMove = null;
+  if (groupMove && (state.ui.paused || !isCursorOrFoodTool(state.ui.selectedTool))) cancelGroupMove();
+}
 
 // Whether the "drag Waste into the Turret" guided-tutorial step is the one
 // currently active — shared by the mousedown-arming gate below, update()'s
@@ -2689,6 +2752,7 @@ function undoActionLabel(type) {
   if (type === 'move') return 'Undo Move';
   if (type === 'demolish') return 'Undo Sell';
   if (type === 'replace') return 'Undo Replace';
+  if (type === 'groupMove') return 'Undo Move';
   return 'Undo';
 }
 
@@ -2716,6 +2780,19 @@ function performUndo() {
     if (picked) {
       const result = putDownMovedBuilding(state, entry.fromCol, entry.fromRow, picked.type, picked.data);
       if (!result.ok) putDownMovedBuilding(state, entry.toCol, entry.toRow, picked.type, picked.data, false); // couldn't go back — put it right back where undo found it rather than losing it
+    }
+  } else if (entry.type === 'groupMove') {
+    // Lift the whole moved group first (a destination can be another building's origin), put each back where it came from, then restore anything the move replaced.
+    const lifted = entry.moves.map((m) => ({ m, picked: pickUpBuildingForMove(state, m.col, m.row) }));
+    for (const { m, picked } of lifted) {
+      if (!picked) continue;
+      const result = putDownMovedBuilding(state, m.fromCol, m.fromRow, picked.type, picked.data);
+      if (!result.ok) putDownMovedBuilding(state, m.col, m.row, picked.type, picked.data, false); // origin got built on — leave it where undo found it rather than losing it
+    }
+    for (const m of entry.moves) {
+      if (!m.oldBuildingId) continue;
+      const result = putDownMovedBuilding(state, m.col, m.row, m.oldBuildingId, m.oldData);
+      if (result.ok) state.level.money = Math.max(0, state.level.money - m.refund);
     }
   } else if (entry.type === 'demolish') {
     const result = putDownMovedBuilding(state, entry.col, entry.row, entry.buildingId, entry.data);
@@ -2963,6 +3040,18 @@ input.clickHandlers.push((sx, sy) => {
   // angle) — see fanAimingMoveData's own comment — so confirming its
   // destination here just threads it into the existing two-click aiming
   // flow (fanAimingCell) instead of finishing outright.
+  if (groupMove != null) {
+    const { col, row } = worldToTile(world.x, world.y);
+    const result = placeGroupMove(state, col, row, groupMove.cells, isShiftHeld());
+    if (!result.ok) {
+      handleBuildPlacementFailure(result.reason); // stay in carry mode — the ghost keeps following, try again
+      return;
+    }
+    pushUndoEntry({ type: 'groupMove', moves: result.placed });
+    if (result.anyReplace) playDemolish();
+    groupMove = null;
+    return;
+  }
   if (movingBuilding != null) {
     const failure = confirmBuildingMoveAt(world);
     if (failure) handleBuildPlacementFailure(failure); // stay in move mode — the ghost keeps following, try again
@@ -3235,6 +3324,7 @@ input.clickHandlers.push((sx, sy) => {
   if (effectiveTool === 'food') {
     const reason = trySpawnFood(state, world.x, world.y);
     if (reason === 'no_money') flashMoneyInsufficient(state);
+    else if (reason === 'spawned') advanceTutorialFlow(state, 'hunger', 'feed'); // hunger tutorial's feed step
     return;
   }
   // A purchased fish is placed with a click, exactly like a building — see
@@ -3299,9 +3389,12 @@ input.rightClickHandlers.push(() => {
 // in-progress move ALSO clears whatever tool was armed at the same time —
 // one right-click genuinely clears everything back to the plain cursor.
 input.rightClickHandlers.push(() => {
-  if (state.ui.paused || state.level.tutorialFlow) return;
+  // The hunger tutorial's last step is exactly this right-click, so it's the one tutorial state that lets it through.
+  const hungerDeselectStep = state.level.tutorialFlow?.id === 'hunger' && state.level.tutorialFlow.step === 'deselect';
+  if (state.ui.paused || (state.level.tutorialFlow && !hungerDeselectStep)) return;
   closeSidePanels(state, true); // right-click cancels the tool but leaves the Shop open until its own X/E, per direct request
   cancelActiveTool(state);
+  if (hungerDeselectStep) advanceTutorialFlow(state, 'hunger', 'deselect');
   // A Fan's pending angle-adjust step (fanAimingCell) isn't itself part of
   // selectedTool, so cancelActiveTool above clearing the tool back to
   // 'cursor' only makes isFanAimingActive() self-heal to false — the stale
@@ -3537,6 +3630,10 @@ input.keydownHandlers.push((e) => {
   // (dynamically "Close Menu" vs. "Pause Menu" depending on this same
   // condition).
   if (e.code === 'Escape') {
+    if (groupMove != null) {
+      cancelGroupMove();
+      return;
+    }
     if (fanAimingCell != null && fanAimingMoveData == null) {
       cancelArmedFanPlacement();
       return;
@@ -3625,6 +3722,10 @@ input.keydownHandlers.push((e) => {
       toggleShopCollapse(state, true);
       break;
     case 'KeyQ': { // Clear Blueprint / Pipette Tool / "last used" fallback / Clear Cursor — per direct request
+      if (groupMove != null) { // a carried group move is cleared first, like a copied Blueprint
+        cancelGroupMove();
+        break;
+      }
       // A copied Blueprint takes priority over every other Q meaning below —
       // per direct request ("press Q when you have a blueprint copied to
       // clear a blueprint"), matching the dynamic "Q: Clear Blueprint" legend
@@ -3814,6 +3915,24 @@ function animateLoadingGuppy(now) {
 }
 requestAnimationFrame(animateLoadingGuppy);
 
+// Resolves on the first pointerdown/keydown. The keydown is swallowed in the
+// capture phase so that key doesn't also fire a game hotkey (Space would
+// pause time); resumeAudio is called here because that swallowing also stops
+// the page's own one-shot resumeAudio keydown listener from running.
+function waitForFirstGesture() {
+  return new Promise((resolve) => {
+    const onGesture = (e) => {
+      window.removeEventListener('pointerdown', onGesture, true);
+      window.removeEventListener('keydown', onGesture, true);
+      if (e.type === 'keydown') e.stopImmediatePropagation();
+      resumeAudio();
+      resolve();
+    };
+    window.addEventListener('pointerdown', onGesture, true);
+    window.addEventListener('keydown', onGesture, true);
+  });
+}
+
 async function runLoadingSequence() {
   const resources = [
     preloadAudioFile('audio/Game.mp3'),
@@ -3833,6 +3952,12 @@ async function runLoadingSequence() {
   const timeout = new Promise((resolve) => setTimeout(resolve, LOADING_SCREEN_TIMEOUT_MS));
   await Promise.race([allLoaded, timeout]);
   updateLoadingBar(1);
+  // Per direct request: browsers keep audio locked until a click/keypress, so
+  // the splash (and its Fin Sanity stinger) waits for one — that is what makes
+  // the menu music start with the splash every time.
+  loadingStatus.textContent = 'Click or press any key to begin';
+  loadingStatus.classList.add('ready');
+  await waitForFirstGesture();
   loadingDone = true;
   loadingOverlay.classList.add('hidden');
   initTitleScreen();
@@ -4488,6 +4613,7 @@ function update(dtMs) {
   updateRecipeDrag();
   updatePlatformFilterDrag();
   updateBuildingMove();
+  updateGroupMoveGate();
   if (!state.ui.timePaused) {
     updateStoryTriggers(state, dtMs);
     state.level.elapsed += dtMs;
@@ -5358,6 +5484,7 @@ function applyGuidedTutorialPreference(state) {
   else if (ended) noteTutorialFlowEnded();
 }
 
+let lastFloatingTextAt = performance.now();
 function render() {
   applyGuidedTutorialPreference(state);
   if (state.ui.replayStartTutorialPending) {
@@ -5608,6 +5735,29 @@ function render() {
     renderMoveGhost(ctx, state, hoverWorld.x, hoverWorld.y, movingBuilding.buildingId, movingBuilding.data);
   }
 
+  // Group move: the selection box while dragging, then the carried group as a
+  // multi-cell ghost (green = fits, blue = replaces with Shift, red = blocked).
+  if (groupMoveDragStart && !input.mouseDown) groupMoveDragStart = null; // a missed release
+  if (groupMoveDragStart) {
+    const curWorld = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
+    const cur = worldToTile(curWorld.x, curWorld.y);
+    const a = worldToScreen(Math.min(groupMoveDragStart.col, cur.col) * TILE_SIZE, Math.min(groupMoveDragStart.row, cur.row) * TILE_SIZE, state.camera);
+    const b = worldToScreen((Math.max(groupMoveDragStart.col, cur.col) + 1) * TILE_SIZE, (Math.max(groupMoveDragStart.row, cur.row) + 1) * TILE_SIZE, state.camera);
+    ctx.save();
+    ctx.strokeStyle = '#ffb84d';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.strokeRect(a.x, a.y, b.x - a.x, b.y - a.y);
+    ctx.fillStyle = 'rgba(255, 184, 77, 0.12)';
+    ctx.fillRect(a.x, a.y, b.x - a.x, b.y - a.y);
+    ctx.restore();
+  }
+  if (groupMove != null && input.mouse.inside && !state.ui.paused) {
+    const hoverWorld = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
+    const { col: baseCol, row: baseRow } = worldToTile(hoverWorld.x, hoverWorld.y);
+    renderGroupMoveGhost(ctx, state, baseCol, baseRow, groupMove.cells, isShiftHeld());
+  }
+
   // Read every frame, regardless of tool/hover state, by UI.js's updateHUD
   // to switch the persistent bottom-left Q legend to "Clear Blueprint" —
   // see the KeyQ handler's own comment for why that meaning takes priority
@@ -5774,6 +5924,12 @@ function render() {
   }
 
   perfMark('r: items', ctx);
+  // Per direct request, floating text ages in real time (not sim time), so it
+  // rises and fades at the normal pace while time is paused or sped up.
+  const floatingTextNow = performance.now();
+  const floatingTextDtMs = Math.min(100, floatingTextNow - lastFloatingTextAt);
+  lastFloatingTextAt = floatingTextNow;
+  state.level.floatingTexts = state.level.floatingTexts.filter((ft) => updatePickupText(ft, floatingTextDtMs));
   for (const ft of state.level.floatingTexts) {
     const pos = worldToScreen(ft.x, ft.y, state.camera);
     if (pos.x < -40 || pos.x > canvas.width + 40 || pos.y < -20 || pos.y > canvas.height + 20) continue; // cull offscreen

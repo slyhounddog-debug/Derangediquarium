@@ -28,7 +28,7 @@ export function createInput(canvas) {
     clickHandlers: [],
     rightClickHandlers: [], // now main.js's universal-cancel + in-progress-move/blueprint cancel; contextmenu is prevented so it never opens the browser menu
     middleClickHandlers: [], // middle-click = pipette (main.js); fired on mousedown (button 1) since there's no middle-click equivalent of the contextmenu event, with its own default (OS autoscroll) prevented below
-    mouseDownInterceptors: [], // checked BEFORE mouseDownHandlers on a left press — if any returns true the press is consumed (no other handler sees it); main.js's Shift-drag production-info box select uses this so item/chest/recipe drags don't also start
+    mouseDownInterceptors: [], // checked BEFORE mouseDownHandlers on a left press — if any returns true the press is consumed (no other handler sees it); main.js's Ctrl-drag production-info and Shift-drag group-move box selects use this so item/chest/recipe drags don't also start
     clickInterceptors: [], // same idea for the native click that follows — true swallows it
     mouseDownHandlers: [], // fired once, at press — main.js uses this to arm an Economy Fish Combining drag when the press lands on a combinable fish
     mouseUpHandlers: [], // fired once, at release (screen coords are the last tracked in-canvas mouse position — see the window mouseup listener below) — main.js uses this to resolve a combining drag

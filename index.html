@@ -193,7 +193,7 @@
      now and then until the panel gets opened (UI.js's updateTabReminder). A
      sideways "Tab" label plus rows of right-pointing carets that fade in and
      out in a staggered wave, built by UI.js's initUI. -->
-<!-- Production info — shown while Shift-dragging a selection box with nothing armed:
+<!-- Production info — shown while Ctrl-dragging a selection box with nothing armed:
      what the fish/buildings inside it produce and consume per minute, their
      electricity, and the items/chests inside. Content is rebuilt a few times a
      second (UI.js's updateProductionInfoModal); positioned above the box,
@@ -495,7 +495,70 @@
       <button id="pause-save-btn" class="pause-btn sheen-target">💾 Save</button>
       <button id="pause-restart-btn" class="pause-btn sheen-target">🔄 Restart</button>
       <button id="pause-settings-btn" class="pause-btn sheen-target">⚙️ Settings</button>
+      <button id="pause-controls-btn" class="pause-btn sheen-target">🎮 Controls</button>
       <button id="pause-main-menu-btn" class="pause-btn sheen-target">🏠 Main Menu</button>
+    </div>
+    <div id="pause-controls" class="hidden">
+      <div id="pause-title">Controls</div>
+      <div id="pause-controls-list">
+      <div class="controls-group">
+        <div class="controls-group-title">Windows & menus</div>
+        <div class="controls-row"><span class="controls-keys"><kbd>Esc</kbd></span><span class="controls-text">Close the Shop / Tank / Lab if one is open, otherwise open or close this menu</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>E</kbd></span><span class="controls-text">Open or close the Shop</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>T</kbd></span><span class="controls-text">Open or close Tank Upgrades</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>S</kbd></span><span class="controls-text">Open or close the Science Lab</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>Tab</kbd></span><span class="controls-text">Base Stats panel</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>Alt</kbd></span><span class="controls-text">Alt-mode (hides the interface)</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>`</kbd></span><span class="controls-text">Debug overlay</span></div>
+      </div>
+      <div class="controls-group">
+        <div class="controls-group-title">Tools</div>
+        <div class="controls-row"><span class="controls-keys"><kbd>1</kbd></span><span class="controls-text">Food tool</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>2</kbd></span><span class="controls-text">Blueprint tool</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>3–5</kbd></span><span class="controls-text">Favorite slots 3, 4 and 5 (with the Shop open and an item selected, pin it to that slot)</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>Q</kbd></span><span class="controls-text">Clear the tool you are holding; with nothing armed, copy the fish or building under the cursor (pipette) or re-arm your last one</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>R</kbd></span><span class="controls-text">Cycle the armed building to its next tier, or the Platform under the cursor to its next shape</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>D</kbd></span><span class="controls-text">Hold with the cursor or Food tool and hover or drag over buildings to delete them (full refund)</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>G</kbd></span><span class="controls-text">Show or hide every Fan's cone</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>Ctrl</kbd> + <kbd>Z</kbd></span><span class="controls-text">Undo the last placement, move, sale or replace</span></div>
+      </div>
+      <div class="controls-group">
+        <div class="controls-group-title">Time</div>
+        <div class="controls-row"><span class="controls-keys"><kbd>Space</kbd></span><span class="controls-text">Pause time (fish, aliens and buildings stop; you can still build and move things)</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>X</kbd></span><span class="controls-text">2x speed</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>+</kbd></span><span class="controls-text">Debug: speed time up (numpad + also works)</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>-</kbd></span><span class="controls-text">Debug: slow time down</span></div>
+      </div>
+      <div class="controls-group">
+        <div class="controls-group-title">Camera</div>
+        <div class="controls-row"><span class="controls-keys"><kbd>↑</kbd> + <kbd>↓</kbd></span><span class="controls-text">Scroll the tank up and down</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>Wheel</kbd></span><span class="controls-text">Scroll the tank up and down</span></div>
+      </div>
+      <div class="controls-group">
+        <div class="controls-group-title">Mouse</div>
+        <div class="controls-row"><span class="controls-keys"><kbd>Click</kbd></span><span class="controls-text">Use the armed tool: drop Food, place a building or fish, bank a coin, open a building or fish info</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>Drag</kbd></span><span class="controls-text">Move items, aim a chest, or drag a recipe / filter from one building onto another to copy it</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>Right-click</kbd></span><span class="controls-text">Cancel and deselect the tool you are holding, or put back a building you are moving</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>Right-drag</kbd></span><span class="controls-text">Move a building (with the cursor tool), or drag one fish onto another to merge or splice them</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>Middle-click</kbd></span><span class="controls-text">Pipette: arm the fish or building under the cursor</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>Shift</kbd> + <kbd>Click</kbd></span><span class="controls-text">Replace the building under a placement (including pasting a Blueprint or dropping a group move)</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>Ctrl</kbd> + <kbd>Click</kbd></span><span class="controls-text">Snap-placement: place a straight line of buildings from the last one you placed</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>Shift</kbd> + <kbd>Drag</kbd></span><span class="controls-text">Group move: box-select buildings, then click to drop them somewhere else (Right-click, Esc or Q puts them back)</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>Ctrl</kbd> + <kbd>Drag</kbd></span><span class="controls-text">Production info: box-select fish and buildings to see what they make and use</span></div>
+      </div>
+      <div class="controls-group">
+        <div class="controls-group-title">Debug cheats</div>
+        <div class="controls-row"><span class="controls-keys"><kbd>M</kbd></span><span class="controls-text">Grant money, points, Science and gems</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>U</kbd></span><span class="controls-text">Unlock every fish, building and Lab upgrade</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>N</kbd></span><span class="controls-text">Crack the Mound to its next tier</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>K</kbd></span><span class="controls-text">Clear all items</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>Y</kbd></span><span class="controls-text">Start the next alien wave now</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>C</kbd></span><span class="controls-text">Set the alien wave countdown to 10 seconds</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>Shift</kbd> + <kbd>G</kbd></span><span class="controls-text">Spawn the selected fish, fully grown, at the cursor</span></div>
+        <div class="controls-row"><span class="controls-keys"><kbd>Shift</kbd> + <kbd>T</kbd></span><span class="controls-text">Cycle the tile under the cursor through every building</span></div>
+      </div>
+      </div>
+      <button id="pause-controls-back-btn" class="pause-btn sheen-target">← Back</button>
     </div>
     <div id="pause-settings" class="hidden">
       <div id="pause-title">Settings</div>

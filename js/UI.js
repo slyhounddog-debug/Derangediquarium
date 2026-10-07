@@ -26,6 +26,7 @@ import {
   CLEANLINESS_COLOR_DIRTY,
   PROCESSOR_STATS,
   REFINERY_STATS,
+  HUNGER_SEEK_THRESHOLD,
   TAB_REMINDER_AFTER_OPEN_MS,
   PRODUCTION_INFO_REFRESH_MS,
   TAB_REMINDER_REPEAT_MS,
@@ -450,6 +451,9 @@ export function initUI(state) {
     pauseMenu: document.getElementById('pause-menu'),
     pauseMain: document.getElementById('pause-main'),
     pauseSettings: document.getElementById('pause-settings'),
+    pauseControls: document.getElementById('pause-controls'),
+    pauseControlsBtn: document.getElementById('pause-controls-btn'),
+    pauseControlsBackBtn: document.getElementById('pause-controls-back-btn'),
     pauseResumeBtn: document.getElementById('pause-resume-btn'),
     pauseSaveBtn: document.getElementById('pause-save-btn'),
     pauseLoadSaveBtn: document.getElementById('pause-load-save-btn'),
@@ -766,6 +770,8 @@ export function initUI(state) {
   });
   els.pauseSettingsBtn.addEventListener('click', () => { showPauseSettings(); playPanelOpen(); });
   els.pauseSettingsBackBtn.addEventListener('click', () => returnFromPauseSettings(state));
+  els.pauseControlsBtn.addEventListener('click', () => { showPauseControls(); playPanelOpen(); });
+  els.pauseControlsBackBtn.addEventListener('click', () => { showPauseMain(); playPanelClose(); });
   els.pauseOverlay.addEventListener('click', (e) => {
     if (e.target !== els.pauseOverlay) return; // clicked the card, not the backdrop
     if (settingsOpenedFromStartScreen) returnFromPauseSettings(state);
@@ -2601,6 +2607,16 @@ function drawLabTreeConnectors(state) {
 function showPauseMain() {
   els.pauseMain.classList.remove('hidden');
   els.pauseSettings.classList.add('hidden');
+  els.pauseControls.classList.add('hidden');
+  els.pauseMenu.classList.remove('controls-open');
+}
+
+// The pause menu's Controls sub-view — a read-only list of every hotkey and
+// mouse gesture (static markup in index.html). The card widens while it shows.
+function showPauseControls() {
+  els.pauseMain.classList.add('hidden');
+  els.pauseControls.classList.remove('hidden');
+  els.pauseMenu.classList.add('controls-open');
 }
 
 function showPauseSettings() {
@@ -2894,6 +2910,7 @@ export function selectTool(state, tool) {
     return;
   }
   state.ui.selectedTool = tool;
+  if (tool === 'food') advanceTutorialFlow(state, 'hunger', 'food'); // hunger tutorial's first step
   closeSidePanels(state, true); // picking a bottom-tool-bar tool (Food/Blueprint) closes the Tank window; the Shop stays open until its own X/E, per direct request
   updateToolbar(state);
 }
@@ -4006,7 +4023,7 @@ export function toggleStatsPanel(state) {
 // already showing restarts that 4s timer (by restarting the CSS animation) and
 // shakes and flashes the arrow. Only does anything on the frame a new block is
 // seen; the arrow itself is pure CSS.
-// ---- Production info modal (Shift-drag box select, main.js) ----
+// ---- Production info modal (Ctrl-drag box select, main.js) ----
 // Per direct request: shows what everything in the selection box produces and
 // consumes per minute, its electricity (draw orange, production teal, net
 // green/red) and the items/chests inside. main.js calls this every frame while
@@ -5772,6 +5789,20 @@ function mergeFishStepCircle(state) {
   return { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, r };
 }
 
+// The hungry fish the hunger tutorial points at: the hungriest fish that can
+// starve (a Scavenger eats Waste and never needs Food). Recomputed every frame
+// like every other step circle, since fish keep swimming.
+function hungerTutorialFishCircle(state) {
+  let target = null;
+  for (const e of state.level.entities) {
+    if (e.type !== 'fish' || e.dying || SPECIES[e.speciesId].behavior.includes('SCAVENGER')) continue;
+    if (!target || e.hunger > target.hunger) target = e;
+  }
+  if (!target) return null;
+  const screen = worldToScreen(target.x, target.y, state.camera);
+  return { cx: screen.x, cy: screen.y, r: 100 };
+}
+
 const TUTORIAL_FLOWS = {
   // The cinematic first-alien intro — per direct report, unified onto this
   // exact same engine ("the tutorial event... seemed different") instead of
@@ -5856,6 +5887,18 @@ const TUTORIAL_FLOWS = {
   // plain cursor selected, hence tool 'cursor'.
   mergefish: [
     { id: 'drag', text: 'Right-click and drag one fish onto the other to merge them!', tool: 'cursor', getCircle: mergeFishStepCircle },
+  ],
+  // Started by Systems.js's updateHungerTutorialTrigger the first time a fish
+  // gets hungry — per direct request, 3 steps: select the Food tool, feed the
+  // fish, right-click to put the Food away. 'food' is advanced by selectTool,
+  // 'feed' by main.js's food drop, 'deselect' by main.js's right-click cancel.
+  // 'food' forces the plain cursor so the step can't start already satisfied,
+  // and 'deselect' has no tool at all (an enforced tool would undo the very
+  // right-click it is waiting for) and no spotlight, so the click reaches the canvas.
+  hunger: [
+    { id: 'food', text: 'A fish is getting hungry! Select the Food tool.', tool: 'cursor', getCircle: () => tutorialCircleForDom(els.toolFoodBtn) },
+    { id: 'feed', text: 'Click near the hungry fish to drop some Food!', tool: 'food', getCircle: hungerTutorialFishCircle },
+    { id: 'deselect', text: 'Now right-click to put the Food away.', noSpotlight: true },
   ],
   // Started by Systems.js's updateChestTutorialTrigger — per direct request
   // ("have a chest tutorial start that's like the turret tutorial"), then

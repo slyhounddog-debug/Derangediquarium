@@ -1660,7 +1660,15 @@ body.time-paused #time-pause-overlay { opacity: 1; }
   box-shadow: 0 16px 40px rgba(107, 76, 107, 0.45), inset 0 2px 0 rgba(255, 255, 255, 0.7);
   text-align: center;
 }
-#pause-main.hidden, #pause-settings.hidden { display: none; }
+#pause-main.hidden, #pause-settings.hidden, #pause-controls.hidden { display: none; }
+/* Controls sub-view: the card widens and the list scrolls inside it. */
+#pause-menu.controls-open { width: 600px; max-width: 94vw; }
+#pause-controls-list { max-height: 58vh; overflow-y: auto; margin-bottom: 16px; padding-right: 6px; text-align: left; }
+.controls-group-title { font-size: 15px; font-weight: 800; margin: 12px 0 6px; }
+.controls-row { display: flex; align-items: baseline; gap: 12px; padding: 4px 0; font-size: 13px; line-height: 1.35; }
+.controls-keys { flex: none; width: 150px; text-align: left; white-space: nowrap; }
+.controls-keys kbd { display: inline-block; min-width: 24px; padding: 2px 7px; border-radius: 6px; font: 700 12px sans-serif; text-align: center; background: #fff; border: 2px solid #c25f8f; }
+.controls-text { flex: 1; min-width: 0; }
 #pause-title { font-size: 22px; font-weight: 800; color: #c25f8f; margin-bottom: 20px; }
 
 .pause-btn {
@@ -1913,6 +1921,9 @@ body.time-paused #time-pause-overlay { opacity: 1; }
 #loading-status {
   font-size: 13px; font-weight: 700; color: rgba(255, 255, 255, 0.85);
 }
+/* The "Click or press any key to begin" prompt, once everything has loaded. */
+#loading-status.ready { animation: loading-ready-pulse 1.3s ease-in-out infinite; }
+@keyframes loading-ready-pulse { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
 
 /* How-To-Play tutorial page — a scrollable list of icon+text rows, opened
    from the start screen's Help button. Same centered-modal language as

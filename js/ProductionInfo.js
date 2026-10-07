@@ -1,5 +1,5 @@
 // ProductionInfo.js — what's being produced/consumed inside a world-space box,
-// for the Shift-drag production-info modal (main.js owns the selection and its
+// for the Ctrl-drag production-info modal (main.js owns the selection and its
 // box, UI.js owns the modal DOM). Per direct request, a pure read-only
 // summary: how many of each object per minute the fish and buildings in the
 // box are producing (only ones actually producing) and consuming, their

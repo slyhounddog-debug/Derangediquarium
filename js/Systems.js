@@ -54,6 +54,8 @@ import {
   ACHIEVEMENT_CLEANLINESS_COMPLETE_THRESHOLD,
   IDLE_PURCHASE_HINT_DELAY_MS,
   IDLE_PURCHASE_HINT_MESSAGE,
+  HUNGER_SEEK_THRESHOLD,
+  SPECIES,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings } from './Levels.js';
 import { getFishPurchaseCost, findCombinablePair, spawnTurretTutorialWaste, spawnChestTutorialWaste } from './Entities.js';
@@ -150,6 +152,20 @@ function updateMergeTutorialTrigger(state) {
   if (!findCombinablePair(state)) return;
   state.level.tutorialFlags.mergeTutorialShown = true;
   state.level.tutorialFlow = { id: 'mergefish', step: 'drag' };
+}
+
+// Starts the hunger guided tutorial (UI.js's TUTORIAL_FLOWS' 'hunger': select the
+// Food tool, feed the fish, right-click to put the Food away) the first time a
+// fish that can actually starve reaches the "!" hunger stage — per direct
+// request. A Scavenger never goes hungry for Food, so it doesn't count. One-shot
+// via tutorialFlags.hungerTutorialShown, deferred while another flow is active.
+// Skips straight to the feed step if the Food tool is already selected.
+function updateHungerTutorialTrigger(state) {
+  if (state.level.tutorialFlags.hungerTutorialShown || state.level.tutorialFlow) return;
+  const hungry = state.level.entities.some((e) => e.type === 'fish' && !e.dying && e.hunger >= HUNGER_SEEK_THRESHOLD && !SPECIES[e.speciesId].behavior.includes('SCAVENGER'));
+  if (!hungry) return;
+  state.level.tutorialFlags.hungerTutorialShown = true;
+  state.level.tutorialFlow = { id: 'hunger', step: state.ui.selectedTool === 'food' ? 'feed' : 'food' };
 }
 
 // Starts the post-alien "arm up" guided tutorial (Shop -> Waste Turret ->
@@ -603,6 +619,7 @@ export function updateStoryTriggers(state, dtMs) {
   updateTurretTutorialTrigger(state);
   updatePostAlienTutorial(state);
   updateMergeTutorialTrigger(state);
+  updateHungerTutorialTrigger(state);
   updateChestTutorialTrigger(state);
   updateRecipeCopyTip(state);
   // updateAutosave(state) now runs from main.js directly, ahead of the pause

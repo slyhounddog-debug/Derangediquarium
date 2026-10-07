@@ -1050,6 +1050,75 @@ export function pickUpBuildingForMove(state, col, row) {
   return { type, data };
 }
 
+// Group move (Shift + drag) — per direct request, mimics the Blueprint tool
+// but MOVES the buildings. pickUpBuildingsInBox lifts every building in the
+// tile box off the grid at once (each keeps its own data, like a single move);
+// the cells are relative to the box's top-left. renderGroupMoveGhost previews
+// the drop, and placeGroupMove commits it: free, and an occupied target is
+// refused unless Shift is held, in which case the building there is replaced
+// (sold for its refund) exactly like a Shift-click replace elsewhere.
+export function pickUpBuildingsInBox(state, colA, rowA, colB, rowB) {
+  const minCol = Math.min(colA, colB);
+  const minRow = Math.min(rowA, rowB);
+  const cells = [];
+  for (let row = minRow; row <= Math.max(rowA, rowB); row++) {
+    for (let col = minCol; col <= Math.max(colA, colB); col++) {
+      const picked = pickUpBuildingForMove(state, col, row);
+      if (picked) cells.push({ dCol: col - minCol, dRow: row - minRow, buildingId: picked.type, data: picked.data, fromCol: col, fromRow: row });
+    }
+  }
+  return cells;
+}
+
+export function renderGroupMoveGhost(ctx, state, baseCol, baseRow, cells, shiftHeld) {
+  const size = TILE_SIZE * state.camera.zoom;
+  for (const cell of cells) {
+    const col = baseCol + cell.dCol;
+    const row = baseRow + cell.dRow;
+    const check = canPlaceTile(state, col, row, cell.buildingId, true);
+    const screen = worldToScreen(col * TILE_SIZE, row * TILE_SIZE, state.camera);
+    ctx.save();
+    ctx.globalAlpha = 0.6;
+    renderTileShape(ctx, cell.buildingId, BUILDING_TYPES[cell.buildingId].color, screen.x, screen.y, size, cell.data, state.level.elapsed);
+    ctx.restore();
+    ctx.save();
+    ctx.globalAlpha = 0.4;
+    if (check.ok) ctx.fillStyle = '#7cff5a';
+    else if (shiftHeld && check.reason === 'occupied') ctx.fillStyle = '#5ab0ff';
+    else ctx.fillStyle = '#ff5a5a';
+    ctx.fillRect(screen.x, screen.y, size, size);
+    ctx.restore();
+  }
+}
+
+export function placeGroupMove(state, baseCol, baseRow, cells, shiftHeld) {
+  for (const cell of cells) {
+    const check = canPlaceTile(state, baseCol + cell.dCol, baseRow + cell.dRow, cell.buildingId, true);
+    if (!check.ok && !(shiftHeld && check.reason === 'occupied')) return { ok: false, reason: check.reason };
+  }
+  const placed = [];
+  let anyReplace = false;
+  for (const cell of cells) {
+    const col = baseCol + cell.dCol;
+    const row = baseRow + cell.dRow;
+    const existingType = state.level.grid[row][col];
+    let replaced = {};
+    if (existingType !== TILE_EMPTY) {
+      // Reuses the cross-family replace mutation (drains a chest, frees held items) with the new building's cost zeroed — a move is free, the player only gets the replaced building's refund.
+      const refund = Math.floor(getBuildingCostExcluding(state, existingType, col, row) * TILE_REFUND_FRACTION);
+      const result = applyReplacementMutation(state, col, row, cell.buildingId, 0, { replacing: true, replacedType: existingType, sameFamily: false, netCost: -refund });
+      if (cell.data) state.level.buildingData[buildingKey(col, row)] = cell.data;
+      else delete state.level.buildingData[buildingKey(col, row)];
+      replaced = { oldBuildingId: result.oldBuildingId, oldData: result.oldData, refund };
+      anyReplace = true;
+    } else {
+      putDownMovedBuilding(state, col, row, cell.buildingId, cell.data);
+    }
+    placed.push({ col, row, fromCol: cell.fromCol, fromRow: cell.fromRow, buildingId: cell.buildingId, ...replaced });
+  }
+  return { ok: true, placed, anyReplace };
+}
+
 // The "put down" half — places a previously-picked-up building back at a
 // (possibly new, possibly the exact same) location, completely free, with
 // whatever data pickUpBuildingForMove handed back (already stripped of any
@@ -2490,8 +2559,8 @@ function tileHasAnyPowerCost(type) {
   return false;
 }
 
-// Whether a placed building is currently "stalled or without power" — per
-// direct request, drives the minimap's own red pulsing dots (main.js's
+// What (if anything) a placed building should flash on the minimap — per
+// direct request, drives the minimap's own pulsing dots (main.js's
 // renderMinimap) rather than inventing a separate notion of "stalled": reuses
 // the EXACT same per-type conditions renderTileShape's own on-tile badges
 // already check (idle Refinery/Power Plant/dry ammo Turret/idle
@@ -2499,14 +2568,15 @@ function tileHasAnyPowerCost(type) {
 // call sites above) plus the grid-wide "blocked from accepting due to low
 // power" condition renderPowerShortageOverlay's own call site checks, so the
 // minimap can never disagree with what the on-tile badges are showing.
-export function isBuildingStalledOrPowerless(state, type, data) {
-  if (!data) return false;
-  if (REFINERY_TILES.has(type) && data.lockedRecipe === null) return true;
-  if (POWER_PLANT_TILES.has(type) && data.recipeId === null) return true;
-  if (TURRET_AMMO_TILES.has(type) && data.ammoWaste + data.ammoBiomass <= 0) return true;
-  if (MANUFACTURER_TILES.has(type) && !data.processing) return true;
-  if (tileHasAnyPowerCost(type) && state.level.powerEfficiency < POWER_SHORTAGE_STALLED_THRESHOLD) return true;
-  return false;
+// 'powerless' (flashes yellow) wins over 'idle' (flashes white) when both apply.
+export function getBuildingAlertKind(state, type, data) {
+  if (!data) return null;
+  if (tileHasAnyPowerCost(type) && state.level.powerEfficiency < POWER_SHORTAGE_STALLED_THRESHOLD) return 'powerless';
+  if (REFINERY_TILES.has(type) && data.lockedRecipe === null) return 'idle';
+  if (POWER_PLANT_TILES.has(type) && data.recipeId === null) return 'idle';
+  if (TURRET_AMMO_TILES.has(type) && data.ammoWaste + data.ammoBiomass <= 0) return 'idle';
+  if (MANUFACTURER_TILES.has(type) && !data.processing) return 'idle';
+  return null;
 }
 
 // Starts the same pull-to-center hold stepCollectorProcessing eases through
@@ -2554,6 +2624,8 @@ function beginCollectorProcessing(item, centerX, centerY, tileType) {
 // reports 'consumed'. bioSpawnPoints entries carry an itemType alongside
 // { x, y } since the Refinery/Bio-Combuster can each eject more than one
 // kind of output depending on which recipe locked in.
+const turretLockedTargets = new WeakMap(); // turret buildingData -> the alien it is locked onto, see updateBuildings' turret branch
+
 export function updateBuildings(state, dtMs) {
   const foodSpawnPoints = [];
   const wasteSpawnPoints = [];
@@ -2729,9 +2801,15 @@ export function updateBuildings(state, dtMs) {
       // when only the shot itself needed it. data.aimAngle (read by
       // renderTurretArm) is only ever updated when a real target exists —
       // with none, the arm just holds whatever direction it last pointed.
-      let nearestAlien = null;
+      // Per direct request, a turret stays on its target until that alien
+      // dies instead of re-picking the nearest one every tick (no more
+      // flipping between two close aliens, and no per-tick scan while locked).
+      // The lock lives in a WeakMap off the turret's own data object so it is
+      // never serialized into a save.
+      let nearestAlien = turretLockedTargets.get(data) || null;
+      if (nearestAlien && nearestAlien.hp <= 0) nearestAlien = null;
       let nearestDist = Infinity;
-      for (const entity of state.level.entities) {
+      for (const entity of nearestAlien ? [] : state.level.entities) {
         if (entity.type !== 'alien' || entity.hp <= 0) continue;
         // Per direct request — a target already covered by damage from
         // shots OTHER turrets (or this same one, an earlier cycle) already
@@ -2748,9 +2826,11 @@ export function updateBuildings(state, dtMs) {
           nearestDist = d;
         }
       }
+      if (nearestAlien) turretLockedTargets.set(data, nearestAlien);
       if (nearestAlien) data.aimAngle = Math.atan2(nearestAlien.y - centerY, nearestAlien.x - centerX);
       if (data.cooldownMs <= 0 && hasAmmo && hasPower) {
-        if (nearestAlien) {
+        // A locked target already covered by shots in flight is held, not swapped out — it either dies or the reservation frees up and firing resumes.
+        if (nearestAlien && nearestAlien.hp - (nearestAlien.reservedDamage || 0) > 0) {
           // Spends from the Biomass pool first whenever it's non-empty (see
           // BIOMASS_TURRET_DAMAGE_MULTIPLIER's own comment) — the better
           // ammo you just loaded takes effect immediately rather than

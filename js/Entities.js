@@ -3543,7 +3543,8 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
   return true;
 }
 
-function updatePickupText(item, dtMs) {
+// Aged by main.js's render() in real time, per direct request — not here, so pausing/speeding time never changes how floating text fades.
+export function updatePickupText(item, dtMs) {
   item.age += dtMs;
   item.y -= PICKUP_TEXT_RISE_SPEED * (dtMs / 1000);
   return item.age < PICKUP_TEXT_LIFETIME_MS;
@@ -3987,8 +3988,6 @@ export function updateEntities(state, dtMs) {
 
   perfMark('e: buildings + spawns + turret shots');
   resolveItemCollisions(state, loadMode ? LOAD_MODE_COLLISION_ITERATIONS : undefined); perfMark('e: item-item collisions'); // items in the seabed band can't overlap — see Grid.js's module comment
-
-  state.level.floatingTexts = state.level.floatingTexts.filter((ft) => updatePickupText(ft, dtMs));
 
   pendingBossMinionSpawns.length = 0; // updateAlien (below) fills this — see that array's own comment for why it can't push into state.level.entities directly
   pendingTurretTutorialAlienSpawns.length = 0;
