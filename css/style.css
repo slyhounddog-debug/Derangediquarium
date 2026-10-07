@@ -1755,10 +1755,12 @@ body.time-paused #time-pause-overlay { opacity: 1; }
    the snapshot fades out to reveal the live tank underneath. */
 #start-overlay.leaving { background: transparent; pointer-events: none; }
 #start-overlay.leaving #title-backdrop { opacity: 0; transition: opacity 1s ease 0.25s; }
+/* Per direct request, the planks are a vertical stack centred under the title
+   instead of a row along the bottom. */
 #start-planks {
-  position: absolute; left: 0; right: 0; bottom: 3.2vh;
-  display: flex; justify-content: center; align-items: flex-end;
-  gap: clamp(8px, 1.2vw, 18px);
+  position: absolute; left: 0; right: 0; top: 38vh;
+  display: flex; flex-direction: column; justify-content: flex-start; align-items: center;
+  gap: clamp(14px, 2.6vh, 26px);
   padding: 0 16px;
   pointer-events: none; /* only the planks themselves take clicks — the loose coins above them stay draggable */
   transition: transform 0.55s cubic-bezier(0.5, 0, 0.8, 0.4), opacity 0.45s ease;
@@ -1773,8 +1775,8 @@ body.time-paused #time-pause-overlay { opacity: 1; }
   --i: 0;
   position: relative;
   pointer-events: auto;
-  flex: 1 1 0; min-width: 0; max-width: 210px;
-  height: clamp(46px, 7vh, 64px);
+  flex: none; width: clamp(200px, 22vw, 260px);
+  height: clamp(44px, 6vh, 60px);
   padding: 0 22px;
   border: 0; border-radius: 7px 9px 8px 7px;
   font: 700 clamp(12px, 1.3vw, 18px)/1 'Fredoka', 'Baloo 2', sans-serif;

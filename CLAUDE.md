@@ -2306,3 +2306,7 @@ Per direct request, a placed building looks dropped into the world — purely vi
 - Verified in a browser (frame-by-frame canvas capture plus an AudioBufferSource log): enlarged/tilted at the start, settling, dust fading, drop sound at ~240ms after placement; regression/smoke/menus/start scripts 0 errors.
 
 Also: the Shop's left-edge seaweed now sits on top of the bottom-left corner plate so it reads as growing from it.
+
+## Main Menu Buttons Stacked Vertically
+
+Per direct request, the main-menu planks (`#start-planks`) are a vertical column centred under the title (top: 38vh, column flex, fixed-width planks `clamp(200px, 22vw, 260px)`) instead of a row along the bottom. Only CSS changed; the rise-in and leave animations and the click targets are the same. Checked at 1600x950, 1280x720 and 900x600.
