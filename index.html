@@ -8,6 +8,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Comic+Neue:wght@400;700&family=Fredoka:wght@600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
+<!-- Nautical/wooden re-skin, per direct request — a pure override layer on top of style.css. -->
+<link rel="stylesheet" href="css/nautical.css">
 </head>
 <body>
 <canvas id="game-canvas"></canvas>
@@ -85,6 +87,18 @@
     <div id="start-mode-note">You can change this anytime in Settings.</div>
   </div>
 </div>
+
+<!-- Wavy, torn-paper edge for the Shop's detail parchment (nautical.css's
+     #shop-preview::before applies it as a filter to the paper layer only, so
+     the text on top is never distorted). -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <filter id="torn-edge" x="-6%" y="-6%" width="112%" height="112%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.03" numOctaves="3" seed="5" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="11" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+  </defs>
+</svg>
 
 <div id="start-help-overlay" class="hidden">
   <div id="start-help-modal">
@@ -516,7 +530,7 @@
      is full-screen so a click outside the window closes it. -->
 <div id="shop-panel" class="collapsed">
   <div id="shop-header-row">
-    <div id="shop-header">Shop</div>
+    <div id="shop-header"><span>S</span><span>h</span><span>o</span><span>p</span></div>
     <div id="shop-money" class="sheen-target">💰 $0</div>
     <button id="shop-close-btn" class="lab-close-x-btn" title="Close (E)">✕</button>
   </div>

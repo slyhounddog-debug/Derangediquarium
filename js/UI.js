@@ -2366,13 +2366,35 @@ function speciesStatsHtml(state, speciesId) {
 // check (not the narrower isPureScavenger used elsewhere for eating/coin-drop
 // purposes), so this mirrors it exactly rather than guessing at a different
 // rule.
+// Per direct request, the fish stat lines get small inset progress bars. Each
+// bar is that species' value as a fraction of the highest value for the same
+// stat across every species, so it reads as "how this fish compares."
+let fishStatMax = null;
+function getFishStatMax() {
+  if (fishStatMax) return fishStatMax;
+  fishStatMax = { hunger: 0, money: 0, waste: 0, speed: 0 };
+  for (const sp of Object.values(SPECIES)) {
+    const spAdult = sp.growthStages[sp.growthStages.length - 1];
+    fishStatMax.hunger = Math.max(fishStatMax.hunger, sp.hungerRate);
+    fishStatMax.speed = Math.max(fishStatMax.speed, sp.swimSpeed);
+    if (sp.behavior.includes('FEEDER') && spAdult.dropValue) fishStatMax.money = Math.max(fishStatMax.money, spAdult.dropValue / spAdult.dropInterval);
+    if (!sp.behavior.includes('SCAVENGER')) fishStatMax.waste = Math.max(fishStatMax.waste, 1 / (sp.wastePoopIntervalMultiplier || 1));
+  }
+  return fishStatMax;
+}
+function fishStatBarHtml(kind, value) {
+  const max = getFishStatMax()[kind];
+  const pct = max > 0 ? Math.max(6, Math.min(100, Math.round((value / max) * 100))) : 0;
+  return `<span class="stat-bar stat-bar-${kind}"><i style="width:${pct}%"></i></span>`;
+}
+
 function fishEconomyStatsHtml(state, speciesId) {
   const s = SPECIES[speciesId];
   if (!s) return '';
   const baby = s.growthStages[0];
   const adult = s.growthStages[s.growthStages.length - 1];
   const foodPerMin = (s.hungerRate * 60) / FOOD_HUNGER_RELIEF_BY_LEVEL[state.level.upgrades.foodQuality];
-  let html = `<div class="building-stat">🍽️ Hunger: <b>${foodPerMin.toFixed(1)} ${itemIconImgHtml('food')}/min</b></div>`;
+  let html = `<div class="building-stat">🍽️ Hunger: <b>${foodPerMin.toFixed(1)} ${itemIconImgHtml('food')}/min</b>${fishStatBarHtml('hunger', s.hungerRate)}</div>`;
   if (s.behavior.includes('FEEDER') && adult.dropValue) {
     // Shown as a baby -> adult range, not just the adult figure — per direct
     // request. Every stage now shares the same dropInterval (see Config.js's
@@ -2386,7 +2408,7 @@ function fishEconomyStatsHtml(state, speciesId) {
     // Rounded to the nearest whole dollar now, per direct request — was
     // toFixed(1) (nearest tenth) before that, toFixed(2) before that; a
     // dollar range doesn't need fractional-cent precision to be useful.
-    html += `<div class="building-stat">${itemIconImgHtml('coin')} Money: <b>$${Math.round(babyMoneyPerMin)} - $${Math.round(adultMoneyPerMin)}/min</b></div>`;
+    html += `<div class="building-stat">${itemIconImgHtml('coin')} Money: <b>$${Math.round(babyMoneyPerMin)} - $${Math.round(adultMoneyPerMin)}/min</b>${fishStatBarHtml('money', adult.dropValue / adult.dropInterval)}</div>`;
   }
   // Per direct request ("add in a stat line for the electric eels in the
   // shop showing the range of electricity they produce"). A pure Generator
@@ -2424,14 +2446,14 @@ function fishEconomyStatsHtml(state, speciesId) {
     // actual poop timer; only this display-side stat had drifted out of
     // sync with it).
     const wastePerMin = 60000 / (WASTE_POOP_INTERVAL_MS * (s.wastePoopIntervalMultiplier || 1));
-    html += `<div class="building-stat">${itemIconImgHtml('waste')} Waste: <b>${wastePerMin.toFixed(1)}/min</b></div>`; // nearest tenth, per direct request — see the Money line's own comment
+    html += `<div class="building-stat">${itemIconImgHtml('waste')} Waste: <b>${wastePerMin.toFixed(1)}/min</b>${fishStatBarHtml('waste', 1 / (s.wastePoopIntervalMultiplier || 1))}</div>`; // nearest tenth, per direct request — see the Money line's own comment
   }
   // Per direct request ("add in the fish speed stat"). The base swimSpeed
   // times the flat game-wide multiplier — deliberately NOT the live
   // effectiveSwimSpeed (which also folds in the player's current Fish
   // Movement Tank Upgrade level), for the same "fixed comparison figure"
   // reason every other stat here uses a baseline value.
-  html += `<div class="building-stat">🏊 Speed: <b>${Math.round(s.swimSpeed * FISH_SPEED_MULTIPLIER)}px/s</b></div>`;
+  html += `<div class="building-stat">🏊 Speed: <b>${Math.round(s.swimSpeed * FISH_SPEED_MULTIPLIER)}px/s</b>${fishStatBarHtml('speed', s.swimSpeed)}</div>`;
   return html;
 }
 
@@ -4766,6 +4788,14 @@ function buildShopPanel(state) {
     btn.title = species.name;
     btn.dataset.tool = `fish:${species.id}`;
     btn.style.setProperty('--species-color', FISH_COLORS[species.id] || '#ffffff');
+
+    // Per direct request, the fish's own 2D illustration sits inside its
+    // bubble (same drawFishIconCanvas the favorites slots use).
+    const iconCanvas = document.createElement('canvas');
+    iconCanvas.width = 44;
+    iconCanvas.height = 44;
+    drawFishIconCanvas(iconCanvas, species.id);
+    btn.appendChild(iconCanvas);
 
     const priceTag = document.createElement('span');
     priceTag.className = 'species-icon-price';

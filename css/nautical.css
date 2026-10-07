@@ -1,0 +1,639 @@
+/* Nautical / wooden theme — per direct request ("rework ... using the
+   hand-crafted, nautical visual identity established in the main menu ...
+   entirely replacing the flat, modern white interface with a rustic, undersea
+   'wooden and nautical' theme").
+
+   Loaded AFTER style.css and deliberately a pure override layer: style.css
+   still owns every layout/size/behavior rule, this file only re-skins it
+   (backgrounds, borders, fonts, colors, shadows), so none of the existing
+   positioning, animation or state classes change. Everything is drawn with
+   CSS gradients plus a few small hand-built SVGs in css/nautical/ (no bitmap
+   art), the same "no images, generate it" approach the main menu's planks
+   use — the plank wood below (--grain + the same tan stops) is lifted
+   directly from .plank-btn so the HUD and the title screen read as one set.
+
+   Layout of this file:
+     1. tokens   2. HUD / chat / minimap   3. bottom toolbar + launcher coins
+     4. big windows (Shop, Tank, Lab, Help, Pause, New Game, Lab purchase)
+     5. Shop contents   6. Tank / achievements / customization contents
+     7. paper pop-ups (info menus, stats panel, chat log)   8. misc */
+
+/* ---------- 1. tokens ---------- */
+:root {
+  --wood-hi: #e0a964;
+  --wood-mid: #c88642;
+  --wood-lo: #b4733a;
+  --wood-dark: #6b3f1c;
+  --wood-darker: #3a2010;
+  --cream: #fff1d0;
+  --ink: #4a3320;
+  --orange: #f07a1c;
+  --navy: #12305a;
+  --font-display: 'Fredoka', 'Baloo 2', sans-serif;
+  /* The plank grain from the main menu's .plank-btn. */
+  --grain:
+    repeating-linear-gradient(92deg, transparent 0 9px, rgba(70, 35, 12, 0.14) 9px 10px, transparent 10px 23px, rgba(255, 225, 170, 0.09) 23px 25px),
+    repeating-linear-gradient(88deg, transparent 0 41px, rgba(60, 28, 8, 0.2) 41px 43px);
+  --noise: url(nautical/noise.svg);
+  --plank: var(--noise), var(--grain), linear-gradient(180deg, #d99c58 0%, #c0803f 50%, #a96b33 100%);
+  --dark-wood: var(--noise), var(--grain), linear-gradient(180deg, #4a2c15 0%, #2f1a0b 100%);
+  --paper: linear-gradient(165deg, #f6ecd0 0%, #ead9ab 65%, #e0c78f 100%);
+  /* Four copper rivets, one per corner. */
+  --rivets:
+    radial-gradient(circle 5px at 11px 11px, #e9b07a 0 1.5px, #a5612f 2.6px, #34190a 4.3px, transparent 5px),
+    radial-gradient(circle 5px at calc(100% - 11px) 11px, #e9b07a 0 1.5px, #a5612f 2.6px, #34190a 4.3px, transparent 5px),
+    radial-gradient(circle 5px at 11px calc(100% - 11px), #e9b07a 0 1.5px, #a5612f 2.6px, #34190a 4.3px, transparent 5px),
+    radial-gradient(circle 5px at calc(100% - 11px) calc(100% - 11px), #e9b07a 0 1.5px, #a5612f 2.6px, #34190a 4.3px, transparent 5px);
+  /* Wooden-coin face used by every round HUD button. */
+  --coin:
+    radial-gradient(circle at 34% 28%, #ecb97a 0, #c98f52 36%, #a06832 72%, #6e4322 100%);
+  /* The deep-ocean-blue chart paper the windows' interiors are drawn on. */
+  --map:
+    url(nautical/map-stains.svg) 0 0 / 400px 400px,
+    radial-gradient(ellipse at 28% 16%, rgba(140, 215, 228, 0.3), transparent 62%),
+    repeating-linear-gradient(0deg, transparent 0 46px, rgba(255, 255, 255, 0.04) 46px 47px),
+    repeating-linear-gradient(90deg, transparent 0 46px, rgba(255, 255, 255, 0.04) 46px 47px),
+    linear-gradient(170deg, #2b86a3 0%, #1f6a88 50%, #16506b 100%);
+}
+
+/* ---------- 2. HUD, chat, minimap ---------- */
+/* Top-left chat: a weathered plank plaque with a dark-bound edge, a rope
+   trim along top and bottom, nail heads and a strand of seaweed. */
+#notification-latest {
+  background:
+    radial-gradient(circle 3px at 9px 50%, #e9b07a 0 1px, #7a4624 2px, #2a150a 3px, transparent 3.5px),
+    url(nautical/seaweed-a.svg) no-repeat right -6px bottom -26px / 30px 56px,
+    repeating-linear-gradient(135deg, #e3cf98 0 3px, #a98c4f 3px 6px) top / 100% 4px no-repeat,
+    repeating-linear-gradient(135deg, #e3cf98 0 3px, #a98c4f 3px 6px) bottom / 100% 4px no-repeat,
+    var(--plank);
+  color: #fff6dc;
+  font: 600 16px/1.2 var(--font-display);
+  text-shadow: 0 2px 0 #3a1f0d, 0 0 6px rgba(40, 18, 4, 0.5);
+  padding: 11px 38px 11px 22px;
+  border: 3px solid #3a2010;
+  border-radius: 8px;
+  box-shadow: inset 0 2px 0 rgba(255, 232, 190, 0.45), inset 0 -3px 0 rgba(60, 30, 10, 0.4), 0 4px 0 #5a3418, 0 9px 14px rgba(0, 0, 0, 0.45);
+}
+#notification-latest:hover { background:
+    radial-gradient(circle 3px at 9px 50%, #e9b07a 0 1px, #7a4624 2px, #2a150a 3px, transparent 3.5px),
+    url(nautical/seaweed-a.svg) no-repeat right -6px bottom -26px / 30px 56px,
+    repeating-linear-gradient(135deg, #e3cf98 0 3px, #a98c4f 3px 6px) top / 100% 4px no-repeat,
+    repeating-linear-gradient(135deg, #e3cf98 0 3px, #a98c4f 3px 6px) bottom / 100% 4px no-repeat,
+    var(--plank); filter: brightness(1.08); transform: scale(1.02); }
+
+/* Top-right currency bar: dark, "depressed" wood with riveted corners. */
+#hud {
+  background: var(--rivets), var(--dark-wood);
+  color: var(--cream);
+  font: 600 16px/1 var(--font-display);
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.7);
+  padding: 10px 30px;
+  border: 3px solid #1d0f06;
+  border-radius: 12px;
+  box-shadow: inset 0 5px 12px rgba(0, 0, 0, 0.7), inset 0 -2px 0 rgba(255, 220, 160, 0.14), 0 3px 0 #9a6630, 0 8px 14px rgba(0, 0, 0, 0.5);
+}
+#hud-power { font: inherit; color: inherit; }
+
+/* Minimap: rough-cut timber frame. */
+#minimap-canvas {
+  border: 8px solid;
+  border-image: linear-gradient(135deg, #d3995c, #94602f 45%, #6d4420 70%, #a87038) 1;
+  border-radius: 0;
+  box-shadow: 0 0 0 2px #2a1608, inset 0 0 0 2px #2a1608, 0 8px 14px rgba(0, 0, 0, 0.5);
+}
+#minimap-controls { justify-content: space-between; padding: 2px 4px 0; }
+/* Carved wooden coins with the icon inset. */
+.minimap-ctrl-btn {
+  flex: none;
+  width: 36px; height: 36px;
+  padding: 0;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%;
+  border: 2px solid #3a2010;
+  color: var(--cream);
+  font-size: 16px;
+  background: var(--coin);
+  box-shadow: inset 0 0 0 3px #94602f, inset 0 0 0 4.5px rgba(40, 20, 8, 0.7), inset 0 3px 5px rgba(255, 235, 200, 0.3), 0 3px 0 #4a2a12, 0 6px 9px rgba(0, 0, 0, 0.45);
+  text-shadow: 0 1px 0 rgba(255, 235, 200, 0.45), 0 -1px 0 rgba(40, 20, 8, 0.65);
+}
+.minimap-ctrl-btn.active {
+  background: radial-gradient(circle at 34% 28%, #ffe29a 0, #f0b94d 40%, #c88a2d 100%);
+  box-shadow: inset 0 0 0 3px #b9792c, inset 0 0 0 4.5px rgba(40, 20, 8, 0.6), 0 0 14px rgba(255, 210, 100, 0.75), 0 3px 0 #4a2a12;
+}
+
+/* Bottom-left hotkey legend: playful, readable, hand-lettered feel. */
+#hotkey-legend {
+  font: 600 14px/1.3 var(--font-display);
+  letter-spacing: 0.02em;
+  color: #fff4d6;
+  text-shadow: 0 2px 0 #2a150a, 1px 1px 0 #2a150a, -1px 1px 0 #2a150a, 0 0 7px rgba(0, 0, 0, 0.6);
+}
+#build-legend, #build-replace-legend, #build-snap-legend, #tutorial-skip-legend, #building-move-legend, #fish-merge-legend {
+  font-family: var(--font-display);
+  font-weight: 600;
+}
+
+/* ---------- 3. bottom toolbar and launcher coins ---------- */
+#bottom-tool-bar {
+  gap: 22px;
+  padding: 14px 30px;
+  background:
+    radial-gradient(circle 4.5px at 12px 50%, #e9b07a 0 1.5px, #a5612f 2.6px, #34190a 4.3px, transparent 5px),
+    radial-gradient(circle 4.5px at calc(100% - 12px) 50%, #e9b07a 0 1.5px, #a5612f 2.6px, #34190a 4.3px, transparent 5px),
+    var(--plank);
+  border: 3px solid #3a2010;
+  border-radius: 12px;
+  box-shadow: inset 0 3px 0 rgba(255, 232, 190, 0.5), inset 0 -4px 0 rgba(60, 30, 10, 0.4), 0 6px 0 #5a3418, 0 13px 20px rgba(0, 0, 0, 0.5);
+}
+#bottom-bar-row { gap: 20px; }
+
+/* Every slot on the plank is an inset round frame holding a glowing,
+   translucent bubble. */
+#bottom-tool-bar .tool-btn {
+  width: 58px; height: 58px;
+  border: 0;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 30% 24%, rgba(255, 255, 255, 0.95) 0 5%, rgba(255, 255, 255, 0) 6.5%),
+    radial-gradient(circle at 72% 80%, rgba(255, 255, 255, 0.4) 0 7%, rgba(255, 255, 255, 0) 8.5%),
+    radial-gradient(circle at 50% 50%, rgba(150, 225, 255, 0.16) 0 56%, rgba(120, 205, 250, 0.5) 82%, rgba(215, 247, 255, 0.85) 100%),
+    radial-gradient(circle at 50% 56%, #1f6b8e, #0e3b57);
+  box-shadow:
+    0 0 0 4px #4a2a12,
+    0 0 0 7px #b88048,
+    0 0 0 9px #3a2010,
+    0 5px 9px 7px rgba(0, 0, 0, 0.35),
+    inset 0 0 14px rgba(170, 238, 255, 0.55),
+    0 0 14px 9px rgba(120, 220, 255, 0.3);
+}
+#bottom-tool-bar .tool-btn:hover:not(:disabled) { transform: scale(1.07); }
+#bottom-tool-bar .tool-btn.selected {
+  background:
+    radial-gradient(circle at 30% 24%, rgba(255, 255, 255, 0.95) 0 5%, rgba(255, 255, 255, 0) 6.5%),
+    radial-gradient(circle at 50% 50%, rgba(255, 235, 150, 0.22) 0 56%, rgba(255, 215, 110, 0.55) 82%, rgba(255, 246, 205, 0.9) 100%),
+    radial-gradient(circle at 50% 56%, #2a7aa0, #124560);
+  box-shadow: 0 0 0 4px #4a2a12, 0 0 0 7px #ffc94d, 0 0 0 9px #3a2010, 0 5px 9px 7px rgba(0, 0, 0, 0.35), inset 0 0 14px rgba(255, 240, 170, 0.6), 0 0 16px 10px rgba(255, 205, 90, 0.4);
+}
+#bottom-tool-bar .tool-btn-favorite-empty { color: rgba(255, 255, 255, 0.55); }
+.panel-toggle-hotkey {
+  background: #4a2a12;
+  color: #ffe9b8;
+  border: 1.5px solid #c58e52;
+  font-family: var(--font-display);
+  font-weight: 700;
+  box-shadow: 0 2px 3px rgba(0, 0, 0, 0.5);
+}
+
+/* Shop / Science Lab / Tank launchers: carved, embossed wooden coins. */
+#shop-collapse-btn, #tank-collapse-btn, #lab-collapse-btn {
+  width: 62px; height: 62px;
+  border: 3px solid #3a2010;
+  background: var(--coin);
+  font-size: 29px;
+  box-shadow: inset 0 0 0 5px #94602f, inset 0 0 0 7px rgba(40, 20, 8, 0.7), inset 0 4px 7px rgba(255, 235, 200, 0.32), 0 4px 0 #4a2a12, 0 9px 13px rgba(0, 0, 0, 0.5);
+  text-shadow: 0 1px 0 rgba(255, 235, 200, 0.5), 0 -1px 0 rgba(40, 20, 8, 0.6);
+}
+#shop-collapse-btn:hover, #tank-collapse-btn:hover, #lab-collapse-btn:hover {
+  background: radial-gradient(circle at 34% 28%, #f6c98c 0, #d99f60 36%, #b27a3f 72%, #7a4b27 100%);
+}
+#shop-collapse-btn.panel-toggle-active, #tank-collapse-btn.panel-toggle-active, #lab-collapse-btn.panel-toggle-active,
+#shop-collapse-btn.panel-toggle-active:hover, #tank-collapse-btn.panel-toggle-active:hover, #lab-collapse-btn.panel-toggle-active:hover {
+  background: radial-gradient(circle at 34% 28%, #ffe29a 0, #f0b94d 40%, #c88a2d 100%);
+  box-shadow: inset 0 0 0 5px #b9792c, inset 0 0 0 7px rgba(40, 20, 8, 0.6), 0 0 0 3px #3a2010, 0 0 18px 6px rgba(255, 210, 100, 0.7), 0 4px 0 #4a2a12;
+}
+
+/* ---------- 4. big windows ---------- */
+/* One heavy, dark-bound wooden frame with iron corner brackets (the 9-slice
+   css/nautical/frame-wood.svg), around an aged deep-ocean chart. */
+#shop-panel, #tank-panel, #lab-modal, #lab-purchase-modal, #start-help-modal, #start-mode-modal, #pause-menu {
+  color: var(--cream);
+  background: var(--map);
+  background-clip: padding-box;
+  border: 30px solid transparent;
+  border-image: url(nautical/frame-wood.svg) 36 / 30px round;
+  border-radius: 0;
+  padding: 18px 22px;
+  box-shadow: none;
+  filter: drop-shadow(0 14px 22px rgba(0, 0, 0, 0.55));
+}
+#shop-panel, #tank-panel { width: 800px; height: 620px; max-width: 94vw; max-height: 92vh; }
+#lab-modal { width: 760px; height: 680px; max-width: 94vw; max-height: 92vh; padding: 18px 22px; }
+#start-mode-modal { width: 780px; }
+#start-help-modal { width: 640px; }
+#pause-menu { width: 340px; }
+/* Natural touches scattered over the frame: seaweed wrapping the corners, a
+   couple of starfish, barnacles on the edge. Click-through. */
+#shop-panel::before, #tank-panel::before, #lab-modal::before, #start-mode-modal::before, #start-help-modal::before, #pause-menu::before {
+  content: '';
+  position: absolute; inset: -30px;
+  pointer-events: none;
+  z-index: 5;
+}
+#shop-panel::before {
+  background:
+    url(nautical/starfish-orange.svg) no-repeat right 42px bottom 6px / 62px,
+    url(nautical/starfish-red.svg) no-repeat right -4px top 92px / 44px,
+    url(nautical/seaweed-a.svg) no-repeat left -12px top 46px / 60px 112px,
+    url(nautical/seaweed-b.svg) no-repeat left -10px bottom -4px / 64px 120px,
+    url(nautical/seaweed-b.svg) no-repeat right -8px bottom 4px / 52px 100px,
+    url(nautical/barnacles.svg) no-repeat left 20px bottom 6px / 54px,
+    url(nautical/barnacles.svg) no-repeat right 200px top 0 / 44px;
+}
+#tank-panel::before {
+  background:
+    url(nautical/starfish-orange.svg) no-repeat right -6px bottom 70px / 44px,
+    url(nautical/seaweed-a.svg) no-repeat left -12px bottom -4px / 56px 108px,
+    url(nautical/barnacles.svg) no-repeat right 120px bottom 4px / 48px;
+}
+#lab-modal::before {
+  background:
+    url(nautical/starfish-red.svg) no-repeat left -4px bottom 96px / 44px,
+    url(nautical/seaweed-b.svg) no-repeat right -12px bottom -4px / 56px 108px,
+    url(nautical/barnacles.svg) no-repeat left 140px bottom 4px / 48px;
+}
+#start-mode-modal::before, #start-help-modal::before, #pause-menu::before {
+  background:
+    url(nautical/starfish-orange.svg) no-repeat right -4px bottom 20px / 40px,
+    url(nautical/seaweed-a.svg) no-repeat left -10px bottom -4px / 50px 96px;
+}
+/* #shop-panel/#tank-panel are position:fixed / flex children already; the
+   decoration needs them positioned (the others are positioned by style.css). */
+#tank-panel, #lab-modal, #start-mode-modal, #start-help-modal, #pause-menu { position: relative; }
+#shop-panel { position: fixed; }
+
+/* Bubbly, hand-lettered 3D titles with a thick navy outline. */
+#shop-header, #tank-title, #lab-title, #start-mode-title, #start-help-title, #pause-title {
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: var(--orange);
+  -webkit-text-stroke: 7px var(--navy);
+  paint-order: stroke fill;
+  letter-spacing: 0.02em;
+  text-shadow: 0 4px 0 #0b2347, 0 7px 7px rgba(0, 0, 0, 0.35);
+}
+#tank-title, #lab-title, #start-mode-title, #start-help-title { font-size: 30px; }
+#pause-title { font-size: 34px; }
+/* The Shop's big title sits up over the frame, each letter its own color. */
+#shop-header { font-size: 58px; line-height: 1; position: relative; z-index: 6; margin: -62px 0 -6px -16px; }
+#shop-header > span:nth-child(1) { color: #ff7a1a; }
+#shop-header > span:nth-child(2) { color: #fbf6ec; }
+#shop-header > span:nth-child(3) { color: #41b9ff; }
+#shop-header > span:nth-child(4) { color: #ff9b2e; }
+#shop-header-row { margin-bottom: 4px; align-items: flex-end; }
+#shop-header-row .lab-close-x-btn { margin: -66px -26px 0 0; position: relative; z-index: 6; }
+#tank-header-row .lab-close-x-btn, #lab-header-row .lab-close-x-btn { margin: -52px -26px 0 0; position: relative; z-index: 6; }
+
+/* Close button: a red-and-white life preserver on a rusty iron backing. */
+.lab-close-x-btn {
+  width: 52px; height: 52px;
+  border: 0;
+  background:
+    radial-gradient(circle at 50% 50%, #6b3a1e 0 25%, transparent 26%),
+    conic-gradient(from 22deg, #e0412f 0 45deg, #f8f2e4 0 90deg, #e0412f 0 135deg, #f8f2e4 0 180deg, #e0412f 0 225deg, #f8f2e4 0 270deg, #e0412f 0 315deg, #f8f2e4 0 360deg);
+  color: #ffffff;
+  font: 700 24px/1 var(--font-display);
+  -webkit-text-stroke: 3.5px #4a0f0c;
+  paint-order: stroke fill;
+  box-shadow: 0 0 0 4px #858992, 0 0 0 6.5px #4b4f57, 0 0 0 8px #2a1608, inset 0 0 0 7px rgba(60, 20, 10, 0.2), 0 6px 9px rgba(0, 0, 0, 0.5);
+}
+.lab-close-x-btn:hover { filter: brightness(1.1) saturate(1.1); }
+
+/* Readout pills (money, tank points, gems, science): dark inset wood. */
+#shop-money, #tank-points-display, #achievement-gems-display, #customization-gems-display, #lab-science-readout {
+  background: var(--dark-wood);
+  color: #ffe9a8;
+  border: 2px solid #1d0f06;
+  border-radius: 999px;
+  padding: 6px 18px;
+  font: 700 19px/1.1 var(--font-display);
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.7);
+  box-shadow: inset 0 4px 8px rgba(0, 0, 0, 0.7), 0 2px 0 #9a6630;
+}
+
+/* Wooden-plank buttons everywhere the old pink pills were (.pause-btn is
+   also the Lab's zoom buttons and every window's Back/Resume button). */
+.pause-btn, .lab-filter-btn {
+  background: var(--plank);
+  color: var(--cream);
+  font-family: var(--font-display);
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  border: 2px solid #3a2010;
+  border-radius: 8px;
+  text-shadow: 0 2px 0 #4a2610;
+  box-shadow: inset 0 3px 0 rgba(255, 238, 195, 0.5), inset 0 -3px 0 rgba(80, 40, 14, 0.35), 0 4px 0 #5a3418, 0 8px 12px rgba(0, 0, 0, 0.4);
+}
+.pause-btn:hover, .lab-filter-btn:hover { background: var(--plank); filter: brightness(1.1); transform: translateY(-1px) scale(1.02); }
+.pause-btn:disabled, .pause-btn:disabled:hover { background: var(--plank); filter: grayscale(0.7) brightness(0.8); }
+.lab-filter-btn.selected { background: radial-gradient(circle at 34% 28%, #ffe29a 0, #f0b94d 50%, #c88a2d 100%); color: #4a2610; text-shadow: none; }
+#pause-resume-btn { background: linear-gradient(180deg, #8fd68a 0%, #4f9c52 100%); color: #14391a; text-shadow: none; }
+.volume-row label, .toggle-row label { color: var(--cream); text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5); }
+
+/* ---------- 5. Shop contents ---------- */
+#shop-panel-scroll, #tank-panel-scroll {
+  scrollbar-color: #b88048 rgba(0, 0, 0, 0.25);
+}
+#shop-panel-scroll::-webkit-scrollbar-track, #tank-panel-scroll::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.25); }
+#shop-panel-scroll::-webkit-scrollbar-thumb, #tank-panel-scroll::-webkit-scrollbar-thumb { background: #b88048; }
+#shop-panel-scroll { padding: 4px 14px 0 12px; }
+.shop-section-title {
+  font: 700 26px/1.1 var(--font-display);
+  text-transform: lowercase;
+  color: var(--cream);
+  text-shadow: 0 3px 0 #0d2a40, 0 0 8px rgba(0, 0, 0, 0.45);
+  border-bottom: 2px solid rgba(255, 255, 255, 0.16);
+  padding-bottom: 3px;
+}
+/* The fish and buildings rows are one identical grid: same 66px circle,
+   same spacing, same hanging price tag. */
+#shop-species-grid, #tool-bar {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 68px);
+  justify-content: start;
+  gap: 18px 20px;
+  margin: 16px 0 44px;
+}
+.species-icon-btn, .tool-btn-build {
+  position: relative;
+  width: 66px; height: 66px;
+  border-radius: 50%;
+  border: 3px solid rgba(255, 255, 255, 0.55);
+  padding: 0;
+  opacity: 1;
+  background:
+    radial-gradient(circle at 30% 24%, rgba(255, 255, 255, 0.9) 0 6%, rgba(255, 255, 255, 0) 7.5%),
+    radial-gradient(circle at 50% 52%, color-mix(in srgb, var(--species-color, var(--tile-color, #7fb8d8)) 30%, transparent) 0 55%, color-mix(in srgb, var(--species-color, var(--tile-color, #7fb8d8)) 78%, #ffffff) 100%),
+    radial-gradient(circle at 50% 55%, #1f6b8e, #11405d);
+  box-shadow: inset 0 0 14px rgba(255, 255, 255, 0.5), 0 0 12px color-mix(in srgb, var(--species-color, var(--tile-color, #7fb8d8)) 70%, transparent), 0 5px 8px rgba(0, 0, 0, 0.4);
+  transition: transform 0.12s ease, border-color 0.12s ease;
+  display: flex; align-items: center; justify-content: center;
+}
+.species-icon-btn:hover, .tool-btn-build:hover:not(:disabled) { transform: scale(1.08); }
+.species-icon-btn.selected, .tool-btn-build.selected { border-color: #ffc94d; box-shadow: inset 0 0 14px rgba(255, 240, 170, 0.6), 0 0 16px 4px rgba(255, 205, 90, 0.7), 0 5px 8px rgba(0, 0, 0, 0.4); }
+.species-icon-btn canvas, .tool-btn-build .tool-btn-building-icon { width: 44px; height: 44px; pointer-events: none; border-radius: 0; }
+.tool-btn-build .tool-btn-family-dots { top: -9px; }
+/* Hanging wooden price tag on a string, same for fish and buildings. */
+.species-icon-price, .building-icon-price {
+  position: absolute;
+  top: calc(100% + 11px); bottom: auto; left: 50%;
+  transform: translateX(-50%) rotate(-2deg);
+  min-width: 42px;
+  padding: 3px 9px 3px;
+  text-align: center;
+  font: 700 14px/1.2 var(--font-display);
+  color: var(--cream);
+  text-shadow: 0 2px 0 #3a1f0d;
+  background: var(--noise), var(--grain), linear-gradient(180deg, #c58944 0%, #9a6330 100%);
+  border: 2px solid #3a2010;
+  border-radius: 3px 3px 7px 7px;
+  box-shadow: inset 0 2px 0 rgba(255, 232, 190, 0.4), 0 3px 4px rgba(0, 0, 0, 0.45);
+}
+.species-icon-price::before, .building-icon-price::before {
+  content: '';
+  position: absolute; left: 50%; bottom: calc(100% + 1px);
+  width: 2px; height: 11px;
+  transform: translateX(-50%);
+  background: repeating-linear-gradient(180deg, #e3cf98 0 2px, #a98c4f 2px 4px);
+}
+.species-icon-price::after, .building-icon-price::after {
+  content: '';
+  position: absolute; left: 50%; top: 3px;
+  width: 4px; height: 4px; margin-left: -2px;
+  border-radius: 50%;
+  background: #2a150a;
+  display: none;
+}
+.species-icon-btn.unaffordable, .tool-btn-build.unaffordable { filter: grayscale(0.55) brightness(0.9); opacity: 0.8; }
+
+/* Right-hand detail window: aged, water-damaged parchment with torn edges,
+   glowing faintly bioluminescent. The paper itself is the ::before (the torn
+   edge is an SVG displacement filter — see #torn-edge in index.html — so the
+   text on top isn't distorted). */
+#shop-preview {
+  position: relative; isolation: isolate;
+  width: 270px;
+  background: none; border: 0; box-shadow: none;
+  color: var(--ink);
+  padding: 22px 22px 18px;
+}
+#shop-preview::before {
+  content: '';
+  position: absolute; inset: 0; z-index: -1;
+  background:
+    var(--noise),
+    radial-gradient(ellipse at 22% 12%, rgba(255, 255, 255, 0.75), transparent 55%),
+    radial-gradient(ellipse at 80% 88%, rgba(120, 180, 170, 0.35), transparent 60%),
+    linear-gradient(170deg, #e6f6ee 0%, #cfe8e0 55%, #b7d6d2 100%);
+  filter: url(#torn-edge) drop-shadow(0 0 7px rgba(130, 255, 235, 0.85));
+}
+#shop-preview-canvas {
+  width: 64px; height: 64px;
+  background:
+    radial-gradient(circle at 30% 24%, rgba(255, 255, 255, 0.95) 0 7%, rgba(255, 255, 255, 0) 8.5%),
+    radial-gradient(circle at 50% 50%, rgba(170, 235, 245, 0.35) 0 55%, rgba(120, 215, 240, 0.8) 100%);
+  border: 3px solid rgba(255, 255, 255, 0.8);
+  box-shadow: 0 0 12px rgba(120, 230, 255, 0.8), inset 0 0 12px rgba(255, 255, 255, 0.7);
+}
+#shop-preview-name {
+  font: 700 28px/1.05 var(--font-display);
+  color: var(--orange);
+  -webkit-text-stroke: 5px #5a2a08;
+  paint-order: stroke fill;
+  text-shadow: 0 3px 0 #3a1a05;
+}
+.shop-preview-box { background: rgba(60, 40, 20, 0.07); border-radius: 8px; scrollbar-color: #a98c4f transparent; }
+#shop-preview-desc { color: var(--ink); font: 600 14px/1.4 var(--font-display); opacity: 1; }
+#shop-preview-stats { color: var(--ink); gap: 9px 10px; }
+.building-stat { color: var(--ink); font: 600 14px/1.25 var(--font-display); opacity: 1; flex: 1 1 100%; }
+.building-stat b { color: #2a1a0a; font-weight: 700; }
+/* Inset progress bars under the fish stats, scaled against the strongest
+   species for that stat (UI.js's fishStatBarHtml). */
+.stat-bar {
+  display: block; height: 9px; margin-top: 3px;
+  border-radius: 999px;
+  background: #3a2a18;
+  box-shadow: inset 0 2px 3px rgba(0, 0, 0, 0.7), 0 1px 0 rgba(255, 255, 255, 0.55);
+  overflow: hidden;
+}
+.stat-bar > i { display: block; height: 100%; border-radius: 999px; box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.35); }
+.stat-bar-hunger > i { background: linear-gradient(90deg, #ff9a5a, #e0392b); }
+.stat-bar-money > i { background: linear-gradient(90deg, #ffe27a, #e9a61a); }
+.stat-bar-waste > i { background: linear-gradient(90deg, #b99a6a, #7a5a30); }
+.stat-bar-speed > i { background: linear-gradient(90deg, #7fe0ff, #2a9ad8); }
+#shop-preview-hint {
+  background: var(--noise), linear-gradient(180deg, #b39c6a 0%, #8e7847 100%);
+  color: #2c1d0d;
+  border-radius: 6px;
+  padding: 7px 8px;
+  font: 700 14px/1.2 var(--font-display);
+  opacity: 1;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+#shop-preview-empty { color: var(--ink); font: 600 15px/1.4 var(--font-display); opacity: 0.85; }
+
+/* ---------- 6. Tank / achievements / customization ---------- */
+#tank-upgrades-note { color: var(--cream); font: 600 14px var(--font-display); text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5); opacity: 0.95; }
+#tank-tabs { width: 168px; }
+.tank-tab-btn {
+  background: var(--plank);
+  color: var(--cream);
+  border: 2px solid #3a2010;
+  border-radius: 8px;
+  font: 700 14px var(--font-display);
+  text-shadow: 0 2px 0 #4a2610;
+  box-shadow: inset 0 3px 0 rgba(255, 238, 195, 0.5), inset 0 -3px 0 rgba(80, 40, 14, 0.35), 0 4px 0 #5a3418, 0 7px 10px rgba(0, 0, 0, 0.4);
+}
+.tank-tab-btn.active {
+  background: radial-gradient(circle at 34% 28%, #ffe29a 0, #f0b94d 55%, #c88a2d 100%);
+  color: #4a2610; text-shadow: none;
+  box-shadow: inset 0 3px 0 rgba(255, 255, 255, 0.5), 0 0 12px rgba(255, 210, 100, 0.6), 0 4px 0 #5a3418;
+}
+/* Parchment cards on the blue chart. */
+.tank-upgrade-card, .achievement-card, .hat-card {
+  background: var(--noise), var(--paper);
+  color: var(--ink);
+  border: 2px solid #9a6b3a;
+  border-radius: 10px;
+  box-shadow: 0 3px 0 #5b3a1b, 0 7px 10px rgba(0, 0, 0, 0.35), inset 0 0 14px rgba(120, 80, 30, 0.22);
+}
+.achievement-card { border-left-width: 6px; }
+.tank-upgrade-name, .achievement-name, .hat-name {
+  font-family: var(--font-display); color: #b4510c; font-weight: 700;
+}
+.tank-upgrade-name { font-size: 17px; }
+.achievement-name { font-size: 16px; }
+.hat-name { font-size: 12.5px; }
+.tank-upgrade-level, .tank-upgrade-desc, .achievement-desc, .achievement-progress-text { color: var(--ink); font-family: var(--font-display); font-weight: 600; opacity: 0.9; }
+.tank-upgrade-pip, .achievement-progress { background: #3a2a18; box-shadow: inset 0 2px 3px rgba(0, 0, 0, 0.6); }
+.tank-upgrade-buy, .achievement-claim-btn, .hat-buy-btn {
+  border: 2px solid #1f4a34;
+  font-family: var(--font-display);
+}
+.tank-upgrade-buy:disabled, .achievement-claim-btn:disabled, .hat-buy-btn:disabled { background: #cdbd96; color: #7a6a48; border-color: #8e7847; opacity: 1; }
+.hat-card.previewing { border-color: #2a9ad8; }
+.hat-card.equipped { border-color: #e0392b; }
+#customization-preview-wrap { border: 3px solid #5b3a1b; box-shadow: inset 0 0 12px rgba(0, 40, 70, 0.4); }
+
+/* New Game chooser cards, Help rows: paper on the chart. */
+.start-mode-card, .help-row {
+  background: var(--noise), var(--paper);
+  color: var(--ink);
+  border: 2px solid #9a6b3a;
+  border-radius: 10px;
+  box-shadow: 0 4px 0 #5b3a1b, 0 9px 12px rgba(0, 0, 0, 0.4), inset 0 0 14px rgba(120, 80, 30, 0.22);
+}
+.start-mode-card:hover { border-color: #f0b94d; box-shadow: 0 4px 0 #5b3a1b, 0 0 18px rgba(255, 210, 100, 0.7), inset 0 0 14px rgba(120, 80, 30, 0.22); }
+.start-mode-card canvas { border: 3px solid #5b3a1b; border-radius: 8px; }
+.start-mode-card-title { font-family: var(--font-display); color: #b4510c; font-size: 24px; }
+.start-mode-card-desc, .help-text { font-family: var(--font-display); font-weight: 600; color: var(--ink); }
+.start-mode-card-desc b, .help-text b { color: #b4510c; }
+#start-mode-note { color: var(--cream); font: 600 14px var(--font-display); text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5); opacity: 0.95; }
+#start-help-list { scrollbar-color: #b88048 rgba(0, 0, 0, 0.25); }
+
+/* ---------- 7. paper pop-ups, stats panel, chat log ---------- */
+#notification-log, #stats-panel, #mound-menu, #recipe-menu, #building-info-menu, #fish-info-menu, #platform-filter-menu, #storage-chest-menu, #hud-info-modal, #hud-power-graph {
+  background: var(--noise), var(--paper);
+  color: var(--ink);
+  border: 4px solid #7a4a22;
+  border-radius: 9px;
+  box-shadow: 0 0 0 2px #2a1608, 0 10px 20px rgba(0, 0, 0, 0.5), inset 0 0 18px rgba(120, 80, 30, 0.28);
+  font-family: var(--font-display);
+}
+.notification-line { color: var(--ink); font: 600 15px/1.4 var(--font-display); border-bottom: 1px dashed rgba(122, 74, 34, 0.35); }
+.notification-line-time { color: #8a6a3a; font-family: var(--font-display); }
+#notification-log { scrollbar-color: #b88048 rgba(0, 0, 0, 0.15); }
+#notification-log::-webkit-scrollbar-track { background: rgba(0, 0, 0, 0.15); }
+#notification-log::-webkit-scrollbar-thumb { background: #b88048; }
+#hud-info-modal-title { font-family: var(--font-display); color: #b4510c; }
+
+/* ---------- 8. misc ---------- */
+#hud-hover-bubble { background: #f6ecd0; border-color: #4a2a12; color: var(--ink); }
+#save-toast { background: var(--plank); color: var(--cream); border: 3px solid #3a2010; border-radius: 8px; font-family: var(--font-display); text-shadow: 0 2px 0 #4a2610; }
+
+/* ---------- 9. second pass: legends, banners, spacing, paper tuning ---------- */
+/* Floating hint pills (cost / replace / snap / merge / tutorial lines) become
+   small wooden plaques. */
+#build-legend, #tutorial-skip-legend, #building-move-legend, #build-replace-legend, #build-snap-legend, #fish-merge-legend, #tutorial-text {
+  background: var(--plank);
+  color: var(--cream);
+  font: 600 15px/1.3 var(--font-display);
+  text-shadow: 0 2px 0 #3a1f0d;
+  border: 3px solid #3a2010;
+  border-radius: 8px;
+  padding: 8px 18px;
+  box-shadow: inset 0 2px 0 rgba(255, 232, 190, 0.45), inset 0 -3px 0 rgba(60, 30, 10, 0.4), 0 4px 0 #5a3418, 0 8px 12px rgba(0, 0, 0, 0.45);
+}
+#tutorial-text { font-size: 18px; }
+#build-replace-legend { background: var(--noise), linear-gradient(180deg, #5fa8d6 0%, #3a78a8 100%); }
+#build-snap-legend { background: var(--noise), linear-gradient(180deg, #6fc48a 0%, #3f8f5d 100%); }
+#alien-countdown {
+  background: var(--noise), var(--grain), linear-gradient(180deg, #d9533f 0%, #a8301f 100%);
+  color: #fff1d0;
+  font: 700 18px var(--font-display);
+  text-shadow: 0 2px 0 #4a0f0a;
+  border: 3px solid #3a2010;
+  border-radius: 8px;
+  box-shadow: inset 0 2px 0 rgba(255, 200, 180, 0.4), 0 4px 0 #5a1a10, 0 8px 12px rgba(0, 0, 0, 0.5);
+}
+#boss-victory-modal {
+  background: var(--map);
+  color: var(--cream);
+  border: 30px solid transparent;
+  border-image: url(nautical/frame-wood.svg) 36 / 30px round;
+  border-radius: 0;
+  filter: drop-shadow(0 14px 22px rgba(0, 0, 0, 0.55));
+}
+#boss-victory-modal h2 { font: 700 30px var(--font-display); color: var(--orange); -webkit-text-stroke: 6px var(--navy); paint-order: stroke fill; }
+.boss-victory-stat-row, .boss-victory-stat-row b { color: var(--cream); font-family: var(--font-display); font-weight: 600; }
+
+/* Shop: room under each row for the hanging tags, and a title that sits up
+   over the frame like the reference. */
+#shop-species-grid, #tool-bar { gap: 50px 20px; margin: 18px 0 50px; }
+#shop-species-grid { margin-bottom: 38px; }
+#shop-header { margin: -92px 0 0 -18px; }
+#shop-header-row { margin-bottom: 14px; }
+#shop-header-row .lab-close-x-btn { margin-top: -96px; }
+#tank-header-row .lab-close-x-btn, #lab-header-row .lab-close-x-btn { margin-top: -62px; }
+
+/* Lighter, warmer parchment grain (the dark speckle read as dirty gray). */
+.tank-upgrade-card, .achievement-card, .hat-card, .start-mode-card, .help-row,
+#notification-log, #stats-panel, #mound-menu, #recipe-menu, #building-info-menu, #fish-info-menu, #platform-filter-menu, #storage-chest-menu, #hud-info-modal, #hud-power-graph {
+  background: url(nautical/noise-light.svg), var(--paper);
+}
+#shop-preview::before {
+  background:
+    url(nautical/noise-light.svg),
+    radial-gradient(ellipse at 22% 12%, rgba(255, 255, 255, 0.8), transparent 55%),
+    radial-gradient(ellipse at 80% 88%, rgba(150, 205, 195, 0.3), transparent 60%),
+    linear-gradient(170deg, #eef9f2 0%, #d8ece4 55%, #c3ddd8 100%);
+}
+.shop-preview-box { background: rgba(110, 80, 40, 0.07); }
+/* Readable on parchment (the old light red/green were made for a pink card). */
+.tank-upgrade-desc .stat-current { color: #b3261e; }
+.tank-upgrade-desc .stat-next { color: #1c7a3a; }
+#shop-panel { width: 900px; }
+#shop-preview { width: 252px; }
+#shop-species-grid, #tool-bar { gap: 50px 14px; }
+
+/* ---------- 10. pop-up titles and leftovers ---------- */
+#stats-panel-title, #production-info-title, #mound-title, #recipe-menu-title, #building-info-name, #fish-info-name, #platform-filter-title, #storage-chest-title {
+  font-family: var(--font-display); font-weight: 700; color: #b4510c;
+}
+#production-info { background: url(nautical/noise-light.svg), var(--paper); border: 4px solid #7a4a22; border-radius: 9px; color: var(--ink); box-shadow: 0 0 0 2px #2a1608, 0 10px 20px rgba(0, 0, 0, 0.5), inset 0 0 18px rgba(120, 80, 30, 0.28); font-family: var(--font-display); }
+#storage-chest-mode-label .chest-mode-active { color: #b4510c; }
+#lab-purchase-name { font-family: var(--font-display); color: var(--orange); -webkit-text-stroke: 4px var(--navy); paint-order: stroke fill; font-size: 22px; }
+#lab-purchase-desc, #lab-purchase-cost, #lab-purchase-stats, #lab-purchase-stats .building-stat { color: var(--cream); font-family: var(--font-display); }
+#lab-purchase-stats .building-stat b { color: #ffe9a8; }
+#scroll-hint-text { color: #fff4d6; font-family: var(--font-display); font-weight: 600; text-shadow: 0 2px 0 #2a150a, 0 0 7px rgba(0, 0, 0, 0.6); }
+/* Lab purchase window: no dim behind it (same no-dimming rule as every other
+   menu), and its cost line is the same dark-wood pill as the other readouts. */
+#lab-purchase-overlay { background: transparent; }
+#lab-purchase-cost {
+  background: var(--dark-wood);
+  color: #ffe9a8;
+  border: 2px solid #1d0f06;
+  font: 700 17px var(--font-display);
+  text-shadow: 0 2px 0 rgba(0, 0, 0, 0.7);
+  box-shadow: inset 0 4px 8px rgba(0, 0, 0, 0.7), 0 2px 0 #9a6630;
+}
+.mound-throw-btn { font-family: var(--font-display); border: 2px solid #1f4a34; }
