@@ -435,11 +435,13 @@ function sfxOnCooldown(name, cooldownMs = SFX_COOLDOWN_MS) {
 }
 
 // ---- SFX ----
-// A cheerful two-note ascending blip — buying a fish.
+// Buying a fish — per direct request, the same soft rising sine whoosh as an
+// item going into a building (playIntake), but a little higher, longer and
+// louder with a small chime on top so it stands out from that background sound.
 export function playPurchase() {
   if (sfxOnCooldown('playPurchase')) return;
-  playTone(523.25, 0.08, { type: 'square', gain: 0.16 }); // C5
-  playTone(783.99, 0.1, { type: 'square', gain: 0.16, when: 0.07 }); // G5
+  playSweep(380, 900, 0.11, { type: 'sine', gain: 0.1 });
+  playTone(1174.66, 0.12, { type: 'sine', gain: 0.07, attack: 0.01, release: 0.09, when: 0.08 }); // D6
 }
 
 // A tiny soft "plink" — dropping a food pellet.
@@ -524,10 +526,12 @@ export function playCoinBank() {
 // blip) but climbs up a fourth instead of dropping a fifth — the same
 // "rising pitch reads as a good outcome" language playPurchase/playUpgrade
 // already use elsewhere in this file.
+// Per direct request, softened and quieter: triangle waves with a gentle
+// attack/release instead of harsh squares, at roughly half the old volume.
 export function playBuildPlace() {
   if (sfxOnCooldown('playBuildPlace')) return;
-  playTone(196, 0.08, { type: 'square', gain: 0.13 }); // G3
-  playTone(261.63, 0.12, { type: 'square', gain: 0.15, when: 0.06 }); // C4
+  playTone(196, 0.09, { type: 'triangle', gain: 0.06, attack: 0.012, release: 0.06 }); // G3
+  playTone(261.63, 0.13, { type: 'triangle', gain: 0.07, attack: 0.012, release: 0.09, when: 0.06 }); // C4
 }
 
 // The building drop-in animation's landing sound (audio/Drop.mp3), per direct
@@ -536,6 +540,7 @@ export function playBuildPlace() {
 // or snap line) can each fire it without re-fetching; a slightly longer cooldown
 // than the default keeps a long staggered line from becoming a roar.
 const DROP_SOUND_COOLDOWN_MS = 90;
+const DROP_SOUND_GAIN = 1.5; // per direct request, 50% louder than the raw file
 let dropBuffer = null;
 function loadDropSound() {
   fetch('audio/Drop.mp3')
@@ -550,7 +555,9 @@ export function playBuildDrop() {
   if (sfxOnCooldown('playBuildDrop', DROP_SOUND_COOLDOWN_MS)) return;
   const src = audioCtx.createBufferSource();
   src.buffer = dropBuffer;
-  src.connect(sfxGain);
+  const gain = audioCtx.createGain();
+  gain.gain.value = DROP_SOUND_GAIN;
+  src.connect(gain).connect(sfxGain);
   src.start();
 }
 
