@@ -156,7 +156,7 @@ import { isGuidedTutorialsEnabled, noteTutorialFlowStarted, noteTutorialFlowEnde
 import { loadLevel, LEVELS } from './Levels.js';
 import { updateStoryTriggers, updateAutosave } from './Systems.js';
 import { updateAmbience, renderAmbienceBehindLab, renderAmbienceFrontLab, spawnCursorBubbles, renderWaterSurface, spawnSeaTurtleBubble, renderBackgroundParallaxDecor, renderShadowFish, renderDecorMask } from './Ambience.js';
-import { resumeAudio, startGameMusic, playAlienHit, setBattleMusicActive, triggerBossMusic, playBuildPlace, playDemolish } from './Sound.js';
+import { resumeAudio, startGameMusic, startMenuMusic, playAlienHit, setBattleMusicActive, triggerBossMusic, playBuildPlace, playDemolish } from './Sound.js';
 import {
   updateEntities,
   trySpawnFood,
@@ -3819,6 +3819,7 @@ async function runLoadingSequence() {
     preloadAudioFile('audio/Game.mp3'),
     preloadAudioFile('audio/Battle.mp3'),
     preloadAudioFile('audio/Boss.mp3'),
+    preloadAudioFile('audio/Fin Sanity.mp3'),
     document.fonts ? document.fonts.ready : Promise.resolve(),
     loadTitleFonts(), // the title logo is baked into sprites once, so its font has to be ready first
   ];
@@ -3837,6 +3838,7 @@ async function runLoadingSequence() {
   initTitleScreen();
   document.getElementById('start-overlay').classList.remove('hidden');
   showTitle(performance.now());
+  startMenuMusic(); // per direct request — Fin Sanity once, then the low-passed Game song, for as long as the main menu is up
 }
 runLoadingSequence();
 

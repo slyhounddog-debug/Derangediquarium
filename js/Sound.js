@@ -269,6 +269,7 @@ export function resumeAudio() {
   const audioCtx = ensureContext();
   if (!audioCtx) return;
   if (audioCtx.state === 'suspended') audioCtx.resume();
+  tryStartMenuMusic();
 }
 
 // Called specifically when the player presses Start or Continue on the
@@ -282,11 +283,68 @@ export function resumeAudio() {
 export function startGameMusic() {
   const audioCtx = ensureContext();
   if (!audioCtx) return;
+  stopMenuMusic();
   if (audioCtx.state === 'suspended') audioCtx.resume();
   if (!musicStarted) {
     musicStarted = true;
     startMusic();
   }
+}
+
+// ---- Main-menu music ----
+// Per direct request: "Fin Sanity" plays once the moment the intro splash
+// starts, then Game.mp3 follows with a low-pass filter on it. This is a
+// separate <audio> element for Game.mp3 from the in-game one (gameMusicEl), so
+// stopMenuMusic can silence it for good when a game starts without touching
+// the in-game track, which then starts fresh from 0 — the two never overlap.
+// Browsers keep an AudioContext suspended until a real user gesture, so if the
+// splash opens before the player has clicked/pressed anything, the stinger
+// waits for resumeAudio's first-gesture hook (tryStartMenuMusic).
+const MENU_MUSIC_LOWPASS_HZ = 900;
+const MENU_MUSIC_STOP_FADE_S = 0.2;
+let menuMusicWanted = false;
+let menuMusicStarted = false;
+let menuStingerEl = null;
+let menuLoopEl = null;
+let menuLoopGain = null;
+
+export function startMenuMusic() {
+  menuMusicWanted = true;
+  if (!ensureContext()) return;
+  tryStartMenuMusic();
+}
+
+function tryStartMenuMusic() {
+  if (!menuMusicWanted || menuMusicStarted || !ctx) return;
+  const go = () => {
+    if (!menuMusicWanted || menuMusicStarted || ctx.state !== 'running') return;
+    menuMusicStarted = true;
+    menuStingerEl = new Audio('audio/Fin Sanity.mp3');
+    ctx.createMediaElementSource(menuStingerEl).connect(musicGain);
+    menuLoopEl = new Audio('audio/Game.mp3');
+    menuLoopEl.loop = true;
+    menuLoopGain = ctx.createGain();
+    const lowpass = ctx.createBiquadFilter();
+    lowpass.type = 'lowpass';
+    lowpass.frequency.value = MENU_MUSIC_LOWPASS_HZ;
+    ctx.createMediaElementSource(menuLoopEl).connect(menuLoopGain).connect(lowpass).connect(musicGain);
+    menuStingerEl.addEventListener('ended', () => {
+      if (menuMusicWanted) menuLoopEl.play().catch(() => {});
+    }, { once: true });
+    menuStingerEl.play().catch(() => {});
+  };
+  if (ctx.state === 'running') go();
+  else ctx.resume().then(go).catch(() => {});
+}
+
+function stopMenuMusic() {
+  menuMusicWanted = false;
+  if (!menuMusicStarted) return;
+  menuStingerEl.pause();
+  const loop = menuLoopEl;
+  menuLoopGain.gain.setValueAtTime(menuLoopGain.gain.value, ctx.currentTime);
+  menuLoopGain.gain.linearRampToValueAtTime(0, ctx.currentTime + MENU_MUSIC_STOP_FADE_S);
+  setTimeout(() => loop.pause(), MENU_MUSIC_STOP_FADE_S * 1000);
 }
 
 // One oscillator + a short attack/release gain envelope, the basic unit

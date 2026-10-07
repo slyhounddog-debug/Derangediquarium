@@ -2384,8 +2384,8 @@ function speciesStatsHtml(state, speciesId) {
 // An inset fill meter. `pct` is clamped to 10-100 so even the lowest value in a
 // range still shows a sliver of fill, per direct request.
 const STAT_BAR_MIN_PCT = 10;
-function statBarHtml(kind, pct) {
-  const width = Math.max(STAT_BAR_MIN_PCT, Math.min(100, Math.round(pct)));
+function statBarHtml(kind, pct, floorPct = STAT_BAR_MIN_PCT) {
+  const width = Math.max(floorPct, Math.min(100, Math.round(pct)));
   return `<span class="stat-bar stat-bar-${kind}"><i style="width:${width}%"></i></span>`;
 }
 // Places `value` within [min, max]; a lone value (min === max) reads as full.
@@ -4659,7 +4659,7 @@ function buildingStatLine(label, value, bar) {
 
 function buildingPowerLine(buildingId, placed, label, mw, unit, noPowerIcon = '⚡') {
   if (mw > 0) return buildingStatLine(`⚡ ${label}`, `${mw} mw/${unit}`, buildingPowerBar(buildingId, placed, mw));
-  return `<div class="building-stat">${noPowerIcon} <b>No electricity needed</b>${buildingPowerBar(buildingId, placed, 0)}</div>`;
+  return `<div class="building-stat">${noPowerIcon} <b>No electricity needed</b>${statBarHtml('power', 0, 0)}</div>`; // nothing drawn, so nothing filled
 }
 
 // One row per ingredient with two side-by-side meters: processing time (the

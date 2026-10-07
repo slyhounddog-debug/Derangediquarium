@@ -83,16 +83,16 @@
 
 /* Top-right currency bar: dark, "depressed" wood with riveted corners. */
 /* Per direct request: a lighter rim in the toolbar's plank wood around the
-   dark, depressed middle. Layers 1-7 (rivets + dark wood) sit inside the rim
-   (padding-box); layers 8-11 (a top highlight + the plank) fill the border area. */
+   dark, depressed middle. Layers 1-8 (rivets + dark wood) sit inside the rim
+   (padding-box); layers 9-13 (a top highlight + the plank) fill the border area. */
 #hud {
   background:
     var(--rivets),
     var(--noise), var(--grain), linear-gradient(180deg, #4a2c15 0%, #2f1a0b 100%),
     linear-gradient(180deg, rgba(255, 238, 200, 0.6) 0 2px, transparent 2px),
     var(--plank);
-  background-origin: padding-box, padding-box, padding-box, padding-box, padding-box, padding-box, padding-box, border-box, border-box, border-box, border-box;
-  background-clip: padding-box, padding-box, padding-box, padding-box, padding-box, padding-box, padding-box, border-box, border-box, border-box, border-box;
+  background-origin: padding-box, padding-box, padding-box, padding-box, padding-box, padding-box, padding-box, padding-box, border-box, border-box, border-box, border-box, border-box;
+  background-clip: padding-box, padding-box, padding-box, padding-box, padding-box, padding-box, padding-box, padding-box, border-box, border-box, border-box, border-box, border-box;
   color: var(--cream);
   font: 600 16px/1 var(--font-display);
   text-shadow: 0 2px 0 rgba(0, 0, 0, 0.7);
@@ -264,10 +264,8 @@
     url(nautical/shell-clam.svg) no-repeat left 23px top 31% / 30px,
     url(nautical/shell-scallop.svg) no-repeat right 24px top 23% / 24px,
     url(nautical/shell-spiral.svg) no-repeat left 276px top 22px / 24px,
-    url(nautical/weed-wrap.svg) no-repeat left -14px bottom 110px / 88px 125px,
+    url(nautical/weed-wrap.svg) no-repeat left 21px bottom 110px / 88px 125px,
     url(nautical/weed-hang.svg) no-repeat left 41% top 23px / 46px 70px,
-    url(nautical/weed-corner.svg) no-repeat right -8px bottom -10px / 62px 77px,
-    url(nautical/weed-tuft.svg) no-repeat left 36% bottom 1px / 56px 47px,
     url(nautical/weed-r1.svg) no-repeat right 55% top 12px / 46px 53px;
 }
 #tank-panel::before {
