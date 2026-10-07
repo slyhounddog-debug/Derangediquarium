@@ -261,6 +261,7 @@ import {
   openFishInfoMenu,
   closeFishInfoMenu,
   updateProductionInfoModal,
+  updateGroupMoveInfoModal,
   closeProductionInfoModal,
   copyPlatformFilter,
   openStorageChestModal,
@@ -1908,6 +1909,7 @@ input.mouseUpHandlers.push((sx, sy) => {
   const start = groupMoveDragStart;
   groupMoveDragStart = null;
   groupMoveSwallowClick = true;
+  closeProductionInfoModal();
   const world = screenToWorld(sx, sy, state.camera);
   const end = worldToTile(world.x, world.y);
   const cells = pickUpBuildingsInBox(state, start.col, start.row, end.col, end.row);
@@ -5737,7 +5739,7 @@ function render() {
 
   // Group move: the selection box while dragging, then the carried group as a
   // multi-cell ghost (green = fits, blue = replaces with Shift, red = blocked).
-  if (groupMoveDragStart && !input.mouseDown) groupMoveDragStart = null; // a missed release
+  if (groupMoveDragStart && !input.mouseDown) { groupMoveDragStart = null; closeProductionInfoModal(); } // a missed release
   if (groupMoveDragStart) {
     const curWorld = screenToWorld(input.mouse.x, input.mouse.y, state.camera);
     const cur = worldToTile(curWorld.x, curWorld.y);
@@ -5751,6 +5753,16 @@ function render() {
     ctx.fillStyle = 'rgba(255, 184, 77, 0.12)';
     ctx.fillRect(a.x, a.y, b.x - a.x, b.y - a.y);
     ctx.restore();
+    // The info card beside the box: how many of each building type it holds.
+    const counts = new Map();
+    for (let r = Math.min(groupMoveDragStart.row, cur.row); r <= Math.max(groupMoveDragStart.row, cur.row); r++) {
+      for (let c = Math.min(groupMoveDragStart.col, cur.col); c <= Math.max(groupMoveDragStart.col, cur.col); c++) {
+        const type = getTile(state.level.grid, c, r);
+        if (type && type !== TILE_EMPTY && BUILDING_TYPES[type]) counts.set(type, (counts.get(type) || 0) + 1);
+      }
+    }
+    const rows = [...counts].map(([type, count]) => ({ name: BUILDING_TYPES[type].name, count })).sort((x, y) => y.count - x.count || x.name.localeCompare(y.name));
+    updateGroupMoveInfoModal(rows, { left: a.x, top: a.y, right: b.x, bottom: b.y });
   }
   if (groupMove != null && input.mouse.inside && !state.ui.paused) {
     const hoverWorld = screenToWorld(input.mouse.x, input.mouse.y, state.camera);

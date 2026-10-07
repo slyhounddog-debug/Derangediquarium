@@ -2326,3 +2326,7 @@ Seven per-request changes landed together.
 ## Sound Tuning: Softer Build Blip, Louder Drop, Fish Purchase Chime
 
 Per direct request: `playBuildPlace` is now two soft triangle-wave notes at roughly half the old gain (no more harsh squares); `Drop.mp3` plays through a 1.5x gain node (`DROP_SOUND_GAIN`, 50% louder); `playPurchase` (buying a fish) is the same rising sine sweep as `playIntake` (an item entering a building) but higher, longer and louder with a small D6 chime on top so it stands out.
+
+## Group Move Info Card
+
+Per direct request, while Shift-dragging the group-move box the same `#production-info` card the Ctrl-drag shows appears beside the box (right side, vertically centered, kept on screen), listing a live count of each building type inside (`UI.js`'s `updateGroupMoveInfoModal`, counted by main.js per frame from the grid) and closing on release or a missed release. The card has two modes (`setProductionInfoMode`): "Selection" with the uptime footnote for production info, "Buildings" with no footnote for the group move.

@@ -397,6 +397,7 @@ export function initUI(state) {
     productionInfo: document.getElementById('production-info'),
     productionInfoTitle: document.getElementById('production-info-title'),
     productionInfoBody: document.getElementById('production-info-body'),
+    productionInfoNote: document.getElementById('production-info-note'),
     tabReminder: document.getElementById('tab-reminder'),
     tabReminderCarets: document.getElementById('tab-reminder-carets'),
     bossHealthBarWrap: document.getElementById('boss-health-bar-wrap'),
@@ -4038,6 +4039,7 @@ let productionInfoHtml = null;
 let productionInfoW = 0;
 let productionInfoH = 0;
 let productionInfoPos = '';
+let productionInfoMode = 'production'; // the same card also serves the group-move box, see updateGroupMoveInfoModal
 
 function productionRowHtml(itemType, text, extra = '') {
   const def = PLATFORM_FILTER_ITEM_TYPES.find((t) => t.id === itemType);
@@ -4077,8 +4079,18 @@ function buildProductionInfoHtml(info) {
 }
 
 // worldRect: { x0, y0, x1, y1 } in world px; screenRect: { left, top, right, bottom } in screen px.
+// Switches the shared card between its two contents (title + footnote).
+function setProductionInfoMode(mode) {
+  if (mode === productionInfoMode) return;
+  productionInfoMode = mode;
+  els.productionInfoTitle.textContent = mode === 'production' ? 'Selection' : 'Buildings';
+  els.productionInfoNote.style.display = mode === 'production' ? '' : 'none';
+  productionInfoHtml = null;
+}
+
 export function updateProductionInfoModal(state, worldRect, screenRect, nowMs) {
   const el = els.productionInfo;
+  setProductionInfoMode('production');
   if (el.classList.contains('hidden')) {
     el.classList.remove('hidden');
     productionInfoNextAtMs = 0; // first frame: build immediately
@@ -4094,6 +4106,33 @@ export function updateProductionInfoModal(state, worldRect, screenRect, nowMs) {
       productionInfoH = el.offsetHeight;
     }
   }
+  positionProductionInfo(el, screenRect);
+}
+
+// Per direct request, the Shift-drag group-move box shows this same card
+// listing how many of each building type are inside, live as the box changes
+// and gone on release — `rows` is [{ name, count }] already counted by main.js.
+export function updateGroupMoveInfoModal(rows, screenRect) {
+  const el = els.productionInfo;
+  setProductionInfoMode('groupMove');
+  const total = rows.reduce((sum, r) => sum + r.count, 0);
+  const html = rows.length
+    ? `<div class="prod-row prod-row-sub"><span>${total} building${total === 1 ? '' : 's'}</span></div>` + rows.map((r) => `<div class="prod-row"><span>${r.name}</span><b>×${r.count}</b></div>`).join('')
+    : '<div class="prod-row prod-row-sub"><span>No buildings here.</span></div>';
+  if (el.classList.contains('hidden')) {
+    el.classList.remove('hidden');
+    productionInfoHtml = null;
+  }
+  if (html !== productionInfoHtml) {
+    productionInfoHtml = html;
+    els.productionInfoBody.innerHTML = html;
+    productionInfoW = el.offsetWidth;
+    productionInfoH = el.offsetHeight;
+  }
+  positionProductionInfo(el, screenRect);
+}
+
+function positionProductionInfo(el, screenRect) {
   // Always on the box's right side (per direct request — it reads best there, and
   // never hopping between above/below/beside keeps it from jumping around),
   // vertically centered on the box and kept on screen — if the box reaches the
