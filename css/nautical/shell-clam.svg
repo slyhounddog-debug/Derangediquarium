@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64"><defs><filter id="sh" x="-25%" y="-25%" width="150%" height="150%"><feDropShadow dx="1.6" dy="2.6" stdDeviation="1.7" flood-color="#1b0d04" flood-opacity=".6"/></filter><radialGradient id="g" cx=".5" cy=".9" r="1"><stop offset="0" stop-color="#b4c1c6"/><stop offset="1" stop-color="#e9eef0"/></radialGradient></defs>
+  <g filter="url(#sh)" transform="rotate(14 32 36)">
+    <path d="M8 46 C8 20 22 10 32 10 C42 10 56 20 56 46 C56 50 52 52 48 52 L16 52 C12 52 8 50 8 46 Z" fill="url(#g)" stroke="#59656b" stroke-width="2" stroke-linejoin="round"/>
+    <path d="M22.8,41.8 C23.6,33.4 40.4,33.4 41.2,41.8" fill="none" stroke="#7e8d94" stroke-width="1.4" opacity=".75"/><path d="M18.4,39.8 C19.6,27.4 44.4,27.4 45.6,39.8" fill="none" stroke="#7e8d94" stroke-width="1.4" opacity=".75"/><path d="M14.4,38 C16,22 48,22 49.6,38" fill="none" stroke="#7e8d94" stroke-width="1.4" opacity=".75"/>
+    <path d="M32 11 L32 50" stroke="#7e8d94" stroke-width="1.1" opacity=".5"/>
+    <path d="M24 12 L16 50 M40 12 L48 50" stroke="#7e8d94" stroke-width="1" opacity=".4"/>
+    <path d="M22 52 q10 -6 20 0" fill="#59656b" opacity=".7"/>
+  </g>
+</svg>

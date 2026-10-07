@@ -1748,10 +1748,16 @@ export const PLATFORM_FLAT_COST = 3;
 export const BUILDING_COST_GROWTH_RATE_TIER1 = 1.03; // base cost <= $100
 export const BUILDING_COST_GROWTH_RATE_TIER2 = 1.06; // base cost $101-200
 export const BUILDING_COST_GROWTH_RATE_TIER3 = 1.09; // base cost > $200
+// Per direct request, usage hints ("Click to filter...", "Press R...") are shown
+// as their own lines in the stats box instead of inside the description.
+const PLATFORM_STAT_NOTES = ['Click to filter items.', 'Press R to cycle platforms.'];
+const FAN_STAT_NOTES = ['Click to filter what gets blown.', "Press G to hide/show every fan's cone."];
+const CHEST_STAT_NOTES = ['Drag away from it to aim, then release to trickle items out.'];
 export const BUILDING_TYPES = {
   [TILE_PLATFORM]: {
     id: TILE_PLATFORM, name: 'Platform', icon: '🧱', cost: PLATFORM_FLAT_COST,
-    description: 'Solid floor. Items land and rest on top — cheap, optional item routing. Click to filter which items pass through. Press R to cycle platform shape.',
+    description: 'Items land and rest on top, good for item routing.',
+    statNotes: PLATFORM_STAT_NOTES,
     color: '#dba36f', unlockedByDefault: true, // available from level start, unchanged — no longer load-bearing for whether anything ELSE can be placed, though (see canPlaceTile's own comment)
   },
   // Same material/cost as plain Platform (see getBuildingCost's own
@@ -1760,23 +1766,27 @@ export const BUILDING_TYPES = {
   // sloped surface. Per direct request, unlocked from level start same as
   // the flat Platform.
   [TILE_PLATFORM_HALF_LEFT]: {
-    id: TILE_PLATFORM_HALF_LEFT, name: 'Half Platform - Left', icon: '◺', cost: PLATFORM_FLAT_COST,
-    description: 'A 45° ramp — deflects anything that lands on it down and to the left.',
+    id: TILE_PLATFORM_HALF_LEFT, name: 'Platform - Right', icon: '◺', cost: PLATFORM_FLAT_COST, // names of these two swapped per direct request (this wedge is solid on the right)
+    description: 'A 45° ramp that sends items down and to the left.',
+    statNotes: PLATFORM_STAT_NOTES,
     color: '#dba36f', unlockedByDefault: true,
   },
   [TILE_PLATFORM_HALF_RIGHT]: {
-    id: TILE_PLATFORM_HALF_RIGHT, name: 'Half Platform - Right', icon: '◹', cost: PLATFORM_FLAT_COST,
-    description: 'A 45° ramp — deflects anything that lands on it down and to the right.',
+    id: TILE_PLATFORM_HALF_RIGHT, name: 'Platform - Left', icon: '◹', cost: PLATFORM_FLAT_COST,
+    description: 'A 45° ramp that sends items down and to the right.',
+    statNotes: PLATFORM_STAT_NOTES,
     color: '#dba36f', unlockedByDefault: true,
   },
   [TILE_PLATFORM_HALF_TOPLEFT]: {
-    id: TILE_PLATFORM_HALF_TOPLEFT, name: 'Half Platform - Top Left', icon: '◸', cost: PLATFORM_FLAT_COST,
-    description: 'A 45° ramp, solid at the top — deflects anything that hits it down and to the right.',
+    id: TILE_PLATFORM_HALF_TOPLEFT, name: 'Platform - Top Left', icon: '◸', cost: PLATFORM_FLAT_COST,
+    description: 'A 45° ramp, solid at the top. Sends items down and to the right.',
+    statNotes: PLATFORM_STAT_NOTES,
     color: '#dba36f', unlockedByDefault: true,
   },
   [TILE_PLATFORM_HALF_TOPRIGHT]: {
-    id: TILE_PLATFORM_HALF_TOPRIGHT, name: 'Half Platform - Top Right', icon: '◿', cost: PLATFORM_FLAT_COST,
-    description: 'A 45° ramp, solid at the top — deflects anything that hits it down and to the left.',
+    id: TILE_PLATFORM_HALF_TOPRIGHT, name: 'Platform - Top Right', icon: '◿', cost: PLATFORM_FLAT_COST,
+    description: 'A 45° ramp, solid at the top. Sends items down and to the left.',
+    statNotes: PLATFORM_STAT_NOTES,
     color: '#dba36f', unlockedByDefault: true,
   },
   // Renamed back to plain "Collector" per direct request (an earlier pass
@@ -1787,12 +1797,12 @@ export const BUILDING_TYPES = {
   // Bio Collector) unchanged. Base cost unchanged at 40.
   [TILE_COLLECTOR]: {
     id: TILE_COLLECTOR, name: 'Collector', icon: '🧲', cost: 40,
-    description: 'Auto-banks coins and Science touching it. Draws 2-4mw while collecting.',
+    description: 'Auto-banks coins and Science that touch it.',
     color: '#8fe0b8', unlockedByDefault: false,
   },
   [TILE_COLLECTOR_ELECTRIC]: {
     id: TILE_COLLECTOR_ELECTRIC, name: 'Advanced Collector', icon: '🧲', cost: 60,
-    description: 'Faster than the base Collector. Costs less power on a coin than on Science.',
+    description: 'Banks faster than the base Collector.',
     color: '#5fb8ff', unlockedByDefault: false,
   },
   [TILE_COLLECTOR_ADVANCED]: {
@@ -1802,17 +1812,20 @@ export const BUILDING_TYPES = {
   },
   [TILE_FAN_T2]: {
     id: TILE_FAN_T2, name: 'Rudimentary Fan', icon: '🌀', cost: 15,
-    description: `Blows a cone of force wherever you aim it — you can filter what gets blown. Free, but short reach (${FAN_T2_MAX_RANGE}px) and weak — struggles to lift a coin. Press G to hide/show every fan's cone.`,
+    description: 'Aim a cone of air. Great for routing items.',
+    statNotes: FAN_STAT_NOTES,
     color: '#9fd8ff', unlockedByDefault: true, // per direct request — no longer gated behind the Mound's old paid "Tier 1.75" step, available from level start alongside Platform/Waste Turret
   },
   [TILE_FAN_T3]: {
     id: TILE_FAN_T3, name: 'Electric Fan', icon: '💨', cost: 45,
-    description: `Draws power for medium reach (${FAN_T3_MAX_RANGE}px) — enough to route most coins. Press G to hide/show every fan's cone.`,
+    description: 'Draws power for medium reach.',
+    statNotes: FAN_STAT_NOTES,
     color: '#5fb8ff', unlockedByDefault: false,
   },
   [TILE_FAN_T4]: {
     id: TILE_FAN_T4, name: 'Turbo Fan', icon: '🌪️', cost: 120,
-    description: `Longest reach (${FAN_T4_MAX_RANGE}px), gentle enough to suspend a coin mid-air. Draws power. Press G to hide/show every fan's cone.`,
+    description: 'Longest reach, but draws more power.',
+    statNotes: FAN_STAT_NOTES,
     color: '#2f7fd6', unlockedByDefault: false,
   },
   [TILE_TURRET_WASTE]: {
@@ -1821,17 +1834,17 @@ export const BUILDING_TYPES = {
     // biomass as well") — Biomass now doubles as premium ammo (see
     // BIOMASS_TURRET_DAMAGE_MULTIPLIER/BIOMASS_TURRET_SHOTS_PER_AMMO), for
     // any tile in TURRET_AMMO_TILES (this tier and Electric, below).
-    description: 'Auto-fires on the nearest alien with global range. Feeds itself from any Waste (or Biomass, for more damage per shot) touching it.',
+    description: 'Auto-fires on the nearest alien. Feeds on Waste or Biomass.',
     color: '#9c8a6b', unlockedByDefault: true, // free from the start, alongside Platform — the only defense before the Science Lab exists
   },
   [TILE_TURRET_ELECTRIC]: {
     id: TILE_TURRET_ELECTRIC, name: 'Electric Waste Turret', icon: '🔫', cost: 55,
-    description: 'Faster and harder-hitting than the Waste Turret with global range. Needs BOTH Waste (or Biomass) ammo and power to fire.',
+    description: 'Fires faster and harder. Needs both ammo and power.',
     color: '#5fb8ff', unlockedByDefault: false,
   },
   [TILE_TURRET_ADVANCED]: {
     id: TILE_TURRET_ADVANCED, name: 'Advanced Turret', icon: '🔫', cost: 130,
-    description: 'The strongest turret with global range — fastest, hardest-hitting.',
+    description: 'The strongest turret: fastest and hardest-hitting.',
     color: '#c9a8ff', unlockedByDefault: false,
   },
   // Renamed per direct request, same reasoning/shift as the Collector family
@@ -1848,12 +1861,12 @@ export const BUILDING_TYPES = {
   // direct request.
   [TILE_REFINERY]: {
     id: TILE_REFINERY, name: 'Solar Refinery', icon: '⚗️', cost: 30,
-    description: 'Refines Waste -> Food, or Bio-Sludge -> Biomass. One item at a time. Runs on sunlight — uses no electricity.',
+    description: 'Refines Waste into Food, or Bio-Sludge into Biomass.',
     color: '#b8a888', unlockedByDefault: false,
   },
   [TILE_REFINERY_ELECTRIC]: {
     id: TILE_REFINERY_ELECTRIC, name: 'Advanced Refinery', icon: '⚗️', cost: 140,
-    description: 'Processes Waste (and Bio-Sludge) faster than the Solar Refinery. Draws power while working.',
+    description: 'Refines faster than the Solar Refinery.',
     color: '#4fd6e0', unlockedByDefault: false,
   },
   [TILE_REFINERY_ADVANCED]: {
@@ -1863,12 +1876,14 @@ export const BUILDING_TYPES = {
   },
   [TILE_MANUFACTURER]: {
     id: TILE_MANUFACTURER, name: 'Manufacturer', icon: '🏭', cost: 125, // cut from 300 per direct request, to compensate for its own tier-2 (6%, base cost $101-200) compounding cost curve
-    description: 'Pick a recipe by clicking it once placed. Does nothing until a recipe is chosen.',
+    description: 'Combines items into new ones using a recipe.',
+    statNotes: ['Click to pick a recipe once placed.'],
     color: '#e690e0', unlockedByDefault: false,
   },
   [TILE_POWER_PLANT]: {
     id: TILE_POWER_PLANT, name: 'Power Plant', icon: '☢️', cost: 350,
-    description: 'Pick a fuel recipe by clicking it once placed: Food (20mw/15s), Biomass (40mw/20s), or Blue Science (100mw/30s). Does nothing until a recipe is chosen.',
+    description: 'Burns items to generate electricity.',
+    statNotes: ['Click to pick a fuel recipe once placed.'],
     color: '#6fff8a', unlockedByDefault: false,
   },
   // Granted by the Mound's $75 tease (see Mound.js's crackMound) rather than
@@ -1876,17 +1891,20 @@ export const BUILDING_TYPES = {
   // finally comes out of it.
   [TILE_STORAGE_CHEST]: {
     id: TILE_STORAGE_CHEST, name: 'Storage Chest', icon: '📦', cost: 20,
-    description: `Auto-locks onto the first item type that touches it, holding up to ${STORAGE_CHEST_CAPACITY[TILE_STORAGE_CHEST]}. Drag away from it to aim, then release to start trickling its contents back out.`,
+    description: 'Locks onto the first item type that touches it and stores it.',
+    statNotes: CHEST_STAT_NOTES,
     color: '#c9915a', unlockedByDefault: false,
   },
   [TILE_STORAGE_CHEST_T2]: {
     id: TILE_STORAGE_CHEST_T2, name: 'Storage Chest II', icon: '📦', cost: 60,
-    description: `Same as the Storage Chest, just bigger — holds up to ${STORAGE_CHEST_CAPACITY[TILE_STORAGE_CHEST_T2]}.`,
+    description: 'Same as the Storage Chest, just bigger.',
+    statNotes: CHEST_STAT_NOTES,
     color: '#8fa8c9', unlockedByDefault: false,
   },
   [TILE_STORAGE_CHEST_T3]: {
     id: TILE_STORAGE_CHEST_T3, name: 'Storage Chest III', icon: '📦', cost: 120,
-    description: `The largest Storage Chest — holds up to ${STORAGE_CHEST_CAPACITY[TILE_STORAGE_CHEST_T3]}.`,
+    description: 'The largest Storage Chest.',
+    statNotes: CHEST_STAT_NOTES,
     color: '#c9a8ff', unlockedByDefault: false,
   },
 };
@@ -2307,7 +2325,7 @@ export const MANUFACTURER_ITEM_PROCESS_MS = { waste: 5000, food: 8000, biomass: 
 // absorbed ingredient, same "only while working" rule every other Electric
 // building follows. The shop/Lab-preview's own stat shows this as a plain
 // min-max range (buildingStatsHtml); the recipe pop-up menu shows the full
-// per-item breakdown (UI.js's manufacturerPowerBreakdownHtml), since that's
+// per-item breakdown (UI.js's manufacturerRowsHtml), since that's
 // the one place a player is actually choosing which recipe (and therefore
 // which ingredients) to run.
 export const MANUFACTURER_ITEM_POWER_COST_MW = { waste: 10, food: 15, biomass: 25, science: 35 };

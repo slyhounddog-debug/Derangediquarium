@@ -62,7 +62,7 @@
 #notification-latest {
   background:
     radial-gradient(circle 3px at 9px 50%, #e9b07a 0 1px, #7a4624 2px, #2a150a 3px, transparent 3.5px),
-    url(nautical/seaweed-a.svg) no-repeat right -6px bottom -26px / 30px 56px,
+    url(nautical/weed-chat.svg) no-repeat right -4px bottom -22px / 28px 46px,
     repeating-linear-gradient(135deg, #e3cf98 0 3px, #a98c4f 3px 6px) top / 100% 4px no-repeat,
     repeating-linear-gradient(135deg, #e3cf98 0 3px, #a98c4f 3px 6px) bottom / 100% 4px no-repeat,
     var(--plank);
@@ -76,30 +76,42 @@
 }
 #notification-latest:hover { background:
     radial-gradient(circle 3px at 9px 50%, #e9b07a 0 1px, #7a4624 2px, #2a150a 3px, transparent 3.5px),
-    url(nautical/seaweed-a.svg) no-repeat right -6px bottom -26px / 30px 56px,
+    url(nautical/weed-chat.svg) no-repeat right -4px bottom -22px / 28px 46px,
     repeating-linear-gradient(135deg, #e3cf98 0 3px, #a98c4f 3px 6px) top / 100% 4px no-repeat,
     repeating-linear-gradient(135deg, #e3cf98 0 3px, #a98c4f 3px 6px) bottom / 100% 4px no-repeat,
     var(--plank); filter: brightness(1.08); transform: scale(1.02); }
 
 /* Top-right currency bar: dark, "depressed" wood with riveted corners. */
+/* Per direct request: a lighter rim in the toolbar's plank wood around the
+   dark, depressed middle. Layers 1-7 (rivets + dark wood) sit inside the rim
+   (padding-box); layers 8-11 (a top highlight + the plank) fill the border area. */
 #hud {
-  background: var(--rivets), var(--dark-wood);
+  background:
+    var(--rivets),
+    var(--noise), var(--grain), linear-gradient(180deg, #4a2c15 0%, #2f1a0b 100%),
+    linear-gradient(180deg, rgba(255, 238, 200, 0.6) 0 2px, transparent 2px),
+    var(--plank);
+  background-origin: padding-box, padding-box, padding-box, padding-box, padding-box, padding-box, padding-box, border-box, border-box, border-box, border-box;
+  background-clip: padding-box, padding-box, padding-box, padding-box, padding-box, padding-box, padding-box, border-box, border-box, border-box, border-box;
   color: var(--cream);
   font: 600 16px/1 var(--font-display);
   text-shadow: 0 2px 0 rgba(0, 0, 0, 0.7);
-  padding: 10px 30px;
-  border: 3px solid #1d0f06;
-  border-radius: 12px;
-  box-shadow: inset 0 5px 12px rgba(0, 0, 0, 0.7), inset 0 -2px 0 rgba(255, 220, 160, 0.14), 0 3px 0 #9a6630, 0 8px 14px rgba(0, 0, 0, 0.5);
+  padding: 7px 26px;
+  border: 7px solid transparent;
+  border-radius: 14px;
+  box-shadow: inset 0 6px 12px rgba(0, 0, 0, 0.75), inset 0 0 0 2px #24120a, inset 0 -2px 0 rgba(255, 220, 160, 0.14), 0 0 0 3px #3a2010, 0 6px 0 #5a3418, 0 12px 18px rgba(0, 0, 0, 0.5);
 }
 #hud-power { font: inherit; color: inherit; }
 
 /* Minimap: rough-cut timber frame. */
+/* Per direct request: the same raised, 3D look as the coin buttons under it —
+   a bevelled frame (lit top/left, shaded bottom/right) around a sunken map,
+   with a hard drop edge below it. */
 #minimap-canvas {
-  border: 8px solid;
-  border-image: linear-gradient(135deg, #d3995c, #94602f 45%, #6d4420 70%, #a87038) 1;
+  border: 10px solid transparent;
+  border-image: url(nautical/minimap-frame.svg) 12 / 10px stretch;
   border-radius: 0;
-  box-shadow: 0 0 0 2px #2a1608, inset 0 0 0 2px #2a1608, 0 8px 14px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 4px 0 #4a2a12, 0 9px 13px rgba(0, 0, 0, 0.5);
 }
 #minimap-controls { justify-content: space-between; padding: 2px 4px 0; }
 /* Carved wooden coins with the icon inset. */
@@ -210,7 +222,7 @@
   background: var(--map);
   background-clip: padding-box;
   border: 30px solid transparent;
-  border-image: url(nautical/frame-wood.svg) 36 / 30px round;
+  border-image: url(nautical/frame-wood.svg) 36 / 30px stretch;
   border-radius: 0;
   padding: 18px 22px;
   box-shadow: none;
@@ -221,40 +233,134 @@
 #start-mode-modal { width: 780px; }
 #start-help-modal { width: 640px; }
 #pause-menu { width: 340px; }
-/* Natural touches scattered over the frame: seaweed wrapping the corners, a
-   couple of starfish, barnacles on the edge. Click-through. */
+/* Sea life on the frames, per direct request. Two layers per window so it
+   reads as part of the wood rather than stickers on top of it:
+   - the window's own BACKGROUND holds the seaweed that grows in from behind
+     the wood (the frame paints over its base, so it truly emerges from under
+     the border into the map);
+   - the ::before (click-through, over the frame) holds everything lying on or
+     wrapping around the wood: starfish in different poses, shells, a small
+     anchor, and seaweed draped over / climbing around the edges. Every
+     drawing is a different asset, and each carries a soft contact shadow. */
 #shop-panel::before, #tank-panel::before, #lab-modal::before, #start-mode-modal::before, #start-help-modal::before, #pause-menu::before {
   content: '';
-  position: absolute; inset: -30px;
+  position: absolute; inset: -56px;
   pointer-events: none;
   z-index: 5;
 }
 #shop-panel::before {
   background:
-    url(nautical/starfish-orange.svg) no-repeat right 42px bottom 6px / 62px,
-    url(nautical/starfish-red.svg) no-repeat right -4px top 92px / 44px,
-    url(nautical/seaweed-a.svg) no-repeat left -12px top 46px / 60px 112px,
-    url(nautical/seaweed-b.svg) no-repeat left -10px bottom -4px / 64px 120px,
-    url(nautical/seaweed-b.svg) no-repeat right -8px bottom 4px / 52px 100px,
-    url(nautical/barnacles.svg) no-repeat left 20px bottom 6px / 54px,
-    url(nautical/barnacles.svg) no-repeat right 200px top 0 / 44px;
+    url(nautical/anchor.svg) no-repeat left 57% bottom 22px / 32px 36px,
+    url(nautical/starfish-2.svg) no-repeat left 144px bottom 12px / 58px,
+    url(nautical/starfish-1.svg) no-repeat right 10px top 46% / 54px,
+    url(nautical/starfish-4.svg) no-repeat right 300px bottom 14px / 46px,
+    url(nautical/starfish-3.svg) no-repeat left 66% top 14px / 34px,
+    url(nautical/starfish-5.svg) no-repeat left 15px bottom 231px / 38px,
+    url(nautical/starfish-3.svg) no-repeat left 30% bottom 26px / 24px,
+    url(nautical/starfish-4.svg) no-repeat right 19px bottom 31% / 28px,
+    url(nautical/starfish-5.svg) no-repeat left 356px top 20px / 26px,
+    url(nautical/shell-scallop.svg) no-repeat left 22% bottom 25px / 32px,
+    url(nautical/shell-spiral.svg) no-repeat right 21% bottom 24px / 30px,
+    url(nautical/shell-clam.svg) no-repeat left 23px top 31% / 30px,
+    url(nautical/shell-scallop.svg) no-repeat right 24px top 23% / 24px,
+    url(nautical/shell-spiral.svg) no-repeat left 276px top 22px / 24px,
+    url(nautical/weed-wrap.svg) no-repeat left -14px bottom 110px / 88px 125px,
+    url(nautical/weed-hang.svg) no-repeat left 41% top 23px / 46px 70px,
+    url(nautical/weed-corner.svg) no-repeat right -8px bottom -10px / 62px 77px,
+    url(nautical/weed-tuft.svg) no-repeat left 36% bottom 1px / 56px 47px,
+    url(nautical/weed-r1.svg) no-repeat right 55% top 12px / 46px 53px;
 }
 #tank-panel::before {
   background:
-    url(nautical/starfish-orange.svg) no-repeat right -6px bottom 70px / 44px,
-    url(nautical/seaweed-a.svg) no-repeat left -12px bottom -4px / 56px 108px,
-    url(nautical/barnacles.svg) no-repeat right 120px bottom 4px / 48px;
+    url(nautical/anchor.svg) no-repeat left 47% top 20px / 30px 34px,
+    url(nautical/starfish-3.svg) no-repeat right 13px bottom 156px / 50px,
+    url(nautical/starfish-5.svg) no-repeat left 112px bottom 13px / 52px,
+    url(nautical/starfish-2.svg) no-repeat right 122px bottom 17px / 30px,
+    url(nautical/starfish-4.svg) no-repeat left 17px top 44% / 34px,
+    url(nautical/starfish-1.svg) no-repeat left 61% bottom 27px / 24px,
+    url(nautical/starfish-5.svg) no-repeat right 20px top 38% / 26px,
+    url(nautical/shell-clam.svg) no-repeat left 31% bottom 25px / 32px,
+    url(nautical/shell-spiral.svg) no-repeat right 36% bottom 24px / 28px,
+    url(nautical/shell-scallop.svg) no-repeat left 14% top 23px / 26px,
+    url(nautical/weed-wrap-2.svg) no-repeat left -10px bottom 84px / 78px 117px,
+    url(nautical/weed-r2.svg) no-repeat right -4px bottom -4px / 56px 68px,
+    url(nautical/weed-r3.svg) no-repeat left 52% bottom 6px / 50px 53px;
 }
 #lab-modal::before {
   background:
-    url(nautical/starfish-red.svg) no-repeat left -4px bottom 96px / 44px,
-    url(nautical/seaweed-b.svg) no-repeat right -12px bottom -4px / 56px 108px,
-    url(nautical/barnacles.svg) no-repeat left 140px bottom 4px / 48px;
+    url(nautical/anchor.svg) no-repeat right 31% bottom 22px / 32px 36px,
+    url(nautical/starfish-4.svg) no-repeat left 14px bottom 146px / 46px,
+    url(nautical/starfish-1.svg) no-repeat right 146px bottom 14px / 52px,
+    url(nautical/starfish-2.svg) no-repeat right 16px top 52% / 34px,
+    url(nautical/starfish-3.svg) no-repeat left 38% top 17px / 28px,
+    url(nautical/starfish-5.svg) no-repeat left 156px bottom 27px / 24px,
+    url(nautical/shell-spiral.svg) no-repeat left 21% bottom 24px / 32px,
+    url(nautical/shell-clam.svg) no-repeat right 51px top 22px / 26px,
+    url(nautical/shell-scallop.svg) no-repeat left 24px top 33% / 28px,
+    url(nautical/weed-corner.svg) no-repeat right -8px bottom -8px / 64px 80px,
+    url(nautical/weed-r4.svg) no-repeat left 46% top 8px / 54px 58px,
+    url(nautical/weed-r5.svg) no-repeat left -4px top 0px / 56px 64px;
 }
 #start-mode-modal::before, #start-help-modal::before, #pause-menu::before {
   background:
-    url(nautical/starfish-orange.svg) no-repeat right -4px bottom 20px / 40px,
-    url(nautical/seaweed-a.svg) no-repeat left -10px bottom -4px / 50px 96px;
+    url(nautical/starfish-1.svg) no-repeat right 14px bottom 62px / 40px,
+    url(nautical/starfish-3.svg) no-repeat left 24% bottom 25px / 22px,
+    url(nautical/shell-scallop.svg) no-repeat right 22% bottom 24px / 26px,
+    url(nautical/shell-spiral.svg) no-repeat left 22px top 30% / 24px,
+    url(nautical/anchor.svg) no-repeat left 48% top 21px / 26px 29px,
+    url(nautical/weed-wrap.svg) no-repeat left -8px bottom 22px / 62px 88px;
+}
+#start-help-modal::before {
+  background:
+    url(nautical/starfish-4.svg) no-repeat right 14px bottom 62px / 40px,
+    url(nautical/starfish-2.svg) no-repeat left 24% bottom 25px / 24px,
+    url(nautical/shell-clam.svg) no-repeat right 22% bottom 24px / 26px,
+    url(nautical/shell-scallop.svg) no-repeat left 22px top 30% / 24px,
+    url(nautical/anchor.svg) no-repeat right 40% top 21px / 26px 29px,
+    url(nautical/weed-corner.svg) no-repeat left -8px bottom -8px / 58px 72px;
+}
+#pause-menu::before {
+  background:
+    url(nautical/starfish-5.svg) no-repeat right 14px bottom 62px / 36px,
+    url(nautical/starfish-1.svg) no-repeat left 22% bottom 26px / 20px,
+    url(nautical/shell-spiral.svg) no-repeat right 24% bottom 24px / 24px,
+    url(nautical/shell-clam.svg) no-repeat left 22px top 30% / 24px,
+    url(nautical/anchor.svg) no-repeat left 46% top 21px / 24px 27px,
+    url(nautical/weed-r1.svg) no-repeat left -4px bottom 22px / 54px 63px;
+}
+/* The seaweed rooted behind the wood: extra background layers under the map
+   (background-clip: padding-box already cuts them at the frame's inner edge). */
+#shop-panel {
+  background:
+    url(nautical/weed-in-a.svg) no-repeat left 15% bottom -8px / 72px 92px,
+    url(nautical/weed-in-b.svg) no-repeat right 19% bottom -6px / 54px 74px,
+    url(nautical/weed-in-c.svg) no-repeat left -6px top 62% / 80px 63px,
+    url(nautical/weed-in-d.svg) no-repeat left 58% bottom -6px / 62px 66px,
+    url(nautical/weed-in-e.svg) no-repeat right -6px top 70% / 62px 80px,
+    var(--map);
+  background-clip: padding-box;
+}
+#tank-panel {
+  background:
+    url(nautical/weed-in-f.svg) no-repeat left 8% bottom -8px / 60px 80px,
+    url(nautical/weed-in-g.svg) no-repeat right 14% bottom -6px / 78px 68px,
+    url(nautical/weed-in-h.svg) no-repeat right -6px top 24% / 72px 59px,
+    var(--map);
+  background-clip: padding-box;
+}
+#lab-modal {
+  background:
+    url(nautical/weed-in-b.svg) no-repeat left 12% bottom -6px / 52px 71px,
+    url(nautical/weed-in-e.svg) no-repeat right -6px top 58% / 60px 78px,
+    url(nautical/weed-in-a.svg) no-repeat right 30% bottom -8px / 64px 82px,
+    var(--map);
+  background-clip: padding-box;
+}
+#start-mode-modal, #start-help-modal, #pause-menu {
+  background:
+    url(nautical/weed-in-d.svg) no-repeat right 12% bottom -6px / 52px 56px,
+    var(--map);
+  background-clip: padding-box;
 }
 /* #shop-panel/#tank-panel are position:fixed / flex children already; the
    decoration needs them positioned (the others are positioned by style.css). */
@@ -435,6 +541,7 @@
   box-shadow: 0 0 12px rgba(120, 230, 255, 0.8), inset 0 0 12px rgba(255, 255, 255, 0.7);
 }
 #shop-preview-name {
+  text-align: center;
   font: 700 28px/1.05 var(--font-display);
   color: var(--orange);
   -webkit-text-stroke: 5px #5a2a08;
@@ -459,7 +566,19 @@
 .stat-bar-hunger > i { background: linear-gradient(90deg, #ff9a5a, #e0392b); }
 .stat-bar-money > i { background: linear-gradient(90deg, #ffe27a, #e9a61a); }
 .stat-bar-waste > i { background: linear-gradient(90deg, #b99a6a, #7a5a30); }
-.stat-bar-speed > i { background: linear-gradient(90deg, #7fe0ff, #2a9ad8); }
+.stat-bar-speed > i, .stat-bar-time > i { background: linear-gradient(90deg, #7fe0ff, #2a9ad8); }
+.stat-bar-power > i { background: linear-gradient(90deg, #fff59a, #f2c200); }
+.stat-bar-science > i { background: linear-gradient(90deg, #dcb4ff, #8a3fd8); }
+.stat-bar-range > i { background: linear-gradient(90deg, #a6f0c8, #2fae7a); }
+.stat-bar-rate > i { background: linear-gradient(90deg, #ffc48a, #e8731a); }
+.stat-bar-damage > i { background: linear-gradient(90deg, #ff9a86, #d6341f); }
+.stat-bar-capacity > i { background: linear-gradient(90deg, #e6c590, #a9763a); }
+/* A usage hint ("Click to filter items.") — its own plain line, no meter. */
+.building-stat.stat-note { font-size: 13px; font-weight: 600; font-style: italic; opacity: 0.85; }
+/* One ingredient/fuel per row: the icon, then two side-by-side meters. */
+.building-stat.stat-dual { display: grid; grid-template-columns: 24px 1fr 1fr; gap: 0 10px; align-items: end; }
+.stat-dual > span { min-width: 0; text-align: left; }
+.stat-dual .stat-dual-icon { align-self: center; text-align: center; }
 #shop-preview-hint {
   background: var(--noise), linear-gradient(180deg, #b39c6a 0%, #8e7847 100%);
   color: #2c1d0d;
@@ -579,7 +698,7 @@
   background: var(--map);
   color: var(--cream);
   border: 30px solid transparent;
-  border-image: url(nautical/frame-wood.svg) 36 / 30px round;
+  border-image: url(nautical/frame-wood.svg) 36 / 30px stretch;
   border-radius: 0;
   filter: drop-shadow(0 14px 22px rgba(0, 0, 0, 0.55));
 }
@@ -611,9 +730,13 @@
 /* Readable on parchment (the old light red/green were made for a pink card). */
 .tank-upgrade-desc .stat-current { color: #b3261e; }
 .tank-upgrade-desc .stat-next { color: #1c7a3a; }
-#shop-panel { width: 900px; }
-#shop-preview { width: 252px; }
+#shop-panel { width: 944px; }
+#shop-preview { width: 296px; }
 #shop-species-grid, #tool-bar { gap: 50px 14px; }
+/* Per direct request the building bubbles are slightly larger (the icon inside
+   keeps its 44px size) and only five fit in a row; the fish grid is unchanged. */
+#tool-bar { grid-template-columns: repeat(5, 76px); }
+.tool-btn-build { width: 76px; height: 76px; }
 
 /* ---------- 10. pop-up titles and leftovers ---------- */
 #stats-panel-title, #production-info-title, #mound-title, #recipe-menu-title, #building-info-name, #fish-info-name, #platform-filter-title, #storage-chest-title {

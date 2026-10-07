@@ -20,6 +20,7 @@ import {
   FISH_MOVEMENT_UPGRADE_SPEED_BONUS,
   BUILDING_FAMILIES,
   BUILDING_TYPES,
+  BUILDING_LIST,
   CLEANLINESS_MAX,
   CLEANLINESS_COLOR_CLEAN,
   CLEANLINESS_COLOR_DIRTY,
@@ -1160,7 +1161,7 @@ function refreshBuildingInfoMenu(state) {
   els.buildingInfoIcon.textContent = def.icon;
   els.buildingInfoName.textContent = def.name;
   els.buildingInfoDesc.textContent = def.description;
-  els.buildingInfoStats.innerHTML = buildingStatsHtml(type);
+  els.buildingInfoStats.innerHTML = buildingStatsHtml(type, state);
   refreshBuildingInfoLiveStats(state);
 }
 
@@ -1318,9 +1319,31 @@ function updateFishInfoMenuPosition(state) {
   }
 }
 
-function fishStatRowHtml(label, perMin, penaltyPerMin) {
+function fishStatRowHtml(label, perMin, penaltyPerMin, bar) {
   const penalty = penaltyPerMin > 0.05 ? ` <span class="fish-info-penalty">(-${penaltyPerMin.toFixed(1)})</span>` : '';
-  return `<div>${label}: <b>${perMin.toFixed(1)}</b>${penalty}</div>`;
+  return `<div>${label}: <b>${perMin.toFixed(1)}</b>${penalty}${bar}</div>`;
+}
+
+// Per direct request, the fish modal's meters compare this fish against the
+// fish currently in the tank (not the strongest possible fish): the lowest
+// and highest value of each stat among them. computeFishInfoModalStats is the
+// same per-fish source the modal's numbers already come from.
+function collectFishModalRanges(state) {
+  const ranges = {};
+  for (const e of state.level.entities) {
+    if (e.type !== 'fish' || e.dying) continue;
+    const stats = computeFishInfoModalStats(state, e);
+    // The frozen-snapshot figure only belongs to the open fish; every other generator reports its own last output.
+    if (stats.generatedMwLastSec != null && e.id !== state.ui.fishInfoModalFishId) stats.generatedMwLastSec = e.lastGeneratedMw || 0;
+    for (const key in stats) {
+      const v = stats[key];
+      if (v == null || key === 'goldPenaltyPerMin') continue;
+      const r = ranges[key] || (ranges[key] = { min: v, max: v });
+      r.min = Math.min(r.min, v);
+      r.max = Math.max(r.max, v);
+    }
+  }
+  return ranges;
 }
 
 // Rebuilds the whole pop-up every frame it's open (unlike the building
@@ -1349,13 +1372,15 @@ export function refreshFishInfoMenu(state) {
   drawFish(iconCtx, iconSize / 2, iconSize / 2, fish.speciesId, def.growthStages.length - 1, 1, 0, { x: 1, y: 0 }, fish.starTier || 1, 0, 0, 'none', state.level.elapsed, fish.growthOrbitPhase || 0);
 
   const stats = computeFishInfoModalStats(state, fish);
+  const ranges = collectFishModalRanges(state);
+  const bar = (kind, key) => statBarForRange(kind, stats[key], ranges[key].min, ranges[key].max);
   const rows = [];
-  if (stats.goldPerMin != null) rows.push(fishStatRowHtml('Gold/min', stats.goldPerMin, stats.goldPenaltyPerMin));
-  if (stats.wastePerMin != null) rows.push(`<div>Waste/min: <b>${stats.wastePerMin.toFixed(1)}</b></div>`);
-  if (stats.wasteEatenPerMin != null) rows.push(`<div>Waste eaten/min: <b>${stats.wasteEatenPerMin.toFixed(1)}</b></div>`);
-  if (stats.sciencePerMin != null) rows.push(`<div>Science/min: <b>${stats.sciencePerMin.toFixed(1)}</b></div>`);
-  if (stats.foodPerMin != null) rows.push(`<div>Food/min: <b>${stats.foodPerMin.toFixed(1)}</b></div>`);
-  if (stats.generatedMwLastSec != null) rows.push(`<div>⚡ Electricity generated: <b>${stats.generatedMwLastSec}mw</b></div>`);
+  if (stats.goldPerMin != null) rows.push(fishStatRowHtml('Gold/min', stats.goldPerMin, stats.goldPenaltyPerMin, bar('money', 'goldPerMin')));
+  if (stats.wastePerMin != null) rows.push(`<div>Waste/min: <b>${stats.wastePerMin.toFixed(1)}</b>${bar('waste', 'wastePerMin')}</div>`);
+  if (stats.wasteEatenPerMin != null) rows.push(`<div>Waste eaten/min: <b>${stats.wasteEatenPerMin.toFixed(1)}</b>${bar('waste', 'wasteEatenPerMin')}</div>`);
+  if (stats.sciencePerMin != null) rows.push(`<div>Science/min: <b>${stats.sciencePerMin.toFixed(1)}</b>${bar('science', 'sciencePerMin')}</div>`);
+  if (stats.foodPerMin != null) rows.push(`<div>Food/min: <b>${stats.foodPerMin.toFixed(1)}</b>${bar('hunger', 'foodPerMin')}</div>`);
+  if (stats.generatedMwLastSec != null) rows.push(`<div>⚡ Electricity generated: <b>${stats.generatedMwLastSec}mw</b>${bar('power', 'generatedMwLastSec')}</div>`);
   els.fishInfoStats.innerHTML = rows.join('');
 
   els.fishInfoFilter.classList.toggle('hidden', fish.speciesId !== 'buffer_fish'); // the Magnet Fish's own filter lives in this modal; its grid is built on open/mutation only
@@ -1743,20 +1768,7 @@ function refreshRecipeMenu(state) {
   // here (and only here — the shop/Lab preview keeps the plain range) per a
   // later direct request, since this is the one place ingredient choice
   // actually matters.
-  els.recipeMenuStats.innerHTML = isManufacturer ? manufacturerRecipeMenuStatsHtml() : buildingStatsHtml(data.type);
-}
-
-// Per direct request: "Add this stat into just the recipe modal" — the
-// Manufacturer's exact per-ingredient power draw (see
-// MANUFACTURER_ITEM_POWER_COST_MW), shown only in its own recipe pop-up
-// menu, not the shop/Lab preview (which shows the plain min-max range via
-// buildingStatsHtml instead).
-function manufacturerPowerBreakdownHtml() {
-  const p = MANUFACTURER_ITEM_POWER_COST_MW;
-  return (
-    `<div class="building-stat">🗑️ <b>${p.waste}</b>mw · 🍖 <b>${p.food}</b>mw</div>` +
-    `<div class="building-stat">🟩 <b>${p.biomass}</b>mw · 🔬 <b>${p.science}</b>mw</div>`
-  );
+  els.recipeMenuStats.innerHTML = isManufacturer ? manufacturerRecipeMenuStatsHtml(state) : buildingStatsHtml(data.type, state);
 }
 
 // applyRecipeToBuilding moved to Grid.js (and exported from there) per
@@ -2369,6 +2381,21 @@ function speciesStatsHtml(state, speciesId) {
 // Per direct request, the fish stat lines get small inset progress bars. Each
 // bar is that species' value as a fraction of the highest value for the same
 // stat across every species, so it reads as "how this fish compares."
+// An inset fill meter. `pct` is clamped to 10-100 so even the lowest value in a
+// range still shows a sliver of fill, per direct request.
+const STAT_BAR_MIN_PCT = 10;
+function statBarHtml(kind, pct) {
+  const width = Math.max(STAT_BAR_MIN_PCT, Math.min(100, Math.round(pct)));
+  return `<span class="stat-bar stat-bar-${kind}"><i style="width:${width}%"></i></span>`;
+}
+// Places `value` within [min, max]; a lone value (min === max) reads as full.
+// `fasterIsFuller` flips it for processing times, where the shortest is best.
+function statBarForRange(kind, value, min, max, fasterIsFuller = false) {
+  if (!(max > min)) return statBarHtml(kind, 100);
+  const t = (value - min) / (max - min);
+  return statBarHtml(kind, STAT_BAR_MIN_PCT + (100 - STAT_BAR_MIN_PCT) * (fasterIsFuller ? 1 - t : t));
+}
+
 let fishStatMax = null;
 function getFishStatMax() {
   if (fishStatMax) return fishStatMax;
@@ -2384,8 +2411,7 @@ function getFishStatMax() {
 }
 function fishStatBarHtml(kind, value) {
   const max = getFishStatMax()[kind];
-  const pct = max > 0 ? Math.max(6, Math.min(100, Math.round((value / max) * 100))) : 0;
-  return `<span class="stat-bar stat-bar-${kind}"><i style="width:${pct}%"></i></span>`;
+  return statBarHtml(kind, max > 0 ? (value / max) * 100 : 0);
 }
 
 function fishEconomyStatsHtml(state, speciesId) {
@@ -2394,7 +2420,9 @@ function fishEconomyStatsHtml(state, speciesId) {
   const baby = s.growthStages[0];
   const adult = s.growthStages[s.growthStages.length - 1];
   const foodPerMin = (s.hungerRate * 60) / FOOD_HUNGER_RELIEF_BY_LEVEL[state.level.upgrades.foodQuality];
-  let html = `<div class="building-stat">🍽️ Hunger: <b>${foodPerMin.toFixed(1)} ${itemIconImgHtml('food')}/min</b>${fishStatBarHtml('hunger', s.hungerRate)}</div>`;
+  // Per direct request, a Scavenger (Suckerfish) shows Waste as what it eats, with a full meter.
+  const eatsWaste = s.behavior.includes('SCAVENGER');
+  let html = `<div class="building-stat">🍽️ Hunger: <b>${foodPerMin.toFixed(1)} ${itemIconImgHtml(eatsWaste ? 'waste' : 'food')}/min</b>${eatsWaste ? statBarHtml('hunger', 100) : fishStatBarHtml('hunger', s.hungerRate)}</div>`;
   if (s.behavior.includes('FEEDER') && adult.dropValue) {
     // Shown as a baby -> adult range, not just the adult figure — per direct
     // request. Every stage now shares the same dropInterval (see Config.js's
@@ -2424,7 +2452,7 @@ function fishEconomyStatsHtml(state, speciesId) {
     const baseSpeed = s.swimSpeed * FISH_SPEED_MULTIPLIER;
     const babyMwPerSec = baseSpeed / baby.pixelsPerMW;
     const adultMwPerSec = baseSpeed / adult.pixelsPerMW;
-    html += `<div class="building-stat">⚡ Power: <b>${Math.round(babyMwPerSec)} - ${Math.round(adultMwPerSec)} mw/sec</b></div>`;
+    html += `<div class="building-stat">⚡ Power: <b>${Math.round(babyMwPerSec)} - ${Math.round(adultMwPerSec)} mw/sec</b>${statBarHtml('power', 100)}</div>`; // full meter per direct request
   }
   // Per direct request ("add in a stat line for the octopus in the shop for
   // how much blue science it makes"). A pure Researcher (RESEARCHER without
@@ -2435,7 +2463,7 @@ function fishEconomyStatsHtml(state, speciesId) {
   if (s.behavior.includes('RESEARCHER') && !s.behavior.includes('FEEDER')) {
     const babySciencePerMin = (baby.dropValue / baby.dropInterval) * 60000;
     const adultSciencePerMin = (adult.dropValue / adult.dropInterval) * 60000;
-    html += `<div class="building-stat">${itemIconImgHtml('science')} Science: <b>${babySciencePerMin.toFixed(1)} - ${adultSciencePerMin.toFixed(1)}/min</b></div>`;
+    html += `<div class="building-stat">${itemIconImgHtml('science')} Science: <b>${babySciencePerMin.toFixed(1)} - ${adultSciencePerMin.toFixed(1)}/min</b>${statBarHtml('science', 100)}</div>`; // full meter per direct request
   }
   if (!s.behavior.includes('SCAVENGER')) {
     // Real bug fix: this used to read the flat global WASTE_POOP_INTERVAL_MS
@@ -4550,124 +4578,176 @@ function selectBuildingForPreview(state, building) {
   updateToolbar(state);
 }
 
-// Per direct request — clicking a Processor, Auto-Feeder, or Fan in the
-// shop shows its real stats (processing speed, waste creation speed,
-// electricity cost, range) instead of just the prose description. Each
-// building type only shows the lines that actually apply to it — a Fan has
-// no processing/waste stats, a Processor/Auto-Feeder has no range.
-// Per direct request ("shorten the verbiage... so the shop window doesn't
-// also need a scroll bar"), each building type's stats are paired two-to-a-
-// line (shorter labels too) instead of one stat per line — halves the line
-// count for the 3-4-stat buildings (Processor, Turret) that were the only
-// things actually overflowing the fixed-height preview box.
-function buildingStatsHtml(buildingId) {
-  const p = PROCESSOR_STATS[buildingId];
-  if (p) {
-    // The Waste-per-N-seconds stat is gone entirely, per direct request —
-    // the Collector no longer produces any Waste byproduct on any tier.
-    // Power now depends on what's actually being collected (a coin costs
-    // HALF as much as Science on the power-costing tiers, per direct
-    // request) — shown as a plain min-max range, same convention the
-    // Manufacturer's own per-ingredient power spread already uses; a flat
-    // single number (the base Collector's 0) still reads correctly since
-    // both ends of the range are identical.
-    const powerRange = p.powerCostPerSecCoin === p.powerCostPerSecScience
-      ? `${p.powerCostPerSecCoin}`
-      : `${p.powerCostPerSecCoin}-${p.powerCostPerSecScience}`;
-    return (
-      `<div class="building-stat">⏱️ Coin <b>${p.coinMs / 1000}s</b> · ${itemIconImgHtml('science')} <b>${p.scienceMs / 1000}s</b> · ${itemIconImgHtml('science_green')} <b>${p.scienceGreenMs / 1000}s</b></div>` +
-      `<div class="building-stat">⚡ <b>${powerRange}</b> mw/s</div>`
-    );
-  }
-  const f = FAN_STATS[buildingId];
-  if (f) {
-    return `<div class="building-stat">📏 <b>${f.maxRange}px</b> · ⚡ <b>${f.powerCost}</b> mw/sec</div>`;
-  }
+// Per direct request, every stat a building has is its own line with an inset
+// fill meter, like the fish. What a meter is measured against depends on the
+// stat:
+//   - tiered stats (processing time, range, fire rate, damage, capacity) are
+//     measured against the other tiers of the building's own family, so a Bio
+//     Collector's processing time reads full and the base Collector's reads
+//     empty (processing times are "faster is fuller");
+//   - electricity is measured against every building;
+//   - the Manufacturer and Power Plant measure across their own ingredients /
+//     recipes.
+// Passing `state` (the placed-building pop-ups) narrows every range to just the
+// building types currently placed in the tank; the shop passes nothing and
+// compares against the full roster.
+const BUILDING_STAT_VALUE = {
+  coinTime: (id) => PROCESSOR_STATS[id]?.coinMs / 1000,
+  scienceTime: (id) => PROCESSOR_STATS[id]?.scienceMs / 1000,
+  greenTime: (id) => PROCESSOR_STATS[id]?.scienceGreenMs / 1000,
+  wasteTime: (id) => REFINERY_STATS[id]?.foodProcessMs / 1000,
+  sludgeTime: (id) => (REFINERY_STATS[id]?.foodProcessMs * ALIEN_DNA_REFINERY_TIME_MULTIPLIER) / 1000,
+  range: (id) => FAN_STATS[id]?.maxRange,
+  fireRate: (id) => TURRET_STATS[id]?.shotsPerSec,
+  damage: (id) => turretDamageRange(id)?.max,
+  capacity: (id) => STORAGE_CHEST_CAPACITY[id],
+};
+
+// The damage shown for a turret runs from its Waste-ammo hit to its best
+// (Biomass) hit; the meter tracks the top of that range.
+function turretDamageRange(buildingId) {
   const t = TURRET_STATS[buildingId];
-  if (t) {
-    // "Global" range dropped entirely per direct request; the electrical
-    // figure is per-shot now, not per-second (t.powerCostPerShot — the
-    // player-facing number; powerCostPerSec is purely the derived rate
-    // computeCurrentPowerDemand needs). Any ammo-consuming tier (Waste +
-    // Electric Waste Turret — see TURRET_AMMO_TILES) shows the ammo stat;
-    // the Electric tier ALSO needs power, so it shows both. Per direct
-    // request ("add in the biomass on the turret description/stat line...
-    // by showing the damage and shots per ammo as a range") — Biomass is a
-    // second, better ammo option (see BIOMASS_TURRET_DAMAGE_MULTIPLIER/
-    // BIOMASS_TURRET_SHOTS_PER_AMMO), so both the damage and the shots-per-
-    // ammo figures show as a Waste-to-Biomass range on any ammo-consuming
-    // tier instead of one flat number.
-    const isAmmoTurret = TURRET_AMMO_TILES.has(buildingId);
-    const isAdvancedTurret = buildingId === TILE_TURRET_ADVANCED;
-    const biomassDamage = Math.round(t.damage * BIOMASS_TURRET_DAMAGE_MULTIPLIER * 10) / 10;
-    // Per direct request ("make sure to show the damage of the advanced
-    // turret as a range in the shop") — the Advanced Turret now ALSO shows a
-    // range (base damage to ADVANCED_TURRET_BIOMASS_DAMAGE's flat 14),
-    // despite not being an "ammo turret" (TURRET_AMMO_TILES) at all — its
-    // own separate optional Biomass reserve (see that constant's own comment
-    // in Config.js) is what the higher end of this range refers to.
-    const damageText = isAmmoTurret ? `${t.damage}-${biomassDamage}` : isAdvancedTurret ? `${t.damage}-${ADVANCED_TURRET_BIOMASS_DAMAGE}` : `${t.damage}`;
-    const ammoIcons = `${itemIconImgHtml('waste')}${itemIconImgHtml('biomass')}`;
-    const ammoText = `${ammoIcons} <b>${WASTE_TURRET_SHOTS_PER_WASTE}-${BIOMASS_TURRET_SHOTS_PER_AMMO}</b>/ammo, holds <b>${WASTE_TURRET_MAX_WASTE}</b>`;
-    const powerText = `⚡ <b>${t.powerCostPerShot}</b> mw/shot`;
-    let line2;
-    if (isAmmoTurret && t.powerCostPerShot > 0) line2 = `${ammoIcons} <b>${WASTE_TURRET_SHOTS_PER_WASTE}-${BIOMASS_TURRET_SHOTS_PER_AMMO}</b>/ammo · ${powerText}`;
-    else if (isAmmoTurret) line2 = ammoText;
-    // Per direct request ("advanced turrets... don't need biomass to shoot,
-    // but if it does have biomass, those shots do 14 damage a shot") — the
-    // line makes clear Biomass is optional here, unlike the Waste/Electric
-    // tiers' own required ammo line just above.
-    else if (isAdvancedTurret) line2 = `${powerText} · ${itemIconImgHtml('biomass')} optional, holds <b>${ADVANCED_TURRET_MAX_BIOMASS_AMMO}</b>`;
-    else line2 = powerText;
-    return (
-      `<div class="building-stat">🔫 <b>${t.shotsPerSec}</b>/sec · 💥 <b>${damageText}</b> dmg</div>` +
-      `<div class="building-stat">${line2}</div>`
-    );
-  }
-  const r = REFINERY_STATS[buildingId];
-  if (r) {
-    const dnaS = (r.foodProcessMs * ALIEN_DNA_REFINERY_TIME_MULTIPLIER) / 1000;
-    return (
-      `<div class="building-stat">${itemIconImgHtml('waste')}➜${itemIconImgHtml('food')} <b>${r.foodProcessMs / 1000}s</b> · ${itemIconImgHtml('alien_dna')}➜${itemIconImgHtml('biomass')} <b>${dnaS}s</b></div>` +
-      (r.powerCostPerSec > 0 ? `<div class="building-stat">⚡ <b>${r.powerCostPerSec}</b> mw/sec</div>` : `<div class="building-stat">☀️ <b>No electricity needed</b></div>`)
-    );
-  }
-  if (MANUFACTURER_STATS[buildingId]) {
-    // Per direct request, power now depends on which ingredient is being
-    // processed (see MANUFACTURER_ITEM_POWER_COST_MW) — the shop/Lab
-    // preview shows it as a plain min-max range; the recipe pop-up menu
-    // (manufacturerRecipeMenuStatsHtml, below) shows the full per-item
-    // breakdown instead, since that's the one place ingredient choice
-    // actually matters.
-    const rates = Object.values(MANUFACTURER_ITEM_POWER_COST_MW);
-    const p = MANUFACTURER_ITEM_PROCESS_MS;
-    return (
-      `<div class="building-stat">${itemIconImgHtml('waste')} ${p.waste / 1000}s · ${itemIconImgHtml('food')} ${p.food / 1000}s · ${itemIconImgHtml('biomass')} ${p.biomass / 1000}s per item</div>` +
-      `<div class="building-stat">Pick a recipe once placed · ⚡ <b>${Math.min(...rates)}-${Math.max(...rates)}</b> mw</div>`
-    );
-  }
-  if (buildingId === TILE_POWER_PLANT) {
-    return (
-      `<div class="building-stat">${itemIconImgHtml('food')}➜20mw/15s · ${itemIconImgHtml('biomass')}➜40mw/20s · ${itemIconImgHtml('science')}➜100mw/30s</div>` +
-      `<div class="building-stat">Pick a fuel recipe once placed</div>`
-    );
-  }
-  return '';
+  if (!t) return null;
+  return TURRET_AMMO_TILES.has(buildingId)
+    ? { min: t.damage, max: Math.round(t.damage * BIOMASS_TURRET_DAMAGE_MULTIPLIER * 10) / 10 }
+    : { min: t.damage, max: ADVANCED_TURRET_BIOMASS_DAMAGE };
 }
 
-// The Manufacturer's own recipe pop-up (refreshRecipeMenu below) gets a
-// fuller, dedicated stats block instead of reusing buildingStatsHtml
-// verbatim — per direct request, it drops the "Pick a recipe once placed"
-// range line entirely (the shop/Lab preview above keeps it, unchanged) and
-// shows the exact per-item processing time for all 4 ingredient types (not
-// just the 3 the shop's own brief summary fits), plus the full power
-// breakdown.
-function manufacturerRecipeMenuStatsHtml() {
-  const p = MANUFACTURER_ITEM_PROCESS_MS;
-  return (
-    `<div class="building-stat">🗑️ ${p.waste / 1000}s · 🍖 ${p.food / 1000}s · 🟩 ${p.biomass / 1000}s · 🔬 ${p.science / 1000}s per item</div>` +
-    manufacturerPowerBreakdownHtml()
-  );
+// Every electricity figure a building shows (collectors: coin/science, turrets:
+// per shot, the Manufacturer: per ingredient).
+function buildingPowerValues(buildingId) {
+  const p = PROCESSOR_STATS[buildingId];
+  if (p) return [p.powerCostPerSecCoin, p.powerCostPerSecScience];
+  if (FAN_STATS[buildingId]) return [FAN_STATS[buildingId].powerCost];
+  if (TURRET_STATS[buildingId]) return [TURRET_STATS[buildingId].powerCostPerShot];
+  if (REFINERY_STATS[buildingId]) return [REFINERY_STATS[buildingId].powerCostPerSec];
+  if (buildingId === TILE_MANUFACTURER) return Object.values(MANUFACTURER_ITEM_POWER_COST_MW);
+  return [];
+}
+
+function placedBuildingTypes(state) {
+  const types = new Set();
+  for (const key in state.level.buildingData) types.add(state.level.buildingData[key].type);
+  return types;
+}
+
+function buildingValueRange(values) {
+  const nums = values.filter(Number.isFinite);
+  return { min: Math.min(...nums), max: Math.max(...nums) };
+}
+
+// `pool` narrowed to what's placed (plus the building being described itself).
+function comparableBuildings(buildingId, pool, placed) {
+  return placed ? pool.filter((id) => id === buildingId || placed.has(id)) : pool;
+}
+
+function buildingFamilyBar(buildingId, placed, kind, key, fasterIsFuller = false) {
+  const members = Object.values(BUILDING_FAMILIES).find((m) => m.includes(buildingId)) || [buildingId];
+  const { min, max } = buildingValueRange(comparableBuildings(buildingId, members, placed).map((id) => BUILDING_STAT_VALUE[key](id)));
+  return statBarForRange(kind, BUILDING_STAT_VALUE[key](buildingId), min, max, fasterIsFuller);
+}
+
+function buildingPowerBar(buildingId, placed, mw) {
+  const pool = comparableBuildings(buildingId, BUILDING_LIST.map((b) => b.id), placed);
+  const { min, max } = buildingValueRange(pool.flatMap(buildingPowerValues));
+  return statBarForRange('power', mw, min, max);
+}
+
+function buildingStatLine(label, value, bar) {
+  return `<div class="building-stat">${label}: <b>${value}</b>${bar}</div>`;
+}
+
+function buildingPowerLine(buildingId, placed, label, mw, unit, noPowerIcon = '⚡') {
+  if (mw > 0) return buildingStatLine(`⚡ ${label}`, `${mw} mw/${unit}`, buildingPowerBar(buildingId, placed, mw));
+  return `<div class="building-stat">${noPowerIcon} <b>No electricity needed</b>${buildingPowerBar(buildingId, placed, 0)}</div>`;
+}
+
+// One row per ingredient with two side-by-side meters: processing time (the
+// shortest fills the meter) and electricity.
+function manufacturerRowsHtml(buildingId, items, placed) {
+  const times = items.map((item) => MANUFACTURER_ITEM_PROCESS_MS[item] / 1000);
+  const timeRange = { min: Math.min(...times), max: Math.max(...times) };
+  return items.map((item) => {
+    const seconds = MANUFACTURER_ITEM_PROCESS_MS[item] / 1000;
+    const mw = MANUFACTURER_ITEM_POWER_COST_MW[item];
+    return (
+      `<div class="building-stat stat-dual"><span class="stat-dual-icon">${itemIconImgHtml(item, 20)}</span>` +
+      `<span>⏱️ <b>${seconds}s</b>${statBarForRange('time', seconds, timeRange.min, timeRange.max, true)}</span>` +
+      `<span>⚡ <b>${mw}mw</b>${buildingPowerBar(buildingId, placed, mw)}</span></div>`
+    );
+  }).join('');
+}
+
+// One row per fuel with two meters: power produced and how long it lasts.
+function powerPlantRowsHtml() {
+  const outputs = POWER_PLANT_RECIPE_LIST.map((r) => r.powerOutputMw);
+  const durations = POWER_PLANT_RECIPE_LIST.map((r) => r.durationMs / 1000);
+  return POWER_PLANT_RECIPE_LIST.map((r) => {
+    const seconds = r.durationMs / 1000;
+    return (
+      `<div class="building-stat stat-dual"><span class="stat-dual-icon">${itemIconImgHtml(r.inputs[0], 20)}</span>` +
+      `<span>⚡ <b>+${r.powerOutputMw}mw</b>${statBarForRange('power', r.powerOutputMw, Math.min(...outputs), Math.max(...outputs))}</span>` +
+      `<span>⏱️ <b>${seconds}s</b>${statBarForRange('time', seconds, Math.min(...durations), Math.max(...durations))}</span></div>`
+    );
+  }).join('');
+}
+
+function buildingStatsHtml(buildingId, state = null) {
+  const placed = state ? placedBuildingTypes(state) : null;
+  const familyBar = (kind, key, fasterIsFuller) => buildingFamilyBar(buildingId, placed, kind, key, fasterIsFuller);
+  let html = '';
+  const p = PROCESSOR_STATS[buildingId];
+  const f = FAN_STATS[buildingId];
+  const t = TURRET_STATS[buildingId];
+  const r = REFINERY_STATS[buildingId];
+  if (p) {
+    html =
+      buildingStatLine(`${itemIconImgHtml('coin')} Coin time`, `${p.coinMs / 1000}s`, familyBar('time', 'coinTime', true)) +
+      buildingStatLine(`${itemIconImgHtml('science')} Science time`, `${p.scienceMs / 1000}s`, familyBar('time', 'scienceTime', true)) +
+      buildingStatLine(`${itemIconImgHtml('science_green')} Green time`, `${p.scienceGreenMs / 1000}s`, familyBar('time', 'greenTime', true)) +
+      buildingPowerLine(buildingId, placed, 'Coin power', p.powerCostPerSecCoin, 's') +
+      buildingPowerLine(buildingId, placed, 'Science power', p.powerCostPerSecScience, 's');
+  } else if (f) {
+    html =
+      buildingStatLine('📏 Range', `${f.maxRange}px`, familyBar('range', 'range')) +
+      buildingPowerLine(buildingId, placed, 'Power', f.powerCost, 's');
+  } else if (t) {
+    // The electrical figure is per shot, not per second (powerCostPerShot is the
+    // player-facing number; powerCostPerSec is only the derived rate the power
+    // demand math needs). Damage runs Waste-ammo -> Biomass-ammo, and the ammo
+    // line (no scale to compare, so no meter) says how the turret is fed.
+    const dmg = turretDamageRange(buildingId);
+    const ammoIcons = `${itemIconImgHtml('waste')}${itemIconImgHtml('biomass')}`;
+    const ammoLine = TURRET_AMMO_TILES.has(buildingId)
+      ? `${ammoIcons} Ammo: <b>${WASTE_TURRET_SHOTS_PER_WASTE}-${BIOMASS_TURRET_SHOTS_PER_AMMO}</b> shots each, holds <b>${WASTE_TURRET_MAX_WASTE}</b>`
+      : `${itemIconImgHtml('biomass')} Optional ammo: holds <b>${ADVANCED_TURRET_MAX_BIOMASS_AMMO}</b>`;
+    html =
+      buildingStatLine('🔫 Fire rate', `${t.shotsPerSec}/sec`, familyBar('rate', 'fireRate')) +
+      buildingStatLine('💥 Damage', `${dmg.min}-${dmg.max}`, familyBar('damage', 'damage')) +
+      `<div class="building-stat">${ammoLine}</div>` +
+      buildingPowerLine(buildingId, placed, 'Power', t.powerCostPerShot, 'shot');
+  } else if (r) {
+    html =
+      buildingStatLine(`${itemIconImgHtml('waste')}➜${itemIconImgHtml('food')} Time`, `${r.foodProcessMs / 1000}s`, familyBar('time', 'wasteTime', true)) +
+      buildingStatLine(`${itemIconImgHtml('alien_dna')}➜${itemIconImgHtml('biomass')} Time`, `${(r.foodProcessMs * ALIEN_DNA_REFINERY_TIME_MULTIPLIER) / 1000}s`, familyBar('time', 'sludgeTime', true)) +
+      buildingPowerLine(buildingId, placed, 'Power', r.powerCostPerSec, 'sec', '☀️');
+  } else if (STORAGE_CHEST_CAPACITY[buildingId]) {
+    html = buildingStatLine('📦 Holds', STORAGE_CHEST_CAPACITY[buildingId], familyBar('capacity', 'capacity'));
+  } else if (MANUFACTURER_STATS[buildingId]) {
+    // The shop shows the three everyday ingredients; the recipe pop-up
+    // (manufacturerRecipeMenuStatsHtml, below) adds Science.
+    html = manufacturerRowsHtml(buildingId, ['waste', 'food', 'biomass'], placed);
+  } else if (buildingId === TILE_POWER_PLANT) {
+    html = powerPlantRowsHtml();
+  }
+  const notes = (BUILDING_TYPES[buildingId].statNotes || []).map((note) => `<div class="building-stat stat-note">${note}</div>`).join('');
+  return html + notes;
+}
+
+// The Manufacturer's own recipe pop-up gets all four ingredients (the shop's
+// summary drops Science to save room).
+function manufacturerRecipeMenuStatsHtml(state) {
+  return manufacturerRowsHtml(TILE_MANUFACTURER, ['waste', 'food', 'biomass', 'science'], placedBuildingTypes(state));
 }
 
 // A live, idling adult-stage fish (same drawFish the real tank uses)

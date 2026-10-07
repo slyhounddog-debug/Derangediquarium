@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="72" viewBox="0 0 64 72"><defs><filter id="sh" x="-25%" y="-25%" width="150%" height="150%"><feDropShadow dx="1.6" dy="2.6" stdDeviation="1.7" flood-color="#1b0d04" flood-opacity=".6"/></filter>
+  <linearGradient id="fe" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8d949f"/><stop offset=".5" stop-color="#586069"/><stop offset="1" stop-color="#2f353d"/></linearGradient></defs>
+  <g filter="url(#sh)" fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="32" cy="9" r="5.5" stroke="#1c2026" stroke-width="7"/>
+    <circle cx="32" cy="9" r="5.5" stroke="url(#fe)" stroke-width="4.4"/>
+    <path d="M32 15 V58" stroke="#1c2026" stroke-width="8"/>
+    <path d="M32 15 V58" stroke="url(#fe)" stroke-width="5"/>
+    <path d="M18 25 H46" stroke="#1c2026" stroke-width="7.5"/>
+    <path d="M18 25 H46" stroke="url(#fe)" stroke-width="4.6"/>
+    <path d="M9 44 C10 58 20 66 32 66 C44 66 54 58 55 44" stroke="#1c2026" stroke-width="8"/>
+    <path d="M9 44 C10 58 20 66 32 66 C44 66 54 58 55 44" stroke="url(#fe)" stroke-width="4.8"/>
+    <path d="M3 48 L9 42 L15 49 Z M61 48 L55 42 L49 49 Z" fill="url(#fe)" stroke="#1c2026" stroke-width="2.6"/>
+    <path d="M30.6 17 V56" stroke="#c9d0da" stroke-opacity=".5" stroke-width="1.2"/>
+    <path d="M20 23.6 H44" stroke="#c9d0da" stroke-opacity=".5" stroke-width="1.1"/>
+    <path d="M28 12 a4 4 0 0 1 6 -1" stroke="#c9d0da" stroke-opacity=".55" stroke-width="1.1"/>
+  </g>
+  <circle cx="30" cy="40" r="1.6" fill="#a35a2a" opacity=".6"/><circle cx="35" cy="50" r="2" fill="#a35a2a" opacity=".5"/><circle cx="26" cy="63" r="1.7" fill="#a35a2a" opacity=".55"/><circle cx="38" cy="26" r="1.4" fill="#a35a2a" opacity=".55"/>
+</svg>
