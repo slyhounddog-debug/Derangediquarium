@@ -168,6 +168,14 @@ const FOUND_THE_CHAT_MESSAGE = 'You found the chat, you curious little fish.';
 // tank. These only touch the DOM when the value actually changed.
 function setText(el, text) { if (el.textContent !== text) el.textContent = text; }
 function setHidden(el, hidden) { if (el.classList.contains('hidden') !== hidden) el.classList.toggle('hidden', hidden); }
+// Same idea for the three centered windows (Shop, Tank, Science Lab), per direct
+// request (opening any of them dropped the frame rate): their refresh functions
+// run every frame the window is open, and rewriting identical text/HTML/disabled
+// made the browser re-rasterise the big framed panel on the GPU every frame.
+// innerHTML's last value is cached on the element rather than read back, since
+// reading it re-serialises the whole subtree.
+function setHtml(el, html) { if (el._lastHtml !== html) { el._lastHtml = html; el.innerHTML = html; } }
+function setDisabled(el, disabled) { if (el.disabled !== disabled) el.disabled = disabled; }
 
 let els = null;
 let currentPreviewSpecies = null; // species currently shown in the in-panel preview, if any
@@ -2327,15 +2335,15 @@ function refreshLabPurchaseButton(state) {
   const purchased = state.meta.labUpgradesPurchased.includes(labPurchaseNodeId);
   const prereqsMet = node.requires.every((r) => state.meta.labUpgradesPurchased.includes(r));
   if (purchased) {
-    els.labPurchaseConfirmBtn.textContent = 'Bought';
-    els.labPurchaseConfirmBtn.disabled = true;
+    setText(els.labPurchaseConfirmBtn, 'Bought');
+    setDisabled(els.labPurchaseConfirmBtn, true);
   } else if (!prereqsMet) {
-    els.labPurchaseConfirmBtn.textContent = 'Locked';
-    els.labPurchaseConfirmBtn.disabled = true;
+    setText(els.labPurchaseConfirmBtn, 'Locked');
+    setDisabled(els.labPurchaseConfirmBtn, true);
   } else {
     const affordable = labNodeHasEnoughScience(state, node) && state.level.money >= node.goldCost;
-    els.labPurchaseConfirmBtn.textContent = 'Confirm';
-    els.labPurchaseConfirmBtn.disabled = !affordable;
+    setText(els.labPurchaseConfirmBtn, 'Confirm');
+    setDisabled(els.labPurchaseConfirmBtn, !affordable);
   }
 }
 
@@ -2506,7 +2514,7 @@ function labNodeUnlocksHtml(id) {
 function refreshLabTree(state) {
   // Both Science reserves shown together — several nodes now spend both at
   // once, see labNodeHasEnoughScience's own comment.
-  els.labScienceReadout.textContent = `🔬 ${state.level.science} · 🟢 ${state.level.scienceGreen} · 💰 $${Math.floor(state.level.money)}`;
+  setText(els.labScienceReadout, `🔬 ${state.level.science} · 🟢 ${state.level.scienceGreen} · 💰 $${Math.floor(state.level.money)}`);
   for (const node of SCIENCE_LAB_UPGRADE_LIST) {
     const { btn, nameTextEl, iconCanvas, costEl } = labNodeButtons[node.id];
     const purchased = state.meta.labUpgradesPurchased.includes(node.id);
@@ -2522,7 +2530,7 @@ function refreshLabTree(state) {
     // purchase modal to read; only that modal's own Confirm button actually
     // reflects whether a purchase can happen right now — see
     // refreshLabPurchaseButton.
-    btn.disabled = false;
+    setDisabled(btn, false);
     // A `mystery: true` node (the "Mother Alien Fish" secret unlock, per
     // direct spec — "a question mark node... that gives no info until it's
     // unlockable") hides its own name/icon behind a plain "???" for as long
@@ -2530,12 +2538,13 @@ function refreshLabTree(state) {
     // purchase modal — reads live every frame, same as everything else here,
     // so it reveals itself the instant the last prerequisite is bought.
     const isHiddenMystery = node.mystery && !prereqsMet;
-    if (iconCanvas) iconCanvas.style.display = isHiddenMystery ? 'none' : '';
-    nameTextEl.textContent = isHiddenMystery ? '❓ ???' : (iconCanvas ? node.name : `${node.icon} ${node.name}`);
-    if (purchased) costEl.textContent = 'Unlocked ✓';
-    else if (isHiddenMystery) costEl.textContent = '???';
-    else if (!prereqsMet) costEl.textContent = 'Locked';
-    else costEl.textContent = labNodeCostText(node);
+    const iconDisplay = isHiddenMystery ? 'none' : '';
+    if (iconCanvas && iconCanvas.style.display !== iconDisplay) iconCanvas.style.display = iconDisplay;
+    setText(nameTextEl, isHiddenMystery ? '❓ ???' : (iconCanvas ? node.name : `${node.icon} ${node.name}`));
+    if (purchased) setText(costEl, 'Unlocked ✓');
+    else if (isHiddenMystery) setText(costEl, '???');
+    else if (!prereqsMet) setText(costEl, 'Locked');
+    else setText(costEl, labNodeCostText(node));
   }
   drawLabTreeConnectors(state);
   if (labPurchaseNodeId !== null) refreshLabPurchaseButton(state); // Science/gold/purchased-state can keep changing while the confirmation modal sits open
@@ -2548,16 +2557,28 @@ function refreshLabTree(state) {
 // per direct request, so it's visually obvious both are required, not a
 // single merged line. An edge whose prerequisite is already purchased
 // draws brighter/solid; still-locked edges draw faint/dashed.
+const LAB_CONNECTOR_SETTLE_MS = 600;
+let labConnectorRedrawKey = null;
+let labConnectorSettleUntilMs = 0;
 function drawLabTreeConnectors(state) {
   const wrap = els.labTreeWrap;
   const canvas = els.labTreeCanvas;
   const w = wrap.scrollWidth;
   const h = wrap.scrollHeight;
+  const wrapRect = wrap.getBoundingClientRect();
+  // Per direct request (Science Lab frame-rate fix) — everything below is a pure
+  // function of these inputs, so while none of them has changed it isn't redrawn.
+  // For LAB_CONNECTOR_SETTLE_MS after any change it keeps redrawing, since a node
+  // button can still be moving under a CSS transition (hover scale, the window's
+  // open animation) without any of these numbers changing.
+  const redrawKey = `${w}x${h}|${wrapRect.left},${wrapRect.top},${wrapRect.width},${wrapRect.height}|${wrap.scrollLeft},${wrap.scrollTop}|${labZoom}|${labHoveredNodeId}|${state.meta.labUpgradesPurchased.length}`;
+  const nowMs = performance.now();
+  if (redrawKey !== labConnectorRedrawKey) { labConnectorRedrawKey = redrawKey; labConnectorSettleUntilMs = nowMs + LAB_CONNECTOR_SETTLE_MS; }
+  else if (nowMs > labConnectorSettleUntilMs) return;
   if (canvas.width !== w) canvas.width = w;
   if (canvas.height !== h) canvas.height = h;
   const ctx = canvas.getContext('2d');
   ctx.clearRect(0, 0, w, h);
-  const wrapRect = wrap.getBoundingClientRect();
 
   for (const node of SCIENCE_LAB_UPGRADE_LIST) {
     if (!node.requires.length) continue;
@@ -3524,14 +3545,19 @@ function refreshFamilyButton(state, familyId) {
   const f = familyButtons[familyId];
   if (!f) return;
   const currentId = familySelectedTier[familyId];
+  const familyCost = getBuildingCost(state, currentId);
+  setText(f.priceTag, `$${familyCost}`);
+  f.btn.classList.toggle('unaffordable', state.level.money < familyCost);
+  // Everything below only depends on which tier is showing, so it's redone only
+  // when that changes — per direct request (Shop frame-rate fix), this used to
+  // rewrite the title/dataset/icon canvas and rebuild every dot, every frame.
+  if (f.shownTierId === currentId) return;
+  f.shownTierId = currentId;
   const building = BUILDING_TYPES[currentId];
   f.btn.title = building.name;
   f.btn.dataset.tool = `build:${currentId}`;
   f.btn.style.setProperty('--tile-color', building.color);
   drawBuildingIconCanvas(f.iconCanvas, currentId);
-  const familyCost = getBuildingCost(state, currentId);
-  f.priceTag.textContent = `$${familyCost}`;
-  f.btn.classList.toggle('unaffordable', state.level.money < familyCost);
   f.dotsWrap.innerHTML = '';
   for (const id of f.memberIds) {
     const dot = document.createElement('span');
@@ -3892,61 +3918,61 @@ function refreshTankPanel(state) {
   const available = state.level.tankPoints.available;
 
   const fqLevel = state.level.upgrades.foodQuality;
-  foodQuality.levelEl.textContent = `Level ${fqLevel} / ${FOOD_QUALITY_UPGRADE_MAX_LEVEL}`;
+  setText(foodQuality.levelEl, `Level ${fqLevel} / ${FOOD_QUALITY_UPGRADE_MAX_LEVEL}`);
   fillUpgradePips(foodQuality, fqLevel);
-  foodQuality.descEl.innerHTML = describeFoodQualityLevel(fqLevel);
+  setHtml(foodQuality.descEl, describeFoodQualityLevel(fqLevel));
   if (fqLevel >= FOOD_QUALITY_UPGRADE_MAX_LEVEL) {
-    foodQuality.buyBtn.textContent = 'Maxed out';
-    foodQuality.buyBtn.disabled = true;
+    setText(foodQuality.buyBtn, 'Maxed out');
+    setDisabled(foodQuality.buyBtn, true);
   } else {
     const cost = FOOD_QUALITY_UPGRADE_COSTS[fqLevel];
-    foodQuality.buyBtn.textContent = `${cost} 🏆`;
-    foodQuality.buyBtn.disabled = available < cost;
+    setText(foodQuality.buyBtn, `${cost} 🏆`);
+    setDisabled(foodQuality.buyBtn, available < cost);
   }
 
   const fmLevel = state.level.upgrades.fishMovement;
-  fishMovement.levelEl.textContent = `Level ${fmLevel} / ${FISH_MOVEMENT_UPGRADE_MAX_LEVEL}`;
+  setText(fishMovement.levelEl, `Level ${fmLevel} / ${FISH_MOVEMENT_UPGRADE_MAX_LEVEL}`);
   fillUpgradePips(fishMovement, fmLevel);
-  fishMovement.descEl.innerHTML = describeFishMovementLevel(fmLevel);
+  setHtml(fishMovement.descEl, describeFishMovementLevel(fmLevel));
   if (fmLevel >= FISH_MOVEMENT_UPGRADE_MAX_LEVEL) {
-    fishMovement.buyBtn.textContent = 'Maxed out';
-    fishMovement.buyBtn.disabled = true;
+    setText(fishMovement.buyBtn, 'Maxed out');
+    setDisabled(fishMovement.buyBtn, true);
   } else {
     const cost = FISH_MOVEMENT_UPGRADE_COSTS[fmLevel];
-    fishMovement.buyBtn.textContent = `${cost} 🏆`;
-    fishMovement.buyBtn.disabled = available < cost;
+    setText(fishMovement.buyBtn, `${cost} 🏆`);
+    setDisabled(fishMovement.buyBtn, available < cost);
   }
 
   const teLevel = state.level.upgrades.tankExpansionTier;
   const rowsUnlocked = teLevel * TANK_EXPANSION_ROWS_PER_TIER;
-  tankExpansion.levelEl.textContent = `Tier ${teLevel} / ${TANK_EXPANSION_MAX_TIER}`;
+  setText(tankExpansion.levelEl, `Tier ${teLevel} / ${TANK_EXPANSION_MAX_TIER}`);
   fillUpgradePips(tankExpansion, teLevel);
   if (teLevel >= TANK_EXPANSION_MAX_TIER) {
-    tankExpansion.descEl.textContent = `Fully expanded — +${rowsUnlocked} extra rows of city unlocked.`;
-    tankExpansion.buyBtn.textContent = 'Maxed out';
-    tankExpansion.buyBtn.disabled = true;
+    setText(tankExpansion.descEl, `Fully expanded — +${rowsUnlocked} extra rows of city unlocked.`);
+    setText(tankExpansion.buyBtn, 'Maxed out');
+    setDisabled(tankExpansion.buyBtn, true);
   } else {
     const cost = TANK_EXPANSION_UPGRADE_COSTS[teLevel];
-    tankExpansion.descEl.textContent =
-      `+${rowsUnlocked} extra rows of city unlocked so far. Next tier adds ${TANK_EXPANSION_ROWS_PER_TIER} more rows to build on.`;
-    tankExpansion.buyBtn.textContent = `${cost} 🏆`;
-    tankExpansion.buyBtn.disabled = available < cost;
+    setText(tankExpansion.descEl,
+      `+${rowsUnlocked} extra rows of city unlocked so far. Next tier adds ${TANK_EXPANSION_ROWS_PER_TIER} more rows to build on.`);
+    setText(tankExpansion.buyBtn, `${cost} 🏆`);
+    setDisabled(tankExpansion.buyBtn, available < cost);
   }
 
   const fhLevel = state.level.upgrades.fishHealth;
-  fishHealth.levelEl.textContent = `Level ${fhLevel} / ${FISH_HEALTH_UPGRADE_MAX_LEVEL}`;
+  setText(fishHealth.levelEl, `Level ${fhLevel} / ${FISH_HEALTH_UPGRADE_MAX_LEVEL}`);
   fillUpgradePips(fishHealth, fhLevel);
-  fishHealth.descEl.innerHTML = describeFishHealthLevel(fhLevel);
+  setHtml(fishHealth.descEl, describeFishHealthLevel(fhLevel));
   if (fhLevel >= FISH_HEALTH_UPGRADE_MAX_LEVEL) {
-    fishHealth.buyBtn.textContent = 'Maxed out';
-    fishHealth.buyBtn.disabled = true;
+    setText(fishHealth.buyBtn, 'Maxed out');
+    setDisabled(fishHealth.buyBtn, true);
   } else {
     const cost = FISH_HEALTH_UPGRADE_COSTS[fhLevel];
-    fishHealth.buyBtn.textContent = `${cost} 🏆`;
-    fishHealth.buyBtn.disabled = available < cost;
+    setText(fishHealth.buyBtn, `${cost} 🏆`);
+    setDisabled(fishHealth.buyBtn, available < cost);
   }
 
-  els.tankPointsDisplay.textContent = `🏆 ${available}`;
+  setText(els.tankPointsDisplay, `🏆 ${available}`);
 }
 
 // ---- Tank panel view switcher (Upgrades / Achievements / Customization) ----
@@ -4355,23 +4381,25 @@ function refreshAchievementPanel(state) {
     card.classList.toggle('claimed', claimed);
     card.classList.toggle('claimable', unlocked && !claimed);
     // Claimable first, then still-locked, then already-claimed at the bottom.
-    card.style.order = claimed ? 2 : (unlocked ? 0 : 1);
+    const order = String(claimed ? 2 : (unlocked ? 0 : 1));
+    if (card.style.order !== order) card.style.order = order;
     const progress = Math.min(achievement.threshold, state.meta.stats[achievement.statField] || 0);
-    progressFillEl.style.width = `${(progress / achievement.threshold) * 100}%`;
-    progressTextEl.textContent = `${formatAchievementProgress(achievement.statField, progress)} / ${formatAchievementProgress(achievement.statField, achievement.threshold)}`;
+    const fillWidth = `${(progress / achievement.threshold) * 100}%`;
+    if (progressFillEl._lastWidth !== fillWidth) { progressFillEl._lastWidth = fillWidth; progressFillEl.style.width = fillWidth; }
+    setText(progressTextEl, `${formatAchievementProgress(achievement.statField, progress)} / ${formatAchievementProgress(achievement.statField, achievement.threshold)}`);
     const reward = ACHIEVEMENT_GEM_REWARD_BY_TIER[achievement.tier];
     if (claimed) {
-      claimBtn.textContent = 'Claimed ✓';
-      claimBtn.disabled = true;
+      setText(claimBtn, 'Claimed ✓');
+      setDisabled(claimBtn, true);
     } else if (unlocked) {
-      claimBtn.textContent = `Claim — ${reward} 💎`;
-      claimBtn.disabled = false;
+      setText(claimBtn, `Claim — ${reward} 💎`);
+      setDisabled(claimBtn, false);
     } else {
-      claimBtn.textContent = `Locked — ${reward} 💎`;
-      claimBtn.disabled = true;
+      setText(claimBtn, `Locked — ${reward} 💎`);
+      setDisabled(claimBtn, true);
     }
   }
-  els.achievementGemsDisplay.textContent = `💎 ${state.meta.fishyGems}`;
+  setText(els.achievementGemsDisplay, `💎 ${state.meta.fishyGems}`);
 }
 
 // ---- Customization (hats) ----
@@ -4487,20 +4515,20 @@ function refreshCustomizationPanel(state) {
     card.classList.toggle('equipped', equipped);
     card.classList.toggle('previewing', previewedHatId === hat.id);
     if (equipped) {
-      buyBtn.textContent = 'Equipped';
-      buyBtn.disabled = true;
+      setText(buyBtn, 'Equipped');
+      setDisabled(buyBtn, true);
       buyBtn.classList.add('equipped-btn');
     } else if (owned) {
-      buyBtn.textContent = 'Equip';
-      buyBtn.disabled = false;
+      setText(buyBtn, 'Equip');
+      setDisabled(buyBtn, false);
       buyBtn.classList.remove('equipped-btn');
     } else {
-      buyBtn.textContent = hat.gemCost > 0 ? `${hat.gemCost} 💎` : 'Free';
-      buyBtn.disabled = state.meta.fishyGems < hat.gemCost;
+      setText(buyBtn, hat.gemCost > 0 ? `${hat.gemCost} 💎` : 'Free');
+      setDisabled(buyBtn, state.meta.fishyGems < hat.gemCost);
       buyBtn.classList.remove('equipped-btn');
     }
   }
-  els.customizationGemsDisplay.textContent = `💎 ${state.meta.fishyGems}`;
+  setText(els.customizationGemsDisplay, `💎 ${state.meta.fishyGems}`);
 }
 
 // Per direct request: clicking an already-selected single-tier shop item
@@ -4547,7 +4575,7 @@ function selectSpeciesForPreview(state, species) {
   // Per direct request, fish get the same stats chip row buildings already
   // show — see fishEconomyStatsHtml.
   const statsHtml = speciesStatsHtml(state, species.id);
-  els.previewStats.innerHTML = statsHtml;
+  setHtml(els.previewStats, statsHtml);
   // Name/price text is set live in refreshPreviewInfo (called both here and
   // every frame from updateHUD) since an economy species' price is dynamic —
   // see Config.js's ECONOMY_FISH_COST_GROWTH_RATE.
@@ -4626,7 +4654,7 @@ function selectBuildingForPreview(state, building) {
   els.previewHint.textContent = 'Click in the tank to place it';
   els.previewDesc.textContent = building.description;
   const statsHtml = buildingStatsHtml(building.id);
-  els.previewStats.innerHTML = statsHtml;
+  setHtml(els.previewStats, statsHtml);
   refreshPreviewInfo(state);
   renderPreviewCanvas();
   state.ui.selectedTool = `build:${building.id}`;
@@ -4891,15 +4919,15 @@ function renderPreviewCanvas() {
 // directly).
 function refreshPreviewInfo(state) {
   if (currentPreviewSpecies) {
-    els.previewName.textContent = currentPreviewSpecies.name;
+    setText(els.previewName, currentPreviewSpecies.name);
     // Re-rendered every frame (this runs each tick from updateHUD, same as
     // the price tags) so the Hunger line updates live if the player buys a
     // Food Quality upgrade while a fish preview is open — see
     // fishEconomyStatsHtml.
     const statsHtml = speciesStatsHtml(state, currentPreviewSpecies.id);
-    els.previewStats.innerHTML = statsHtml;
+    setHtml(els.previewStats, statsHtml);
   } else if (currentPreviewBuilding) {
-    els.previewName.textContent = currentPreviewBuilding.name;
+    setText(els.previewName, currentPreviewBuilding.name);
   }
 }
 
@@ -4967,12 +4995,12 @@ function refreshShopPrices(state) {
   // (.unaffordable) — the price tag's parent is the item's own button.
   for (const speciesId in speciesPriceTags) {
     const cost = getFishPurchaseCost(state, speciesId);
-    speciesPriceTags[speciesId].textContent = `$${cost}`;
+    setText(speciesPriceTags[speciesId], `$${cost}`);
     speciesPriceTags[speciesId].parentElement.classList.toggle('unaffordable', state.level.money < cost);
   }
   for (const buildingId in buildingPriceTags) {
     const cost = getBuildingCost(state, buildingId);
-    buildingPriceTags[buildingId].textContent = `$${cost}`;
+    setText(buildingPriceTags[buildingId], `$${cost}`);
     buildingPriceTags[buildingId].parentElement.classList.toggle('unaffordable', state.level.money < cost);
   }
   for (const familyId in familyButtons) {
@@ -5230,7 +5258,7 @@ export function updateHUD(state) {
   if (octopusUnlocked) {
     const scienceCapCount = countTankItemsByType(state, 'science');
     const scienceCapMax = effectiveScienceCapacity(state);
-    els.scienceCap.textContent = `🔬 ${scienceCapCount}/${scienceCapMax}`;
+    setText(els.scienceCap, `🔬 ${scienceCapCount}/${scienceCapMax}`);
     els.scienceCap.classList.toggle('cap-warning', scienceCapCount / scienceCapMax >= CAP_WARNING_THRESHOLD_FRACTION);
     els.scienceCap.classList.toggle('cap-full', scienceCapCount >= scienceCapMax);
     if (lastScienceCapCount !== null && scienceCapCount > lastScienceCapCount) {
@@ -5266,7 +5294,7 @@ export function updateHUD(state) {
     // battery draw/charge is netted in (see main.js's own comment),
     // batteryStoredMw is the live charge level, not the capacity.
     const storedMw = Math.round(state.level.batteryStoredMw);
-    els.powerText.textContent = last ? `⚡ ${last.demand}/${last.raw}/${storedMw} mw` : `⚡ 0/0/${storedMw} mw`;
+    setText(els.powerText, last ? `⚡ ${last.demand}/${last.raw}/${storedMw} mw` : `⚡ 0/0/${storedMw} mw`);
     if (powerGraphOpen) { positionPowerGraph(state); renderPowerGraph(state); }
   } else if (powerGraphOpen) {
     powerGraphOpen = false;
@@ -5278,7 +5306,7 @@ export function updateHUD(state) {
   // same "refresh every frame it's open" precedent as the power graph above.
   if (hudInfoModalOpen !== null) {
     const info = HUD_INFO_DATA[hudInfoModalOpen];
-    els.hudInfoModalStat.textContent = `${info.statLabel}: ${info.statFn(state)}`;
+    setText(els.hudInfoModalStat, `${info.statLabel}: ${info.statFn(state)}`);
     positionHudInfoModal();
   }
 
