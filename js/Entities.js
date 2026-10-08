@@ -210,6 +210,31 @@ function nextId() {
   return _nextId++;
 }
 
+// Real bug fix, per direct report ("I drag a coin around, let go, then try to grab another coin and it
+// snaps the first coin back under my cursor instead — over and over, until I grab a different one"):
+// _nextId restarts at 1 every page load, but a loaded save already holds items/fish with ids from the
+// earlier session, so after Continue / Load the next coin dropped got an id some saved coin already had.
+// Two items with one id make every find-by-id (the item drag, the fish drag, ...) return the FIRST of
+// them whichever one was actually clicked. Called right after a saved level is installed as
+// state.level: it moves the counter past every id in the level, and gives the later one of any
+// duplicate pair inside the same list (items, entities, ...) a fresh id — which also repairs a save
+// that was already written with duplicates in it.
+export function reconcileIdsAfterLoad(level) {
+  const lists = [];
+  for (const key in level) if (Array.isArray(level[key])) lists.push(level[key]);
+  let maxId = 0;
+  for (const list of lists) for (const obj of list) if (obj && typeof obj.id === 'number' && obj.id > maxId) maxId = obj.id;
+  if (maxId >= _nextId) _nextId = maxId + 1;
+  for (const list of lists) {
+    const seen = new Set();
+    for (const obj of list) {
+      if (!obj || typeof obj.id !== 'number') continue;
+      if (seen.has(obj.id)) obj.id = nextId();
+      else seen.add(obj.id);
+    }
+  }
+}
+
 // Filled by updateFood, flushed into state.level.items by updateEntities
 // right after its own state.level.items.filter(...) call completes — see
 // updateFood's own comment for why it can't push a new Waste item directly

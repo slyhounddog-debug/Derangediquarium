@@ -102,7 +102,7 @@ import {
   getFishPurchaseCost, effectiveScienceCapacity, countTankItemsByType, resolveMergeTutorialPair,
   computeTheoreticalGoldPerMinute, computeTheoreticalCoinCountPerMinute, computeTheoreticalSciencePerMinute, computeTheoreticalFoodNeededPerMinute,
   computeTheoreticalWastePerMinute, computeTheoreticalWasteEatenPerMinute, computeTheoreticalManufacturerOutputPerMinute, computeTheoreticalBiomassPerMinute,
-  computeFishInfoModalStats, describeFishMergeOptions, createPickupText,
+  computeFishInfoModalStats, describeFishMergeOptions, createPickupText, reconcileIdsAfterLoad,
 } from './Entities.js';
 import {
   getTile, worldToTile, getBuildingCost, FAN_STATS,
@@ -2753,6 +2753,7 @@ export function initStartScreen(state, onStart) {
       // campaign progress.
       state.meta = saved.meta;
       state.level = saved.level;
+      reconcileIdsAfterLoad(state.level); // new items/fish must not reuse ids the saved level already holds — see Entities.js
       centerCameraOnMound(state.camera); // same one-time re-center loadLevel's own callers already do, since a saved level has no camera position of its own
     }
     playPanelClose();
@@ -2849,6 +2850,7 @@ function loadLastSaveFromPause(state) {
   }
   state.meta = saved.meta;
   state.level = saved.level;
+  reconcileIdsAfterLoad(state.level); // new items/fish must not reuse ids the saved level already holds — see Entities.js
   centerCameraOnMound(state.camera); // same one-time re-center every other load-a-saved-level path already does
   pushUiNotification(state, 'Loaded your last save.');
   if (settingsOpenedFromStartScreen) {
