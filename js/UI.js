@@ -72,11 +72,8 @@ import {
   TILE_TURRET_WASTE,
   TILE_TURRET_ADVANCED,
   WASTE_TURRET_SHOTS_PER_WASTE,
-  WASTE_TURRET_MAX_WASTE,
-  WASTE_TURRET_MAX_AMMO,
   BIOMASS_TURRET_SHOTS_PER_AMMO,
   BIOMASS_TURRET_DAMAGE_MULTIPLIER,
-  ADVANCED_TURRET_MAX_BIOMASS_AMMO,
   ADVANCED_TURRET_BIOMASS_DAMAGE,
   ACHIEVEMENTS,
   ACHIEVEMENT_LIST,
@@ -4842,18 +4839,19 @@ const BUILDING_STAT_VALUE = {
 // A turret's damage/ammo, broken down per ammo type, per direct request: one row each for what it can
 // fire — Waste (ammo + damage), Biomass (ammo + damage); the Advanced Turret fires for free, so its Waste row
 // is a "No ammo" one with just its base damage, and its Biomass ammo is the small optional pool. `ammo` is
-// the shots a full load holds.
+// the shots one item of that ammo gives (per direct request, shown per Waste/Biomass rather than as a full load;
+// the Advanced Turret's Biomass reads as 15 too).
 function turretAmmoRows(buildingId) {
   const t = TURRET_STATS[buildingId];
   if (!TURRET_AMMO_TILES.has(buildingId)) {
     return [
       { icon: '🚫', label: 'No ammo', damage: t.damage },
-      { icon: itemIconImgHtml('biomass'), label: 'Biomass', ammo: ADVANCED_TURRET_MAX_BIOMASS_AMMO, damage: ADVANCED_TURRET_BIOMASS_DAMAGE },
+      { icon: itemIconImgHtml('biomass'), label: 'Biomass', ammo: BIOMASS_TURRET_SHOTS_PER_AMMO, damage: ADVANCED_TURRET_BIOMASS_DAMAGE },
     ];
   }
   return [
-    { icon: itemIconImgHtml('waste'), label: 'Waste', ammo: Math.min(WASTE_TURRET_MAX_AMMO, WASTE_TURRET_SHOTS_PER_WASTE * WASTE_TURRET_MAX_WASTE), damage: t.damage },
-    { icon: itemIconImgHtml('biomass'), label: 'Biomass', ammo: Math.min(WASTE_TURRET_MAX_AMMO, BIOMASS_TURRET_SHOTS_PER_AMMO * WASTE_TURRET_MAX_WASTE), damage: Math.round(t.damage * BIOMASS_TURRET_DAMAGE_MULTIPLIER * 10) / 10 },
+    { icon: itemIconImgHtml('waste'), label: 'Waste', ammo: WASTE_TURRET_SHOTS_PER_WASTE, damage: t.damage },
+    { icon: itemIconImgHtml('biomass'), label: 'Biomass', ammo: BIOMASS_TURRET_SHOTS_PER_AMMO, damage: Math.round(t.damage * BIOMASS_TURRET_DAMAGE_MULTIPLIER * 10) / 10 },
   ];
 }
 

@@ -1834,17 +1834,17 @@ export const BUILDING_TYPES = {
     // biomass as well") — Biomass now doubles as premium ammo (see
     // BIOMASS_TURRET_DAMAGE_MULTIPLIER/BIOMASS_TURRET_SHOTS_PER_AMMO), for
     // any tile in TURRET_AMMO_TILES (this tier and Electric, below).
-    description: 'Auto-fires on the nearest alien. Feeds on Waste or Biomass.',
+    description: 'Auto-fires on the nearest alien. Feeds on Waste or Biomass. Holds 5 items as ammo.',
     color: '#9c8a6b', unlockedByDefault: true, // free from the start, alongside Platform — the only defense before the Science Lab exists
   },
   [TILE_TURRET_ELECTRIC]: {
     id: TILE_TURRET_ELECTRIC, name: 'Electric Waste Turret', icon: '🔫', cost: 55,
-    description: 'Fires faster and harder. Needs both ammo and power.',
+    description: 'Fires faster and harder. Needs both ammo and power. Holds 5 items as ammo.',
     color: '#5fb8ff', unlockedByDefault: false,
   },
   [TILE_TURRET_ADVANCED]: {
     id: TILE_TURRET_ADVANCED, name: 'Advanced Turret', icon: '🔫', cost: 130,
-    description: 'The strongest turret: fastest and hardest-hitting.',
+    description: 'The strongest turret: fastest and hardest-hitting. Holds 5 items as ammo.',
     color: '#c9a8ff', unlockedByDefault: false,
   },
   // Renamed per direct request, same reasoning/shift as the Collector family

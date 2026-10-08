@@ -804,3 +804,12 @@ body:has(#tank-overlay:not(.collapsed)) #bottom-bar-row, body:has(#lab-overlay:n
 #lab-purchase-footnote.hidden { display: none; }
 /* Turret ammo-type rows: a "Waste"/"Biomass" title with an Ammo meter and a Damage meter side by side under it. */
 .building-stat.stat-dual-pair { grid-template-columns: 1fr 1fr; margin-top: -6px; }
+
+/* Selected Food/Favorite: the blue bubble turns light gold, like an active menu button on the plank and a selected building bubble in the Shop, so it's obvious at a glance. */
+#bottom-tool-bar .tool-btn.selected,
+#bottom-tool-bar #tool-food-btn.selected {
+  background:
+    radial-gradient(circle at 30% 24%, rgba(255, 255, 255, 0.95) 0 5%, rgba(255, 255, 255, 0) 6.5%),
+    radial-gradient(circle at 50% 50%, rgba(255, 244, 190, 0.45) 0 50%, rgba(255, 226, 150, 0.55) 82%, rgba(255, 250, 220, 0.9) 100%),
+    radial-gradient(circle at 34% 28%, #ffe9a8 0, #f6cd6a 45%, #d99f3a 100%);
+}
