@@ -983,19 +983,22 @@ body.alt-mode #production-info { display: none !important; }
   box-shadow: 0 3px 9px rgba(107, 76, 107, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.85);
 }
 
-/* Pause Time (button or Space) — a subtle cool tint plus a soft vignette
-   fades in over the whole screen, per direct request, so it's visually
-   obvious time is stopped. Under the pop-up menus (190+) so they stay
-   crisp, over the HUD and toolbar. Pure cosmetic: click-through, and the
-   simulation/physics aren't touched. */
+/* Pause Time (button or Space) — an old-film sepia wash fades in over the
+   whole screen, per direct request (replacing the earlier washed-out blue
+   tint), so it's visually obvious time is stopped: a warm brown tint, dark
+   burnt edges, and faint static scanlines. All plain gradients — no filter or
+   blend mode — so it costs almost nothing to composite. Under the pop-up menus
+   (190+) so they stay crisp, over the HUD and toolbar. Pure cosmetic:
+   click-through, and the simulation/physics aren't touched. */
 #time-pause-overlay {
   position: fixed; inset: 0;
   z-index: 150;
   pointer-events: none;
   opacity: 0;
   background:
-    radial-gradient(ellipse at center, rgba(40, 70, 140, 0) 50%, rgba(40, 70, 140, 0.3) 100%),
-    rgba(130, 170, 230, 0.1);
+    radial-gradient(ellipse at center, rgba(40, 20, 4, 0) 40%, rgba(30, 14, 2, 0.65) 100%),
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.07) 0 1px, transparent 1px 3px),
+    rgba(105, 62, 20, 0.34);
   transition: opacity 0.5s ease;
 }
 body.time-paused #time-pause-overlay { opacity: 1; }
@@ -1426,14 +1429,6 @@ body.time-paused #time-pause-overlay { opacity: 1; }
   flex: none; height: 92px;
   font-size: 13px; line-height: 1.4; opacity: 0.85;
   margin-bottom: 8px;
-}
-/* No Buy button any more — a fish is armed as the active click-tool exactly
-   like a building is (see UI.js's selectSpeciesForPreview/main.js's click
-   handler), so the preview is read-only info plus this one hint line. */
-#shop-preview-hint {
-  margin-top: auto; /* pins to the bottom of the fixed-height column no matter how tall the description above it is */
-  text-align: center;
-  font-size: 13px; font-weight: 700; opacity: 0.6;
 }
 /* Processor/Auto-Feeder/Fan stats block — shown instead of/alongside the
    prose description when one of those is previewed, per direct request

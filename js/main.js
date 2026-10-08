@@ -3595,7 +3595,7 @@ input.keydownHandlers.push((e) => {
     return;
   }
   // Per direct request ("make it so that during tutorials you can use
-  // hotkeys 1-2 to toggle the tools on or off, in case they are on and need
+  // hotkeys W/Ctrl+C to toggle the tools on or off, in case they are on and need
   // to be turned off for the tutorial") — a third exception to "every hotkey
   // is swallowed during a tutorial," alongside Escape/KeyE above. selectTool
   // already toggles (re-pressing an already-armed tool's own hotkey clears
@@ -3609,8 +3609,8 @@ input.keydownHandlers.push((e) => {
   // silently reverted).
   if (state.level.tutorialFlow) {
     const flow = state.level.tutorialFlow;
-    if (e.code === 'Digit1') { selectTool(state, 'food'); state.ui.tutorialToolOverrideStep = `${flow.id}:${flow.step}`; return; }
-    if (e.code === 'Digit2') { selectTool(state, 'blueprint'); state.ui.tutorialToolOverrideStep = `${flow.id}:${flow.step}`; return; }
+    if (e.code === 'KeyW') { selectTool(state, 'food'); state.ui.tutorialToolOverrideStep = `${flow.id}:${flow.step}`; return; }
+    if (e.code === 'KeyC' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); selectTool(state, 'blueprint'); state.ui.tutorialToolOverrideStep = `${flow.id}:${flow.step}`; return; }
   }
   // Guided tutorial flows (see UI.js's TUTORIAL_FLOWS) swallow every OTHER
   // hotkey, same reasoning as the cinematic intro above — the overlay's own
@@ -3704,24 +3704,21 @@ input.keydownHandlers.push((e) => {
     case 'KeyK': // clear all items
       state.level.items = [];
       break;
-    case 'Digit1': // Food — matches the fixed bottom tool-bar's own hotkeys
+    case 'KeyW': // Food — matches the fixed bottom tool-bar's own hotkeys; moved off 1 per direct request, which now belongs to Favorite slot 1
       selectTool(state, 'food');
       break;
-    case 'Digit2': // Blueprint ("Stamp") — moved down from 3 when the Merge tool was removed, per direct request — see blueprintClipboardActive's/blueprintClipboard's own comments
-      selectTool(state, 'blueprint');
-      break;
-    // 3/4/5 — Favorite slots 1/2/3 (were 4/5/6 before the Merge tool was removed).
+    // 1/2/3 — Favorite slots 1/2/3 (moved down from 3/4/5 per direct request, when Food moved to W and Blueprint to Ctrl+C).
     // Per direct request (replacing the old F hotkey): with the shop open and a
     // fish/building selected they PIN that selection into the slot (overwrite,
     // or toggle off if it's already there); otherwise they select the slot's
     // favorite as before.
-    case 'Digit3':
+    case 'Digit1':
       if (!setFavoriteSlotFromShop(state, 0)) selectFavorite(state, 0);
       break;
-    case 'Digit4':
+    case 'Digit2':
       if (!setFavoriteSlotFromShop(state, 1)) selectFavorite(state, 1);
       break;
-    case 'Digit5':
+    case 'Digit3':
       if (!setFavoriteSlotFromShop(state, 2)) selectFavorite(state, 2);
       break;
     case 'KeyZ': // Ctrl+Z — undo the last building place/move/sell
@@ -3842,7 +3839,14 @@ input.keydownHandlers.push((e) => {
     case 'KeyY': // force the next Alien Invasion wave to start right now, for testing without waiting out a real ALIEN_WAVE_INTERVAL_EARLY/LATE_MS gap
       state.level.alienNextWaveAtMs = state.level.elapsed;
       break;
-    case 'KeyC': // set the countdown to the next Alien Invasion wave to exactly 10s from now — per direct request, for testing the Wave Countdown HUD/warning notifications without waiting out a real 3.5-4.5 minute gap. Touches ONLY alienNextWaveAtMs, same minimal shape as KeyY above — doesn't touch wave size, tier mix, or the difficulty ramp (all computed fresh, from alienWavesSpawned/elapsed, at the moment the wave actually fires), and is silently overwritten by updateAlienWaves' own real scheduling if a wave is already active (the countdown genuinely hasn't started yet in that case, same as it wouldn't for a real player).
+    case 'KeyC': // Ctrl+C — Blueprint ("Stamp"), per direct request, replacing the toolbar button and the 2 hotkey; see blueprintClipboardActive's/blueprintClipboard's own comments. The wave-countdown cheat moved to Alt+C so the two don't collide.
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        selectTool(state, 'blueprint');
+        break;
+      }
+      if (!e.altKey) break;
+      // set the countdown to the next Alien Invasion wave to exactly 10s from now — per direct request, for testing the Wave Countdown HUD/warning notifications without waiting out a real 3.5-4.5 minute gap. Touches ONLY alienNextWaveAtMs, same minimal shape as KeyY above — doesn't touch wave size, tier mix, or the difficulty ramp (all computed fresh, from alienWavesSpawned/elapsed, at the moment the wave actually fires), and is silently overwritten by updateAlienWaves' own real scheduling if a wave is already active (the countdown genuinely hasn't started yet in that case, same as it wouldn't for a real player).
       state.level.alienNextWaveAtMs = state.level.elapsed + 10000;
       break;
     case 'Space': // Pause Time — per direct request, same toggle the minimap's own Pause button uses (see UI.js's toggleTimePause)

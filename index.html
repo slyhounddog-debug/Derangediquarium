@@ -302,6 +302,7 @@
 <div id="hotkey-legend">
   <div id="hotkey-legend-esc">Esc: Pause Menu</div>
   <div id="hotkey-legend-q">Q: Pipette Tool</div>
+  <div id="hotkey-legend-blueprint">Ctrl+C: Blueprint</div>
   <div id="hotkey-legend-undo" class="hidden">Ctrl+Z: Undo</div>
   <div id="hotkey-legend-alt">Alt: Turn on Alt-mode</div>
   <div id="hotkey-legend-tab">Tab: Base Stats</div>
@@ -480,6 +481,8 @@
     <div id="lab-purchase-desc"></div>
     <div id="lab-purchase-stats"></div>
     <div id="lab-purchase-cost"></div>
+    <!-- Per direct request: shown only when the modal was opened from a merge button for a hybrid that hasn't been bought yet. -->
+    <div id="lab-purchase-footnote" class="hidden">* Locked — purchase this fish from the Science Lab.</div>
     <div id="lab-purchase-buttons">
       <button id="lab-purchase-cancel-btn" class="pause-btn">Cancel</button>
       <button id="lab-purchase-confirm-btn" class="pause-btn sheen-target">Confirm</button>
@@ -607,7 +610,7 @@
       </div>
     </div>
     <div id="shop-preview" class="sheen-target">
-      <div id="shop-preview-empty"><div>Tap a fish or building to see it here!<div id="shop-preview-empty-hint">3/4/5: Set Favorite</div></div></div>
+      <div id="shop-preview-empty"><div>Tap a fish or building to see it here!<div id="shop-preview-empty-hint">1/2/3: Set Favorite</div></div></div>
       <div id="shop-preview-content" class="hidden">
         <!-- Per direct request, name, description and stats each live in
              their own fixed-size container so nothing in this column moves
@@ -618,7 +621,6 @@
         </div>
         <div id="shop-preview-desc" class="shop-preview-box"></div>
         <div id="shop-preview-stats" class="shop-preview-box"></div>
-        <div id="shop-preview-hint">Click in the tank to place it</div>
       </div>
     </div>
   </div>
@@ -670,40 +672,29 @@
 </div>
 
 <div id="bottom-bar-row">
-  <button id="shop-collapse-btn" title="Shop (E)">🛍️<span class="panel-toggle-hotkey">E</span></button>
-
-  <!-- Per direct request ("add in badges to the 1-6 tools in the toolbar,
-       like the E and P badges on the shop and tank point menu") — every
-       button here reuses that exact same .panel-toggle-hotkey badge (see
-       css/style.css's own comment on it), just showing 1-6 instead of E/T.
-       The 3 static tools' badges are plain markup below; the 3 Favorite
-       slots' own badges are injected live by UI.js's refreshFavoriteSlots
-       (their whole innerHTML is rebuilt every time a favorite changes, so a
-       static badge here would get wiped). -->
+  <!-- Per direct request, one wide toolbar plank in three categories — menus (Shop, Tank Upgrades,
+       Science Lab once the Mound has shattered into it), Food, and the 3 Favorites — split by riveted
+       iron straps. Hotkey badges: E/T/S on the menus, W on Food, 1-3 on the Favorites (the Favorites'
+       own badges are injected live by UI.js's refreshFavoriteSlots, since their whole innerHTML is
+       rebuilt every time a favorite changes). The Blueprint tool has no button any more; Ctrl+C arms it. -->
   <div id="bottom-tool-bar">
-    <button id="tool-food-btn" class="tool-btn sheen-target" title="Food — $3 (1) — hover a building and press D (or hold D and drag) to delete it for a full refund">
+    <button id="shop-collapse-btn" title="Shop (E)">🛍️<span class="panel-toggle-hotkey">E</span></button>
+    <button id="tank-collapse-btn" title="Tank Upgrades (T)">🏆<span class="panel-toggle-hotkey">T</span><span class="attention-dot hidden"></span></button>
+    <!-- Science Lab launcher — hidden until the Mound has shattered into the Lab (UI.js's updateHUD toggles .hidden). -->
+    <button id="lab-collapse-btn" class="hidden" title="Science Lab (S)">🔬<span class="panel-toggle-hotkey">S</span><span class="attention-dot hidden"></span></button>
+    <div class="toolbar-strap"></div>
+    <button id="tool-food-btn" class="tool-btn sheen-target" title="Food — $3 (W) — hover a building and press D (or hold D and drag) to delete it for a full refund">
       <span class="tool-icon tool-icon-food"></span>
-      <span class="panel-toggle-hotkey">1</span>
+      <span class="panel-toggle-hotkey">W</span>
     </button>
-    <button id="tool-blueprint-btn" class="tool-btn sheen-target" title="Blueprint — drag a box over built buildings to copy them, then click to paste that layout elsewhere (2)">
-      <span class="tool-icon tool-icon-blueprint"></span>
-      <span class="panel-toggle-hotkey">2</span>
-    </button>
-    <!-- 3 Favorite slots — per direct request: with the shop open, pick a
-         fish/building and press 3/4/5 to pin it into that slot (overwrites;
-         pressing the same number again on the same pick clears it).
-         Empty/filled content and hotkeys (3/4/5) are all populated live by
-         UI.js's buildFavoriteSlots/refreshFavoriteSlots. -->
+    <div class="toolbar-strap"></div>
+    <!-- 3 Favorite slots — with the shop open, pick a fish/building and press 1/2/3 to pin it into that
+         slot (overwrites; pressing the same number again on the same pick clears it). Content and
+         hotkeys are populated live by UI.js's buildFavoriteSlots/refreshFavoriteSlots. -->
     <button id="tool-favorite-1-btn" class="tool-btn sheen-target tool-btn-favorite"></button>
     <button id="tool-favorite-2-btn" class="tool-btn sheen-target tool-btn-favorite"></button>
     <button id="tool-favorite-3-btn" class="tool-btn sheen-target tool-btn-favorite"></button>
   </div>
-
-  <!-- Science Lab launcher, per direct request — hidden until the Mound has
-       shattered into the Lab (UI.js's updateHUD toggles .hidden), since
-       there's nothing to open before then. -->
-  <button id="lab-collapse-btn" class="hidden" title="Science Lab (S)">🔬<span class="panel-toggle-hotkey">S</span><span class="attention-dot hidden"></span></button>
-  <button id="tank-collapse-btn" title="Tank Upgrades (T)">🏆<span class="panel-toggle-hotkey">T</span><span class="attention-dot hidden"></span></button>
 </div>
 
 <!-- Pause Time (button or Space) fades this subtle tint + vignette in over the

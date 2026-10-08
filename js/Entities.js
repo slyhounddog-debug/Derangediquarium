@@ -1922,11 +1922,11 @@ function mergePairOutcome(state, fish, other, combineSource, spliceSource, splic
   }
   if (spliceSource && canSpliceFish(state, fish, other)) {
     const resultSpeciesId = getHybridSpeciesId(other.speciesId, fish.speciesId);
-    return { resultSpeciesId, text: `Splice with ${SPECIES[other.speciesId].name} → ${SPECIES[resultSpeciesId].name}` };
+    return { resultSpeciesId, text: `${SPECIES[other.speciesId].name} → ${SPECIES[resultSpeciesId].name}`, isSplice: true };
   }
   if (spliceTarget && canSpliceFish(state, other, fish)) {
     const resultSpeciesId = getHybridSpeciesId(fish.speciesId, other.speciesId);
-    return { resultSpeciesId, text: `Splice with ${SPECIES[other.speciesId].name} → ${SPECIES[resultSpeciesId].name}` };
+    return { resultSpeciesId, text: `${SPECIES[other.speciesId].name} → ${SPECIES[resultSpeciesId].name}`, isSplice: true };
   }
   return null;
 }
@@ -1938,7 +1938,7 @@ export function describeFishMergeOptions(state, fish) {
     if (!state.meta.speciesUnlocked.includes('xeno_octopus')) return null;
     const entries = [];
     if (state.level.entities.some((e) => e.type === 'fish' && !e.dying && canSpliceOctopusWithAlien(state, e, fish))) {
-      entries.push({ text: `Splice with ${SPECIES.octopus.name} → ${SPECIES.xeno_octopus.name}`, otherSpeciesId: 'octopus', resultSpeciesId: 'xeno_octopus' });
+      entries.push({ text: `${SPECIES.octopus.name} → ${SPECIES.xeno_octopus.name}`, isSplice: true, otherSpeciesId: 'octopus', resultSpeciesId: 'xeno_octopus' });
     }
     return entries.length > 0 ? entries : [{ text: 'No available fish to merge.', otherSpeciesId: null, resultSpeciesId: null }];
   }
@@ -1953,13 +1953,13 @@ export function describeFishMergeOptions(state, fish) {
       // An Octopus can also splice with an egg-hatched friendly alien (Bio Fish) — listed with a text label, since there's no fish icon for the alien.
       if (canSpliceOctopusWithAlien(state, fish, other) && !seen.has('alien')) {
         seen.add('alien');
-        entries.push({ text: `Splice with Friendly Alien → ${SPECIES.xeno_octopus.name}`, otherSpeciesId: null, otherLabel: 'Alien', resultSpeciesId: 'xeno_octopus' });
+        entries.push({ text: `Friendly Alien → ${SPECIES.xeno_octopus.name}`, isSplice: true, otherSpeciesId: null, otherLabel: 'Alien', resultSpeciesId: 'xeno_octopus' });
       }
       continue;
     }
     if (other.type !== 'fish' || other.id === fish.id || other.dying) continue;
     const outcome = mergePairOutcome(state, fish, other, combineSource, spliceSource, spliceTarget);
-    if (outcome && !seen.has(outcome.text)) { seen.add(outcome.text); entries.push({ text: outcome.text, otherSpeciesId: other.speciesId, resultSpeciesId: outcome.resultSpeciesId }); }
+    if (outcome && !seen.has(outcome.text)) { seen.add(outcome.text); entries.push({ text: outcome.text, isSplice: !!outcome.isSplice, otherSpeciesId: other.speciesId, resultSpeciesId: outcome.resultSpeciesId }); }
   }
   return entries.length > 0 ? entries : [{ text: 'No available fish to merge.', otherSpeciesId: null, resultSpeciesId: null }];
 }

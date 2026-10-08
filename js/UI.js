@@ -61,6 +61,7 @@ import {
   TILE_STORAGE_CHEST,
   STORAGE_CHEST_CAPACITY,
   SPECIES,
+  SPECIES_LIST,
   FISH_BASE_SIZE,
   WASTE_POOP_INTERVAL_MS,
   FISH_SPEED_MULTIPLIER,
@@ -227,6 +228,7 @@ let savedLabZoom = 1;
 const LAB_ZOOM_MIN = 0.6;
 const LAB_ZOOM_MAX = 1.6;
 const LAB_ZOOM_STEP = 0.15;
+let labPurchaseInfoOnly = false; // true when the modal was opened from a merge button (fish modal/shop) just to read about a hybrid's node — no Cancel/Confirm, see openLabPurchaseModal
 let labPurchaseNodeId = null; // node id the confirmation modal is currently showing, if any — see openLabPurchaseModal/confirmLabPurchase
 let powerGraphOpen = false; // the small rolling-graph popup under the electricity HUD readout — see #hud-power's click listener
 let hudInfoModalOpen = null; // which HUD stat's info modal is open ('money'/'scienceCap'/'cleanliness'), or null — see openHudInfoModal
@@ -447,9 +449,7 @@ export function initUI(state) {
     previewName: document.getElementById('shop-preview-name'),
     previewDesc: document.getElementById('shop-preview-desc'),
     previewStats: document.getElementById('shop-preview-stats'),
-    previewHint: document.getElementById('shop-preview-hint'),
     toolFoodBtn: document.getElementById('tool-food-btn'),
-    toolBlueprintBtn: document.getElementById('tool-blueprint-btn'),
     favoriteSlotBtns: [
       document.getElementById('tool-favorite-1-btn'),
       document.getElementById('tool-favorite-2-btn'),
@@ -540,6 +540,8 @@ export function initUI(state) {
     labTreeCanvas: document.getElementById('lab-tree-canvas'),
     labTreeColumns: document.getElementById('lab-tree-columns'),
     labPurchaseOverlay: document.getElementById('lab-purchase-overlay'),
+    labPurchaseModal: document.getElementById('lab-purchase-modal'),
+    labPurchaseFootnote: document.getElementById('lab-purchase-footnote'),
     labPurchaseIcon: document.getElementById('lab-purchase-icon'),
     labPurchaseName: document.getElementById('lab-purchase-name'),
     labPurchaseDesc: document.getElementById('lab-purchase-desc'),
@@ -705,8 +707,19 @@ export function initUI(state) {
   els.labPurchaseCancelBtn.addEventListener('click', () => closeLabPurchaseModal());
   els.labPurchaseConfirmBtn.addEventListener('click', () => confirmLabPurchase(state));
   els.labPurchaseOverlay.addEventListener('click', (e) => {
-    if (e.target === els.labPurchaseOverlay) closeLabPurchaseModal();
+    if (e.target !== els.labPurchaseOverlay) return;
+    // Per direct request, when this was opened from a merge button, a click outside it closes
+    // the fish modal behind it too — unless the click lands back inside that fish modal.
+    const closeFishToo = labPurchaseInfoOnly && fishInfoMenuOpen && !document.elementsFromPoint(e.clientX, e.clientY).includes(els.fishInfoMenu);
+    closeLabPurchaseModal();
+    if (closeFishToo) closeFishInfoMenu(state);
   });
+  const onMergeNodeClick = (e) => {
+    const btn = e.target.closest('.merge-node-btn');
+    if (btn) openLabPurchaseModal(state, btn.dataset.nodeId, true);
+  };
+  els.fishInfoMergeLines.addEventListener('click', onMergeNodeClick);
+  els.previewStats.addEventListener('click', onMergeNodeClick);
 
   els.notificationLatest.addEventListener('click', () => {
     notificationLogExpanded = !notificationLogExpanded;
@@ -733,7 +746,6 @@ export function initUI(state) {
   // paste that whole layout elsewhere. All the actual drag-select/paste
   // mechanics live in main.js (mouse handlers, module-local clipboard state)
   // — this button just arms the tool, same as every other one here.
-  els.toolBlueprintBtn.addEventListener('click', () => selectTool(state, 'blueprint'));
 
   els.shopCollapseBtn.addEventListener('click', () => {
     toggleShopCollapse(state);
@@ -1384,6 +1396,37 @@ function collectFishModalRanges(state) {
 // player feeding/cleaning the tank, another fish growing up nearby), so
 // there's no "static content" half to split off the way
 // refreshBuildingInfoLiveStats does.
+// The Science Lab node that unlocks a hybrid species, or null for anything without one.
+function labNodeIdForSpecies(speciesId) {
+  const node = SCIENCE_LAB_UPGRADE_LIST.find((n) => n.grants.species && n.grants.species.includes(speciesId));
+  return node ? node.id : null;
+}
+
+// One "Partner → [Result]" merge line, per direct request: the result is a bright bold button that opens
+// that hybrid's Science Lab node info (see openLabPurchaseModal's infoOnly mode), styled as locked
+// until the node is purchased. Plain Tier merges and entries with no node stay plain text.
+function spliceEntryHtml(state, entry) {
+  const nodeId = entry.isSplice ? labNodeIdForSpecies(entry.resultSpeciesId) : null;
+  const arrow = entry.text.indexOf(' → ');
+  if (nodeId == null || arrow < 0) return `<div>${entry.text}</div>`;
+  const locked = !state.meta.labUpgradesPurchased.includes(nodeId);
+  const title = locked ? 'Not purchased yet — click to see its Science Lab node' : 'Click to see its Science Lab node';
+  return `<div>${entry.text.slice(0, arrow)} → <button class="merge-node-btn${locked ? ' locked' : ''}" data-node-id="${nodeId}" title="${title}">${locked ? '🔒 ' : ''}${entry.text.slice(arrow + 3)}</button></div>`;
+}
+
+// The shop preview's merge section for a fish: every hybrid that lists it as a parent.
+function shopSpliceSectionHtml(state, speciesId) {
+  const lines = [];
+  for (const s of SPECIES_LIST) {
+    if (!s.parents || !s.parents.includes(speciesId)) continue;
+    const otherId = s.parents[0] === speciesId ? s.parents[1] : s.parents[0];
+    // the Bio Fish's second parent is the egg-hatched alien, which isn't a SPECIES row
+    lines.push(spliceEntryHtml(state, { text: `${SPECIES[otherId] ? SPECIES[otherId].name : 'Friendly Alien'} → ${s.name}`, isSplice: true, resultSpeciesId: s.id }));
+  }
+  if (!lines.length) return '';
+  return `<div class="shop-merge-section"><div class="shop-merge-title">Available Merges</div>${lines.join('')}</div>`;
+}
+
 export function refreshFishInfoMenu(state) {
   if (!fishInfoMenuOpen) return;
   const fishId = state.ui.fishInfoModalFishId;
@@ -1419,11 +1462,12 @@ export function refreshFishInfoMenu(state) {
   const mergeLines = describeFishMergeOptions(state, fish);
   els.fishInfoMergeTitle.classList.toggle('hidden', mergeLines == null);
   els.fishInfoMergeLines.classList.toggle('hidden', mergeLines == null);
+  // Per direct request, a splice reads "Partner → Result" with the result as a button to its Science Lab node.
   // The modal keeps the full text sentence, per direct request ("Keep the
   // fish info modal text for the available merges as it is now") — only the
   // bottom-left hover legend (refreshFishMergeLegendIcons below) switched to
   // icons.
-  if (mergeLines != null) els.fishInfoMergeLines.innerHTML = mergeLines.map((entry) => `<div>${entry.text}</div>`).join('');
+  if (mergeLines != null) setHtml(els.fishInfoMergeLines, mergeLines.map((entry) => spliceEntryHtml(state, entry)).join('')); // setHtml so the node buttons aren't torn down every frame mid-click
 
   updateFishInfoMenuPosition(state);
 }
@@ -2231,9 +2275,14 @@ function buyLabUpgrade(state, id) {
 // the stats of the building/fish being unlocked"). Opened by a node's click
 // handler above instead of buying immediately; Confirm is the only thing
 // left that actually calls buyLabUpgrade.
-function openLabPurchaseModal(state, id) {
+function openLabPurchaseModal(state, id, infoOnly = false) {
   const node = SCIENCE_LAB_UPGRADES[id];
   labPurchaseNodeId = id;
+  labPurchaseInfoOnly = infoOnly;
+  const infoLocked = infoOnly && !state.meta.labUpgradesPurchased.includes(id);
+  els.labPurchaseModal.classList.toggle('info-only', infoOnly);
+  els.labPurchaseModal.classList.toggle('info-locked', infoLocked);
+  els.labPurchaseFootnote.classList.toggle('hidden', !infoLocked);
   // A `mystery: true` node stays a total blank until its prerequisites are
   // met, per direct spec ("a question mark node... that gives no info until
   // it's unlockable") — no name, no icon, no cost, no description, nothing
@@ -2257,8 +2306,8 @@ function openLabPurchaseModal(state, id) {
   // rendering of that building's actual look instead of its flat emoji.
   els.labPurchaseIcon.textContent = '';
   els.labPurchaseIcon.appendChild(buildingIconOrEmojiElement(node, LAB_PURCHASE_ICON_CANVAS_SIZE));
-  els.labPurchaseName.textContent = node.name;
-  els.labPurchaseCost.textContent = labNodeCostText(node);
+  els.labPurchaseName.textContent = (infoLocked ? '🔒 ' : '') + node.name;
+  els.labPurchaseCost.textContent = infoOnly && !infoLocked ? 'Unlocked ✓' : labNodeCostText(node);
   refreshLabPurchaseButton(state);
 
   const descLines = [];
@@ -2321,6 +2370,7 @@ function openLabPurchaseModal(state, id) {
 export function closeLabPurchaseModal() {
   if (labPurchaseNodeId === null) return;
   labPurchaseNodeId = null;
+  labPurchaseInfoOnly = false;
   els.labPurchaseOverlay.classList.add('hidden');
   playPanelClose();
 }
@@ -2563,7 +2613,7 @@ function refreshLabTree(state) {
     else setText(costEl, labNodeCostText(node));
   }
   drawLabTreeConnectors(state);
-  if (labPurchaseNodeId !== null) refreshLabPurchaseButton(state); // Science/gold/purchased-state can keep changing while the confirmation modal sits open
+  if (labPurchaseNodeId !== null && !labPurchaseInfoOnly) refreshLabPurchaseButton(state); // Science/gold/purchased-state can keep changing while the confirmation modal sits open
 }
 
 // The "web" itself — one bezier connector per prerequisite edge, drawn on a
@@ -2994,9 +3044,7 @@ export function cancelActiveTool(state) {
 
 function updateToolbar(state) {
   const foodSelected = state.ui.selectedTool === 'food';
-  const blueprintSelected = state.ui.selectedTool === 'blueprint';
   els.toolFoodBtn.classList.toggle('selected', foodSelected);
-  els.toolBlueprintBtn.classList.toggle('selected', blueprintSelected);
 
   // Descriptive text lives on each button's own native `title` hover
   // tooltip now, not a separate always-visible shop line — per direct
@@ -3007,7 +3055,7 @@ function updateToolbar(state) {
   // this tool (see main.js's updateKeyDDelete), per direct request
   // ("Remove the demolish tool... have it built into the food cursor tool
   // via the D hotkey").
-  const foodTitle = `Food — $${FOOD_COST} (1) — hover a building and press D (or hold D and drag) to delete it for a full refund`;
+  const foodTitle = `Food — $${FOOD_COST} (W) — hover a building and press D (or hold D and drag) to delete it for a full refund`;
   if (els.toolFoodBtn.title !== foodTitle) els.toolFoodBtn.title = foodTitle;
 
   for (const btn of els.buildToolGrid.children) {
@@ -3025,7 +3073,7 @@ function updateToolbar(state) {
 }
 
 // ---- Favorite toolbar slots ----
-// Per direct request: 3 extra bottom-tool-bar slots (hotkeys 3-5) a player
+// Per direct request: 3 extra bottom-tool-bar slots (hotkeys 1-3) a player
 // can pin any fish or building into. state.meta.favorites is a plain
 // 3-element array — each entry a 'build:<id>'/'fish:<id>' tool string or
 // null for an empty slot — persisted like every other meta field (survives
@@ -3046,7 +3094,7 @@ function buildFavoriteSlots(state) {
 function refreshFavoriteSlots(state) {
   els.favoriteSlotBtns.forEach((btn, index) => {
     const tool = state.meta.favorites[index];
-    const hotkeyNum = index + 3; // slots are hotkeys 3/4/5 (the Merge tool, and its hotkey, were removed)
+    const hotkeyNum = index + 1; // slots are hotkeys 1/2/3 — per direct request, moved down from 3/4/5 when Food moved to W and Blueprint to Ctrl+C
     btn.innerHTML = '';
     // Per direct request ("add in badges to the 1-6 tools in the toolbar,
     // like the E and P badges") — this whole button's innerHTML gets wiped
@@ -3087,12 +3135,12 @@ function refreshFavoriteSlots(state) {
   });
 }
 
-// Per direct request (replaces the old dedicated F hotkey): pressing 3/4/5
+// Per direct request (replaces the old dedicated F hotkey): pressing 1/2/3
 // while the shop is open with a fish/building selected pins that selection
 // into slot 1/2/3 — overwriting whatever was there — or, if that exact tool
 // is already in that exact slot, clears it back to empty. Returns false when
 // it doesn't apply (shop closed, or nothing buildable/buyable selected), so
-// main.js's keydown handler falls through to selectFavorite, i.e. 3/4/5's
+// main.js's keydown handler falls through to selectFavorite, i.e. 1/2/3's
 // usual "arm this slot's tool" meaning.
 export function setFavoriteSlotFromShop(state, index) {
   const tool = state.ui.selectedTool;
@@ -4588,11 +4636,10 @@ function selectSpeciesForPreview(state, species) {
   currentPreviewBuilding = null;
   els.previewEmpty.classList.add('hidden');
   els.previewContent.classList.remove('hidden');
-  els.previewHint.textContent = 'Click in the tank to place it';
   els.previewDesc.textContent = species.description;
   // Per direct request, fish get the same stats chip row buildings already
   // show — see fishEconomyStatsHtml.
-  const statsHtml = speciesStatsHtml(state, species.id);
+  const statsHtml = speciesStatsHtml(state, species.id) + shopSpliceSectionHtml(state, species.id); // per direct request, plus this fish's available merges
   setHtml(els.previewStats, statsHtml);
   // Name/price text is set live in refreshPreviewInfo (called both here and
   // every frame from updateHUD) since an economy species' price is dynamic —
@@ -4669,7 +4716,6 @@ function selectBuildingForPreview(state, building) {
   stopPreviewAnimation(); // no idle-swim animation for a building — it's a static tile icon
   els.previewEmpty.classList.add('hidden');
   els.previewContent.classList.remove('hidden');
-  els.previewHint.textContent = 'Click in the tank to place it';
   els.previewDesc.textContent = building.description;
   const statsHtml = buildingStatsHtml(building.id);
   setHtml(els.previewStats, statsHtml);
@@ -4942,7 +4988,7 @@ function refreshPreviewInfo(state) {
     // the price tags) so the Hunger line updates live if the player buys a
     // Food Quality upgrade while a fish preview is open — see
     // fishEconomyStatsHtml.
-    const statsHtml = speciesStatsHtml(state, currentPreviewSpecies.id);
+    const statsHtml = speciesStatsHtml(state, currentPreviewSpecies.id) + shopSpliceSectionHtml(state, currentPreviewSpecies.id);
     setHtml(els.previewStats, statsHtml);
   } else if (currentPreviewBuilding) {
     setText(els.previewName, currentPreviewBuilding.name);
@@ -5645,7 +5691,8 @@ function formatBuildCostLegendText(netCost) {
 
 function positionBottomLeftLegends() {
   const rect = els.shopCollapseBtn.getBoundingClientRect();
-  const right = `${window.innerWidth - rect.left + 12}px`;
+  const barRect = document.getElementById('bottom-tool-bar').getBoundingClientRect(); // the Shop button now sits inside the wide toolbar plank, so the legends clear the plank's left edge, not the button's
+  const right = `${window.innerWidth - barRect.left + 12}px`;
   const bottom = `${window.innerHeight - rect.bottom}px`;
   els.buildLegend.style.right = right;
   els.buildLegend.style.bottom = bottom;
