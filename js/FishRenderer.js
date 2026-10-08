@@ -655,6 +655,7 @@ function drawHat(ctx, hatId, x, y, size, facing) {
 // header comment).
 function drawEye(ctx, eyeX, eyeY, socketRadius, pupilRadius, eyeDirection) {
   if (!eyeDirection) return;
+  if (eyeRecorder) { eyeRecorder.push({ x: eyeX, y: eyeY, socket: socketRadius, pupil: pupilRadius, color: pupilColor }); return; } // sprite bake: the eye is drawn live, on top of the cached body — see drawFishCached
   const pupilOffset = socketRadius * EYE_PUPIL_OFFSET_RATIO;
   ctx.fillStyle = '#ffffff';
   ctx.beginPath();
@@ -1128,7 +1129,10 @@ export function drawFishShadow(ctx, x, y, speciesId, stage, starTier = 1) {
 // random phase, and ms since a merge made it (-1 for none). Left at the default
 // (-1) by every preview/icon caller, which then draw no stars or rim at all —
 // only the static Tier 4 look (gold pupil, +5% size) still follows starTier.
-export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDirection, starTier = 1, sickness = 0, grayed = 0, hatId = 'none', elapsedMs = -1, fishPhase = 0, mergeAgeMs = -1) {
+// The look every draw path shares: species/stage -> size, and the body color after the
+// sickness / grayed tints. Split out of drawFish unchanged so drawFish and the sprite
+// cache below can't drift apart.
+function resolveFishLook(speciesId, stage, starTier, sickness, grayed) {
   const def = SPECIES[speciesId];
   const scale = def.growthStages[stage].scale;
   const isFullyGrown = stage === def.growthStages.length - 1;
@@ -1149,29 +1153,15 @@ export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDire
     if (grayed > 0) rgb = mixRgb(rgb, ALIEN_BLOCKED_GRAY, grayed);
     color = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
   }
+  return { def, size, isFullyGrown, baseColor, color };
+}
 
-  // Economy Fish Combining tier look (see the helpers above) — adults only. The far
-  // half of the orbiting stars draws before the body so it tucks behind it.
-  pupilColor = isFullyGrown && starTier >= 4 ? color : '#1a1a1a'; // Tier 4: the pupil matches the fish's own color
-  rimBandAlpha = 0;
-  let starCount = 0;
-  let orbitRing = null;
-  // Only economy fish (the ones that can merge up a tier) get stars, the orbit oval and the rim.
-  if (isFullyGrown && elapsedMs >= 0 && ECONOMY_SPECIES.has(speciesId)) {
-    starCount = FISH_STAR_COUNT_BY_TIER[starTier] || 0;
-    const band = FISH_RIM_BAND_BY_TIER[starTier];
-    if (band) {
-      const pulse = 0.5 + 0.5 * Math.sin((elapsedMs / FISH_RIM_PERIOD_MS) * Math.PI * 2 + fishPhase);
-      rimBandAlpha = band.minAlpha + (band.maxAlpha - band.minAlpha) * pulse;
-      rimBandWidth = size * band.width;
-      rimBandColor = tone(color, FISH_RIM_LIGHTEN);
-    }
-    if (starCount > 0) {
-      orbitRing = getOrbitRingSprite(speciesId, size, baseColor);
-      drawOrbitStars(ctx, x, y, size, starCount, elapsedMs, fishPhase, mergeAgeMs, false, orbitRing);
-    }
-  }
-
+// Draws just the body (and, for the special species, their own distinct shapes) and returns
+// where a worn hat should sit. Everything here is exactly what drawFish always did between
+// the far-half stars and the near-half stars; the per-draw tier globals (rim band, pupil
+// color) must already be set by the caller.
+function drawFishBody(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDirection, look) {
+  const { def, size, isFullyGrown, color } = look;
   // Suckerfish/Electric Eel/Science Octopus each get a visually distinct
   // body shape — per direct request that the 3 utility species "look
   // visually distinct" from each other and from the standard fish shape.
@@ -1198,7 +1188,6 @@ export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDire
     // does, so a worn hat visibly follows the swimming motion instead of
     // reading as glued to a fixed screen position.
     const length = size * 1.5;
-    const segments = 7;
     const t = 1; // head end
     const headPx = x - facing * length * (0.5 - t);
     const headWave = Math.sin(tailPhase - t * 3.2) * size * 0.22 * (1 - t * 0.3);
@@ -1248,6 +1237,47 @@ export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDire
     headY = y - size * stdShape.bodyH * 0.85;
     headSize = size * stdShape.bodyW * 0.85;
   }
+  return { headX, headY, headSize };
+}
+
+// Sets the per-draw tier look the body functions read (pupil color, and the Tier 2+ rim band).
+// rimPulse is the 0-1 position in the rim's pulse, or null for no rim (a fish drawn without a
+// game clock — previews, a dying fish — or one with no band at its tier).
+function applyTierLook(look, starTier, rimPulse) {
+  const { size, isFullyGrown, color } = look;
+  pupilColor = isFullyGrown && starTier >= 4 ? color : '#1a1a1a'; // Tier 4: the pupil matches the fish's own color
+  rimBandAlpha = 0;
+  const band = rimPulse === null ? null : FISH_RIM_BAND_BY_TIER[starTier];
+  if (band) {
+    rimBandAlpha = band.minAlpha + (band.maxAlpha - band.minAlpha) * rimPulse;
+    rimBandWidth = size * band.width;
+    rimBandColor = tone(color, FISH_RIM_LIGHTEN);
+  }
+}
+
+export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDirection, starTier = 1, sickness = 0, grayed = 0, hatId = 'none', elapsedMs = -1, fishPhase = 0, mergeAgeMs = -1) {
+  const look = resolveFishLook(speciesId, stage, starTier, sickness, grayed);
+  const { def, size, isFullyGrown, baseColor, color } = look;
+
+  // Economy Fish Combining tier look (see the helpers above) — adults only. The far
+  // half of the orbiting stars draws before the body so it tucks behind it.
+  let starCount = 0;
+  let orbitRing = null;
+  let rimPulse = null;
+  // Only economy fish (the ones that can merge up a tier) get stars, the orbit oval and the rim.
+  if (isFullyGrown && elapsedMs >= 0 && ECONOMY_SPECIES.has(speciesId)) {
+    starCount = FISH_STAR_COUNT_BY_TIER[starTier] || 0;
+    if (FISH_RIM_BAND_BY_TIER[starTier]) rimPulse = 0.5 + 0.5 * Math.sin((elapsedMs / FISH_RIM_PERIOD_MS) * Math.PI * 2 + fishPhase);
+    applyTierLook(look, starTier, rimPulse);
+    if (starCount > 0) {
+      orbitRing = getOrbitRingSprite(speciesId, size, baseColor);
+      drawOrbitStars(ctx, x, y, size, starCount, elapsedMs, fishPhase, mergeAgeMs, false, orbitRing);
+    }
+  } else {
+    applyTierLook(look, starTier, null);
+  }
+
+  const { headX, headY, headSize } = drawFishBody(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDirection, look);
 
   // The near half of the orbiting stars, over the body (and under any hat).
   if (starCount > 0) drawOrbitStars(ctx, x, y, size, starCount, elapsedMs, fishPhase, mergeAgeMs, true, orbitRing);
@@ -1265,4 +1295,236 @@ export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDire
   if (isFullyGrown && hatId && hatId !== 'none') {
     drawHat(ctx, hatId, headX, headY, headSize, facing);
   }
+}
+
+// ---- Fish sprite cache ----
+// Per direct request (frame rate with ~30 fish — each fish is ~10 vector path operations, and
+// moving paths miss the GPU's path cache every frame, so this was the single biggest drawing
+// cost in a busy tank): drawFishCached draws a fish's body (and worn hat) from a pre-rendered
+// sprite instead. What is baked, and what deliberately isn't:
+//  - BAKED (the cache key): species, stage, facing, the tail phase quantized to
+//    FISH_TAIL_BINS_PER_TURN bins per turn (a tail tip is off by well under a pixel), the tints
+//    (sickness/grayed — they only ever take a few exact values), star tier (size/pupil/rim) and
+//    the Tier 2+ rim pulse quantized to FISH_RIM_PULSE_STEPS steps (~1.7% alpha), and the hat.
+//  - LIVE every frame, exactly as before: the eye(s) (they track the cursor/food — recorded at
+//    bake time as positions, then drawn after the body, which is where every body function
+//    already drew them), the orbiting stars and their oval, and everything the caller adds
+//    (health bar, glows, turn squash, bounce).
+//  - Eel bodies use tailPhase at 1.3x and 1.4x as well (fin/bump wobble), so their phase only
+//    repeats every 5 turns — they get 5x the bins over a 5-turn period instead of wrapping
+//    at one turn.
+// Sprites are baked lazily, at most FISH_SPRITE_BAKES_PER_FRAME a frame; a fish whose sprite isn't
+// ready yet is just drawn the old live way that frame, so nothing ever hitches or goes missing.
+// Each sprite is drawn straight into a canvas just big enough for it: how big is worked out ONCE per
+// look (species/stage/facing/tier/hat) by drawing a few sample tail phases at 1x and measuring them
+// (reading pixels back is the slow part of a bake, so it must not happen per sprite).
+const FISH_SPRITE_SCALE = 1; // 1x: at 2x the cache could reach ~100MB (eel bodies need 5x the bins); 1x is visually indistinguishable at normal zoom and 4x smaller
+const FISH_TAIL_BINS_PER_TURN = 96;
+const FISH_RIM_PULSE_STEPS = 12;
+const FISH_SPRITE_CACHE_MAX_BYTES = 32 * 1024 * 1024; // approximate texture memory the sprites may hold; least-recently-used ones are dropped past it
+const FISH_SPRITE_BAKES_PER_FRAME = 4;
+const FISH_BOUNDS_SAMPLE_TURNS = 5; // sample phases span 5 turns so eel bodies (1.3x/1.4x terms) are covered too
+const FISH_BOUNDS_SAMPLES = 20;
+const fishSpriteCache = new Map();
+const fishBoundsCache = new Map();
+let fishBakesLeft = FISH_SPRITE_BAKES_PER_FRAME;
+let fishSpriteFrame = 0;
+let fishSpriteBytes = 0;
+let eyeRecorder = null; // while baking, drawEye pushes the eye here instead of drawing it
+const EYE_BAKE_DIRECTION = { x: 1, y: 0 }; // any non-null direction makes the body functions call drawEye
+let fishScratch = null;
+
+// Call once per rendered frame, before the fish loop.
+export function beginFishSpriteFrame() {
+  fishBakesLeft = FISH_SPRITE_BAKES_PER_FRAME;
+  fishSpriteFrame++;
+}
+
+function getFishScratch(w, h) {
+  if (!fishScratch) {
+    const canvas = document.createElement('canvas');
+    fishScratch = { canvas, ctx: canvas.getContext('2d', { willReadFrequently: true }) };
+  }
+  if (fishScratch.canvas.width < w || fishScratch.canvas.height < h) {
+    fishScratch.canvas.width = Math.max(fishScratch.canvas.width, w);
+    fishScratch.canvas.height = Math.max(fishScratch.canvas.height, h);
+  }
+  return fishScratch;
+}
+
+// Widens `box` (in 1x pixels relative to the fish centre) to include every non-transparent pixel of the
+// scratch canvas, whose origin (the fish centre) is at (originX, originY).
+function growBoundsFromScratch(box, scratch, w, h, originX, originY) {
+  const data = scratch.ctx.getImageData(0, 0, w, h).data;
+  for (let py = 0; py < h; py++) {
+    const row = py * w * 4;
+    for (let px = 0; px < w; px++) {
+      if (data[row + px * 4 + 3] !== 0) {
+        const rx = px - originX;
+        const ry = py - originY;
+        if (rx < box.minX) box.minX = rx;
+        if (rx > box.maxX) box.maxX = rx;
+        if (ry < box.minY) box.minY = ry;
+        if (ry > box.maxY) box.maxY = ry;
+      }
+    }
+  }
+}
+
+// The body's and hat's pixel bounds for one look, over FISH_BOUNDS_SAMPLES tail phases (in 1x px, centre = 0,0).
+function measureFishBounds(speciesId, stage, facing, starTier, hatId) {
+  const look = resolveFishLook(speciesId, stage, starTier, 0, 0);
+  const { size, isFullyGrown } = look;
+  const halfW = Math.ceil(size * 2.3 + 8);
+  const up = Math.ceil(size * 2.2 + 8);
+  const down = Math.ceil(size * 1.4 + 8);
+  const w = 2 * halfW;
+  const h = up + down;
+  const scratch = getFishScratch(w, h);
+  const sctx = scratch.ctx;
+  const useHat = isFullyGrown && hatId && hatId !== 'none';
+  const body = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+  const hat = { minX: Infinity, minY: Infinity, maxX: -Infinity, maxY: -Infinity };
+  const rimPulse = FISH_RIM_BAND_BY_TIER[starTier] && isFullyGrown && ECONOMY_SPECIES.has(speciesId) ? 0.5 : null; // geometry doesn't depend on the pulse, but the rim stroke is drawn when there is one
+  eyeRecorder = [];
+  try {
+    for (let i = 0; i < FISH_BOUNDS_SAMPLES; i++) {
+      const phase = (i / FISH_BOUNDS_SAMPLES) * Math.PI * 2 * FISH_BOUNDS_SAMPLE_TURNS;
+      sctx.setTransform(1, 0, 0, 1, 0, 0);
+      sctx.clearRect(0, 0, scratch.canvas.width, scratch.canvas.height);
+      sctx.setTransform(1, 0, 0, 1, halfW, up);
+      applyTierLook(look, starTier, rimPulse);
+      const anchor = drawFishBody(sctx, 0, 0, speciesId, stage, facing, phase, EYE_BAKE_DIRECTION, look);
+      growBoundsFromScratch(body, scratch, w, h, halfW, up);
+      if (useHat) {
+        sctx.setTransform(1, 0, 0, 1, 0, 0);
+        sctx.clearRect(0, 0, scratch.canvas.width, scratch.canvas.height);
+        sctx.setTransform(1, 0, 0, 1, halfW, up);
+        drawHat(sctx, hatId, anchor.headX, anchor.headY, anchor.headSize, facing);
+        growBoundsFromScratch(hat, scratch, w, h, halfW, up);
+      }
+    }
+  } finally {
+    eyeRecorder = null;
+    sctx.setTransform(1, 0, 0, 1, 0, 0);
+  }
+  const pad = 2; // anti-aliasing / quantization slack
+  const finish = (b) => (b.maxX < b.minX ? null : { minX: Math.floor(b.minX) - pad, minY: Math.floor(b.minY) - pad, maxX: Math.ceil(b.maxX) + pad, maxY: Math.ceil(b.maxY) + pad });
+  return { body: finish(body), hat: finish(hat) };
+}
+
+// Draws one layer straight into its own right-sized canvas. drawFn(ctx) draws the fish centred on (0,0).
+function bakeLayer(box, drawFn) {
+  const S = FISH_SPRITE_SCALE;
+  const width = (box.maxX - box.minX + 1) * S;
+  const height = (box.maxY - box.minY + 1) * S;
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const c = canvas.getContext('2d');
+  c.setTransform(S, 0, 0, S, -box.minX * S, -box.minY * S);
+  drawFn(c);
+  return { canvas, dx: box.minX, dy: box.minY, w: width / S, h: height / S };
+}
+
+function bakeFishSprite(speciesId, stage, facing, tailPhase, starTier, sickness, grayed, hatId, rimPulse, bounds) {
+  const look = resolveFishLook(speciesId, stage, starTier, sickness, grayed);
+  applyTierLook(look, starTier, rimPulse);
+  const eyes = [];
+  let anchor = null;
+  eyeRecorder = eyes;
+  let body = null;
+  try {
+    if (bounds.body) body = bakeLayer(bounds.body, (c) => { anchor = drawFishBody(c, 0, 0, speciesId, stage, facing, tailPhase, EYE_BAKE_DIRECTION, look); });
+  } finally {
+    eyeRecorder = null;
+  }
+  let hat = null;
+  if (bounds.hat && anchor) hat = bakeLayer(bounds.hat, (c) => drawHat(c, hatId, anchor.headX, anchor.headY, anchor.headSize, facing));
+  const bytes = ((body ? body.canvas.width * body.canvas.height : 0) + (hat ? hat.canvas.width * hat.canvas.height : 0)) * 4;
+  fishSpriteBytes += bytes;
+  return { body, hat, eyes, bytes, lastUsed: fishSpriteFrame };
+}
+
+// Drops the least recently drawn sprites until the cache is back under 3/4 of its byte budget.
+function evictFishSprites() {
+  const entries = [...fishSpriteCache.entries()].sort((a, b) => a[1].lastUsed - b[1].lastUsed);
+  const target = FISH_SPRITE_CACHE_MAX_BYTES * 0.75;
+  for (const [key, sprite] of entries) {
+    if (fishSpriteBytes <= target) break;
+    fishSpriteCache.delete(key);
+    fishSpriteBytes -= sprite.bytes;
+  }
+}
+
+const FISH_TWO_PI = Math.PI * 2;
+export function drawFishCached(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDirection, starTier = 1, sickness = 0, grayed = 0, hatId = 'none', elapsedMs = -1, fishPhase = 0, mergeAgeMs = -1) {
+  const def = SPECIES[speciesId];
+  const scale = def.growthStages[stage].scale;
+  const isFullyGrown = stage === def.growthStages.length - 1;
+  const size = FISH_BASE_SIZE * scale * (isFullyGrown && starTier >= 4 ? FISH_TIER4_SIZE_MULTIPLIER : 1);
+
+  // The same star / rim-pulse resolution drawFish does (stars stay live).
+  let starCount = 0;
+  let orbitRing = null;
+  let rimPulseStep = -1;
+  if (isFullyGrown && elapsedMs >= 0 && ECONOMY_SPECIES.has(speciesId)) {
+    starCount = FISH_STAR_COUNT_BY_TIER[starTier] || 0;
+    if (FISH_RIM_BAND_BY_TIER[starTier]) {
+      const pulse = 0.5 + 0.5 * Math.sin((elapsedMs / FISH_RIM_PERIOD_MS) * Math.PI * 2 + fishPhase);
+      rimPulseStep = Math.round(pulse * FISH_RIM_PULSE_STEPS);
+    }
+    if (starCount > 0) {
+      orbitRing = getOrbitRingSprite(speciesId, size, FISH_COLORS[speciesId] || '#ffffff');
+      drawOrbitStars(ctx, x, y, size, starCount, elapsedMs, fishPhase, mergeAgeMs, false, orbitRing);
+    }
+  }
+
+  const eelFamily = speciesId === 'electric_eel' || (def.parents && def.parents.includes('electric_eel'));
+  const period = eelFamily ? FISH_TWO_PI * FISH_BOUNDS_SAMPLE_TURNS : FISH_TWO_PI;
+  const binCount = FISH_TAIL_BINS_PER_TURN * (eelFamily ? FISH_BOUNDS_SAMPLE_TURNS : 1);
+  let bin = Math.round((((tailPhase % period) + period) % period) / period * binCount);
+  if (bin >= binCount) bin = 0;
+  const useHat = isFullyGrown && hatId && hatId !== 'none';
+  const lookKey = `${speciesId}|${stage}|${facing}|${starTier}|${useHat ? hatId : ''}`;
+  const key = `${lookKey}|${bin}|${sickness}|${grayed}|${rimPulseStep}`;
+  let sprite = fishSpriteCache.get(key);
+  if (!sprite && fishBakesLeft > 0) {
+    let bounds = fishBoundsCache.get(lookKey);
+    if (!bounds) { // first time this look is seen: measuring it takes a whole frame's bake budget
+      fishBakesLeft = 0;
+      bounds = measureFishBounds(speciesId, stage, facing, starTier, hatId);
+      fishBoundsCache.set(lookKey, bounds);
+    } else {
+      fishBakesLeft--;
+      if (fishSpriteBytes >= FISH_SPRITE_CACHE_MAX_BYTES) evictFishSprites();
+      sprite = bakeFishSprite(speciesId, stage, facing, (bin / binCount) * period, starTier, sickness, grayed, hatId, rimPulseStep < 0 ? null : rimPulseStep / FISH_RIM_PULSE_STEPS, bounds);
+      fishSpriteCache.set(key, sprite);
+    }
+  }
+  if (!sprite) { // not baked yet and this frame's bake budget is spent — draw it the old way (stars were already drawn above, so draw only the body + hat here)
+    const look = resolveFishLook(speciesId, stage, starTier, sickness, grayed);
+    applyTierLook(look, starTier, rimPulseStep < 0 ? null : rimPulseStep / FISH_RIM_PULSE_STEPS);
+    const anchor = drawFishBody(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDirection, look);
+    if (starCount > 0) drawOrbitStars(ctx, x, y, size, starCount, elapsedMs, fishPhase, mergeAgeMs, true, orbitRing);
+    if (useHat) drawHat(ctx, hatId, anchor.headX, anchor.headY, anchor.headSize, facing);
+    return;
+  }
+  sprite.lastUsed = fishSpriteFrame;
+  if (sprite.body) ctx.drawImage(sprite.body.canvas, x + sprite.body.dx, y + sprite.body.dy, sprite.body.w, sprite.body.h);
+  if (eyeDirection) {
+    for (const eye of sprite.eyes) { // exactly drawEye's own two fills
+      const pupilOffset = eye.socket * EYE_PUPIL_OFFSET_RATIO;
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(x + eye.x, y + eye.y, eye.socket, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = eye.color;
+      ctx.beginPath();
+      ctx.arc(x + eye.x + eyeDirection.x * pupilOffset, y + eye.y + eyeDirection.y * pupilOffset, eye.pupil, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  if (starCount > 0) drawOrbitStars(ctx, x, y, size, starCount, elapsedMs, fishPhase, mergeAgeMs, true, orbitRing);
+  if (sprite.hat) ctx.drawImage(sprite.hat.canvas, x + sprite.hat.dx, y + sprite.hat.dy, sprite.hat.w, sprite.hat.h);
 }

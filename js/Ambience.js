@@ -383,6 +383,72 @@ function updateSimpleBubblePool(pool, dt, dragMul) {
   }
 }
 
+// ---- Bubble sprites ----
+// Per direct request (frame rate): every bubble used to be two path draws (a stroked ring and a
+// glossy highlight dot) — a busy tank has a couple hundred of them on screen (cursor, background,
+// shadow-fish and fish-mouth bubbles). A bubble's look only depends on its radius, ring width and
+// the two alphas, so it is baked once per radius (quantized to a quarter pixel) at 2x and drawn
+// as one drawImage, the fade applied as globalAlpha (exactly how alpha scales the original
+// draws; the ring and the dot never overlap except at ~1px radii). Same sprite-at-2x approach the
+// item/coral sprites use.
+const BUBBLE_SPRITE_SCALE = 2;
+const BUBBLE_RADIUS_STEP = 0.25;
+const bubbleSprites = new Map();
+function getBubbleSprite(rq, lineWidth, ringAlpha, dotAlpha) {
+  const key = rq + '|' + lineWidth + '|' + ringAlpha + '|' + dotAlpha;
+  let sprite = bubbleSprites.get(key);
+  if (sprite) return sprite;
+  const half = Math.ceil(rq + lineWidth / 2 + 2);
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = half * 2 * BUBBLE_SPRITE_SCALE;
+  const c = canvas.getContext('2d');
+  c.scale(BUBBLE_SPRITE_SCALE, BUBBLE_SPRITE_SCALE);
+  c.strokeStyle = `rgba(255, 255, 255, ${ringAlpha})`;
+  c.lineWidth = lineWidth;
+  c.beginPath();
+  c.arc(half, half, rq, 0, Math.PI * 2);
+  c.stroke();
+  c.fillStyle = `rgba(255, 255, 255, ${dotAlpha})`;
+  c.beginPath();
+  c.arc(half - rq * 0.3, half - rq * 0.3, rq * 0.28, 0, Math.PI * 2);
+  c.fill();
+  sprite = { canvas, half };
+  bubbleSprites.set(key, sprite);
+  return sprite;
+}
+// A crisp ring + glossy dot bubble at (x, y). ringAlpha/dotAlpha are the full-opacity alphas
+// (stroke/fill alpha times the draw's own globalAlpha); fade scales both, like globalAlpha did.
+// Leaves ctx.globalAlpha at `fade` — callers wrap their loop in save/restore.
+export function drawGlossyBubble(ctx, x, y, r, lineWidth, ringAlpha, dotAlpha, fade) {
+  const sprite = getBubbleSprite(Math.max(BUBBLE_RADIUS_STEP, Math.round(r / BUBBLE_RADIUS_STEP) * BUBBLE_RADIUS_STEP), lineWidth, ringAlpha, dotAlpha);
+  ctx.globalAlpha = fade;
+  ctx.drawImage(sprite.canvas, x - sprite.half, y - sprite.half, sprite.half * 2, sprite.half * 2);
+}
+// The soft muted background bubble as a sprite: the gradient baked at full alpha, drawn at the
+// bubble's alpha (stop alphas scale linearly, so this equals the old per-draw gradient).
+const softBubbleSprites = new Map();
+function getSoftBubbleSprite(rq) {
+  let sprite = softBubbleSprites.get(rq);
+  if (sprite) return sprite;
+  const reach = rq * 1.6;
+  const half = Math.ceil(reach + 2);
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = half * 2 * BUBBLE_SPRITE_SCALE;
+  const c = canvas.getContext('2d');
+  c.scale(BUBBLE_SPRITE_SCALE, BUBBLE_SPRITE_SCALE);
+  const grad = c.createRadialGradient(half, half, 0, half, half, reach);
+  grad.addColorStop(0, 'rgba(70, 90, 105, 0.9)');
+  grad.addColorStop(0.6, 'rgba(85, 105, 120, 0.55)');
+  grad.addColorStop(1, 'rgba(85, 105, 120, 0)');
+  c.fillStyle = grad;
+  c.beginPath();
+  c.arc(half, half, reach, 0, Math.PI * 2);
+  c.fill();
+  sprite = { canvas, half };
+  softBubbleSprites.set(rq, sprite);
+  return sprite;
+}
+
 function renderBubbles(ctx, camera, canvasWidth, canvasHeight) {
   ctx.save();
   for (const b of bubbles) {
@@ -391,17 +457,7 @@ function renderBubbles(ctx, camera, canvasWidth, canvasHeight) {
     if (screen.x < -20 || screen.x > canvasWidth + 20 || screen.y < -20 || screen.y > canvasHeight + 20) continue;
     const growT = Math.min(1, b.age / BUBBLE_GROW_DURATION_S);
     const r = Math.max(1, b.radius * growT * camera.zoom); // floored at 1px — a bubble's very first instant is a tiny dot, not literally invisible
-    ctx.globalAlpha = 0.32;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
-    ctx.lineWidth = Math.max(1, camera.zoom);
-    ctx.beginPath();
-    ctx.arc(screen.x, screen.y, r, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.globalAlpha = 0.45;
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
-    ctx.beginPath();
-    ctx.arc(screen.x - r * 0.3, screen.y - r * 0.3, r * 0.28, 0, Math.PI * 2);
-    ctx.fill();
+    drawGlossyBubble(ctx, screen.x, screen.y, r, Math.max(1, camera.zoom), 0.32 * 0.7, 0.45 * 0.6, 1);
   }
   ctx.globalAlpha = 1;
   ctx.restore();
@@ -433,6 +489,34 @@ function drawShadowFishSilhouette(ctx, x, y, size, dir, fillColor, haloColor) {
   ctx.fill();
 }
 
+// Per direct request (frame rate): at full opacity a shadow fish is its silhouette drawn once into a
+// sprite (at its nominal on-screen size, 1x — these are soft background shapes) and then scaled at draw
+// time by the tail-wag squash, exactly what the live version's ctx.scale did to its paths (every
+// measurement in drawShadowFishSilhouette is proportional to size). While it is fading
+// (alpha < 1) it is still drawn live: the halo stroke, halo fill and core fill each blend at that alpha,
+// which a single translucent sprite would not reproduce.
+function getShadowFishSprite(f, size) {
+  const sig = size.toFixed(1) + '|' + f.dir + '|' + f.fillColor + '|' + f.haloColor;
+  if (f.silSprite && f.silSig === sig) return f.silSprite;
+  const bodyW = size;
+  const bodyH = size * 0.5;
+  const tailW = size * 0.45;
+  const lw = size * 0.35;
+  const left = Math.floor(f.dir > 0 ? -(bodyW / 2 + tailW) - lw : -(bodyW / 2) - lw);
+  const right = Math.ceil(f.dir > 0 ? bodyW / 2 + lw : bodyW / 2 + tailW + lw);
+  const top = Math.floor(-(bodyH / 2) - lw);
+  const bottom = Math.ceil(bodyH / 2 + lw);
+  const canvas = document.createElement('canvas');
+  canvas.width = right - left + 2;
+  canvas.height = bottom - top + 2;
+  const c = canvas.getContext('2d');
+  c.translate(1 - left, 1 - top);
+  drawShadowFishSilhouette(c, 0, 0, size, f.dir, f.fillColor, f.haloColor);
+  f.silSprite = { canvas, dx: left - 1, dy: top - 1, w: canvas.width, h: canvas.height };
+  f.silSig = sig;
+  return f.silSprite;
+}
+
 function drawOneShadowFish(ctx, camera, canvasWidth, canvasHeight, f) {
   if (f.alpha <= 0) return; // fully faded out — see updateShadowFishFade
   const bobY = f.baseY + Math.sin(elapsed * f.bobFreq + f.bobPhase) * f.bobAmp;
@@ -452,8 +536,14 @@ function drawOneShadowFish(ctx, camera, canvasWidth, canvasHeight, f) {
   ctx.save();
   ctx.globalAlpha = f.alpha;
   ctx.translate(screen.x, screen.y);
-  ctx.scale(wag, 1);
-  drawShadowFishSilhouette(ctx, 0, 0, size, f.dir, f.fillColor, f.haloColor);
+  if (f.alpha >= 1) {
+    const sprite = getShadowFishSprite(f, f.size * camera.zoom);
+    ctx.scale(wag * sizeScale, sizeScale); // sizeScale is 1 whenever alpha >= 0.5, so this is just the wag; the nominal-size sprite is scaled to the live size
+    ctx.drawImage(sprite.canvas, sprite.dx, sprite.dy, sprite.w, sprite.h);
+  } else {
+    ctx.scale(wag, 1);
+    drawShadowFishSilhouette(ctx, 0, 0, size, f.dir, f.fillColor, f.haloColor);
+  }
   ctx.restore();
 }
 
@@ -1897,17 +1987,7 @@ function renderCursorBubbles(ctx, camera, canvasWidth, canvasHeight) {
     const lifeT = b.ageS / b.ttlS;
     const fade = lifeT < 0.75 ? 1 : Math.max(0, 1 - (lifeT - 0.75) / 0.25); // holds full opacity, fades over the last quarter of its life
     const r = Math.max(1, b.radius * camera.zoom);
-    ctx.globalAlpha = 0.4 * fade;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.75)';
-    ctx.lineWidth = Math.max(1, camera.zoom);
-    ctx.beginPath();
-    ctx.arc(screen.x, screen.y, r, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.globalAlpha = 0.5 * fade;
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
-    ctx.beginPath();
-    ctx.arc(screen.x - r * 0.3, screen.y - r * 0.3, r * 0.28, 0, Math.PI * 2);
-    ctx.fill();
+    drawGlossyBubble(ctx, screen.x, screen.y, r, Math.max(1, camera.zoom), 0.4 * 0.75, 0.5 * 0.6, fade);
   }
   ctx.globalAlpha = 1;
   ctx.restore();
@@ -2196,14 +2276,11 @@ function updateBackgroundParallaxDecor(dt) {
 // background crabs'/chest's own bubbles) and renderShadowBubbles (the
 // background silhouette fish's), since both are "background bubble sources."
 function drawSoftMutedBubble(ctx, x, y, r, alpha) {
-  const grad = ctx.createRadialGradient(x, y, 0, x, y, r * 1.6);
-  grad.addColorStop(0, `rgba(70, 90, 105, ${(alpha * 0.9).toFixed(3)})`);
-  grad.addColorStop(0.6, `rgba(85, 105, 120, ${(alpha * 0.55).toFixed(3)})`);
-  grad.addColorStop(1, 'rgba(85, 105, 120, 0)');
-  ctx.fillStyle = grad;
-  ctx.beginPath();
-  ctx.arc(x, y, r * 1.6, 0, Math.PI * 2);
-  ctx.fill();
+  const sprite = getSoftBubbleSprite(Math.max(BUBBLE_RADIUS_STEP, Math.round(r / BUBBLE_RADIUS_STEP) * BUBBLE_RADIUS_STEP));
+  const prevAlpha = ctx.globalAlpha;
+  ctx.globalAlpha = prevAlpha * alpha;
+  ctx.drawImage(sprite.canvas, x - sprite.half, y - sprite.half, sprite.half * 2, sprite.half * 2);
+  ctx.globalAlpha = prevAlpha;
 }
 
 // Reused here for the background crabs'/chest's own bubbles instead of a

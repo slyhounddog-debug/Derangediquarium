@@ -155,7 +155,7 @@ import { pushGameNotification } from './Notifications.js';
 import { isGuidedTutorialsEnabled, noteTutorialFlowStarted, noteTutorialFlowEnded } from './Save.js';
 import { loadLevel, LEVELS } from './Levels.js';
 import { updateStoryTriggers, updateAutosave } from './Systems.js';
-import { updateAmbience, renderAmbienceBehindLab, renderAmbienceFrontLab, spawnCursorBubbles, renderWaterSurface, spawnSeaTurtleBubble, renderBackgroundParallaxDecor, renderShadowFish, renderDecorMask } from './Ambience.js';
+import { updateAmbience, renderAmbienceBehindLab, renderAmbienceFrontLab, spawnCursorBubbles, renderWaterSurface, spawnSeaTurtleBubble, renderBackgroundParallaxDecor, renderShadowFish, renderDecorMask, drawGlossyBubble } from './Ambience.js';
 import { resumeAudio, startGameMusic, startMenuMusic, playAlienHit, setBattleMusicActive, triggerBossMusic, playBuildPlace, playDemolish } from './Sound.js';
 import {
   updateEntities,
@@ -239,7 +239,7 @@ import {
   getUnlockedWorldH,
 } from './Grid.js';
 import { isPointOnMound, crackMound, renderMound, centerCameraOnMound, isPointOnScienceLab, renderScienceLab, renderMoundMask } from './Mound.js';
-import { drawFish, drawFishShadow } from './FishRenderer.js';
+import { drawFish, drawFishCached, beginFishSpriteFrame, drawFishShadow } from './FishRenderer.js';
 import { perfMark, perfUpdateBegin, perfUpdateEnd, perfRenderBegin, perfRenderEnd } from './PerfOverlay.js';
 import { loadTitleFonts, initTitleScreen, showTitle, updateTitle, exitTitle, titleIsActive, titleBlocksWorldRender, titleNeedsBackdrop, captureTitleBackdrop } from './TitleScreen.js';
 import { oneShotShimmerProgress, drawShimmerSweep, shimmerFadeAlpha, createShimmerTimer, updateShimmerTimer } from './Shimmer.js';
@@ -6161,6 +6161,7 @@ function render() {
   }
   if (mergeHighlightSubject) renderMergeToolPartnerHighlight(ctx, state, mergeHighlightSubject, performance.now(), mergeHighlightFade);
   else mergeHoverSubjectId = null;
+  beginFishSpriteFrame(); // resets the per-frame sprite-bake budget — see FishRenderer.js's drawFishCached
   for (const fish of state.level.entities) {
     if (fish.type !== 'fish') continue; // state.level.entities also holds Alien Invasion aliens now — rendered separately above, BEFORE this loop, so fish (and their health bars) always draw on top and never disappear behind an alien
     const pos = worldToScreen(fish.x, fish.y, state.camera);
@@ -6181,7 +6182,7 @@ function render() {
       const alpha = fadeElapsed <= 0 ? 1 : Math.max(0, 1 - fadeElapsed / FISH_DEATH_FADE_DURATION_MS);
       ctx.save();
       ctx.globalAlpha = alpha;
-      drawFish(ctx, pos.x, pos.y, fish.speciesId, fish.stage, fish.deathFacing, fish.tailPhase, null, fish.starTier || 1, 0, 1, state.meta.equippedHatId);
+      drawFishCached(ctx, pos.x, pos.y, fish.speciesId, fish.stage, fish.deathFacing, fish.tailPhase, null, fish.starTier || 1, 0, 1, state.meta.equippedHatId);
       ctx.restore();
       continue;
     }
@@ -6288,7 +6289,7 @@ function render() {
       ctx.translate(-pos.x, -pos.y);
     }
     if (turning) beginTurnSquash(ctx, pos.x, pos.y, turn);
-    drawFish(ctx, pos.x, pos.y, fish.speciesId, fish.stage, facing, fish.tailPhase, eyeDirection, fish.starTier || 1, sickness, grayed, state.meta.equippedHatId, state.level.elapsed, fish.growthOrbitPhase || 0, fish.starAnimStartedAt != null ? state.level.elapsed - fish.starAnimStartedAt : -1);
+    drawFishCached(ctx, pos.x, pos.y, fish.speciesId, fish.stage, facing, fish.tailPhase, eyeDirection, fish.starTier || 1, sickness, grayed, state.meta.equippedHatId, state.level.elapsed, fish.growthOrbitPhase || 0, fish.starAnimStartedAt != null ? state.level.elapsed - fish.starAnimStartedAt : -1);
     if (turning) ctx.restore();
     if (bounceX !== 1 || bounceY !== 1) ctx.restore();
 
@@ -6896,6 +6897,7 @@ function render() {
   // transient effect instead of that file's fixed recycling pool. Fades out
   // over its own last 30% of life instead of popping off abruptly. Purely
   // decorative — see Entities.js's emitFishBubble/updateFishBubbleEffects.
+  ctx.save();
   for (const b of state.level.fishBubbleEffects) {
     const wobbleX = Math.sin((b.age / 1000) * b.wobbleFreq + b.wobblePhase) * b.wobbleAmp;
     const pos = worldToScreen(b.x + wobbleX, b.y, state.camera);
@@ -6903,20 +6905,9 @@ function render() {
     const lifeT = b.age / FISH_BUBBLE_LIFETIME_MS; // 0 -> 1
     const fadeAlpha = lifeT > 0.7 ? 1 - (lifeT - 0.7) / 0.3 : 1;
     const r = b.radius * state.camera.zoom;
-    ctx.save();
-    ctx.globalAlpha = 0.32 * fadeAlpha;
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
-    ctx.lineWidth = Math.max(1, state.camera.zoom);
-    ctx.beginPath();
-    ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.globalAlpha = 0.45 * fadeAlpha;
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
-    ctx.beginPath();
-    ctx.arc(pos.x - r * 0.3, pos.y - r * 0.3, r * 0.28, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
+    drawGlossyBubble(ctx, pos.x, pos.y, r, Math.max(1, state.camera.zoom), 0.32 * 0.7, 0.45 * 0.6, fadeAlpha); // sprite-based, shared with Ambience.js's own bubbles
   }
+  ctx.restore();
 
   // Small red "Can't afford" reason text, glued to the
   // cursor's own screen position (not a world point — this is pure UI
