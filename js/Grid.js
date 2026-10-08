@@ -108,6 +108,7 @@ import {
 } from './Config.js';
 import { worldToScreen } from './Engine.js';
 import { bakeSeabedCanvas } from './SeabedArt.js';
+import { drawCachedText } from './TextSprites.js';
 import { playBuildPlace, playBuildDrop, playDemolish, playTurretShoot, playIntake, playDispense } from './Sound.js';
 import { pushGameNotification } from './Notifications.js';
 
@@ -4346,13 +4347,13 @@ function renderTierBadge(ctx, type, x, y, size) {
     ctx.font = `${Math.max(8, size * 0.34)}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('⚡', x + size * 0.82, y + size * 0.2);
+    drawCachedText(ctx, '⚡', x + size * 0.82, y + size * 0.2);
   } else if (type === TILE_COLLECTOR_ADVANCED || type === TILE_REFINERY_ADVANCED || type === TILE_TURRET_ADVANCED) {
     ctx.fillStyle = '#e8c8ff';
     ctx.font = `${Math.max(8, size * 0.34)}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('✨', x + size * 0.82, y + size * 0.2);
+    drawCachedText(ctx, '✨', x + size * 0.82, y + size * 0.2);
   }
 }
 
@@ -4995,7 +4996,7 @@ function renderPlatformFilterBadge(ctx, x, y, size, data) {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#ffffff';
-  ctx.fillText('✓', cx, cy + 0.5);
+  drawCachedText(ctx, '✓', cx, cy + 0.5);
   ctx.restore();
 }
 
@@ -5648,7 +5649,7 @@ function renderStalledBadge(ctx, x, y, size, zoom, glyph) {
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = '#d8d8d8';
-  ctx.fillText(glyph, cx, cy);
+  drawCachedText(ctx, glyph, cx, cy);
   ctx.strokeStyle = '#ff5a5a';
   ctx.lineWidth = Math.max(1, 1.3 * zoom);
   ctx.beginPath();
@@ -5802,7 +5803,7 @@ function renderPowerShortageOverlay(ctx, x, y, size, zoom, efficiency, elapsedMs
     ctx.font = `${Math.max(10, size * 0.5)}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('⚡', x + size / 2, y + size / 2);
+    drawCachedText(ctx, '⚡', x + size / 2, y + size / 2);
     ctx.strokeStyle = '#ffffff';
     ctx.lineWidth = Math.max(2, 2.6 * zoom);
     ctx.beginPath();

@@ -240,6 +240,7 @@ import {
 } from './Grid.js';
 import { isPointOnMound, crackMound, renderMound, centerCameraOnMound, isPointOnScienceLab, renderScienceLab, renderMoundMask } from './Mound.js';
 import { drawFish, drawFishCached, beginFishSpriteFrame, drawFishShadow } from './FishRenderer.js';
+import { drawCachedText } from './TextSprites.js';
 import { perfMark, perfUpdateBegin, perfUpdateEnd, perfRenderBegin, perfRenderEnd } from './PerfOverlay.js';
 import { loadTitleFonts, initTitleScreen, showTitle, updateTitle, exitTitle, titleIsActive, titleBlocksWorldRender, titleNeedsBackdrop, captureTitleBackdrop } from './TitleScreen.js';
 import { oneShotShimmerProgress, drawShimmerSweep, shimmerFadeAlpha, createShimmerTimer, updateShimmerTimer } from './Shimmer.js';
@@ -5960,10 +5961,10 @@ function render() {
     ctx.font = 'bold 13px sans-serif';
     if (ft.center) {
       ctx.textAlign = 'center';
-      ctx.fillText(ft.text, pos.x, pos.y);
+      drawCachedText(ctx, ft.text, pos.x, pos.y);
       ctx.textAlign = 'left';
     } else {
-      ctx.fillText(ft.text, pos.x - 12, pos.y);
+      drawCachedText(ctx, ft.text, pos.x - 12, pos.y);
     }
     ctx.globalAlpha = 1;
   }
@@ -7048,7 +7049,7 @@ function render() {
     ctx.font = `${gsize * 0.55}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText(def.icon, gx, gy + 1);
+    drawCachedText(ctx, def.icon, gx, gy + 1);
     ctx.restore();
   }
 
@@ -7072,7 +7073,7 @@ function render() {
     ctx.font = `${gsize * 0.5}px sans-serif`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('✅', gx, gy + 1);
+    drawCachedText(ctx, '✅', gx, gy + 1);
     ctx.restore();
   }
 
