@@ -23,7 +23,7 @@ const fs = require('fs'); const path = require('path');
     }
     (function loop() { if (window.__cc.on) window.__cc.frames++; requestAnimationFrame(loop); })();
   }, ablate);
-  await page.goto('http://localhost:8080/', { waitUntil: 'domcontentloaded' });
+  await page.goto('http://localhost:8080/?perf', { waitUntil: 'domcontentloaded' });
   for (let gi = 0; gi < 60 && (await page.$('#start-overlay.hidden') || !(await page.$('#start-overlay'))); gi++) { await page.waitForTimeout(400); await page.mouse.click(8, 8); }
   await page.waitForTimeout(1500);
   if (fixture) await page.click('#start-continue-btn'); else { await page.click('text=New Game'); await page.waitForTimeout(800); await page.click('#start-mode-exp-btn'); }
@@ -36,10 +36,13 @@ const fs = require('fs'); const path = require('path');
   const m0 = Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics.map((m) => [m.name, m.value]));
   await page.waitForTimeout(6000);
   const m1 = Object.fromEntries((await cdp.send('Performance.getMetrics')).metrics.map((m) => [m.name, m.value]));
+  const overlay = await page.evaluate(() => (document.getElementById('perf-overlay') || {}).textContent || '');
+  const pick = (re) => { const m = overlay.match(re); return m ? m[1] : '?'; };
+  const flush = `F3 render ${pick(/render:\s*([\d.]+)ms/)}ms, flush(mask copy) ${pick(/([\d.]+)\s+r: caustic: mask copy of foreground/)}ms, items ${pick(/([\d.]+)\s+r: items/)}ms`;
   const r = await page.evaluate(() => { window.__cc.on = false; cancelAnimationFrame(window.__raf); const f = window.__f.slice(1); return { cc: window.__cc, avg: f.reduce((a, b) => a + b, 0) / f.length, n: f.length }; });
-  if (ablate) console.log(`ABLATED draws tagged "${ablate}": frame ${r.avg.toFixed(1)}ms  main ${(((m1.TaskDuration - m0.TaskDuration) * 1000) / r.n).toFixed(1)}ms/frame`);
+  if (ablate) console.log(`ABLATED draws tagged "${ablate}": frame ${r.avg.toFixed(1)}ms  main ${(((m1.TaskDuration - m0.TaskDuration) * 1000) / r.n).toFixed(1)}ms/frame | ${flush}`);
   else {
-    console.log(`baseline: frame ${r.avg.toFixed(1)}ms  main ${(((m1.TaskDuration - m0.TaskDuration) * 1000) / r.n).toFixed(1)}ms/frame; frames ${r.cc.frames}`);
+    console.log(`baseline: frame ${r.avg.toFixed(1)}ms  main ${(((m1.TaskDuration - m0.TaskDuration) * 1000) / r.n).toFixed(1)}ms/frame; frames ${r.cc.frames} | ${flush}`);
     for (const [tag, c] of Object.entries(r.cc.counts)) { const tot = Object.entries(c).map(([k, v]) => `${k}:${(v / r.cc.frames).toFixed(0)}`).join(' '); console.log(`tag "${tag}" (draws belong to the phase AFTER this mark):\n    ${tot}`); }
   }
   await browser.close();

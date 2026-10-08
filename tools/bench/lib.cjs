@@ -27,6 +27,7 @@ async function openGame({ fixture = null, headless = false, onError } = {}) {
     await page.addInitScript((j) => { try { localStorage.setItem('finsanity_save_v1', j); } catch (e) { /* ignore */ } }, json);
   }
   if (process.env.BENCH_NOCAUSTIC) await page.route('**/lighting%20effect.mp4', (r) => r.abort());
+  if (process.env.BENCH_INIT) await page.addInitScript({ path: require('path').resolve(process.env.BENCH_INIT) }); // any experiment script, injected before the game loads
   if (process.env.BENCH_ATLAS) await page.addInitScript({ path: require('path').join(__dirname, 'atlas_shim.js') });
   if (process.env.BENCH_OPAQUE) await page.addInitScript({ path: require('path').join(__dirname, 'opaque_shim.js') });
   if (process.env.BENCH_ABLATE) {
