@@ -385,16 +385,16 @@
 #shop-header > span:nth-child(3) { color: #41b9ff; }
 #shop-header > span:nth-child(4) { color: #ff9b2e; }
 #shop-header-row { margin-bottom: 4px; align-items: flex-end; }
-#shop-header-row .lab-close-x-btn { margin: -66px -26px 0 0; position: relative; z-index: 6; }
-#tank-header-row .lab-close-x-btn, #lab-header-row .lab-close-x-btn { margin: -52px -26px 0 0; position: relative; z-index: 6; }
+/* Centered on the frame's top-right iron corner bracket (30px border, so its middle is 15px in from the window's outer edges; offsets are from the padding box, minus half the 52px button). */
+#shop-header-row .lab-close-x-btn, #tank-header-row .lab-close-x-btn, #lab-header-row .lab-close-x-btn { position: absolute; top: -41px; right: -41px; margin: 0; z-index: 6; }
 
 /* Close button: a red-and-white life preserver on a rusty iron backing. */
 .lab-close-x-btn {
   width: 52px; height: 52px;
   border: 0;
   background:
-    radial-gradient(circle at 50% 50%, #6b3a1e 0 25%, transparent 26%),
-    conic-gradient(from 22deg, #e0412f 0 45deg, #f8f2e4 0 90deg, #e0412f 0 135deg, #f8f2e4 0 180deg, #e0412f 0 225deg, #f8f2e4 0 270deg, #e0412f 0 315deg, #f8f2e4 0 360deg);
+    radial-gradient(circle at 50% 50%, #6b3a1e 0 33%, transparent 34%),
+    conic-gradient(from 22deg, #e0412f 0 58.5deg, #f8f2e4 0 90deg, #e0412f 0 148.5deg, #f8f2e4 0 180deg, #e0412f 0 238.5deg, #f8f2e4 0 270deg, #e0412f 0 328.5deg, #f8f2e4 0 360deg); /* 65/35 red/white */
   color: #ffffff;
   font: 700 24px/1 var(--font-display);
   -webkit-text-stroke: 3.5px #4a0f0c;
@@ -715,8 +715,6 @@
 #shop-species-grid { margin-bottom: 38px; }
 #shop-header { margin: -92px 0 0 -18px; }
 #shop-header-row { margin-bottom: 14px; }
-#shop-header-row .lab-close-x-btn { margin-top: -96px; }
-#tank-header-row .lab-close-x-btn, #lab-header-row .lab-close-x-btn { margin-top: -62px; }
 
 /* Lighter, warmer parchment grain (the dark speckle read as dirty gray). */
 .tank-upgrade-card, .achievement-card, .hat-card, .start-mode-card, .help-row,
