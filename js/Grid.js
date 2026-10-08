@@ -3516,9 +3516,22 @@ function pushDirection(a, b, dx, dy, dist) {
 // far items can be shoved WITHIN one iteration (ITEM_MAX_PUSH_PER_STEP per
 // pair), so a pair that only becomes overlapping mid-iteration is still found.
 const COLLISION_GRID_MARGIN_PX = 8 * ITEM_MAX_PUSH_PER_STEP; // verified exact vs the all-pairs version even in absurdly overcrowded piles (a 12px margin was not)
-const collisionGridCells = []; // flat grid of arrays of item indices, reused call to call
-let collisionGridTouched = [];
-const collisionCandidates = [];
+// Per direct request (frame rate with ~1000 items): the grid is flat typed arrays
+// rebuilt by a counting sort each iteration — no per-cell arrays, no closures,
+// nothing allocated per tick — and the 3 cells of a grid row sit next to each
+// other in the sorted order, so an item's neighbourhood is 3 contiguous ranges.
+// Physics is bit-for-bit what the array-of-buckets version did (checked in
+// lockstep over thousands of ticks of falling/piling items): same cells, same
+// candidates, same ascending visiting order, and any pair that could matter still
+// goes through the same Math.hypot arithmetic. The squared-distance reject in
+// front of it only skips pairs further apart than touch range + 1px, which the
+// original skipped too, and an insertion sort replaces Array.sort on the
+// (already nearly sorted) candidate list.
+let gridCellCount = new Int32Array(1);
+let gridCellStart = new Int32Array(1);
+let gridSorted = new Int32Array(1);
+let gridCellOf = new Int32Array(1);
+let gridCandidates = new Int32Array(1);
 export function resolveItemCollisions(state, iterations = ITEM_COLLISION_ITERATIONS) {
   const items = state.level.items;
   const n = items.length;
@@ -3528,41 +3541,52 @@ export function resolveItemCollisions(state, iterations = ITEM_COLLISION_ITERATI
   const cell = 2 * maxRadius + COLLISION_GRID_MARGIN_PX;
   const cols = Math.ceil((WORLD_TILES_W * TILE_SIZE) / cell) + 3;
   const rows = Math.ceil((WORLD_TILES_H * TILE_SIZE) / cell) + 3;
-  const cellX = (x) => Math.min(cols - 2, Math.max(1, Math.floor(x / cell) + 1));
-  const cellY = (y) => Math.min(rows - 2, Math.max(1, Math.floor(y / cell) + 1));
+  const cells = cols * rows;
+  if (gridCellStart.length < cells + 1) { gridCellStart = new Int32Array(cells + 1); gridCellCount = new Int32Array(cells + 1); }
+  if (gridSorted.length < n) { gridSorted = new Int32Array(n * 2); gridCellOf = new Int32Array(n * 2); gridCandidates = new Int32Array(n * 2); }
+  const colMax = cols - 2;
+  const rowMax = rows - 2;
 
   for (let iter = 0; iter < iterations; iter++) {
-    for (let t = 0; t < collisionGridTouched.length; t++) collisionGridCells[collisionGridTouched[t]].length = 0;
-    collisionGridTouched.length = 0;
+    gridCellCount.fill(0, 0, cells + 1);
     for (let i = 0; i < n; i++) {
-      const idx = cellY(items[i].y) * cols + cellX(items[i].x);
-      let bucket = collisionGridCells[idx];
-      if (bucket === undefined) bucket = collisionGridCells[idx] = [];
-      if (bucket.length === 0) collisionGridTouched.push(idx);
-      bucket.push(i);
+      const item = items[i];
+      let cx = Math.floor(item.x / cell) + 1;
+      let cy = Math.floor(item.y / cell) + 1;
+      if (cx !== cx || cy !== cy) { gridCellOf[i] = -1; continue; } // NaN position: in no cell, same as the old version's unreachable NaN bucket
+      cx = cx < 1 ? 1 : (cx > colMax ? colMax : cx);
+      cy = cy < 1 ? 1 : (cy > rowMax ? rowMax : cy);
+      const idx = cy * cols + cx;
+      gridCellOf[i] = idx;
+      gridCellCount[idx]++;
     }
+    let run = 0;
+    for (let c = 0; c < cells; c++) { gridCellStart[c] = run; run += gridCellCount[c]; gridCellCount[c] = gridCellStart[c]; }
+    gridCellStart[cells] = run;
+    for (let i = 0; i < n; i++) { const co = gridCellOf[i]; if (co >= 0) gridSorted[gridCellCount[co]++] = i; } // ascending item index within every cell
 
     for (let i = 0; i < n; i++) {
+      if (gridCellOf[i] < 0) continue;
       const a = items[i];
-      const cx = cellX(a.x);
-      const cy = cellY(a.y);
-      collisionCandidates.length = 0;
+      let cx = Math.floor(a.x / cell) + 1; cx = cx < 1 ? 1 : (cx > colMax ? colMax : cx);
+      let cy = Math.floor(a.y / cell) + 1; cy = cy < 1 ? 1 : (cy > rowMax ? rowMax : cy);
+      let count = 0;
       for (let oy = -1; oy <= 1; oy++) {
-        for (let ox = -1; ox <= 1; ox++) {
-          const bucket = collisionGridCells[(cy + oy) * cols + (cx + ox)];
-          if (bucket === undefined) continue;
-          for (let k = 0; k < bucket.length; k++) if (bucket[k] > i) collisionCandidates.push(bucket[k]);
-        }
+        const base = (cy + oy) * cols + cx;
+        const end = gridCellStart[base + 2];
+        for (let k = gridCellStart[base - 1]; k < end; k++) { const j = gridSorted[k]; if (j > i) gridCandidates[count++] = j; }
       }
-      if (collisionCandidates.length > 1) collisionCandidates.sort((p, q) => p - q);
+      for (let p = 1; p < count; p++) { const v = gridCandidates[p]; let q = p - 1; while (q >= 0 && gridCandidates[q] > v) { gridCandidates[q + 1] = gridCandidates[q]; q--; } gridCandidates[q + 1] = v; }
 
-      for (let c = 0; c < collisionCandidates.length; c++) {
-        const b = items[collisionCandidates[c]];
+      for (let c = 0; c < count; c++) {
+        const b = items[gridCandidates[c]];
 
         const dx = b.x - a.x;
         const dy = b.y - a.y;
-        let dist = Math.hypot(dx, dy);
         const minDist = a.radius + b.radius;
+        const farRange = minDist + SLEEP_NEIGHBOR_RANGE_PX + 1;
+        if (dx * dx + dy * dy >= farRange * farRange) continue; // beyond both the touch range and the overlap range — skip the hypot
+        let dist = Math.hypot(dx, dy);
         // Anything within touching range of another item is never allowed to sleep
         // (and a sleeper that gets a neighbor wakes) — see the sleep notes at
         // stepItemOnGrid. Marked for touching-or-nearly pairs, not just
