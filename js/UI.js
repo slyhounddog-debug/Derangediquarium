@@ -115,7 +115,7 @@ import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND
 import { drawFish } from './FishRenderer.js';
 import { playUpgrade, setMusicVolume, setSfxVolume, getMusicVolume, getSfxVolume, playPanelOpen, playPanelClose, playInsufficientFunds, setMusicUnderwaterMuffle, setMusicSpeedBoost, setMusicPaused } from './Sound.js';
 import { computeProductionInfo } from './ProductionInfo.js';
-import { hasSaveGame, saveGame, loadSaveGame, isGuidedTutorialsEnabled, setGuidedTutorialsEnabled } from './Save.js';
+import { hasSaveGame, saveGame, loadSaveGame, clearSaveGame, isGuidedTutorialsEnabled, setGuidedTutorialsEnabled } from './Save.js';
 import { pushGameNotification } from './Notifications.js';
 import { setTitlePaused } from './TitleScreen.js';
 
@@ -582,6 +582,10 @@ export function initUI(state) {
     startSettingsBtn: document.getElementById('start-settings-btn'),
     startModeOverlay: document.getElementById('start-mode-overlay'),
     startModeBackBtn: document.getElementById('start-mode-back-btn'),
+    startModeModal: document.getElementById('start-mode-modal'),
+    startModeTitle: document.getElementById('start-mode-title'),
+    startWarnCancelBtn: document.getElementById('start-warn-cancel-btn'),
+    startWarnContinueBtn: document.getElementById('start-warn-continue-btn'),
     startModeNewBtn: document.getElementById('start-mode-new-btn'),
     startModeExpBtn: document.getElementById('start-mode-exp-btn'),
     startModeNewCanvas: document.getElementById('start-mode-new-canvas'),
@@ -2871,17 +2875,31 @@ export function initStartScreen(state, onStart) {
   // marking it user-set so Save.js's auto-off never second-guesses it), then
   // carries on into the game exactly as before. Changing the setting later
   // in Settings persists between sessions through the same Save.js call.
+  // Per direct request, if a save exists New Game first warns that it'll be overwritten; Continue on that
+  // warning carries on to the New/Experienced pick. The save itself is only deleted once a game really starts
+  // (backing out at either step leaves it alone).
+  const showStartModeStep = (warn) => {
+    els.startModeModal.classList.toggle('warn', warn);
+    els.startModeTitle.textContent = warn ? 'Overwrite your save?' : 'How would you like to start?';
+  };
   els.startNewGameBtn.addEventListener('click', () => {
+    if (state.ui.gameStarted) return; // the title is already on its way out — nothing here may act on the live game
     drawStartModeArt();
+    showStartModeStep(hasSaveGame());
     els.startModeOverlay.classList.remove('hidden');
     setTitlePaused(true);
     playPanelOpen();
   });
+  els.startWarnContinueBtn.addEventListener('click', () => { showStartModeStep(false); playPanelOpen(); });
+  els.startWarnCancelBtn.addEventListener('click', () => { closeStartModeOverlay(); playPanelClose(); });
   const closeStartModeOverlay = () => {
     els.startModeOverlay.classList.add('hidden');
     setTitlePaused(false);
   };
   const startNewGameWithTutorials = (guided) => {
+    if (state.ui.gameStarted) return;
+    clearSaveGame(); // the warning above already told them; nothing from the old save may survive into the new game
+    els.startContinueBtn.disabled = true;
     setGuidedTutorialsEnabled(guided);
     closeStartModeOverlay();
     playPanelClose();
@@ -2896,6 +2914,7 @@ export function initStartScreen(state, onStart) {
     playPanelClose();
   });
   els.startContinueBtn.addEventListener('click', () => {
+    if (state.ui.gameStarted) return; // a game is already running — loading a save now would overwrite it
     const saved = loadSaveGame();
     if (saved) {
       // The whole point of a save being plain, JSON-serializable state (see
@@ -3866,8 +3885,12 @@ function buildBuildPalette(state) {
     for (const id of memberIds) familyOfBuilding[id] = familyId;
   }
 
+  // Per direct request a fixed slot order (top-left to bottom-right), so unlocking a building just adds its
+  // slot instead of shuffling the others around; anything not listed keeps its roster order at the end.
+  const slotOrder = ['platform', 'fan', 'turret', 'refinery', 'chest', 'collector', TILE_MANUFACTURER, TILE_POWER_PLANT];
+  const slotRank = (b) => { const i = slotOrder.indexOf(familyOfBuilding[b.id] || b.id); return i < 0 ? slotOrder.length : i; };
   const renderedFamilies = new Set();
-  for (const building of available) {
+  for (const building of [...available].sort((x, y) => slotRank(x) - slotRank(y))) {
     const familyId = familyOfBuilding[building.id];
     if (!familyId) {
       buildSingleBuildingButton(state, building);

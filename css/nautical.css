@@ -805,6 +805,12 @@ body:has(#tank-overlay:not(.collapsed)) #bottom-bar-row, body:has(#lab-overlay:n
 /* Turret ammo-type rows: a "Waste"/"Biomass" title with an Ammo meter and a Damage meter side by side under it. */
 .building-stat.stat-dual-pair { grid-template-columns: 1fr 1fr; margin-top: -6px; }
 
+#start-warn-text { font-family: var(--font-display); font-weight: 600; font-size: 20px; color: var(--cream); text-shadow: 0 2px 0 #3a1f0d; }
+#start-warn-text b { color: #ffd27a; }
+
+/* A plank's own pointer-events:auto beats the leaving overlay's pointer-events:none, so during the title's exit animation the planks (centered under the logo, right where the Mound is) stayed clickable — clicking the Mound could hit Continue and load the save over a new game. */
+#start-overlay.leaving .plank-btn { pointer-events: none; }
+
 /* Selected Food/Favorite: the blue bubble turns light gold, like an active menu button on the plank and a selected building bubble in the Shop, so it's obvious at a glance. */
 #bottom-tool-bar .tool-btn.selected,
 #bottom-tool-bar #tool-food-btn.selected {

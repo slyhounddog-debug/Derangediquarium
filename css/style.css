@@ -1983,6 +1983,12 @@ body.time-paused #time-pause-overlay { opacity: 1; }
 .start-mode-card-title { font-size: 20px; font-weight: 800; color: #c25f8f; }
 .start-mode-card-desc { font-size: 13px; line-height: 1.45; }
 .start-mode-card-desc b { color: #c25f8f; }
+#start-warn-body { display: none; }
+#start-mode-modal.warn #start-warn-body { display: block; }
+#start-mode-modal.warn #start-mode-cards, #start-mode-modal.warn #start-mode-note { display: none; }
+#start-warn-text { font-size: 16px; line-height: 1.5; margin-bottom: 18px; }
+#start-warn-buttons { display: flex; gap: 14px; }
+#start-warn-buttons .pause-btn { flex: 1; margin-bottom: 0; }
 #start-mode-note { margin-top: 14px; text-align: center; font-size: 12.5px; font-weight: 700; opacity: 0.7; }
 #start-help-modal {
   width: 520px;

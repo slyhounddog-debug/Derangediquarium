@@ -72,6 +72,14 @@
       <div id="start-mode-title">How would you like to start?</div>
       <button id="start-mode-back-btn" class="pause-btn sheen-target">← Back</button>
     </div>
+    <!-- Per direct request: shown first when a save exists — New Game overwrites it, so the player must confirm. -->
+    <div id="start-warn-body">
+      <div id="start-warn-text">Starting a new game will <b>overwrite your existing save file</b>. Your saved fish, buildings and money will be gone for good.</div>
+      <div id="start-warn-buttons">
+        <button id="start-warn-cancel-btn" class="pause-btn sheen-target">Cancel</button>
+        <button id="start-warn-continue-btn" class="pause-btn sheen-target">Continue</button>
+      </div>
+    </div>
     <div id="start-mode-cards">
       <button id="start-mode-new-btn" class="start-mode-card">
         <canvas id="start-mode-new-canvas" width="260" height="170"></canvas>
