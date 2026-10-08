@@ -205,12 +205,25 @@ export function updateCamera(camera, input, canvas, dtMs, worldBottomY = WORLD_H
 // so an overloaded game runs in slow motion instead of spiraling. Every step
 // is still exactly simDtMs, so the physics itself is unchanged; with a cheap
 // update() the cap is simply never reached.
+//
+// Render only after a sim step, per direct request (high-refresh displays, e.g. a
+// 300Hz laptop): the world only changes when update() steps, and the renderer
+// doesn't interpolate between steps, so on a display faster than the 60Hz sim a
+// frame with no new step would just redraw the identical picture — at 300Hz that
+// was ~4 of every 5 frames. Those are skipped (the canvas simply keeps showing the
+// last frame). alwaysRender() lets the caller opt out for things that animate in
+// real time off the render call itself (the title screen), and a frame is never
+// skipped if MAX_RENDER_GAP_MS has passed without one (e.g. the 0x debug pause
+// runs no steps at all, but hover/UI/real-time effects should still update). At
+// 60Hz or below nearly every frame has a step, so nothing changes there.
 const UPDATE_BUDGET_MS = 50;
 const MIN_STEPS_PER_FRAME = 2;
-export function createGameLoop({ update, render, getTimeScale, simDtMs, maxFrameSkip }) {
+const MAX_RENDER_GAP_MS = 33;
+export function createGameLoop({ update, render, getTimeScale, simDtMs, maxFrameSkip, alwaysRender }) {
   let accumulator = 0;
   let lastTime = performance.now();
   let emaStepMs = 0;
+  let lastRenderAt = -Infinity;
 
   function frame(now) {
     requestAnimationFrame(frame);
@@ -234,7 +247,10 @@ export function createGameLoop({ update, render, getTimeScale, simDtMs, maxFrame
     }
     if (steps >= stepCap) accumulator = 0; // drop backlog rather than spiral after a stall (or when update() is too heavy to keep up)
 
-    render();
+    if (steps > 0 || now - lastRenderAt >= MAX_RENDER_GAP_MS || (alwaysRender && alwaysRender())) {
+      lastRenderAt = now;
+      render();
+    }
   }
 
   requestAnimationFrame(frame);

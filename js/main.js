@@ -240,7 +240,7 @@ import {
 import { isPointOnMound, crackMound, renderMound, centerCameraOnMound, isPointOnScienceLab, renderScienceLab, renderMoundMask } from './Mound.js';
 import { drawFish, drawFishShadow } from './FishRenderer.js';
 import { perfMark, perfUpdateBegin, perfUpdateEnd, perfRenderBegin, perfRenderEnd } from './PerfOverlay.js';
-import { loadTitleFonts, initTitleScreen, showTitle, updateTitle, exitTitle, titleBlocksWorldRender, titleNeedsBackdrop, captureTitleBackdrop } from './TitleScreen.js';
+import { loadTitleFonts, initTitleScreen, showTitle, updateTitle, exitTitle, titleIsActive, titleBlocksWorldRender, titleNeedsBackdrop, captureTitleBackdrop } from './TitleScreen.js';
 import { oneShotShimmerProgress, drawShimmerSweep, shimmerFadeAlpha, createShimmerTimer, updateShimmerTimer } from './Shimmer.js';
 import {
   initUI,
@@ -405,7 +405,9 @@ function compositeCausticForeground() {
   const w = canvas.width;
   const h = canvas.height;
 
+  perfMark('r: fish + overlays', ctx);
   updateCausticVideoLoop();
+  perfMark('r: caustic: video frame copy', ctx);
 
   // Step 3: clip the caustic video to the foreground's own silhouette. A
   // fresh copy of the foreground (not the foreground canvas itself) is used
@@ -485,11 +487,14 @@ function compositeCausticForeground() {
     // of the foreground (not the foreground canvas itself) is the clip mask,
     // since 'source-in' would otherwise destroy the real fish/decor artwork
     // it's clipping against.
+    perfMark('r: caustic: light layer build', ctx);
     causticMaskCtx.globalCompositeOperation = 'copy'; // replaces the old clear + draw pair with one full-screen pass
     causticMaskCtx.drawImage(foregroundCanvas, 0, 0);
+    perfMark('r: caustic: mask copy of foreground', ctx);
     causticMaskCtx.globalCompositeOperation = 'source-in';
     causticMaskCtx.drawImage(causticLightCanvas, 0, 0, lw, lh, 0, 0, w, h);
     causticMaskCtx.globalCompositeOperation = 'source-over';
+    perfMark('r: caustic: clip light to mask', ctx);
 
     // Screen-blend the clipped, gradient-masked light back onto the real
     // foreground art — brightens only the foreground pixels it's clipped to,
@@ -498,10 +503,12 @@ function compositeCausticForeground() {
     foregroundCtx.globalCompositeOperation = 'screen';
     foregroundCtx.drawImage(causticMaskCanvas, 0, 0);
     foregroundCtx.globalCompositeOperation = 'source-over';
+    perfMark('r: caustic: screen-blend onto foreground', ctx);
   }
 
   // Step 5: the completed, lit foreground layer onto the main canvas.
   mainCtx.drawImage(foregroundCanvas, 0, 0);
+  perfMark('r: caustic: blit foreground to main', ctx);
 }
 
 // ---- Minimap ----
@@ -7119,7 +7126,7 @@ function render() {
   updateBossHealthBar(state);
   updateHUD(state);
   updateNotificationTicker(state);
-  perfMark('r: caustic composite', ctx);
+  perfMark('r: boss overlay + HUD', ctx); // was labelled 'caustic composite' back when the composite call sat inside this span; it is timed on its own now (r: caustic: ...)
   renderMinimap(state);
   state.debug.cursorWorld = cursorWorld;
   updateDebugOverlay(state, {
@@ -7146,4 +7153,5 @@ createGameLoop({
   getTimeScale: () => TIME_SCALE_STEPS[state.debug.timeScaleIndex] * (state.ui.speedX2 ? 2 : 1),
   simDtMs: SIM_DT_MS,
   maxFrameSkip: MAX_FRAME_SKIP,
+  alwaysRender: titleIsActive, // the title animates in real time off render() — see Engine.js's render-after-a-step note
 });

@@ -1131,6 +1131,11 @@ export function updateTitle(now) {
 
 // While the title is up and its backdrop snapshot exists, the whole game
 // world is skipped each frame (the snapshot stands in for it).
+// True from showTitle() until the exit animation finishes — main.js's game loop keeps rendering every display frame while it is, since the title animates in real time off render().
+export function titleIsActive() {
+  return ts.active;
+}
+
 export function titleBlocksWorldRender() {
   return ts.active && !ts.exiting && ts.backdropReady && !ts.backdropDirty;
 }
