@@ -726,7 +726,7 @@ function drawOneBoulder(ctx, camera, canvasWidth, b, floorY = SEABED_FLOOR_Y) {
 // castles and make it so the range in size for sand castles is greater on
 // both extremes") — a few static sand structures, originally sized between
 // a Boulder's own footprint (BOULDER_COUNT above, diameter roughly 45-110px)
-// and the Mound's (Mound.js's MOUND_WIDTH_TILES(4.4) * TILE_SIZE(32) ≈
+// and the Mound's (Mound.js's MOUND_WIDTH_TILES, then 4.4 * TILE_SIZE(32) ≈
 // 141px); the range now runs noticeably smaller than a Boulder's own
 // smallest at one end and bigger than the Mound at the other, so 3 castles
 // read as more clearly varied rather than all clustering in that original

@@ -5792,7 +5792,7 @@ function getPostAlienTurretSpot(state) {
 // camera-centering) rather than the bottom of the tank like
 // POST_ALIEN_TURRET_SPOT above, so there's little to scroll to — this flow has
 // no 'scroll' step at all. Offset clear of the Mound's own MOUND_WIDTH_TILES
-// (4.4, so ~2.2 tiles either side of MOUND_X) footprint so the two click
+// (4.84, so ~2.4 tiles either side of MOUND_X) footprint so the two click
 // targets never overlap.
 const POST_MOUND_CHEST_SPOT = { x: MOUND_X + TILE_SIZE * 4, y: SEABED_FLOOR_Y + TILE_SIZE * 2 };
 

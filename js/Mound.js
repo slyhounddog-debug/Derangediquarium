@@ -19,6 +19,8 @@ import {
   MOUND_CRACK_COST,
   MOUND_WIDTH_TILES,
   MOUND_HEIGHT_PX,
+  SCIENCE_LAB_WIDTH_TILES,
+  SCIENCE_LAB_HEIGHT_PX,
   TIER_UNLOCKS,
   TILE_STORAGE_CHEST,
   TILE_REFINERY,
@@ -31,6 +33,9 @@ import { playUpgrade } from './Sound.js';
 import { bakeMoundSprite, bakeLabSprite, traceMoundPath } from './SeabedArt.js';
 
 const MOUND_WIDTH_PX = MOUND_WIDTH_TILES * TILE_SIZE;
+// The Science Lab's own footprint, no longer the Mound's — see SCIENCE_LAB_WIDTH_TILES in Config.js.
+const LAB_WIDTH_PX = SCIENCE_LAB_WIDTH_TILES * TILE_SIZE;
+const LAB_BOX_H = SCIENCE_LAB_HEIGHT_PX + TILE_SIZE; // sprite box height, same HEIGHT + 1-tile-lift shape as the Mound's
 export const MOUND_X = WORLD_W / 2; // world-space center, fixed for the life of the level
 // Per direct request ("move science lab down so it's on the floor of the
 // upper tank, and none of it is in the city part of the tank") — the Lab
@@ -448,8 +453,8 @@ function traceMoundRim(c, ox, oy, k) {
 // The Lab's visible outline, without the bottom edge: the glass dome's arc, out along the top of the
 // steel base (0.1w..0.9w wide), and down its two vertical sides.
 function traceLabRim(c, ox, oy, k) {
-  const w = MOUND_WIDTH_PX * k;
-  const h = (MOUND_HEIGHT_PX + TILE_SIZE) * k;
+  const w = LAB_WIDTH_PX * k;
+  const h = LAB_BOX_H * k;
   const r = w * 0.32;
   const baseTop = oy + h * 0.55;
   c.moveTo(ox + w * 0.1, oy + h);
@@ -468,7 +473,7 @@ function drawMoundRim(ctx, state, topLeft) {
 }
 function drawLabRim(ctx, state, topLeft) {
   const zoom = state.camera.zoom;
-  if (!labRim || labRim.zoom !== zoom) labRim = bakeRimSprites(traceLabRim, MOUND_WIDTH_PX * zoom, (MOUND_HEIGHT_PX + TILE_SIZE) * zoom, zoom);
+  if (!labRim || labRim.zoom !== zoom) labRim = bakeRimSprites(traceLabRim, LAB_WIDTH_PX * zoom, LAB_BOX_H * zoom, zoom);
   drawBakedRim(ctx, labRim, topLeft.x, topLeft.y, state.level.elapsed);
 }
 
@@ -668,9 +673,9 @@ function renderMoundShatter(ctx, state, topLeft) {
 // is actually purchased. This module only owns the hit-test and the render.
 export function isPointOnScienceLab(state, worldX, worldY) {
   if (state.level.tier < MOUND_MAX_TIER) return false;
-  const left = MOUND_X - MOUND_WIDTH_PX / 2;
-  const right = MOUND_X + MOUND_WIDTH_PX / 2;
-  const top = SEABED_FLOOR_Y - MOUND_HEIGHT_PX - SCIENCE_LAB_LIFT_PX;
+  const left = MOUND_X - LAB_WIDTH_PX / 2;
+  const right = MOUND_X + LAB_WIDTH_PX / 2;
+  const top = SEABED_FLOOR_Y - SCIENCE_LAB_HEIGHT_PX - SCIENCE_LAB_LIFT_PX;
   const bottom = SEABED_FLOOR_Y + TILE_SIZE - SCIENCE_LAB_LIFT_PX;
   return worldX >= left && worldX <= right && worldY >= top && worldY <= bottom;
 }
@@ -684,7 +689,9 @@ export function renderMoundMask(ctx, state) {
   const lab = state.level.tier >= MOUND_MAX_TIER;
   if (lab ? !labSprite : !moundSprite) return; // not baked yet — the real render bakes it on its first frame
   const sp = lab ? labSprite : moundSprite;
-  const topLeft = worldToScreen(MOUND_X - MOUND_WIDTH_PX / 2, SEABED_FLOOR_Y - MOUND_HEIGHT_PX - (lab ? SCIENCE_LAB_LIFT_PX : MOUND_LIFT_PX), camera);
+  const topLeft = lab
+    ? worldToScreen(MOUND_X - LAB_WIDTH_PX / 2, SEABED_FLOOR_Y - SCIENCE_LAB_HEIGHT_PX - SCIENCE_LAB_LIFT_PX, camera)
+    : worldToScreen(MOUND_X - MOUND_WIDTH_PX / 2, SEABED_FLOOR_Y - MOUND_HEIGHT_PX - MOUND_LIFT_PX, camera);
   const z = camera.zoom / sp.scale;
   ctx.drawImage(sp.canvas, topLeft.x - sp.pad * camera.zoom, topLeft.y - sp.pad * camera.zoom, sp.canvas.width * z, sp.canvas.height * z);
 }
@@ -692,9 +699,9 @@ export function renderMoundMask(ctx, state) {
 export function renderScienceLab(ctx, state) {
   if (state.level.tier < MOUND_MAX_TIER) return;
   const { camera } = state;
-  const topLeft = worldToScreen(MOUND_X - MOUND_WIDTH_PX / 2, SEABED_FLOOR_Y - MOUND_HEIGHT_PX - SCIENCE_LAB_LIFT_PX, camera);
-  const w = MOUND_WIDTH_PX * camera.zoom;
-  const h = (MOUND_HEIGHT_PX + TILE_SIZE) * camera.zoom;
+  const topLeft = worldToScreen(MOUND_X - LAB_WIDTH_PX / 2, SEABED_FLOOR_Y - SCIENCE_LAB_HEIGHT_PX - SCIENCE_LAB_LIFT_PX, camera);
+  const w = LAB_WIDTH_PX * camera.zoom;
+  const h = LAB_BOX_H * camera.zoom;
   const cx = topLeft.x + w / 2;
 
   const pulsing = shouldPulseScienceLab(state);
@@ -704,8 +711,8 @@ export function renderScienceLab(ctx, state) {
   // sprite in the boulders' own lit/rimmed style (SeabedArt.js's
   // bakeLabSprite), per direct request — a steel base with a door/portholes
   // under a glass dome holding a flask, so it still reads as "lab," not "dirt
-  // mound," at a glance. Same footprint as before.
-  if (!labSprite) labSprite = bakeLabSprite(MOUND_WIDTH_PX, MOUND_HEIGHT_PX + TILE_SIZE);
+  // mound," at a glance. Sized by its own SCIENCE_LAB_* constants, not the Mound's.
+  if (!labSprite) labSprite = bakeLabSprite(LAB_WIDTH_PX, LAB_BOX_H);
   const z = camera.zoom / labSprite.scale;
   ctx.drawImage(labSprite.canvas, topLeft.x - labSprite.pad * camera.zoom, topLeft.y - labSprite.pad * camera.zoom, labSprite.canvas.width * z, labSprite.canvas.height * z);
   drawLabRim(ctx, state, topLeft); // always-on glowing rim, like the Mound's, so it reads as interactable
