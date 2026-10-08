@@ -750,6 +750,8 @@ export function initUI(state) {
     toggleTankPanel(state);
   });
   els.labCollapseBtn.addEventListener('click', () => toggleLabMenu(state));
+  setWindowTitle(document.getElementById('lab-title'), 'Science Lab');
+  setWindowTitle(els.tankTitle, els.tankTitle.textContent); // the HTML's plain text becomes per-letter spans like the others
   // Shop's X — the only mouse way to close it, per direct request (clicking
   // outside it must NOT close it, unlike the Tank/Lab windows). Same effect
   // as the E hotkey, which keeps a selected fish selected (keepSelection) —
@@ -889,6 +891,20 @@ export function closeSidePanels(state, keepShop = false) {
 // keepSelection: the E hotkey passes true — per direct request it only ever
 // opens/closes the shop, so closing it must NOT deselect a selected fish (see
 // updateShopCollapse); every other close path still deselects.
+// The Shop, Tank and Lab windows share one title look (nautical.css colors each
+// letter by position, like the Shop's hand-written <span> letters), so their
+// titles are built the same way: one span per character.
+function setWindowTitle(el, text) {
+  if (el.dataset.title === text) return;
+  el.dataset.title = text;
+  el.textContent = '';
+  for (const ch of text) {
+    const span = document.createElement('span');
+    span.textContent = ch;
+    el.appendChild(span);
+  }
+}
+
 export function toggleShopCollapse(state, keepSelection = false) {
   state.ui.shopCollapsed = !state.ui.shopCollapsed;
   if (!state.ui.shopCollapsed) {
@@ -3994,7 +4010,7 @@ export function setTankPanelView(state, view) {
   els.tankTabCustomizationBtn.classList.toggle('active', view === 'customization');
   // One shared header row across the 3 views (the X lives there) — title and
   // which currency pill shows follow the current view.
-  els.tankTitle.textContent = { upgrades: 'Tank Upgrades', achievements: 'Achievements', customization: 'Customize' }[view];
+  setWindowTitle(els.tankTitle, { upgrades: 'Tank Upgrades', achievements: 'Achievements', customization: 'Customize' }[view]);
   els.tankPointsDisplay.classList.toggle('hidden', view !== 'upgrades');
   els.achievementGemsDisplay.classList.toggle('hidden', view !== 'achievements');
   els.customizationGemsDisplay.classList.toggle('hidden', view !== 'customization');

@@ -228,8 +228,8 @@
   box-shadow: none;
   filter: drop-shadow(0 14px 22px rgba(0, 0, 0, 0.55));
 }
-#shop-panel, #tank-panel { width: 800px; height: 620px; max-width: 94vw; max-height: 92vh; }
-#lab-modal { width: 760px; height: 680px; max-width: 94vw; max-height: 92vh; padding: 18px 22px; }
+/* Shop, Tank and Lab are one window design: change the size, frame, sea life or title here and all three follow. */
+#shop-panel, #tank-panel, #lab-modal { width: 944px; height: 620px; max-width: 94vw; max-height: 92vh; }
 #start-mode-modal { width: 780px; }
 #start-help-modal { width: 640px; }
 #pause-menu { width: 340px; }
@@ -249,7 +249,7 @@
   pointer-events: none;
   z-index: 5;
 }
-#shop-panel::before {
+#shop-panel::before, #tank-panel::before, #lab-modal::before {
   background:
     url(nautical/anchor.svg) no-repeat left 57% bottom 22px / 32px 36px,
     url(nautical/starfish-2.svg) no-repeat left 144px bottom 12px / 58px,
@@ -268,37 +268,6 @@
     url(nautical/weed-wrap.svg) no-repeat left 21px bottom 56px / 88px 125px,
     url(nautical/weed-hang.svg) no-repeat left 41% top 23px / 46px 70px,
     url(nautical/weed-r1.svg) no-repeat right 55% top 12px / 46px 53px;
-}
-#tank-panel::before {
-  background:
-    url(nautical/anchor.svg) no-repeat left 47% top 20px / 30px 34px,
-    url(nautical/starfish-3.svg) no-repeat right 13px bottom 156px / 50px,
-    url(nautical/starfish-5.svg) no-repeat left 112px bottom 13px / 52px,
-    url(nautical/starfish-2.svg) no-repeat right 122px bottom 17px / 30px,
-    url(nautical/starfish-4.svg) no-repeat left 17px top 44% / 34px,
-    url(nautical/starfish-1.svg) no-repeat left 61% bottom 27px / 24px,
-    url(nautical/starfish-5.svg) no-repeat right 20px top 38% / 26px,
-    url(nautical/shell-clam.svg) no-repeat left 31% bottom 25px / 32px,
-    url(nautical/shell-spiral.svg) no-repeat right 36% bottom 24px / 28px,
-    url(nautical/shell-scallop.svg) no-repeat left 14% top 23px / 26px,
-    url(nautical/weed-wrap-2.svg) no-repeat left -10px bottom 84px / 78px 117px,
-    url(nautical/weed-r2.svg) no-repeat right -4px bottom -4px / 56px 68px,
-    url(nautical/weed-r3.svg) no-repeat left 52% bottom 6px / 50px 53px;
-}
-#lab-modal::before {
-  background:
-    url(nautical/anchor.svg) no-repeat right 31% bottom 22px / 32px 36px,
-    url(nautical/starfish-4.svg) no-repeat left 14px bottom 146px / 46px,
-    url(nautical/starfish-1.svg) no-repeat right 146px bottom 14px / 52px,
-    url(nautical/starfish-2.svg) no-repeat right 16px top 52% / 34px,
-    url(nautical/starfish-3.svg) no-repeat left 38% top 17px / 28px,
-    url(nautical/starfish-5.svg) no-repeat left 156px bottom 27px / 24px,
-    url(nautical/shell-spiral.svg) no-repeat left 21% bottom 24px / 32px,
-    url(nautical/shell-clam.svg) no-repeat right 51px top 22px / 26px,
-    url(nautical/shell-scallop.svg) no-repeat left 24px top 33% / 28px,
-    url(nautical/weed-corner.svg) no-repeat right -8px bottom -8px / 64px 80px,
-    url(nautical/weed-r4.svg) no-repeat left 46% top 8px / 54px 58px,
-    url(nautical/weed-r5.svg) no-repeat left -4px top 0px / 56px 64px;
 }
 #start-mode-modal::before, #start-help-modal::before, #pause-menu::before {
   background:
@@ -329,29 +298,13 @@
 }
 /* The seaweed rooted behind the wood: extra background layers under the map
    (background-clip: padding-box already cuts them at the frame's inner edge). */
-#shop-panel {
+#shop-panel, #tank-panel, #lab-modal {
   background:
     url(nautical/weed-in-a.svg) no-repeat left 15% bottom -8px / 72px 92px,
     url(nautical/weed-in-b.svg) no-repeat right 19% bottom -6px / 54px 74px,
     url(nautical/weed-in-c.svg) no-repeat left -6px top 62% / 80px 63px,
     url(nautical/weed-in-d.svg) no-repeat left 58% bottom -6px / 62px 66px,
     url(nautical/weed-in-e.svg) no-repeat right -6px top 70% / 62px 80px,
-    var(--map);
-  background-clip: padding-box;
-}
-#tank-panel {
-  background:
-    url(nautical/weed-in-f.svg) no-repeat left 8% bottom -8px / 60px 80px,
-    url(nautical/weed-in-g.svg) no-repeat right 14% bottom -6px / 78px 68px,
-    url(nautical/weed-in-h.svg) no-repeat right -6px top 24% / 72px 59px,
-    var(--map);
-  background-clip: padding-box;
-}
-#lab-modal {
-  background:
-    url(nautical/weed-in-b.svg) no-repeat left 12% bottom -6px / 52px 71px,
-    url(nautical/weed-in-e.svg) no-repeat right -6px top 58% / 60px 78px,
-    url(nautical/weed-in-a.svg) no-repeat right 30% bottom -8px / 64px 82px,
     var(--map);
   background-clip: padding-box;
 }
@@ -376,15 +329,15 @@
   letter-spacing: 0.02em;
   text-shadow: 0 4px 0 #0b2347, 0 7px 7px rgba(0, 0, 0, 0.35);
 }
-#tank-title, #lab-title, #start-mode-title, #start-help-title { font-size: 30px; }
+#start-mode-title, #start-help-title { font-size: 30px; }
 #pause-title { font-size: 34px; }
 /* The Shop's big title sits up over the frame, each letter its own color. */
-#shop-header { font-size: 58px; line-height: 1; position: relative; z-index: 6; margin: -62px 0 -6px -16px; }
-#shop-header > span:nth-child(1) { color: #ff7a1a; }
-#shop-header > span:nth-child(2) { color: #fbf6ec; }
-#shop-header > span:nth-child(3) { color: #41b9ff; }
-#shop-header > span:nth-child(4) { color: #ff9b2e; }
-#shop-header-row { margin-bottom: 4px; align-items: flex-end; }
+#shop-header, #tank-title, #lab-title { font-size: 58px; line-height: 1; position: relative; z-index: 6; margin: -62px 0 -6px -16px; white-space: pre; }
+#shop-header > span:nth-child(4n+1), #tank-title > span:nth-child(4n+1), #lab-title > span:nth-child(4n+1) { color: #ff7a1a; }
+#shop-header > span:nth-child(4n+2), #tank-title > span:nth-child(4n+2), #lab-title > span:nth-child(4n+2) { color: #fbf6ec; }
+#shop-header > span:nth-child(4n+3), #tank-title > span:nth-child(4n+3), #lab-title > span:nth-child(4n+3) { color: #41b9ff; }
+#shop-header > span:nth-child(4n), #tank-title > span:nth-child(4n), #lab-title > span:nth-child(4n) { color: #ff9b2e; }
+#shop-header-row, #tank-header-row, #lab-header-row { margin-bottom: 4px; align-items: flex-end; }
 /* Centered on the frame's top-right iron corner bracket (30px border, so its middle is 15px in from the window's outer edges; offsets are from the padding box, minus half the 52px button). */
 #shop-header-row .lab-close-x-btn, #tank-header-row .lab-close-x-btn, #lab-header-row .lab-close-x-btn { position: absolute; top: -41px; right: -41px; margin: 0; z-index: 6; }
 
@@ -713,8 +666,10 @@
    over the frame like the reference. */
 #shop-species-grid, #tool-bar { gap: 50px 20px; margin: 18px 0 50px; }
 #shop-species-grid { margin-bottom: 38px; }
-#shop-header { margin: -92px 0 0 -18px; }
-#shop-header-row { margin-bottom: 14px; }
+#shop-header, #tank-title, #lab-title { margin: -92px 0 0 -18px; }
+#shop-header-row, #tank-header-row, #lab-header-row { margin-bottom: 14px; }
+/* The Tank and Lab layers are full-screen click-away overlays above the launcher bar; lift the bar over them so the Shop/Tank/Lab buttons still work while one is open (they switch or close the window). */
+body:has(#tank-overlay:not(.collapsed)) #bottom-bar-row, body:has(#lab-overlay:not(.hidden)) #bottom-bar-row { z-index: 215; }
 
 /* Lighter, warmer parchment grain (the dark speckle read as dirty gray). */
 .tank-upgrade-card, .achievement-card, .hat-card, .start-mode-card, .help-row,
@@ -732,7 +687,6 @@
 /* Readable on parchment (the old light red/green were made for a pink card). */
 .tank-upgrade-desc .stat-current { color: #b3261e; }
 .tank-upgrade-desc .stat-next { color: #1c7a3a; }
-#shop-panel { width: 944px; }
 #shop-preview { width: 296px; }
 #shop-species-grid, #tool-bar { gap: 50px 14px; }
 /* Per direct request the building bubbles are slightly larger (the icon inside
