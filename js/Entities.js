@@ -2442,14 +2442,29 @@ function updateScience(item, state, dtMs) {
 // already settled down there is just as unreachable to this as before.
 // Returns the same { fx, fy } shape computeFanForce does, so the two can be
 // summed before integrateItemForces (see computeEnvironmentalForce below).
+// Per direct request (frame rate): every item used to scan EVERY entity each tick just to find the (usually
+// zero) Magnet Fish with their magnet on — ~30 fish x ~1000 items. The active magnets are now collected once
+// per entities array (updateEntities replaces that array every tick, and magnet toggles only happen between
+// ticks), in the same order, so the summation below is unchanged.
+let magnetFishEntities = null;
+let magnetFishLength = -1;
+let magnetFishList = [];
+function activeMagnetFish(state) {
+  const entities = state.level.entities;
+  if (magnetFishEntities !== entities || magnetFishLength !== entities.length) {
+    magnetFishList = entities.filter((entity) => entity.type === 'fish' && entity.speciesId === 'buffer_fish' && entity.magnetOn);
+    magnetFishEntities = entities;
+    magnetFishLength = entities.length;
+  }
+  return magnetFishList;
+}
 function computeBufferFishMagnetForce(state, item) {
   let fx = 0;
   let fy = 0;
   // Per direct request, blue/green Science and Alien Eggs can never be pulled,
   // whatever an older save's magnetFilterItems says — one Set lookup per item.
   if (MAGNET_FISH_EXCLUDED_ITEM_TYPES.has(item.type)) return { fx, fy };
-  for (const entity of state.level.entities) {
-    if (entity.type !== 'fish' || entity.speciesId !== 'buffer_fish' || !entity.magnetOn) continue;
+  for (const entity of activeMagnetFish(state)) {
     // A fish loaded from a save written before magnetFilterItems existed
     // has it as undefined, not ['waste'] — falls back to the same default a
     // freshly-spawned Magnet Fish gets, so an old save's already-toggled

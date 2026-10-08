@@ -1958,6 +1958,7 @@ export function cyclePlatformAt(state, worldX, worldY) {
 function fanRangeScale(data) {
   return Math.max(0.01, Math.min(1, (data.rangePct ?? 100) / 100));
 }
+const FAN_CONE_COS_HALF_ANGLE = Math.cos(FAN_CONE_HALF_ANGLE_RAD);
 let fanCache = { state: null, step: -1, fans: [] };
 function refreshFanCache(state) {
   const fans = [];
@@ -1966,7 +1967,7 @@ function refreshFanCache(state) {
     const stats = FAN_STATS[data.type];
     if (!stats) continue; // not a fan (e.g. the Auto-Feeder's own buildingData entry)
     const [row, col] = key.split(',').map(Number);
-    fans.push({ data, stats, range: stats.maxRange * fanRangeScale(data), fanX: col * TILE_SIZE + TILE_SIZE / 2, fanY: row * TILE_SIZE + TILE_SIZE / 2 });
+    fans.push({ data, stats, range: stats.maxRange * fanRangeScale(data), fanX: col * TILE_SIZE + TILE_SIZE / 2, fanY: row * TILE_SIZE + TILE_SIZE / 2, cosAngle: Math.cos(data.angle), sinAngle: Math.sin(data.angle) });
   }
   fanCache = { state, step: sleepStepCounter, fans };
 }
@@ -1983,11 +1984,20 @@ export function computeFanForce(state, item) {
     // platformIgnoresItem's comment): empty by default (blows everything,
     // exactly like a Fan always has), and an item type only stops being
     // affected once the player explicitly checks it into the pop-up.
-    if (data.filterItems && data.filterItems.includes(item.type)) continue;
     const dx = item.x - fan.fanX;
     const dy = item.y - fan.fanY;
+    // Per direct request (frame rate): most items are nowhere near a given fan, so the squared distance
+    // rejects them before the (slow) Math.hypot — 1px of slack so the real test below still decides
+    // anything near the edge exactly as before.
+    const reach = range + 1;
+    if (dx * dx + dy * dy > reach * reach) continue;
+    if (data.filterItems && data.filterItems.includes(item.type)) continue;
     const dist = Math.hypot(dx, dy);
     if (dist > range) continue;
+    // Clearly outside the cone (by more than float error): skip the atan2/sin/cos normalisation below, which would reject it
+    // too. cos of the angle between the fan's aim and the item direction is dot / dist; anything within 1e-9 of the cone's
+    // edge (or at dist 0) still falls through to the exact test.
+    if ((dx * fan.cosAngle + dy * fan.sinAngle) / dist < FAN_CONE_COS_HALF_ANGLE - 1e-9) continue;
     const angleToItem = Math.atan2(dy, dx);
     let angleDiff = angleToItem - data.angle;
     angleDiff = Math.atan2(Math.sin(angleDiff), Math.cos(angleDiff)); // normalize to [-PI, PI]
@@ -1997,8 +2007,8 @@ export function computeFanForce(state, item) {
     // efficiency, same "only power-costing buildings are affected at all"
     // rule every other building below follows.
     const magnitude = stats.maxForce * (1 - dist / range) * (stats.powerCost > 0 ? efficiency : 1);
-    fx += Math.cos(data.angle) * magnitude;
-    fy += Math.sin(data.angle) * magnitude;
+    fx += fan.cosAngle * magnitude;
+    fy += fan.sinAngle * magnitude;
   }
   return { fx, fy };
 }
@@ -2509,7 +2519,9 @@ function isTouchingBuildingTile(centerX, centerY, itemX, itemY, itemRadius) {
   const half = TILE_SIZE / 2;
   const dx = Math.max(Math.abs(itemX - centerX) - half, 0);
   const dy = Math.max(Math.abs(itemY - centerY) - half, 0);
-  return Math.hypot(dx, dy) <= itemRadius + TOUCH_EPSILON_PX;
+  const reach = itemRadius + TOUCH_EPSILON_PX;
+  if (dx > reach || dy > reach) return false; // hypot(dx, dy) is never less than either leg, so this is exactly what the test below would say — minus the hypot, for the many items nowhere near the tile
+  return Math.hypot(dx, dy) <= reach;
 }
 
 // A Collector's power draw depends on WHAT it's currently holding, not just
@@ -2626,6 +2638,15 @@ function beginCollectorProcessing(item, centerX, centerY, tileType) {
 // kind of output depending on which recipe locked in.
 const turretLockedTargets = new WeakMap(); // turret buildingData -> the alien it is locked onto, see updateBuildings' turret branch
 
+// The first item (in list order) a Collector at this tile centre is currently holding, or null.
+function findCollectorHeldItem(items, centerX, centerY) {
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    if (it.collectorProgressMs != null && it.collectorCenterX === centerX && it.collectorCenterY === centerY) return it;
+  }
+  return null;
+}
+
 export function updateBuildings(state, dtMs) {
   const foodSpawnPoints = [];
   const wasteSpawnPoints = [];
@@ -2647,12 +2668,16 @@ export function updateBuildings(state, dtMs) {
     // against a 5-second sample granularity. Skipped for Platform (no
     // meaningful "uptime" concept) and anything without a real
     // active/idle distinction.
+    // Per direct request (frame rate): a Collector's "is an item mid-hold here" answer was computed twice a
+    // tick (here for uptime, again for the intake gate below) with a closure scan over every item each time —
+    // same predicate, nothing mutates between the two — so it is scanned once and shared.
+    const collectorHeldItem = COLLECTOR_TILES.has(data.type) ? findCollectorHeldItem(items, centerX, centerY) : null;
     if (
       COLLECTOR_TILES.has(data.type) || REFINERY_TILES.has(data.type) ||
       MANUFACTURER_TILES.has(data.type) || POWER_PLANT_TILES.has(data.type) ||
       TURRET_TILES.has(data.type) || FAN_TILES.has(data.type)
     ) {
-      updateBuildingUptimeTracking(state, data.type, data, centerX, centerY, dtMs);
+      updateBuildingUptimeTracking(state, data.type, data, centerX, centerY, dtMs, collectorHeldItem);
     }
 
     if (COLLECTOR_TILES.has(data.type)) {
@@ -2666,9 +2691,7 @@ export function updateBuildings(state, dtMs) {
       // rest there. Green Science shares blue's own scienceMs duration (see
       // beginCollectorProcessing below) — per spec, it's routed into a
       // Collector the exact same way blue Science already is.
-      let anyProcessing = items.some(
-        (it) => it.collectorProgressMs != null && it.collectorCenterX === centerX && it.collectorCenterY === centerY
-      );
+      let anyProcessing = collectorHeldItem !== null;
       if (!anyProcessing) {
         for (let i = 0; i < items.length; i++) {
           const it = items[i];
@@ -3254,12 +3277,10 @@ function ejectOneFromChest(state, data, key, centerX, centerY, angle, distanceTi
 // elapsed, ammo in hand), not the instantaneous tick a shot happens to go
 // out on, which would otherwise read as near-0% uptime even for a turret
 // that's constantly busy.
-function isBuildingActiveForUptime(state, type, data, centerX, centerY) {
+function isBuildingActiveForUptime(state, type, data, centerX, centerY, collectorHeldItem) {
   if (FAN_TILES.has(type)) return true;
   if (COLLECTOR_TILES.has(type)) {
-    const activeItem = state.level.items.find(
-      (it) => it.collectorProgressMs != null && it.collectorCenterX === centerX && it.collectorCenterY === centerY
-    );
+    const activeItem = collectorHeldItem; // already scanned for by updateBuildings
     if (activeItem) data.lastActiveItemType = activeItem.type; // remembered for the production-info modal, which needs to know what a recently-active Collector was processing
     return !!activeItem;
   }
@@ -3288,13 +3309,13 @@ function isBuildingActiveForUptime(state, type, data, centerX, centerY) {
 // the first place, so a loaded save's field is always either a real array
 // or simply absent, both of which this check already treats as "needs
 // initializing").
-function updateBuildingUptimeTracking(state, type, data, centerX, centerY, dtMs) {
+function updateBuildingUptimeTracking(state, type, data, centerX, centerY, dtMs, collectorHeldItem) {
   if (data.uptimeSamples === undefined) {
     data.uptimeSamples = [];
     data.uptimeSampleTimerMs = 0;
     data.uptimeActiveMs = 0;
   }
-  if (isBuildingActiveForUptime(state, type, data, centerX, centerY)) {
+  if (isBuildingActiveForUptime(state, type, data, centerX, centerY, collectorHeldItem)) {
     data.uptimeActiveMs += dtMs;
     data.lastActiveAtMs = state.level.elapsed; // for getBuildingRecentlyActive
   }
