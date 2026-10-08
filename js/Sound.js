@@ -294,7 +294,10 @@ export function startGameMusic() {
 
 // ---- Main-menu music ----
 // Per direct request: "Fin Sanity" plays once the moment the intro splash
-// starts, then Game.mp3 follows with a low-pass filter on it. This is a
+// starts, then Game.mp3 follows with a low-pass filter on it. The stinger is
+// routed through sfxGain (the Settings SFX slider), not musicGain — per direct
+// request, it counts as a sound effect, so only the SFX slider changes its volume.
+// Game.mp3 stays on the music slider. This is a
 // separate <audio> element for Game.mp3 from the in-game one (gameMusicEl), so
 // stopMenuMusic can silence it for good when a game starts without touching
 // the in-game track, which then starts fresh from 0 — the two never overlap.
@@ -321,7 +324,7 @@ function tryStartMenuMusic() {
     if (!menuMusicWanted || menuMusicStarted || ctx.state !== 'running') return;
     menuMusicStarted = true;
     menuStingerEl = new Audio('audio/Fin Sanity.mp3');
-    ctx.createMediaElementSource(menuStingerEl).connect(musicGain);
+    ctx.createMediaElementSource(menuStingerEl).connect(sfxGain);
     menuLoopEl = new Audio('audio/Game.mp3');
     menuLoopEl.loop = true;
     menuLoopGain = ctx.createGain();

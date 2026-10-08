@@ -232,6 +232,7 @@ import {
   placeTileWithReplace,
   applyPipetteData,
   collectDemolishSpawnPoints,
+  startTileBreakAnimation,
   computeBlueprintCostWithReplace,
   placeBlueprintWithReplace,
   computeSnapLine,
@@ -2868,6 +2869,7 @@ function recordAndRemoveTile(col, row) {
   const moneyBefore = state.level.money;
   const removed = removeTile(state, col, row);
   if (!removed) return;
+  startTileBreakAnimation(col, row, existingType); // per direct request — visual only, the tile is already gone from the grid
   const refund = state.level.money - moneyBefore;
   pushUndoEntry({ type: 'demolish', col, row, buildingId: existingType, data: clonedData, refund });
   const worldX = col * TILE_SIZE + TILE_SIZE / 2;

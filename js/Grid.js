@@ -3991,6 +3991,7 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
       }
     }
     renderDropDust(ctx, camera, performance.now());
+    renderBreakAnims(ctx, camera, performance.now());
   }
 
   renderFanIndicators(ctx, state, canvasWidth, canvasHeight);
@@ -5155,6 +5156,9 @@ export function startTileDropAnimation(col, row) {
     skew: (Math.random() < 0.5 ? -1 : 1) * (0.02 + Math.random() * 0.04),
   });
   setTimeout(playBuildDrop, startAt - now + DROP_FALL_MS); // the corner hits
+  for (let i = tileBreakAnims.length - 1; i >= 0; i--) {
+    if (tileBreakAnims[i].col === col && tileBreakAnims[i].row === row) tileBreakAnims.splice(i, 1); // rebuilt (undo, re-place) before the old one finished falling apart
+  }
 }
 
 // Scales/rotates/skews around an anchor that slides from the tile's centre to
@@ -5192,6 +5196,167 @@ function renderDropDust(ctx, camera, now) {
     const origin = worldToScreen(col * TILE_SIZE, row * TILE_SIZE, camera);
     for (const p of anim.puffs) {
       const prog = (sinceImpact - p.delay) / DROP_DUST_MS;
+      if (prog < 0 || prog > 1) continue;
+      ctx.fillStyle = `rgba(226, 205, 165, ${0.55 * Math.pow(1 - prog, 1.3)})`;
+      ctx.beginPath();
+      ctx.arc(origin.x + size * (p.x0 + p.vx * prog), origin.y + size * (p.y0 + p.vy * prog), size * p.r0 * (1 + 1.2 * prog), 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+}
+
+// ---- Building break-apart animation (purely visual) ----
+// Per direct request: deleting a building plays a short hammer-hit — it is hit
+// in the middle, squashes and cracks, vibrates while the cracks spread and a
+// plume of dust (the same look as the drop-in's) kicks up, then splits into
+// pieces along those cracks that quickly fade away. Like the drop-in, this only
+// changes how the tile is DRAWN: the real tile is already gone from the grid
+// (refund paid, items released, physics and collision unchanged) the moment the
+// animation starts, so the building sprite is drawn from this list instead.
+const BREAK_CRACK_MS = 160; // hit -> cracks fully spread
+const BREAK_SPLIT_MS = 300; // hit -> shaking ends and the pieces burst apart
+const BREAK_FADE_MS = 330; // pieces fly out and fade over this long
+const BREAK_DUST_START_MS = 60; // dust kicks up just after the hit
+const BREAK_DUST_MS = 520;
+const BREAK_TOTAL_MS = BREAK_DUST_START_MS + BREAK_DUST_MS + 70;
+const BREAK_SHAKE_FRACTION = 0.035; // peak shake offset, as a fraction of the tile size
+const BREAK_CRACK_COUNT = 6;
+const BREAK_PUFF_COUNT = 10;
+const BREAK_CORNER_ANGLES = [Math.PI / 4, (3 * Math.PI) / 4, (5 * Math.PI) / 4, (7 * Math.PI) / 4]; // tile corners as seen from its centre
+const tileBreakAnims = []; // { col, row, type, color, variant, startAt, rays, pieces, puffs, shakeSeed }
+
+export function startTileBreakAnimation(col, row, type) {
+  const building = BUILDING_TYPES[type];
+  if (!building) return;
+  const angleOffset = Math.random() * Math.PI * 2;
+  const angles = [];
+  for (let i = 0; i < BREAK_CRACK_COUNT; i++) {
+    angles.push((angleOffset + ((i + (Math.random() - 0.5) * 0.5) * Math.PI * 2) / BREAK_CRACK_COUNT) % (Math.PI * 2));
+  }
+  angles.sort((a, b) => a - b);
+  // Each crack is a jagged polyline from the centre (where the hammer hit) to the tile's edge.
+  const rays = angles.map((a) => {
+    const dx = Math.cos(a);
+    const dy = Math.sin(a);
+    const reach = 0.5 / Math.max(Math.abs(dx), Math.abs(dy));
+    const pts = [[0.5, 0.5]];
+    for (const f of [0.35, 0.7]) {
+      const jitter = (Math.random() - 0.5) * 0.12;
+      pts.push([0.5 + dx * reach * f - dy * jitter, 0.5 + dy * reach * f + dx * jitter]);
+    }
+    pts.push([0.5 + dx * reach, 0.5 + dy * reach]);
+    return pts;
+  });
+  // One piece per wedge between neighbouring cracks, so it breaks exactly along them.
+  const pieces = rays.map((ray, i) => {
+    const next = rays[(i + 1) % rays.length];
+    const a0 = angles[i];
+    const a1 = i + 1 < angles.length ? angles[i + 1] : angles[0] + Math.PI * 2;
+    const poly = ray.slice();
+    for (const ca of BREAK_CORNER_ANGLES) {
+      if ((ca > a0 && ca < a1) || (ca + Math.PI * 2 > a0 && ca + Math.PI * 2 < a1)) {
+        poly.push([0.5 + Math.sign(Math.cos(ca)) * 0.5, 0.5 + Math.sign(Math.sin(ca)) * 0.5]);
+      }
+    }
+    for (let k = next.length - 1; k >= 0; k--) poly.push(next[k]);
+    let cx = 0;
+    let cy = 0;
+    for (const [px, py] of poly) { cx += px; cy += py; }
+    cx /= poly.length;
+    cy /= poly.length;
+    const len = Math.hypot(cx - 0.5, cy - 0.5) || 1;
+    const speed = 0.25 + Math.random() * 0.25;
+    return { poly, cx, cy, vx: ((cx - 0.5) / len) * speed, vy: ((cy - 0.5) / len) * speed, rot: (Math.random() - 0.5) * 0.9 };
+  });
+  const puffs = [];
+  for (let i = 0; i < BREAK_PUFF_COUNT; i++) {
+    const x0 = 0.1 + Math.random() * 0.8;
+    puffs.push({
+      x0,
+      y0: 0.55 + Math.random() * 0.45,
+      vx: (x0 - 0.5) * 0.9 + (Math.random() - 0.5) * 0.2,
+      vy: -(0.1 + Math.random() * 0.3),
+      r0: 0.06 + Math.random() * 0.05,
+      delay: Math.random() * 70,
+    });
+  }
+  tileBreakAnims.push({
+    col, row, type, color: building.color,
+    variant: (((col * 73856093) ^ (row * 19349663)) >>> 0) % TILE_SPRITE_VARIANTS, // same pick as the static layer
+    startAt: performance.now(), rays, pieces, puffs, shakeSeed: Math.random() * 100,
+  });
+}
+
+// Draws the first `fraction` of a polyline (the crack growing outward from the hit).
+function tracePolyline(ctx, pts, fraction, size) {
+  const segs = fraction * (pts.length - 1);
+  ctx.moveTo(pts[0][0] * size, pts[0][1] * size);
+  for (let i = 1; i < pts.length && i - 1 < segs; i++) {
+    const f = Math.min(1, segs - (i - 1));
+    ctx.lineTo((pts[i - 1][0] + (pts[i][0] - pts[i - 1][0]) * f) * size, (pts[i - 1][1] + (pts[i][1] - pts[i - 1][1]) * f) * size);
+  }
+}
+
+function renderBreakAnims(ctx, camera, now) {
+  if (!tileBreakAnims.length) return;
+  const size = TILE_SIZE * camera.zoom;
+  for (let i = tileBreakAnims.length - 1; i >= 0; i--) {
+    const anim = tileBreakAnims[i];
+    const t = now - anim.startAt;
+    if (t > BREAK_TOTAL_MS) { tileBreakAnims.splice(i, 1); continue; }
+    const origin = worldToScreen(anim.col * TILE_SIZE, anim.row * TILE_SIZE, camera);
+    const sprite = getTileSprite(anim.type, anim.color, anim.variant);
+    if (t < BREAK_SPLIT_MS) {
+      const squash = 1 - 0.06 * Math.sin(Math.min(1, t / 130) * Math.PI); // the hammer blow flattens it briefly
+      const shake = BREAK_SHAKE_FRACTION * size * (1 - t / BREAK_SPLIT_MS);
+      ctx.save();
+      ctx.translate(
+        origin.x + size / 2 + Math.sin(t * 0.11 + anim.shakeSeed) * shake,
+        origin.y + size / 2 + Math.cos(t * 0.15 + anim.shakeSeed * 1.7) * shake
+      );
+      ctx.scale(1 + (1 - squash) * 0.5, squash);
+      ctx.translate(-size / 2, -size / 2);
+      ctx.drawImage(sprite, 0, 0, size, size);
+      ctx.strokeStyle = 'rgba(24, 14, 8, 0.85)';
+      ctx.lineWidth = Math.max(1, size * 0.03);
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      const spread = Math.min(1, t / BREAK_CRACK_MS);
+      for (const ray of anim.rays) tracePolyline(ctx, ray, spread, size);
+      ctx.stroke();
+      if (t < 110) {
+        ctx.fillStyle = `rgba(255, 244, 214, ${0.6 * (1 - t / 110)})`; // impact flash
+        ctx.beginPath();
+        ctx.arc(size / 2, size / 2, size * (0.12 + 0.18 * (t / 110)), 0, Math.PI * 2);
+        ctx.fill();
+      }
+      ctx.restore();
+    } else {
+      const u = Math.min(1, (t - BREAK_SPLIT_MS) / BREAK_FADE_MS);
+      for (const piece of anim.pieces) {
+        ctx.save();
+        ctx.globalAlpha = 1 - u;
+        ctx.translate(origin.x + (piece.cx + piece.vx * u) * size, origin.y + (piece.cy + piece.vy * u + 0.35 * u * u) * size);
+        ctx.rotate(piece.rot * u);
+        ctx.translate(-piece.cx * size, -piece.cy * size);
+        ctx.beginPath();
+        piece.poly.forEach(([px, py], k) => (k === 0 ? ctx.moveTo(px * size, py * size) : ctx.lineTo(px * size, py * size)));
+        ctx.closePath();
+        ctx.strokeStyle = 'rgba(24, 14, 8, 0.7)';
+        ctx.lineWidth = Math.max(1, size * 0.03);
+        ctx.lineJoin = 'round';
+        ctx.save();
+        ctx.clip();
+        ctx.drawImage(sprite, 0, 0, size, size);
+        ctx.restore();
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+    const sinceDust = t - BREAK_DUST_START_MS;
+    if (sinceDust < 0 || sinceDust > BREAK_DUST_MS + 70) continue;
+    for (const p of anim.puffs) {
+      const prog = (sinceDust - p.delay) / BREAK_DUST_MS;
       if (prog < 0 || prog > 1) continue;
       ctx.fillStyle = `rgba(226, 205, 165, ${0.55 * Math.pow(1 - prog, 1.3)})`;
       ctx.beginPath();

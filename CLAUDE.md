@@ -2293,7 +2293,7 @@ Per direct request, a second pass on the wooden UI. Generated assets come from a
 
 ## Main-Menu Music, Tuning Pass
 
-Per direct request: "Fin Sanity" (`audio/Fin Sanity.mp3`) plays once when the intro splash starts (`startMenuMusic()`, called from main.js right after `showTitle`), then Game.mp3 loops under a 900Hz low-pass for as long as the main menu is up. Sound.js gives the menu its own Game.mp3 element (not `gameMusicEl`), so `startGameMusic()` — the Start/Continue funnel — calls `stopMenuMusic()` (stinger paused, menu loop faded out over 0.2s) and the in-game track starts fresh with no overlap. Browsers keep the AudioContext suspended until a real gesture, so if the splash opens before any click/keypress the stinger waits for `resumeAudio`'s first-gesture hook; with autoplay allowed it starts with the splash. The stinger is also in the loading screen's preload list.
+Per direct request: "Fin Sanity" (`audio/Fin Sanity.mp3`) plays once when the intro splash starts (`startMenuMusic()`, called from main.js right after `showTitle`), then Game.mp3 loops under a 900Hz low-pass for as long as the main menu is up. The Fin Sanity stinger is routed through `sfxGain` (the Settings SFX slider), per direct request counting as a sound effect; Game.mp3 stays on `musicGain` (the Music slider). Sound.js gives the menu its own Game.mp3 element (not `gameMusicEl`), so `startGameMusic()` — the Start/Continue funnel — calls `stopMenuMusic()` (stinger paused, menu loop faded out over 0.2s) and the in-game track starts fresh with no overlap. Browsers keep the AudioContext suspended until a real gesture, so if the splash opens before any click/keypress the stinger waits for `resumeAudio`'s first-gesture hook; with autoplay allowed it starts with the splash. The stinger is also in the loading screen's preload list.
 Also: a building that needs no electricity now shows a fully empty power meter (`statBarHtml` takes an optional floor; 0 for that case), the HUD rim's `background-origin/-clip` lists were corrected to the real 13 layers (the rim now actually shows the toolbar's plank), and two of the Shop's bottom-edge seaweeds were removed.
 
 ## Building Drop-in Animation
@@ -2304,6 +2304,14 @@ Per direct request, a placed building looks dropped into the world — purely vi
 - **Batches:** each start is delayed to at least 55ms after the previous one (capped at 600ms total), so a snap line/blueprint cascades.
 - **Sound:** `audio/Drop.mp3` (capital D) is decoded once (`Sound.js`'s `loadDropSound`, started when the AudioContext is created) and `playBuildDrop()` fires from a timer at the corner-hit moment, with a 90ms cooldown. A new placement still plays the old `playBuildPlace` blip first and the drop at impact; a move (no blip exists for moves) plays only the drop.
 - Verified in a browser (frame-by-frame canvas capture plus an AudioBufferSource log): enlarged/tilted at the start, settling, dust fading, drop sound at ~240ms after placement; regression/smoke/menus/start scripts 0 errors.
+
+## Building Break-apart Animation
+
+Per direct request, deleting a building (main.js's `recordAndRemoveTile` — the D-key delete) plays a short hammer-hit — purely visual, the tile is already gone from the grid (refund, released items, physics/collision all unchanged) the moment it starts, and the sprite is drawn from `Grid.js`'s `tileBreakAnims` list instead.
+- **Where:** `Grid.js`'s `startTileBreakAnimation(col, row, type)`, called from `recordAndRemoveTile` after `removeTile` succeeds; `renderBreakAnims` draws it right after `renderDropDust`. Undo-of-place, moves and Shift-replace don't play it, and `startTileDropAnimation` cancels any break still playing on that tile (undo/re-place).
+- **Look (~0.65s):** the hammer lands in the middle (0ms: squash + impact flash), 6 jagged cracks spread out from the centre over 160ms while the sprite vibrates with decaying shake and a plume of 10 dust puffs (same colour/motion as the drop-in's) kicks up; at 300ms it splits into one wedge piece per pair of neighbouring cracks (so it breaks exactly along them) that fly outward, tumble, and fade over 330ms. Timing constants are the `BREAK_*` block above `startTileBreakAnimation`.
+- Verified in a browser with `performance.now` frozen and stepped through the animation: cracks grow, shake, dust, pieces burst and fade; regression/smoke scripts 0 errors.
+
 
 Also: the Shop's left-edge seaweed now sits on top of the bottom-left corner plate so it reads as growing from it.
 
