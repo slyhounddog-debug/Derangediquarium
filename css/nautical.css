@@ -198,10 +198,10 @@
 
 /* Shop / Science Lab / Tank launchers: carved, embossed wooden coins. */
 #shop-collapse-btn, #tank-collapse-btn, #lab-collapse-btn {
-  width: 58px; height: 58px; /* per direct request, the same size as the Favorite slots now that they share one plank */
+  width: 74px; height: 74px; /* per direct request, sized to read like a Favorite bubble including its outer ring (58px + 2 x 9px of ring = 76px) */
   border: 3px solid #3a2010;
   background: var(--coin);
-  font-size: 29px;
+  font-size: 36px;
   box-shadow: inset 0 0 0 5px #94602f, inset 0 0 0 7px rgba(40, 20, 8, 0.7), inset 0 4px 7px rgba(255, 235, 200, 0.32), 0 4px 0 #4a2a12, 0 9px 13px rgba(0, 0, 0, 0.5);
   text-shadow: 0 1px 0 rgba(255, 235, 200, 0.5), 0 -1px 0 rgba(40, 20, 8, 0.6);
 }
@@ -605,7 +605,7 @@
 .controls-keys kbd { font-family: var(--font-display); color: var(--cream); background: var(--plank); border: 2px solid #3a2010; text-shadow: 0 1px 0 #4a2610; box-shadow: inset 0 2px 0 rgba(255, 238, 195, 0.45), 0 2px 0 #5a3418; }
 
 /* ---------- 7. paper pop-ups, stats panel, chat log ---------- */
-#notification-log, #stats-panel, #mound-menu, #recipe-menu, #building-info-menu, #fish-info-menu, #platform-filter-menu, #storage-chest-menu, #hud-info-modal, #hud-power-graph {
+#notification-log, #stats-panel, #mound-menu, #recipe-menu, #building-info-menu, #fish-info-menu, #merge-fish-menu, #platform-filter-menu, #storage-chest-menu, #hud-info-modal, #hud-power-graph {
   background: var(--noise), var(--paper);
   color: var(--ink);
   border: 4px solid #7a4a22;
@@ -671,7 +671,7 @@ body:has(#tank-overlay:not(.collapsed)) #bottom-bar-row, body:has(#lab-overlay:n
 
 /* Lighter, warmer parchment grain (the dark speckle read as dirty gray). */
 .tank-upgrade-card, .achievement-card, .hat-card, .start-mode-card, .help-row,
-#notification-log, #stats-panel, #mound-menu, #recipe-menu, #building-info-menu, #fish-info-menu, #platform-filter-menu, #storage-chest-menu, #hud-info-modal, #hud-power-graph {
+#notification-log, #stats-panel, #mound-menu, #recipe-menu, #building-info-menu, #fish-info-menu, #merge-fish-menu, #platform-filter-menu, #storage-chest-menu, #hud-info-modal, #hud-power-graph {
   background: url(nautical/noise-light.svg), var(--paper);
 }
 #shop-preview::before {
@@ -693,7 +693,7 @@ body:has(#tank-overlay:not(.collapsed)) #bottom-bar-row, body:has(#lab-overlay:n
 .tool-btn-build { width: 76px; height: 76px; }
 
 /* ---------- 10. pop-up titles and leftovers ---------- */
-#stats-panel-title, #production-info-title, #mound-title, #recipe-menu-title, #building-info-name, #fish-info-name, #platform-filter-title, #storage-chest-title {
+#stats-panel-title, #production-info-title, #mound-title, #recipe-menu-title, #building-info-name, #fish-info-name, #merge-fish-name, #platform-filter-title, #storage-chest-title {
   font-family: var(--font-display); font-weight: 700; color: #b4510c;
 }
 #production-info { background: url(nautical/noise-light.svg), var(--paper); border: 4px solid #7a4a22; border-radius: 9px; color: var(--ink); box-shadow: 0 0 0 2px #2a1608, 0 10px 20px rgba(0, 0, 0, 0.5), inset 0 0 18px rgba(120, 80, 30, 0.28); font-family: var(--font-display); }
@@ -734,7 +734,7 @@ body:has(#tank-overlay:not(.collapsed)) #bottom-bar-row, body:has(#lab-overlay:n
 }
 /* Food: a little bigger, shinier and more ornate than the rest — a gold ring (::before) studded with rivets (::after), a glossy diagonal streak, and a warm glow. */
 #bottom-tool-bar #tool-food-btn {
-  width: 72px; height: 72px;
+  width: 64px; height: 64px; /* 1.1x a Favorite bubble (58px), per direct request */
   background:
     linear-gradient(125deg, rgba(255, 255, 255, 0) 34%, rgba(255, 255, 255, 0.4) 45%, rgba(255, 255, 255, 0) 56%),
     radial-gradient(circle at 30% 24%, rgba(255, 255, 255, 1) 0 6%, rgba(255, 255, 255, 0) 8%),
@@ -777,9 +777,30 @@ body:has(#tank-overlay:not(.collapsed)) #bottom-bar-row, body:has(#lab-overlay:n
 .shop-merge-section { flex: 1 1 100%; margin-top: 4px; padding-top: 6px; border-top: 1px dashed rgba(122, 74, 34, 0.45); font: 600 14px/1.9 var(--font-display); color: var(--ink); }
 .shop-merge-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; opacity: 0.7; line-height: 1.4; }
 
+/* Science Lab node info opened from the FISH modal hangs under its button in the fish modal's own paper look (the Shop's keeps the framed window). */
+#lab-purchase-modal.anchored {
+  position: absolute; width: 270px; box-sizing: border-box;
+  background: url(nautical/noise-light.svg), var(--paper);
+  color: var(--ink);
+  border: 4px solid #7a4a22; border-image: none; border-radius: 9px;
+  padding: 16px 18px;
+  box-shadow: 0 0 0 2px #2a1608, 0 10px 20px rgba(0, 0, 0, 0.5), inset 0 0 18px rgba(120, 80, 30, 0.28);
+  filter: none;
+  font-family: var(--font-display);
+}
+#lab-purchase-modal.anchored #lab-purchase-name { color: #b4510c; -webkit-text-stroke: 0; font-size: 15px; font-weight: 700; }
+#lab-purchase-modal.anchored #lab-purchase-icon { font-size: 22px; }
+#lab-purchase-modal.anchored #lab-purchase-desc, #lab-purchase-modal.anchored #lab-purchase-stats, #lab-purchase-modal.anchored #lab-purchase-stats .building-stat { color: var(--ink); font-size: 12px; }
+#lab-purchase-modal.anchored #lab-purchase-stats .building-stat b { color: #2a1a0a; }
+#lab-purchase-modal.anchored #lab-purchase-cost { background: rgba(60, 40, 20, 0.1); color: var(--ink); border: 0; font-size: 13px; text-shadow: none; box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.18); }
+#lab-purchase-modal.anchored #lab-purchase-footnote { color: #7a4a22; }
+#lab-purchase-modal.anchored.info-locked { filter: grayscale(0.85) brightness(0.92); }
+
 /* Science Lab node info opened from a merge button: read-only (no Cancel/Confirm); a not-yet-bought hybrid is desaturated and dimmed, with a footnote saying where to buy it. */
 #lab-purchase-modal.info-only #lab-purchase-buttons { display: none; }
 #lab-purchase-modal.info-only #lab-purchase-cost { margin-bottom: 4px; }
 #lab-purchase-modal.info-locked { filter: grayscale(0.85) brightness(0.8) drop-shadow(0 14px 22px rgba(0, 0, 0, 0.55)); }
 #lab-purchase-footnote { margin-top: 10px; text-align: center; font: italic 600 13px/1.3 var(--font-display); color: #ffe3a8; }
 #lab-purchase-footnote.hidden { display: none; }
+/* Turret ammo-type rows: a "Waste"/"Biomass" title with an Ammo meter and a Damage meter side by side under it. */
+.building-stat.stat-dual-pair { grid-template-columns: 1fr 1fr; margin-top: -6px; }

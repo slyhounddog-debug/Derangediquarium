@@ -1907,7 +1907,7 @@ export function isSpliceTargetCandidate(state, fish) {
 // the utility half or the target half of a pair.
 //
 // Each entry is `{ text, otherSpeciesId, resultSpeciesId }` — `text` is the
-// full "Merge/Splice with X -> Y" sentence the fish info modal shows as-is;
+// "X -> Y" sentence the fish info modal shows as-is;
 // `otherSpeciesId`/`resultSpeciesId` are the two fish the hover legend draws
 // as small icons instead of names, per a later direct request ("use just
 // the icons of the fish instead of the names... Keep the fish info modal
@@ -1918,7 +1918,7 @@ export function isSpliceTargetCandidate(state, fish) {
 // `fish`'s own eligibility, computed once by the caller.
 function mergePairOutcome(state, fish, other, combineSource, spliceSource, spliceTarget) {
   if (combineSource && canCombineFish(state, fish, other)) {
-    return { resultSpeciesId: fish.speciesId, text: `Merge with ${SPECIES[other.speciesId].name} → Tier ${(fish.starTier || 1) + 1} ${SPECIES[fish.speciesId].name}` };
+    return { resultSpeciesId: fish.speciesId, resultTier: (fish.starTier || 1) + 1, text: `${SPECIES[other.speciesId].name} → Tier ${(fish.starTier || 1) + 1} ${SPECIES[fish.speciesId].name}` };
   }
   if (spliceSource && canSpliceFish(state, fish, other)) {
     const resultSpeciesId = getHybridSpeciesId(other.speciesId, fish.speciesId);
@@ -1959,7 +1959,7 @@ export function describeFishMergeOptions(state, fish) {
     }
     if (other.type !== 'fish' || other.id === fish.id || other.dying) continue;
     const outcome = mergePairOutcome(state, fish, other, combineSource, spliceSource, spliceTarget);
-    if (outcome && !seen.has(outcome.text)) { seen.add(outcome.text); entries.push({ text: outcome.text, isSplice: !!outcome.isSplice, otherSpeciesId: other.speciesId, resultSpeciesId: outcome.resultSpeciesId }); }
+    if (outcome && !seen.has(outcome.text)) { seen.add(outcome.text); entries.push({ text: outcome.text, isSplice: !!outcome.isSplice, resultTier: outcome.resultTier || null, otherSpeciesId: other.speciesId, resultSpeciesId: outcome.resultSpeciesId }); }
   }
   return entries.length > 0 ? entries : [{ text: 'No available fish to merge.', otherSpeciesId: null, resultSpeciesId: null }];
 }

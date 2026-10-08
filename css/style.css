@@ -983,22 +983,21 @@ body.alt-mode #production-info { display: none !important; }
   box-shadow: 0 3px 9px rgba(107, 76, 107, 0.18), inset 0 1px 0 rgba(255, 255, 255, 0.85);
 }
 
-/* Pause Time (button or Space) — an old-film sepia wash fades in over the
-   whole screen, per direct request (replacing the earlier washed-out blue
-   tint), so it's visually obvious time is stopped: a warm brown tint, dark
-   burnt edges, and faint static scanlines. All plain gradients — no filter or
-   blend mode — so it costs almost nothing to composite. Under the pop-up menus
-   (190+) so they stay crisp, over the HUD and toolbar. Pure cosmetic:
+/* Pause Time (button or Space) — a subtle old-film sepia wash fades in over
+   the tank, per direct request, so it's visually obvious time is stopped: a
+   light warm brown tint and faint static scanlines (no vignette). Plain
+   gradients — no filter or blend mode — so it costs almost nothing to
+   composite. Sits just above the game canvas but below every HUD element,
+   toolbar and menu (10+), so the UI stays crisp on top of it. Pure cosmetic:
    click-through, and the simulation/physics aren't touched. */
 #time-pause-overlay {
   position: fixed; inset: 0;
-  z-index: 150;
+  z-index: 9;
   pointer-events: none;
   opacity: 0;
   background:
-    radial-gradient(ellipse at center, rgba(40, 20, 4, 0) 40%, rgba(30, 14, 2, 0.65) 100%),
-    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.07) 0 1px, transparent 1px 3px),
-    rgba(105, 62, 20, 0.34);
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.05) 0 1px, transparent 1px 3px),
+    rgba(120, 72, 28, 0.16);
   transition: opacity 0.5s ease;
 }
 body.time-paused #time-pause-overlay { opacity: 1; }
@@ -2212,8 +2211,12 @@ body.time-paused #time-pause-overlay { opacity: 1; }
    above, just its own ids so the two never fight over shared state. */
 #fish-info-overlay { position: fixed; inset: 0; z-index: 190; }
 #fish-info-overlay.hidden { display: none; }
+/* The "Tier N Fish" merge preview: the same card, hung under the merge button that opened it (UI.js's positionUnderButton). Above the Lab purchase popup (230), which it never shares the screen with. */
+#merge-fish-overlay { position: fixed; inset: 0; z-index: 235; }
+#merge-fish-overlay.hidden { display: none; }
+#merge-fish-menu { position: absolute; transform-origin: 50% 0%; }
 #fish-info-anchor { position: fixed; transform: translate(-50%, -100%); }
-#fish-info-menu {
+#fish-info-menu, #merge-fish-menu {
   width: 270px;
   background: #fff8f0;
   color: #6b4c6b;
@@ -2234,12 +2237,12 @@ body.time-paused #time-pause-overlay { opacity: 1; }
 #fish-info-anchor.fish-info-right #fish-info-menu { transform-origin: 0% 50%; }
 #fish-info-anchor.fish-info-below { transform: translate(-50%, 0); }
 #fish-info-anchor.fish-info-below #fish-info-menu { transform-origin: 50% 0%; }
-#fish-info-header-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
-#fish-info-icon-canvas { width: 60px; height: 60px; flex: none; }
-#fish-info-name { font-size: 15px; font-weight: 800; color: #c25f8f; }
-#fish-info-desc { font-size: 12px; line-height: 1.4; opacity: 0.85; margin-bottom: 8px; }
-#fish-info-stats { display: flex; flex-direction: column; gap: 3px; font-size: 12px; font-weight: 700; }
-#fish-info-stats .fish-info-penalty { color: #e0392b; font-weight: 800; }
+#fish-info-header-row, #merge-fish-header-row { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+#fish-info-icon-canvas, #merge-fish-icon-canvas { width: 60px; height: 60px; flex: none; }
+#fish-info-name, #merge-fish-name { font-size: 15px; font-weight: 800; color: #c25f8f; }
+#fish-info-desc, #merge-fish-desc { font-size: 12px; line-height: 1.4; opacity: 0.85; margin-bottom: 8px; }
+#fish-info-stats, #merge-fish-stats { display: flex; flex-direction: column; gap: 3px; font-size: 12px; font-weight: 700; }
+#fish-info-stats .fish-info-penalty, #merge-fish-stats .fish-info-penalty { color: #e0392b; font-weight: 800; }
 /* Magnet Fish's item filter, embedded in its fish info modal — reuses the
    Platform filter's own .platform-filter-item button look below. */
 #fish-info-filter { margin-top: 10px; padding-top: 8px; border-top: 1px dashed rgba(107, 76, 107, 0.25); }

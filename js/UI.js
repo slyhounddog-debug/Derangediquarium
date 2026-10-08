@@ -73,6 +73,7 @@ import {
   TILE_TURRET_ADVANCED,
   WASTE_TURRET_SHOTS_PER_WASTE,
   WASTE_TURRET_MAX_WASTE,
+  WASTE_TURRET_MAX_AMMO,
   BIOMASS_TURRET_SHOTS_PER_AMMO,
   BIOMASS_TURRET_DAMAGE_MULTIPLIER,
   ADVANCED_TURRET_MAX_BIOMASS_AMMO,
@@ -229,6 +230,7 @@ const LAB_ZOOM_MIN = 0.6;
 const LAB_ZOOM_MAX = 1.6;
 const LAB_ZOOM_STEP = 0.15;
 let labPurchaseInfoOnly = false; // true when the modal was opened from a merge button (fish modal/shop) just to read about a hybrid's node — no Cancel/Confirm, see openLabPurchaseModal
+let mergeFishModalOpen = false; // the "Tier N Fish" merge preview modal opened from the fish modal — see openMergeFishModal
 let labPurchaseNodeId = null; // node id the confirmation modal is currently showing, if any — see openLabPurchaseModal/confirmLabPurchase
 let powerGraphOpen = false; // the small rolling-graph popup under the electricity HUD readout — see #hud-power's click listener
 let hudInfoModalOpen = null; // which HUD stat's info modal is open ('money'/'scienceCap'/'cleanliness'), or null — see openHudInfoModal
@@ -539,6 +541,12 @@ export function initUI(state) {
     labTreeWrap: document.getElementById('lab-tree-wrap'),
     labTreeCanvas: document.getElementById('lab-tree-canvas'),
     labTreeColumns: document.getElementById('lab-tree-columns'),
+    mergeFishOverlay: document.getElementById('merge-fish-overlay'),
+    mergeFishMenu: document.getElementById('merge-fish-menu'),
+    mergeFishIconCanvas: document.getElementById('merge-fish-icon-canvas'),
+    mergeFishName: document.getElementById('merge-fish-name'),
+    mergeFishDesc: document.getElementById('merge-fish-desc'),
+    mergeFishStats: document.getElementById('merge-fish-stats'),
     labPurchaseOverlay: document.getElementById('lab-purchase-overlay'),
     labPurchaseModal: document.getElementById('lab-purchase-modal'),
     labPurchaseFootnote: document.getElementById('lab-purchase-footnote'),
@@ -706,17 +714,22 @@ export function initUI(state) {
   // buyLabUpgrade.
   els.labPurchaseCancelBtn.addEventListener('click', () => closeLabPurchaseModal());
   els.labPurchaseConfirmBtn.addEventListener('click', () => confirmLabPurchase(state));
-  els.labPurchaseOverlay.addEventListener('click', (e) => {
-    if (e.target !== els.labPurchaseOverlay) return;
-    // Per direct request, when this was opened from a merge button, a click outside it closes
-    // the fish modal behind it too — unless the click lands back inside that fish modal.
-    const closeFishToo = labPurchaseInfoOnly && fishInfoMenuOpen && !document.elementsFromPoint(e.clientX, e.clientY).includes(els.fishInfoMenu);
-    closeLabPurchaseModal();
+  // Per direct request, a click outside either merge/splice popup closes it, and the fish modal behind it
+  // too — unless the click lands back inside that fish modal.
+  const onInfoBackdropClick = (e, closePopup) => {
+    if (e.target !== e.currentTarget) return;
+    const closeFishToo = fishInfoMenuOpen && !document.elementsFromPoint(e.clientX, e.clientY).includes(els.fishInfoMenu);
+    closePopup();
     if (closeFishToo) closeFishInfoMenu(state);
-  });
+  };
+  els.labPurchaseOverlay.addEventListener('click', (e) => onInfoBackdropClick(e, closeLabPurchaseModal));
+  els.mergeFishOverlay.addEventListener('click', (e) => onInfoBackdropClick(e, closeMergeFishModal));
   const onMergeNodeClick = (e) => {
     const btn = e.target.closest('.merge-node-btn');
-    if (btn) openLabPurchaseModal(state, btn.dataset.nodeId, true);
+    if (!btn) return;
+    const anchor = btn.closest('#fish-info-menu') ? btn : null; // from the fish modal the popup hangs under the button; from the shop it's centered
+    if (btn.dataset.mergeTier) openMergeFishModal(state, btn.dataset.mergeSpecies, Number(btn.dataset.mergeTier), btn);
+    else openLabPurchaseModal(state, btn.dataset.nodeId, true, anchor);
   };
   els.fishInfoMergeLines.addEventListener('click', onMergeNodeClick);
   els.previewStats.addEventListener('click', onMergeNodeClick);
@@ -1305,6 +1318,8 @@ export function closeFishInfoMenu(state) {
   const fish = state.level.entities.find((e) => e.id === state.ui.fishInfoModalFishId && e.type === 'fish');
   if (fish) fish.wanderTimer = 0;
   state.ui.fishInfoModalFishId = null; // unfreezes/un-highlights the fish — see main.js's updateFishInfoModalFreeze/render
+  closeMergeFishModal(); // its merge popups hang off this modal, so they go with it
+  if (els.labPurchaseModal.classList.contains('anchored')) closeLabPurchaseModal();
   els.fishInfoMenu.classList.add('fish-info-menu-closed');
   fishInfoMenuCloseTimer = setTimeout(() => {
     els.fishInfoOverlay.classList.add('hidden');
@@ -1389,6 +1404,81 @@ function collectFishModalRanges(state) {
   return ranges;
 }
 
+// The fish modal's stat rows (shared with the merge preview modal), each meter placed within the tank's range.
+function fishModalStatRowsHtml(stats, ranges) {
+  const bar = (kind, key) => statBarForRange(kind, stats[key], ranges[key] ? ranges[key].min : stats[key], ranges[key] ? ranges[key].max : stats[key]);
+  const rows = [];
+  if (stats.goldPerMin != null) rows.push(fishStatRowHtml('Gold/min', stats.goldPerMin, stats.goldPenaltyPerMin, bar('money', 'goldPerMin')));
+  if (stats.wastePerMin != null) rows.push(`<div>Waste/min: <b>${stats.wastePerMin.toFixed(1)}</b>${bar('waste', 'wastePerMin')}</div>`);
+  if (stats.wasteEatenPerMin != null) rows.push(`<div>Waste eaten/min: <b>${stats.wasteEatenPerMin.toFixed(1)}</b>${bar('waste', 'wasteEatenPerMin')}</div>`);
+  if (stats.sciencePerMin != null) rows.push(`<div>Science/min: <b>${stats.sciencePerMin.toFixed(1)}</b>${bar('science', 'sciencePerMin')}</div>`);
+  if (stats.foodPerMin != null) rows.push(`<div>Food/min: <b>${stats.foodPerMin.toFixed(1)}</b>${bar('hunger', 'foodPerMin')}</div>`);
+  if (stats.generatedMwLastSec != null) rows.push(`<div>⚡ Electricity generated: <b>${stats.generatedMwLastSec}mw</b>${bar('power', 'generatedMwLastSec')}</div>`);
+  return rows.join('');
+}
+
+// Centers a popup under a button, flipping above it if there's no room below.
+function positionUnderButton(menuEl, btn) {
+  const r = btn.getBoundingClientRect();
+  const w = menuEl.offsetWidth;
+  const h = menuEl.offsetHeight;
+  let top = r.bottom + 6;
+  if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 6);
+  menuEl.style.left = `${Math.max(8, Math.min(window.innerWidth - w - 8, r.left + r.width / 2 - w / 2))}px`;
+  menuEl.style.top = `${top}px`;
+}
+
+// Per direct request: the fish modal's "Guppy → Tier 2 Guppy" button opens this — the fish modal's own look,
+// hanging under the button, showing what a fish of that star tier would be if one were in the tank (no merges
+// section), with the meters placed against the fish actually in the tank. Built from the open fish with its
+// star tier swapped, at its adult stage.
+function openMergeFishModal(state, speciesId, tier, btn) {
+  const open = state.level.entities.find((e) => e.id === state.ui.fishInfoModalFishId && e.type === 'fish');
+  if (!open) return;
+  closeLabPurchaseModal();
+  const def = SPECIES[speciesId];
+  const adultStage = def.growthStages.length - 1;
+  const preview = { ...open, speciesId, starTier: tier, stage: adultStage, dropValueOverride: null, alienNearby: false, dying: false, mutagenBuffActive: false };
+  els.mergeFishName.textContent = `Tier ${tier} ${def.name}`;
+  els.mergeFishDesc.textContent = def.description;
+  const iconCtx = els.mergeFishIconCanvas.getContext('2d');
+  const iconSize = els.mergeFishIconCanvas.width;
+  iconCtx.clearRect(0, 0, iconSize, iconSize);
+  drawFish(iconCtx, iconSize / 2, iconSize / 2, speciesId, adultStage, 1, 0, { x: 1, y: 0 }, tier, 0, 0, 'none', state.level.elapsed, 0);
+  els.mergeFishStats.innerHTML = fishModalStatRowsHtml(computeFishInfoModalStats(state, preview), collectFishModalRanges(state));
+  mergeFishModalOpen = true;
+  els.mergeFishOverlay.classList.remove('hidden');
+  positionUnderButton(els.mergeFishMenu, btn);
+  playPanelOpen();
+}
+
+function closeMergeFishModal() {
+  if (!mergeFishModalOpen) return;
+  mergeFishModalOpen = false;
+  els.mergeFishOverlay.classList.add('hidden');
+  playPanelClose();
+}
+
+// Per direct request, one Escape closes everything open — every menu and pop-up — and main.js then
+// swallows that Escape so it doesn't also open the pause menu. Returns whether anything was closed.
+export function closeAllModals(state) {
+  let closed = false;
+  const closeIf = (open, close) => { if (open) { close(); closed = true; } };
+  closeIf(labPurchaseNodeId !== null, closeLabPurchaseModal);
+  closeIf(mergeFishModalOpen, closeMergeFishModal);
+  closeIf(fishInfoMenuOpen, () => closeFishInfoMenu(state));
+  closeIf(buildingInfoMenuOpen, () => closeBuildingInfoMenu(state));
+  closeIf(moundMenuOpen, closeMoundMenu);
+  closeIf(recipeMenuOpen, closeRecipeMenu);
+  closeIf(platformFilterMenuOpen, closePlatformFilterMenu);
+  closeIf(storageChestMenuOpen, closeStorageChestModal);
+  closeIf(hudInfoModalOpen !== null, closeHudInfoModal);
+  closeIf(statsPanelOpen, closeStatsPanel);
+  closeIf(labMenuOpen, closeLabMenu);
+  closeIf(!state.ui.shopCollapsed || !state.ui.tankPanelCollapsed, () => closeSidePanels(state));
+  return closed;
+}
+
 // Rebuilds the whole pop-up every frame it's open (unlike the building
 // info pop-up, which only rebuilds on open) — every one of these numbers
 // (gold/min, the dirtiness penalty, the merge/splice partner list) can
@@ -1406,6 +1496,11 @@ function labNodeIdForSpecies(speciesId) {
 // that hybrid's Science Lab node info (see openLabPurchaseModal's infoOnly mode), styled as locked
 // until the node is purchased. Plain Tier merges and entries with no node stay plain text.
 function spliceEntryHtml(state, entry) {
+  // A star-tier merge ("Guppy → Tier 2 Guppy"): the result opens a preview of that tier, no Science Lab node involved.
+  if (entry.resultTier) {
+    const arrowAt = entry.text.indexOf(' → ');
+    return `<div>${entry.text.slice(0, arrowAt)} → <button class="merge-node-btn" data-merge-species="${entry.resultSpeciesId}" data-merge-tier="${entry.resultTier}" title="Click to see what this would look like">${entry.text.slice(arrowAt + 3)}</button></div>`;
+  }
   const nodeId = entry.isSplice ? labNodeIdForSpecies(entry.resultSpeciesId) : null;
   const arrow = entry.text.indexOf(' → ');
   if (nodeId == null || arrow < 0) return `<div>${entry.text}</div>`;
@@ -1445,17 +1540,7 @@ export function refreshFishInfoMenu(state) {
   iconCtx.clearRect(0, 0, iconSize, iconSize);
   drawFish(iconCtx, iconSize / 2, iconSize / 2, fish.speciesId, def.growthStages.length - 1, 1, 0, { x: 1, y: 0 }, fish.starTier || 1, 0, 0, 'none', state.level.elapsed, fish.growthOrbitPhase || 0);
 
-  const stats = computeFishInfoModalStats(state, fish);
-  const ranges = collectFishModalRanges(state);
-  const bar = (kind, key) => statBarForRange(kind, stats[key], ranges[key].min, ranges[key].max);
-  const rows = [];
-  if (stats.goldPerMin != null) rows.push(fishStatRowHtml('Gold/min', stats.goldPerMin, stats.goldPenaltyPerMin, bar('money', 'goldPerMin')));
-  if (stats.wastePerMin != null) rows.push(`<div>Waste/min: <b>${stats.wastePerMin.toFixed(1)}</b>${bar('waste', 'wastePerMin')}</div>`);
-  if (stats.wasteEatenPerMin != null) rows.push(`<div>Waste eaten/min: <b>${stats.wasteEatenPerMin.toFixed(1)}</b>${bar('waste', 'wasteEatenPerMin')}</div>`);
-  if (stats.sciencePerMin != null) rows.push(`<div>Science/min: <b>${stats.sciencePerMin.toFixed(1)}</b>${bar('science', 'sciencePerMin')}</div>`);
-  if (stats.foodPerMin != null) rows.push(`<div>Food/min: <b>${stats.foodPerMin.toFixed(1)}</b>${bar('hunger', 'foodPerMin')}</div>`);
-  if (stats.generatedMwLastSec != null) rows.push(`<div>⚡ Electricity generated: <b>${stats.generatedMwLastSec}mw</b>${bar('power', 'generatedMwLastSec')}</div>`);
-  els.fishInfoStats.innerHTML = rows.join('');
+  els.fishInfoStats.innerHTML = fishModalStatRowsHtml(computeFishInfoModalStats(state, fish), collectFishModalRanges(state));
 
   els.fishInfoFilter.classList.toggle('hidden', fish.speciesId !== 'buffer_fish'); // the Magnet Fish's own filter lives in this modal; its grid is built on open/mutation only
 
@@ -2275,13 +2360,16 @@ function buyLabUpgrade(state, id) {
 // the stats of the building/fish being unlocked"). Opened by a node's click
 // handler above instead of buying immediately; Confirm is the only thing
 // left that actually calls buyLabUpgrade.
-function openLabPurchaseModal(state, id, infoOnly = false) {
+function openLabPurchaseModal(state, id, infoOnly = false, anchorBtn = null) {
+  closeMergeFishModal();
   const node = SCIENCE_LAB_UPGRADES[id];
   labPurchaseNodeId = id;
   labPurchaseInfoOnly = infoOnly;
   const infoLocked = infoOnly && !state.meta.labUpgradesPurchased.includes(id);
   els.labPurchaseModal.classList.toggle('info-only', infoOnly);
   els.labPurchaseModal.classList.toggle('info-locked', infoLocked);
+  els.labPurchaseModal.classList.toggle('anchored', !!anchorBtn); // opened from the fish modal: its paper look, hanging under the button
+  if (!anchorBtn) { els.labPurchaseModal.style.left = ''; els.labPurchaseModal.style.top = ''; }
   els.labPurchaseFootnote.classList.toggle('hidden', !infoLocked);
   // A `mystery: true` node stays a total blank until its prerequisites are
   // met, per direct spec ("a question mark node... that gives no info until
@@ -2364,6 +2452,7 @@ function openLabPurchaseModal(state, id, infoOnly = false) {
   els.labPurchaseDesc.innerHTML = descLines.map((t) => `<div>${t}</div>`).join('');
   els.labPurchaseStats.innerHTML = statChips.join('');
   els.labPurchaseOverlay.classList.remove('hidden');
+  if (anchorBtn) positionUnderButton(els.labPurchaseModal, anchorBtn);
   playPanelOpen();
 }
 
@@ -4747,18 +4836,39 @@ const BUILDING_STAT_VALUE = {
   sludgeTime: (id) => (REFINERY_STATS[id]?.foodProcessMs * ALIEN_DNA_REFINERY_TIME_MULTIPLIER) / 1000,
   range: (id) => FAN_STATS[id]?.maxRange,
   fireRate: (id) => TURRET_STATS[id]?.shotsPerSec,
-  damage: (id) => turretDamageRange(id)?.max,
   capacity: (id) => STORAGE_CHEST_CAPACITY[id],
 };
 
-// The damage shown for a turret runs from its Waste-ammo hit to its best
-// (Biomass) hit; the meter tracks the top of that range.
-function turretDamageRange(buildingId) {
+// A turret's damage/ammo, broken down per ammo type, per direct request: one row each for what it can
+// fire — Waste (ammo + damage), Biomass (ammo + damage); the Advanced Turret fires for free, so its Waste row
+// is a "No ammo" one with just its base damage, and its Biomass ammo is the small optional pool. `ammo` is
+// the shots a full load holds.
+function turretAmmoRows(buildingId) {
   const t = TURRET_STATS[buildingId];
-  if (!t) return null;
-  return TURRET_AMMO_TILES.has(buildingId)
-    ? { min: t.damage, max: Math.round(t.damage * BIOMASS_TURRET_DAMAGE_MULTIPLIER * 10) / 10 }
-    : { min: t.damage, max: ADVANCED_TURRET_BIOMASS_DAMAGE };
+  if (!TURRET_AMMO_TILES.has(buildingId)) {
+    return [
+      { icon: '🚫', label: 'No ammo', damage: t.damage },
+      { icon: itemIconImgHtml('biomass'), label: 'Biomass', ammo: ADVANCED_TURRET_MAX_BIOMASS_AMMO, damage: ADVANCED_TURRET_BIOMASS_DAMAGE },
+    ];
+  }
+  return [
+    { icon: itemIconImgHtml('waste'), label: 'Waste', ammo: Math.min(WASTE_TURRET_MAX_AMMO, WASTE_TURRET_SHOTS_PER_WASTE * WASTE_TURRET_MAX_WASTE), damage: t.damage },
+    { icon: itemIconImgHtml('biomass'), label: 'Biomass', ammo: Math.min(WASTE_TURRET_MAX_AMMO, BIOMASS_TURRET_SHOTS_PER_AMMO * WASTE_TURRET_MAX_WASTE), damage: Math.round(t.damage * BIOMASS_TURRET_DAMAGE_MULTIPLIER * 10) / 10 },
+  ];
+}
+
+function turretAmmoRowsHtml(buildingId) {
+  const all = Object.keys(TURRET_STATS).flatMap(turretAmmoRows);
+  const maxAmmo = Math.max(...all.map((r) => r.ammo || 0));
+  const maxDamage = Math.max(...all.map((r) => r.damage));
+  return turretAmmoRows(buildingId).map((r) => (
+    `<div class="building-stat"><b>${r.icon} ${r.label}</b></div>` +
+    `<div class="building-stat stat-dual stat-dual-pair">` +
+    (r.ammo != null
+      ? `<span>📦 Ammo <b>${r.ammo}</b>${statBarForRange('capacity', r.ammo, 0, maxAmmo)}</span>`
+      : '') + // the no-ammo row has just its damage meter, in the first column
+    `<span>💥 Damage <b>${r.damage}</b>${statBarForRange('damage', r.damage, 0, maxDamage)}</span></div>`
+  )).join('');
 }
 
 // Every electricity figure a building shows (collectors: coin/science, turrets:
@@ -4862,17 +4972,10 @@ function buildingStatsHtml(buildingId, state = null) {
   } else if (t) {
     // The electrical figure is per shot, not per second (powerCostPerShot is the
     // player-facing number; powerCostPerSec is only the derived rate the power
-    // demand math needs). Damage runs Waste-ammo -> Biomass-ammo, and the ammo
-    // line (no scale to compare, so no meter) says how the turret is fed.
-    const dmg = turretDamageRange(buildingId);
-    const ammoIcons = `${itemIconImgHtml('waste')}${itemIconImgHtml('biomass')}`;
-    const ammoLine = TURRET_AMMO_TILES.has(buildingId)
-      ? `${ammoIcons} Ammo: <b>${WASTE_TURRET_SHOTS_PER_WASTE}-${BIOMASS_TURRET_SHOTS_PER_AMMO}</b> shots each, holds <b>${WASTE_TURRET_MAX_WASTE}</b>`
-      : `${itemIconImgHtml('biomass')} Optional ammo: holds <b>${ADVANCED_TURRET_MAX_BIOMASS_AMMO}</b>`;
+    // demand math needs).
     html =
       buildingStatLine('🔫 Fire rate', `${t.shotsPerSec}/sec`, familyBar('rate', 'fireRate')) +
-      buildingStatLine('💥 Damage', `${dmg.min}-${dmg.max}`, familyBar('damage', 'damage')) +
-      `<div class="building-stat">${ammoLine}</div>` +
+      turretAmmoRowsHtml(buildingId) +
       buildingPowerLine(buildingId, placed, 'Power', t.powerCostPerShot, 'shot');
   } else if (r) {
     html =

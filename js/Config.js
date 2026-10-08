@@ -2017,10 +2017,12 @@ export const PROCESSOR_STATS = {
 // take 10mw a shot") — Electric Waste Turret 6->10, Advanced Turret 15->40;
 // powerCostPerSec recomputed to match (powerCostPerShot * shotsPerSec), same
 // as every earlier tuning pass here.
+// Damage retuned per direct request: Electric Waste Turret 4 on Waste / 6 on Biomass (4 x BIOMASS_TURRET_DAMAGE_MULTIPLIER),
+// Advanced Turret 7 on its free base shot / 10 on Biomass (ADVANCED_TURRET_BIOMASS_DAMAGE).
 export const TURRET_STATS = {
   [TILE_TURRET_WASTE]: { shotsPerSec: 1.5, damage: 2, powerCostPerShot: 0, powerCostPerSec: 0 },
-  [TILE_TURRET_ELECTRIC]: { shotsPerSec: 1.75, damage: 6, powerCostPerShot: 10, powerCostPerSec: 17.5 },
-  [TILE_TURRET_ADVANCED]: { shotsPerSec: 2.5, damage: 8, powerCostPerShot: 40, powerCostPerSec: 100 },
+  [TILE_TURRET_ELECTRIC]: { shotsPerSec: 1.75, damage: 4, powerCostPerShot: 10, powerCostPerSec: 17.5 },
+  [TILE_TURRET_ADVANCED]: { shotsPerSec: 2.5, damage: 7, powerCostPerShot: 40, powerCostPerSec: 100 },
 };
 // Which turret tiers consume Waste (or Biomass) as ammo (gating whether they
 // can fire at all, alongside the fire-rate cooldown) — per direct request,
@@ -2089,7 +2091,7 @@ export const WASTE_TURRET_MAX_AMMO = 75;
 // same "use the better ammo you just loaded immediately" precedent
 // BIOMASS_TURRET_DAMAGE_MULTIPLIER's own comment already established.
 export const ADVANCED_TURRET_MAX_BIOMASS_AMMO = 5;
-export const ADVANCED_TURRET_BIOMASS_DAMAGE = 14;
+export const ADVANCED_TURRET_BIOMASS_DAMAGE = 10;
 // Retired in favor of a real circle-vs-tile touch test (Grid.js's
 // isTouchingBuildingTile) — per direct report, this fixed radius left the
 // tile's own corners (including the top edge) under-covered, so waste

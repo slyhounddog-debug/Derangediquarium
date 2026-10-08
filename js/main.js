@@ -286,6 +286,7 @@ import {
   toggleStatsPanel,
   advanceTutorialFlow,
   closeSidePanels,
+  closeAllModals,
   tutorialScrollDirectionNeeded,
   updateBossHealthBar,
   showGameOverModal,
@@ -3547,7 +3548,7 @@ input.keydownHandlers.push((e) => {
   // still goes on to do its own normal job the same tick (e.g. pressing E
   // both closes the modal AND opens the Shop), rather than needing two
   // separate presses.
-  if (state.ui.fishInfoModalFishId != null) closeFishInfoMenu(state);
+  if (state.ui.fishInfoModalFishId != null && (e.code !== 'Escape' || state.ui.paused)) closeFishInfoMenu(state); // Escape is left to closeAllModals below, which closes it along with everything else and consumes the press
   // The debug overlay toggle is a pure observability tool, not a gameplay
   // action — deliberately never blocked by anything below (the cinematic
   // intro/tutorial-flow gates included), so it's always reachable for QA.
@@ -3650,14 +3651,10 @@ input.keydownHandlers.push((e) => {
       cancelArmedFanPlacement();
       return;
     }
-    if (isLabMenuOpen()) {
-      closeLabMenu();
-      return;
-    }
-    if (!state.ui.shopCollapsed || !state.ui.tankPanelCollapsed) {
-      closeSidePanels(state);
-      return;
-    }
+    // Per direct request one Escape closes every open menu and pop-up at once (shop, tank, lab, fish/building
+    // modals, merge/splice/science-node popups, ...) and is then consumed — the pause menu only opens on the
+    // next press, when nothing is left to close.
+    if (!state.ui.paused && closeAllModals(state)) return;
     togglePauseMenu(state);
     return;
   }
