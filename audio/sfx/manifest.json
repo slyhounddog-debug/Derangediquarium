@@ -100,5 +100,20 @@
     "file": "chatMessage.wav",
     "gain": 2,
     "source": "583554__thehorriblejoke__notification-sound trim (2).wav"
+  },
+  "playFishKilledByAlien": {
+    "file": "playFishKilledByAlien.wav",
+    "gain": 0.75,
+    "source": "a_cute_game_with40 trim.wav"
+  },
+  "playFishDeath": {
+    "file": "playFishDeath.mp3",
+    "gain": 1.25,
+    "source": "a_cute_game.mp3"
+  },
+  "playInsufficientFunds": {
+    "file": "playInsufficientFunds.wav",
+    "gain": 1.5,
+    "source": "643139__joelleohworld__boop trim.wav"
   }
 }
