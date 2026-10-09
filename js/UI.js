@@ -113,7 +113,7 @@ import {
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
-import { playUpgrade, setMusicVolume, setSfxVolume, getMusicVolume, getSfxVolume, playPanelOpen, playPanelClose, playInsufficientFunds, setMusicUnderwaterMuffle, setMusicSpeedBoost, setMusicPaused } from './Sound.js';
+import { playUpgrade, setMusicVolume, setSfxVolume, getMusicVolume, getSfxVolume, playPanelOpen, playPanelClose, playInsufficientFunds, playUiHover, setMusicUnderwaterMuffle, setMusicSpeedBoost, setMusicPaused } from './Sound.js';
 import { computeProductionInfo } from './ProductionInfo.js';
 import { hasSaveGame, saveGame, loadSaveGame, clearSaveGame, isGuidedTutorialsEnabled, setGuidedTutorialsEnabled } from './Save.js';
 import { pushGameNotification } from './Notifications.js';
@@ -381,7 +381,35 @@ function pushUiNotification(state, text) {
   pushGameNotification(state, text);
 }
 
+// Per direct request, a soft blip (cycling through 6 recorded sounds) when the mouse enters a UI button:
+// the bottom toolbar, Shop, pause menu, Tank Upgrades, Science Lab (nodes, filters, zoom, purchase window),
+// the chat pill, and the start-screen menus. Deliberately NOT the HUD, the minimap and its buttons, or
+// anything in the tank (fish, buildings) — those simply aren't in this list.
+const UI_HOVER_SELECTOR = [
+  '#bottom-tool-bar button',
+  '#shop-panel button',
+  '#pause-overlay button',
+  '#tank-panel button',
+  '#lab-modal button',
+  '#lab-purchase-modal button',
+  '#notification-ticker button',
+  '#start-overlay button',
+  '#start-mode-overlay button',
+  '#start-help-overlay button',
+].join(',');
+
+function initUiHoverSound() {
+  // mouseover bubbles, so one delegated listener covers buttons that get rebuilt (shop icons, lab nodes).
+  document.addEventListener('mouseover', (e) => {
+    const button = e.target.closest ? e.target.closest(UI_HOVER_SELECTOR) : null;
+    if (!button || button.disabled) return;
+    if (button.contains(e.relatedTarget)) return; // moving between the button's own children isn't a new hover
+    playUiHover();
+  });
+}
+
 export function initUI(state) {
+  initUiHoverSound();
   els = {
     hud: document.getElementById('hud'),
     minimapWrap: document.getElementById('minimap-wrap'),

@@ -61,6 +61,7 @@ import { getAvailableSpecies, getAvailableBuildings } from './Levels.js';
 import { getFishPurchaseCost, findCombinablePair, spawnTurretTutorialWaste, spawnChestTutorialWaste } from './Entities.js';
 import { hasWasteTurretPlaced, countPlacedOfType, findPlacedChestKey } from './Grid.js';
 import { saveGame } from './Save.js';
+import { playWaveWarning } from './Sound.js';
 import { pushGameNotification } from './Notifications.js';
 
 const BANKRUPTCY_BAILOUT_MESSAGE =
@@ -476,6 +477,7 @@ function updateAlienWaves(state, dtMs) {
     if (!state.level.tutorialFlags.firstAlienWarning1Shown) {
       state.level.tutorialFlags.firstAlienWarning1Shown = true;
       pushNotification(state, ALIEN_WARNING_MESSAGE_1);
+      playWaveWarning(); // per direct request — a sound alongside each wave warning message
     }
   }
   // Per direct request, this 30s warning goes completely silent once
@@ -488,6 +490,7 @@ function updateAlienWaves(state, dtMs) {
     state.level.alienWarning2Shown = true;
     const message = state.level.alienWavesSpawned === 0 ? ALIEN_WARNING_MESSAGE_2 : ALIEN_WARNING_MESSAGE_2_REPEAT;
     pushNotification(state, message);
+    playWaveWarning();
   }
 
   if (elapsed >= nextWaveAt) {

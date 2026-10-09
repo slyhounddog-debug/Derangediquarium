@@ -203,7 +203,7 @@ import { pushGameNotification } from './Notifications.js';
 // Sound is a fire-and-forget side effect at the moment something already
 // happened — the same pattern this file already uses for floatingTexts/
 // notifications, just for audio instead of a visual/text readout.
-import { playPurchase, playFoodPlace, playEat, playFishDeath, playFishKilledByAlien, playCoinBank, playTankPoint, playProductionBlocked, playHunger, playAlienHit, playAlienDeath, playDispense, playGrowToMid, playGrowToAdult } from './Sound.js';
+import { playPurchase, playFoodPlace, playEat, playFishDeath, playFishKilledByAlien, playCoinBank, playTankPoint, playProductionBlocked, playHunger, playAlienHit, playAlienDeath, playDispense, playGrowToMid, playGrowToAdult, playPortalOpen } from './Sound.js';
 
 let _nextId = 1;
 function nextId() {
@@ -1568,7 +1568,7 @@ export function tryBankCoinAt(state, worldX, worldY) {
     const clickRadius = item.radius * COIN_CLICK_RADIUS_MULTIPLIER;
     if (dx * dx + dy * dy <= clickRadius * clickRadius) {
       bankMoney(state, item.value);
-      playCoinBank();
+      playCoinBank(getCoinTier(item.value).maxValue === Infinity); // Diamond tier has its own sound
       const color = getCoinColor(item.value);
       state.level.floatingTexts.push(createPickupText(item.x, item.y, `+$${item.value}`, color));
       // Per direct request ("make it so the picking up coins does a sparkle
@@ -2401,7 +2401,7 @@ function updateCoin(item, state, dtMs) {
   const status = stepItemOnGrid(item, state, dt, physics);
   if (status === 'consumed') {
     bankMoney(state, item.value);
-    playCoinBank();
+    playCoinBank(getCoinTier(item.value).maxValue === Infinity); // Diamond tier has its own sound
     state.level.floatingTexts.push(createPickupText(item.x, item.y, `+$${item.value}`, getCoinColor(item.value)));
     // Per direct request ("make it so the picking up coins does a sparkle
     // and makes 1-3 bubbles") — a quick radiating sparkle (main.js renders
@@ -3600,6 +3600,13 @@ export function updatePickupText(item, dtMs) {
 function updateAlienPortals(state) {
   const elapsed = state.level.elapsed;
   for (const portal of state.level.alienPortals) {
+    // Per direct request, a portal makes a sound as it starts to open (its grow-in begins at openAtMs).
+    // portal.soundPlayed keeps it to once per portal; the window check stops a loaded save from replaying
+    // the sound for portals that were already mid-open.
+    if (!portal.soundPlayed && elapsed >= portal.openAtMs) {
+      portal.soundPlayed = true;
+      if (elapsed < portal.openAtMs + ALIEN_PORTAL_OPEN_MS) playPortalOpen();
+    }
     if (!portal.spawned && elapsed >= portal.openAtMs + ALIEN_PORTAL_OPEN_MS) {
       portal.spawned = true;
       portal.spawnedAtMs = elapsed;

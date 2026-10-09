@@ -139,6 +139,7 @@ function ensureContext() {
   sfxGain.gain.value = sfxVolume * SFX_VOLUME_MAX_GAIN;
   sfxGain.connect(ctx.destination);
   loadDropSound();
+  loadSampleSfx();
   return ctx;
 }
 
@@ -437,12 +438,52 @@ function sfxOnCooldown(name, cooldownMs = SFX_COOLDOWN_MS) {
   return false;
 }
 
+// ---- Sampled SFX ----
+// Per direct request, most effects are now real recordings picked in tools/sfx (audio/sfx/<name>.wav,
+// listed in audio/sfx/manifest.json with a per-sound gain). A manifest entry is { file, gain } or, for
+// a sound that cycles through several files (uiHover), { files: [...], gain }. Each playXxx() below
+// tries its sample first and falls back to the original synthesized sound if it hasn't loaded (or
+// has no file) — the new sounds (portal, wave warning, hover) have no synth fallback and are
+// simply silent until loaded.
+const sampleBuffers = {}; // name -> AudioBuffer[]
+const sampleGains = {};   // name -> manifest gain
+function loadSampleSfx() {
+  fetch('audio/sfx/manifest.json')
+    .then((res) => res.json())
+    .then((manifest) => {
+      for (const [name, entry] of Object.entries(manifest)) {
+        const files = entry.files || [entry.file];
+        sampleGains[name] = Number.isFinite(entry.gain) ? entry.gain : 1;
+        Promise.all(files.map((f) => fetch('audio/sfx/' + f).then((r) => r.arrayBuffer()).then((d) => ctx.decodeAudioData(d))))
+          .then((buffers) => { sampleBuffers[name] = buffers; })
+          .catch(() => {});
+      }
+    })
+    .catch(() => {});
+}
+// Plays one sample of a sound (index picks which, for cycling sounds); false means none is loaded, so the caller should fall back
+// to its synth. A suspended/missing context counts as handled (the synth would bail out too).
+function playSample(name, index = 0) {
+  const list = sampleBuffers[name];
+  if (!list || !list.length) return false;
+  const audioCtx = ensureContext();
+  if (!audioCtx || audioCtx.state !== 'running') return true;
+  const src = audioCtx.createBufferSource();
+  src.buffer = list[index % list.length];
+  const gain = audioCtx.createGain();
+  gain.gain.value = sampleGains[name] ?? 1;
+  src.connect(gain).connect(sfxGain);
+  src.start();
+  return true;
+}
+
 // ---- SFX ----
 // Buying a fish — per direct request, the same soft rising sine whoosh as an
 // item going into a building (playIntake), but a little higher, longer and
 // louder with a small chime on top so it stands out from that background sound.
 export function playPurchase() {
   if (sfxOnCooldown('playPurchase')) return;
+  if (playSample('playPurchase')) return;
   playSweep(380, 900, 0.11, { type: 'sine', gain: 0.1 });
   playTone(1174.66, 0.12, { type: 'sine', gain: 0.07, attack: 0.01, release: 0.09, when: 0.08 }); // D6
 }
@@ -450,6 +491,7 @@ export function playPurchase() {
 // A tiny soft "plink" — dropping a food pellet.
 export function playFoodPlace() {
   if (sfxOnCooldown('playFoodPlace')) return;
+  if (playSample('playFoodPlace')) return;
   playTone(1046.5, 0.05, { type: 'triangle', gain: 0.1 }); // C6
 }
 
@@ -514,8 +556,11 @@ export function playFishKilledByAlien() {
 // request ("slightly too aggressive and shrill"): a triangle wave instead of a
 // square (far fewer harmonics, so no buzz), a fourth lower (G5/C6, was B5/E6),
 // quieter, and with a gentler attack and a longer tail on the second note.
-export function playCoinBank() {
+// isDiamond: per direct request, a Diamond-tier coin has its own sound; every other tier shares the main one.
+export function playCoinBank(isDiamond = false) {
   if (sfxOnCooldown('playCoinBank')) return;
+  if (isDiamond && playSample('playCoinBankDiamond')) return;
+  if (playSample('playCoinBank')) return;
   playTone(784, 0.06, { type: 'triangle', gain: 0.13, attack: 0.01 }); // G5
   playTone(1046.5, 0.16, { type: 'triangle', gain: 0.13, attack: 0.01, release: 0.1, when: 0.055 }); // C6
 }
@@ -567,6 +612,7 @@ export function playBuildDrop() {
 // A short crunch — demolishing a building.
 export function playDemolish() {
   if (sfxOnCooldown('playDemolish')) return;
+  if (playSample('playDemolish')) return;
   playNoise(0.12, { gain: 0.14 });
   playTone(130, 0.08, { type: 'sawtooth', gain: 0.08, when: 0.02 });
 }
@@ -702,7 +748,10 @@ export function playTurretShoot() {
   if (sfxOnCooldown('playTurretShoot')) return;
   if (activeTurretShotSounds >= MAX_CONCURRENT_TURRET_SHOTS) return;
   activeTurretShotSounds++;
-  setTimeout(() => { activeTurretShotSounds = Math.max(0, activeTurretShotSounds - 1); }, TURRET_SHOOT_DURATION_S * 1000);
+  // A sample is longer than the old 0.08s sweep, so the concurrency slot is held for its real length.
+  const sampleDurationS = sampleBuffers.playTurretShoot && sampleBuffers.playTurretShoot[0] ? sampleBuffers.playTurretShoot[0].duration : null;
+  setTimeout(() => { activeTurretShotSounds = Math.max(0, activeTurretShotSounds - 1); }, (sampleDurationS ?? TURRET_SHOOT_DURATION_S) * 1000);
+  if (playSample('playTurretShoot')) return;
   playSweep(950, 260, TURRET_SHOOT_DURATION_S, { type: 'square', gain: 0.1 });
 }
 
@@ -711,6 +760,7 @@ export function playTurretShoot() {
 // this should read as "hit, still alive," not a defeat.
 export function playAlienHit() {
   if (sfxOnCooldown('playAlienHit')) return;
+  if (playSample('playAlienHit')) return;
   playNoise(0.05, { gain: 0.09 });
   playTone(180, 0.05, { type: 'sawtooth', gain: 0.08, when: 0.005 });
 }
@@ -720,6 +770,7 @@ export function playAlienHit() {
 // not just another hit.
 export function playAlienDeath() {
   if (sfxOnCooldown('playAlienDeath')) return;
+  if (playSample('playAlienDeath')) return;
   playNoise(0.16, { gain: 0.15 });
   playTone(220, 0.1, { type: 'sawtooth', gain: 0.12, when: 0.02 });
   playTone(110, 0.16, { type: 'sawtooth', gain: 0.1, when: 0.09 });
@@ -740,8 +791,31 @@ export function playIntake() {
 // fire there, to avoid two sounds landing on one event).
 export function playDispense() {
   if (sfxOnCooldown('playDispense')) return;
+  if (playSample('playDispense')) return;
   playTone(880, 0.05, { type: 'sine', gain: 0.08 });
   playTone(660, 0.06, { type: 'sine', gain: 0.07, when: 0.04 });
+}
+
+// ---- New sampled-only sounds (no synth fallback) ----
+// An alien portal starting to open — Entities.js's updateAlienPortals. A wave staggers its portals, so
+// this fires once per portal; the longer cooldown keeps a big wave from blurring into one roar.
+export function playPortalOpen() {
+  if (sfxOnCooldown('playPortalOpen', 120)) return;
+  playSample('portalOpen');
+}
+
+// The 60s / 30s alien wave warnings — Systems.js, alongside the chat message each posts.
+export function playWaveWarning() {
+  if (sfxOnCooldown('playWaveWarning')) return;
+  playSample('waveWarning');
+}
+
+// Mouse enters a UI button — UI.js's delegated hover listener. Cycles through the 6 recorded blips in
+// order rather than repeating one, per direct request.
+let uiHoverIndex = 0;
+export function playUiHover() {
+  if (sfxOnCooldown('playUiHover')) return;
+  if (playSample('uiHover', uiHoverIndex)) uiHoverIndex++;
 }
 
 // ---- Background music ----

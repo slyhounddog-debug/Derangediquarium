@@ -1,0 +1,69 @@
+{
+  "playPurchase": {
+    "file": "playPurchase.wav",
+    "gain": 0.8,
+    "source": "216403__rsilveira_88__water_bubbles_01 trim (2).wav"
+  },
+  "playFoodPlace": {
+    "file": "playFoodPlace.wav",
+    "gain": 0.35,
+    "source": "770082__tanweraman__water-drop-stereo trim.wav"
+  },
+  "playDispense": {
+    "file": "playDispense.wav",
+    "gain": 0.9,
+    "source": "868713__benparamoreaudio__bubble_5.wav"
+  },
+  "playDemolish": {
+    "file": "playDemolish.wav",
+    "gain": 0.7,
+    "source": "654483__bigal13__brick-being-dropped-and-breaking-into-peices trim.wav"
+  },
+  "playTurretShoot": {
+    "file": "playTurretShoot.wav",
+    "gain": 1.3,
+    "source": "634317__adhdreaming__flutter-laser trim.wav"
+  },
+  "playAlienHit": {
+    "file": "playAlienHit.wav",
+    "gain": 1,
+    "source": "330245__deleted_user_2104797__rubber-squeeze-2 trim.wav"
+  },
+  "playCoinBank": {
+    "file": "playCoinBank.wav",
+    "gain": 0.5,
+    "source": "533777__keatonmarek__dropping-single-coin-on-floor-5 trim.wav"
+  },
+  "playAlienDeath": {
+    "file": "playAlienDeath.wav",
+    "gain": 1,
+    "source": "568594__thesoundbandit__bloodspit trim.wav"
+  },
+  "portalOpen": {
+    "file": "portalOpen.wav",
+    "gain": 0.45,
+    "source": "55843__sergenious__port.wav"
+  },
+  "waveWarning": {
+    "file": "waveWarning.wav",
+    "gain": 1,
+    "source": "67397__noisecollector__quiet_bendyping.wav"
+  },
+  "playCoinBankDiamond": {
+    "file": "playCoinBankDiamond.wav",
+    "gain": 0.5,
+    "source": "533777__keatonmarek__dropping-single-coin-on-floor-5 trim (2).wav"
+  },
+  "uiHover": {
+    "files": [
+      "uiHover-1.wav",
+      "uiHover-2.wav",
+      "uiHover-3.wav",
+      "uiHover-4.wav",
+      "uiHover-5.wav",
+      "uiHover-6.wav"
+    ],
+    "gain": 0.35,
+    "source": "6 files, cycled in order"
+  }
+}
