@@ -175,6 +175,7 @@ export function loadLevel(state, levelId) {
     alienWavesSpawned: 0,
     alienWaveActive: false, // true from the moment a wave spawns until every one of its portals has opened AND every alien it produced is dead — see Systems.js's updateAlienWaves; the next wave's own countdown doesn't even start until this clears
     alienWarning1Shown: false,
+    alienWarning10Shown: false, // the 10-second warning SOUND (separate from the 60s/30s chat messages)
     alienWarning2Shown: false,
     alienPortals: [], // { x, y, hp, openAtMs, spawned, spawnedAtMs } — see Systems.js's spawnAlienWave/Entities.js's updateEntities
     alienDeathEffects: [], // { x, y, age } — a short expanding/fading burst pushed by Entities.js's updateAlien the instant an alien's hp hits 0, aged out by updateAlienDeathEffects; purely decorative, rendered by main.js

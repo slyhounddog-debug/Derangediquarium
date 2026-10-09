@@ -1,8 +1,8 @@
 {
   "playPurchase": {
     "file": "playPurchase.wav",
-    "gain": 0.8,
-    "source": "216403__rsilveira_88__water_bubbles_01 trim (2).wav"
+    "gain": 0.55,
+    "source": "683102__florianreichelt__water-drop trim.wav"
   },
   "playFoodPlace": {
     "file": "playFoodPlace.wav",
@@ -63,7 +63,7 @@
       "uiHover-5.wav",
       "uiHover-6.wav"
     ],
-    "gain": 0.35,
+    "gain": 0.21,
     "source": "6 files, cycled in order"
   }
 }

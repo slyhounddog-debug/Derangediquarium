@@ -29,6 +29,7 @@ import {
   ALIEN_WARNING_MS_1,
   ALIEN_WARNING_MS_2,
   ALIEN_WARNING_MAX_WAVES,
+  ALIEN_COUNTDOWN_START_MS,
   ALIEN_WARNING_MESSAGE_2_REPEAT,
   ALIEN_WARNING_MESSAGE_1,
   ALIEN_WARNING_MESSAGE_2,
@@ -477,7 +478,6 @@ function updateAlienWaves(state, dtMs) {
     if (!state.level.tutorialFlags.firstAlienWarning1Shown) {
       state.level.tutorialFlags.firstAlienWarning1Shown = true;
       pushNotification(state, ALIEN_WARNING_MESSAGE_1);
-      playWaveWarning(); // per direct request — a sound alongside each wave warning message
     }
   }
   // Per direct request, this 30s warning goes completely silent once
@@ -490,6 +490,11 @@ function updateAlienWaves(state, dtMs) {
     state.level.alienWarning2Shown = true;
     const message = state.level.alienWavesSpawned === 0 ? ALIEN_WARNING_MESSAGE_2 : ALIEN_WARNING_MESSAGE_2_REPEAT;
     pushNotification(state, message);
+  }
+  // Per direct request, the warning SOUND plays only at the 10-second mark — the same moment the on-screen
+  // countdown banner takes over (UI.js updateAlienCountdown) — not with the 60s/30s chat messages.
+  if (!state.level.alienWarning10Shown && elapsed >= nextWaveAt - ALIEN_COUNTDOWN_START_MS) {
+    state.level.alienWarning10Shown = true;
     playWaveWarning();
   }
 
@@ -498,6 +503,7 @@ function updateAlienWaves(state, dtMs) {
     state.level.alienWaveActive = true; // the branch above now owns rescheduling alienNextWaveAtMs, once this wave is fully cleared
     state.level.alienWarning1Shown = false;
     state.level.alienWarning2Shown = false;
+    state.level.alienWarning10Shown = false;
   }
 }
 
