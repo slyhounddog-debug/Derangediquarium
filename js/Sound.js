@@ -121,7 +121,10 @@ let ambienceVolume = getSavedVolume('ambience') ?? 0.5;
 // per direct request ("make the max music 10% quieter... the 3 music tracks
 // over-power the sound effects by default") — SFX_VOLUME_MAX_GAIN is
 // deliberately untouched, only the music ceiling moved.
-const MUSIC_VOLUME_MAX_GAIN = 0.63;
+// A further 20% lower baseline (0.63 * 0.8), per direct request, independent of the slider: the slider still
+// spans 0-100% of this ceiling, so everything music-related (in-game, battle, boss, main menu) is
+// uniformly 20% quieter at every slider position.
+const MUSIC_VOLUME_MAX_GAIN = 0.504;
 const SFX_VOLUME_MAX_GAIN = 0.7;
 const AMBIENCE_VOLUME_MAX_GAIN = 0.7;
 
