@@ -124,7 +124,10 @@ let ambienceVolume = getSavedVolume('ambience') ?? 0.5;
 // A further 20% lower baseline (0.63 * 0.8), per direct request, independent of the slider: the slider still
 // spans 0-100% of this ceiling, so everything music-related (in-game, battle, boss, main menu) is
 // uniformly 20% quieter at every slider position.
-const MUSIC_VOLUME_MAX_GAIN = 0.504;
+const MUSIC_VOLUME_MAX_GAIN = 0.4; // per direct request, the baseline for the Game/Battle/menu music (was 0.504)
+// The Boss track sits at its own, higher ceiling (0.5) at the same slider position, per direct request —
+// expressed as a multiplier on its per-track gain node, since every track shares the one musicGain above.
+const BOSS_TRACK_GAIN = 0.5 / MUSIC_VOLUME_MAX_GAIN;
 const SFX_VOLUME_MAX_GAIN = 0.7;
 const AMBIENCE_VOLUME_MAX_GAIN = 0.7;
 
@@ -992,7 +995,7 @@ function ensureMusicTracks() {
   // user-gesture unlock created these nodes at all.
   gameTrackGain.gain.value = bossActive ? 0 : (battleActive ? 0 : 1);
   battleTrackGain.gain.value = bossActive ? 0 : (battleActive ? 1 : 0);
-  bossTrackGain.gain.value = bossActive ? 1 : 0;
+  bossTrackGain.gain.value = bossActive ? BOSS_TRACK_GAIN : 0;
 
   ctx.createMediaElementSource(gameMusicEl).connect(gameTrackGain).connect(musicGain);
   ctx.createMediaElementSource(battleMusicEl).connect(battleTrackGain).connect(musicGain);
@@ -1073,7 +1076,7 @@ export function triggerBossMusic() {
   // the WHOLE way from (now, 0) to the ramp's end target, i.e. gain would
   // already be climbing gradually from t=0 instead of staying silent.
   bossTrackGain.gain.setValueAtTime(0, now + BOSS_MUSIC_FADE_IN_START_S);
-  bossTrackGain.gain.linearRampToValueAtTime(1, now + BOSS_MUSIC_FADE_IN_START_S + BOSS_MUSIC_FADE_IN_S);
+  bossTrackGain.gain.linearRampToValueAtTime(BOSS_TRACK_GAIN, now + BOSS_MUSIC_FADE_IN_START_S + BOSS_MUSIC_FADE_IN_S);
   setTimeout(() => {
     bossMusicEl.currentTime = 0;
     bossMusicEl.play().catch(() => {});
