@@ -358,6 +358,7 @@ const MENU_MUSIC_STOP_FADE_S = 0.2;
 let menuMusicWanted = false;
 let menuMusicStarted = false;
 let menuStingerEl = null;
+let menuStingerGain = null;
 let menuLoopEl = null;
 let menuLoopGain = null;
 
@@ -374,7 +375,9 @@ function tryStartMenuMusic() {
     if (!menuMusicWanted || menuMusicStarted || ctx.state !== 'running') return;
     menuMusicStarted = true;
     menuStingerEl = new Audio('audio/Fin Sanity.mp3');
-    ctx.createMediaElementSource(menuStingerEl).connect(sfxGain);
+    menuStingerGain = ctx.createGain();
+    menuStingerGain.gain.value = sampleGains.finSanity ?? 1; // tools/sfx level; loadSampleSfx updates it if the manifest arrives after this
+    ctx.createMediaElementSource(menuStingerEl).connect(menuStingerGain).connect(sfxGain);
     menuLoopEl = new Audio('audio/Game.mp3');
     menuLoopEl.loop = true;
     menuLoopGain = ctx.createGain();
@@ -501,8 +504,14 @@ function loadSampleSfx() {
     .then((res) => res.json())
     .then((manifest) => {
       for (const [name, entry] of Object.entries(manifest)) {
-        const files = entry.files || [entry.file];
         sampleGains[name] = Number.isFinite(entry.gain) ? entry.gain : 1;
+        // Gain-only entries (finSanity, playBuildDrop) just tune the level of a sound whose file the game
+        // already loads itself — there is nothing to decode here.
+        if (entry.gainOnly) {
+          if (name === 'finSanity' && menuStingerGain) menuStingerGain.gain.value = sampleGains[name];
+          continue;
+        }
+        const files = entry.files || [entry.file];
         Promise.all(files.map((f) => fetch('audio/sfx/' + f).then((r) => r.arrayBuffer()).then((d) => ctx.decodeAudioData(d))))
           .then((buffers) => {
             sampleBuffers[name] = buffers;
@@ -656,7 +665,7 @@ export function playBuildDrop() {
   const src = audioCtx.createBufferSource();
   src.buffer = dropBuffer;
   const gain = audioCtx.createGain();
-  gain.gain.value = DROP_SOUND_GAIN;
+  gain.gain.value = sampleGains.playBuildDrop ?? DROP_SOUND_GAIN; // tools/sfx level, falling back to the old fixed 1.5x
   src.connect(gain).connect(sfxGain);
   src.start();
 }
@@ -672,6 +681,16 @@ export function playDemolish() {
 // A rising 4-note arpeggio — buying a Tank Upgrade.
 export function playUpgrade() {
   if (sfxOnCooldown('playUpgrade')) return;
+  const notes = [392, 523.25, 659.25, 783.99]; // G4, C5, E5, G5
+  notes.forEach((freq, i) => playTone(freq, 0.09, { type: 'square', gain: 0.14, when: i * 0.07 }));
+}
+
+// Unlocking something from the Mound or the Science Lab — per direct request its own sound, separate from
+// playUpgrade (which Tank Upgrade/achievement/hat purchases still use). Falls back to the same arpeggio
+// until a recording is picked in tools/sfx.
+export function playUnlock() {
+  if (sfxOnCooldown('playUnlock')) return;
+  if (playSample('playUnlock')) return;
   const notes = [392, 523.25, 659.25, 783.99]; // G4, C5, E5, G5
   notes.forEach((freq, i) => playTone(freq, 0.09, { type: 'square', gain: 0.14, when: i * 0.07 }));
 }

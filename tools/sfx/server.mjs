@@ -21,7 +21,7 @@ const SLOT_IDS = new Set(SLOTS.map((s) => s.id));
 const EXTS = new Set(['.mp3', '.wav', '.ogg', '.m4a', '.flac']);
 const PORT = 8081;
 
-for (const slot of SLOTS) fs.mkdirSync(path.join(CANDIDATES, slot.id), { recursive: true });
+for (const slot of SLOTS) if (!slot.gainOnly) fs.mkdirSync(path.join(CANDIDATES, slot.id), { recursive: true });
 fs.mkdirSync(CHOSEN, { recursive: true });
 
 function readManifest() {
@@ -49,6 +49,7 @@ app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 app.get('/api/slots', (req, res) => {
   const manifest = readManifest();
   res.json(SLOTS.map((slot) => {
+    if (slot.gainOnly) return { ...slot, candidates: [], chosen: manifest[slot.id] || null };
     const dir = path.join(CANDIDATES, slot.id);
     const files = fs.readdirSync(dir)
       .filter((f) => EXTS.has(path.extname(f).toLowerCase()))

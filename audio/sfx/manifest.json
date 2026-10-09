@@ -16,7 +16,7 @@
   },
   "playDemolish": {
     "file": "playDemolish.wav",
-    "gain": 0.7,
+    "gain": 0.6,
     "source": "654483__bigal13__brick-being-dropped-and-breaking-into-peices trim.wav"
   },
   "playTurretShoot": {
@@ -31,7 +31,7 @@
   },
   "playCoinBank": {
     "file": "playCoinBank.wav",
-    "gain": 0.5,
+    "gain": 0.6,
     "source": "533777__keatonmarek__dropping-single-coin-on-floor-5 trim.wav"
   },
   "playAlienDeath": {
@@ -63,22 +63,37 @@
       "uiHover-5.wav",
       "uiHover-6.wav"
     ],
-    "gain": 0.21,
+    "gain": 0.15,
     "source": "6 files, cycled in order"
   },
   "uiSelect": {
     "file": "uiSelect.wav",
-    "gain": 0.75,
+    "gain": 1.3,
     "source": "776443__chaferwitt__pop-out-bubble-soft-bursting trim.wav"
   },
   "uiDeselect": {
     "file": "uiDeselect.wav",
-    "gain": 0.25,
+    "gain": 0.35,
     "source": "433649__dersuperanton__plopp-bubble-popping trim.wav"
   },
   "ambience": {
     "file": "ambience.wav",
     "gain": 0.5,
-    "source": "269867__arnaud-coutancier__bubbles trim (2).wav"
+    "source": "269867__arnaud-coutancier__bubbles trim (4).wav"
+  },
+  "finSanity": {
+    "gainOnly": true,
+    "gain": 0.75,
+    "source": "Fin Sanity.mp3"
+  },
+  "playBuildDrop": {
+    "gainOnly": true,
+    "gain": 2.75,
+    "source": "Drop.mp3"
+  },
+  "playUnlock": {
+    "file": "playUnlock.wav",
+    "gain": 0.35,
+    "source": "646672__sounddesignforyou__coin-pickup-sfx-2 trim.wav"
   }
 }

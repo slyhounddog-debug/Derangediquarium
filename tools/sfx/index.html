@@ -352,10 +352,32 @@ async function refresh() {
 
 function candUrl(slot, file) { return `/audio/sfx-candidates/${encodeURIComponent(slot)}/${encodeURIComponent(file)}`; }
 
+// A sound whose file is fixed in the game (the title sting, the building drop): just Play and a gain slider
+// that saves straight to the manifest.
+function renderGainOnlyCard(s) {
+  const card = document.createElement('section');
+  card.className = 'card';
+  const gain = s.chosen && Number.isFinite(s.chosen.gain) ? s.chosen.gain : 1;
+  card.innerHTML = `<h2><span>${s.label}</span><span class="tag">${s.id}</span><span class="tag">gain only</span></h2>
+    <div class="plays">${s.plays}</div>
+    <div class="row"><button class="gplay">▶ Play</button>
+      <label class="gain">Gain <input type="range" min="0.1" max="3" step="0.05"> <span></span></label>
+      <span class="note" style="margin:0">file: ${s.file}</span></div>`;
+  const url = '/audio/' + encodeURIComponent(s.file);
+  const gi = card.querySelector('input'), gv = card.querySelector('.gain span'), pb = card.querySelector('.gplay');
+  gi.value = gain; gv.textContent = (+gi.value).toFixed(2) + 'x';
+  cardGain[s.id] = gain;
+  gi.addEventListener('input', () => { cardGain[s.id] = +gi.value; gv.textContent = (+gi.value).toFixed(2) + 'x'; });
+  gi.addEventListener('change', async () => { if (await api('gain', { slot: s.id, gain: cardGain[s.id] })) say('Saved gain'); });
+  pb.addEventListener('click', () => playUrl(url, cardGain[s.id], pb));
+  return card;
+}
+
 function render() {
   cardsEl.innerHTML = '';
   for (const s of slots) {
     if (cardGain[s.id] == null) cardGain[s.id] = s.chosen ? s.chosen.gain : 1;
+    if (s.gainOnly) { cardsEl.appendChild(renderGainOnlyCard(s)); continue; }
     const card = document.createElement('section');
     card.className = 'card' + (s.chosen ? ' done' : '');
 

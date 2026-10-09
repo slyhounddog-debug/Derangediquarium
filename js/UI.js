@@ -113,7 +113,7 @@ import {
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
-import { playUpgrade, setMusicVolume, setSfxVolume, setAmbienceVolume, getMusicVolume, getSfxVolume, getAmbienceVolume, playPanelOpen, playPanelClose, playInsufficientFunds, playUiHover, playUiSelect, playUiDeselect, setMusicUnderwaterMuffle, setMusicSpeedBoost, setMusicPaused } from './Sound.js';
+import { playUpgrade, playUnlock, setMusicVolume, setSfxVolume, setAmbienceVolume, getMusicVolume, getSfxVolume, getAmbienceVolume, playPanelOpen, playPanelClose, playInsufficientFunds, playUiHover, playUiSelect, playUiDeselect, setMusicUnderwaterMuffle, setMusicSpeedBoost, setMusicPaused } from './Sound.js';
 import { computeProductionInfo } from './ProductionInfo.js';
 import { hasSaveGame, saveGame, loadSaveGame, clearSaveGame, isGuidedTutorialsEnabled, setGuidedTutorialsEnabled } from './Save.js';
 import { pushGameNotification } from './Notifications.js';
@@ -780,6 +780,7 @@ export function initUI(state) {
 
   els.notificationLatest.addEventListener('click', () => {
     notificationLogExpanded = !notificationLogExpanded;
+    (notificationLogExpanded ? playUiSelect : playUiDeselect)(); // per direct request, opening/closing the chat uses the select/deselect sounds
     els.notificationLog.classList.toggle('hidden', !notificationLogExpanded);
     lastRenderedNotificationCount = -1; // force a rebuild next update so it's populated the instant it opens
     // Story trigger: the first time the log is ever CLOSED again (not
@@ -2371,7 +2372,7 @@ function buyLabUpgrade(state, id) {
   if (node.grants.scienceCapLevel) {
     state.level.upgrades.scienceCapLevel += node.grants.scienceCapLevel;
   }
-  playUpgrade();
+  playUnlock(); // Science Lab unlocks have their own sound now; Tank Upgrade purchases still use playUpgrade
   // Mother Alien Fish, per direct spec — triggers the whole 10-second
   // end-game reveal sequence. Closes the Lab itself right here (UI.js
   // already owns closeLabMenu), then hands off to main.js via a cross-module
