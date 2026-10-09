@@ -30,7 +30,26 @@ const AUTOSAVE_NOTIFICATION_TEXTS = new Set([
   'Auto-save failed — your browser blocked it.',
 ]);
 
+// Per direct request, every chat message (and so its sound, which UI.js plays
+// when a new entry appears) is held back 3 seconds so the player can finish
+// the action it announces first. Counted in game time (state.level.elapsed),
+// so pausing holds the queue too; flushed once per update from main.js.
+export const NOTIFICATION_DELAY_MS = 3000;
+
 export function pushGameNotification(state, text) {
+  if (!state.level.pendingNotifications) state.level.pendingNotifications = [];
+  state.level.pendingNotifications.push({ text, dueAt: state.level.elapsed + NOTIFICATION_DELAY_MS });
+}
+
+export function flushPendingNotifications(state) {
+  const pending = state.level.pendingNotifications;
+  if (!pending || !pending.length) return;
+  while (pending.length && pending[0].dueAt <= state.level.elapsed) {
+    commitGameNotification(state, pending.shift().text);
+  }
+}
+
+function commitGameNotification(state, text) {
   const notifications = state.level.notifications;
   if (!AUTOSAVE_NOTIFICATION_TEXTS.has(text)) {
     for (let i = notifications.length - 1; i >= 0; i--) {

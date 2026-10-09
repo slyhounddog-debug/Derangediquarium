@@ -79,6 +79,7 @@ export function loadLevel(state, levelId) {
     gridStats: { itemsRoutedTotal: 0 }, // lifetime count of items consumed by a Collector tile, for the debug overlay's throughput readout
     tier: 1, // 1-5, Mound-driven progression — see Mound.js and CLAUDE.md's "Tier Progression & The Mound"; level-scoped like everything else here, even though the meta-unlocks a previous crack granted stay permanent
     moundTeased: false, // has the Mound's first "throw money" attempt already happened this level? — see Mound.js's crackMound/getMoundNextCost. A pure no-op joke — the Rudimentary Fan is unlocked from level start now (see Config.js's BUILDING_TYPES), no paid step needed for it any more
+    pendingNotifications: [], // { text, dueAt } chat messages waiting out their 3s delay — see Notifications.js
     notifications: [{ id: 1, text: WELCOME_MESSAGE, elapsed: 0 }], // rolling log for UI.js's ticker — { id, text, elapsed }, capped at NOTIFICATION_LOG_MAX. Seeded with the welcome message as a real entry (not a UI fallback) so it survives in the scrollback log
     tankPoints: { total: 0, available: 0 }, // earned by Entities.js on fish adult-growth transitions, spent in UI.js's Tank Upgrades panel — see CLAUDE.md's "Tank Points & Tank Upgrades"
     upgrades: {

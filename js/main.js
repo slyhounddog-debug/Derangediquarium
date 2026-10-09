@@ -151,7 +151,7 @@ import {
   SEA_TURTLE_COIN_VALUE_PER_COLLECT,
 } from './Config.js';
 import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop } from './Engine.js';
-import { pushGameNotification } from './Notifications.js';
+import { pushGameNotification, flushPendingNotifications } from './Notifications.js';
 import { isGuidedTutorialsEnabled, noteTutorialFlowStarted, noteTutorialFlowEnded } from './Save.js';
 import { loadLevel, LEVELS } from './Levels.js';
 import { updateStoryTriggers, updateAutosave } from './Systems.js';
@@ -4630,6 +4630,7 @@ function update(dtMs) {
   if (!state.ui.timePaused) {
     updateStoryTriggers(state, dtMs);
     state.level.elapsed += dtMs;
+    flushPendingNotifications(state);
   }
 
   stepsCounter++;
