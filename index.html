@@ -92,7 +92,36 @@
         <div class="start-mode-card-desc">The guided tutorial is turned <b>off</b> — jump straight in with no hand-holding.</div>
       </button>
     </div>
+    <button id="start-world-settings-btn" class="pause-btn sheen-target" title="Change the rules for this run: prices, aliens, speed and more">🌍 World Settings <span id="start-world-chip">Normal</span></button>
     <div id="start-mode-note">You can change this anytime in Settings.</div>
+  </div>
+</div>
+
+<!-- Per direct request, a per-run "World Settings" window opened from the New Game dialog above (layers on top of
+     it, same pattern as the Help overlay). It edits a draft (WorldSettingsUI.js); the run adopts it on New Game and
+     it is stored in that save's meta.worldSettings. A modified world can't earn achievements — the banner says so. -->
+<div id="world-settings-overlay" class="hidden">
+  <div id="world-settings-modal">
+    <div id="world-settings-header-row">
+      <div id="world-settings-title">🌍 World Settings</div>
+      <button id="world-settings-close-btn" class="lab-close-x-btn" title="Close">✕</button>
+    </div>
+    <div id="world-settings-banner" class="normal">
+      <span id="world-settings-banner-icon">✔</span>
+      <span id="world-settings-banner-text"></span>
+    </div>
+    <div id="world-settings-presets">
+      <button class="ws-preset pause-btn sheen-target" data-preset="easy">Easy</button>
+      <button class="ws-preset pause-btn sheen-target" data-preset="normal">Normal</button>
+      <button class="ws-preset pause-btn sheen-target" data-preset="challenge">Challenge</button>
+      <span id="world-settings-custom-chip" class="hidden">Custom</span>
+    </div>
+    <div id="world-settings-preset-desc"></div>
+    <div id="world-settings-body"></div>
+    <div id="world-settings-footer">
+      <button id="world-settings-reset-btn" class="pause-btn sheen-target">Reset to Normal</button>
+      <button id="world-settings-done-btn" class="pause-btn sheen-target">Done</button>
+    </div>
   </div>
 </div>
 
@@ -678,6 +707,7 @@
           <div id="tank-upgrade-list"></div>
         </div>
         <div id="tank-view-achievements" class="hidden">
+          <div id="achievements-modified-note" class="hidden">⚠ This run uses modified World Settings — achievements and Fishy Gems are disabled.</div>
           <div id="achievement-list"></div>
         </div>
         <div id="tank-view-customization" class="hidden">

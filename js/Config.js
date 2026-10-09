@@ -705,7 +705,7 @@ export const ITEM_MAX_PUSH_PER_STEP = 3;
 export const ITEM_PUSH_IMPULSE_SPEED = 3;
 
 // ---- Economy & feeding ----
-export const FOOD_COST = 3; // $ per food pellet, matches the Buy Food shop entry — lowered from 5 so the early economy isn't so punishing to get rolling
+export let FOOD_COST = 3; // $ per food pellet, matches the Buy Food shop entry — lowered from 5 so the early economy isn't so punishing to get rolling
 export const FOOD_RADIUS = 7.26; // px, visual + collision + despawn-on-floor check — 10% bigger (was 6) per direct request ("increase the size of all the objects by 10%"), then 10% bigger again (was 6.6) per a later direct request ("increase the size of food by 10%, including the collision size, while keeping mass untouched" — mass is ITEM_MASS_BY_TYPE.food, a flat per-type value, not derived from this radius)
 // Per direct request ("make the food color slightly lighter to a pink
 // salmon color, and make sure all the food icons throughout the game
@@ -851,14 +851,14 @@ export const WASTE_COLOR = '#8a6f45';
 // Flat hunger relief for a Scavenger fish (Suckerfish) eating a Waste item —
 // deliberately NOT tied to the Food Quality Tank Upgrade tree, which is
 // themed around player-bought Food pellets specifically, not scavenged waste.
-export const WASTE_HUNGER_RELIEF = 70;
+export let WASTE_HUNGER_RELIEF = 70;
 // How often a non-Scavenger fish poops out a Waste item directly at its own
 // position, mirroring the existing coin-drop-timer pattern exactly (see
 // Entities.js's updateFish) — a flat rate for every such species regardless
 // of size/species, placeholder balance like every other timing constant
 // here, tune once real playtesting exists. Scavenger fish (Suckerfish)
 // don't poop — they're the one eating this, not producing it.
-export const WASTE_POOP_INTERVAL_MS = 39683; // waste production 30% SLOWER per direct request ("all fish produce waste 30% slower") — was 27778, itself 10% less frequent than the original 25000. This single flat constant is what every non-Scavenger species pops on, so this one change covers "all fish" at once — see CLAUDE.md's Waste section for why this is intentionally NOT per-species.
+export let WASTE_POOP_INTERVAL_MS = 39683; // waste production 30% SLOWER per direct request ("all fish produce waste 30% slower") — was 27778, itself 10% less frequent than the original 25000. This single flat constant is what every non-Scavenger species pops on, so this one change covers "all fish" at once — see CLAUDE.md's Waste section for why this is intentionally NOT per-species.
 
 // ---- Science (physical resource) ----
 // Per direct request, Science is no longer an instant number added straight
@@ -1002,7 +1002,7 @@ export const FRIENDLY_ALIEN_WASTE_INTERVAL_MS = 12000;
 // tree is themed around player-BOUGHT Food specifically), and generous
 // enough to actually read as "high-value" against FOOD_HUNGER_RELIEF_BY_LEVEL's
 // own unupgraded 60.
-export const MUTAGEN_PASTE_HUNGER_RELIEF = 90;
+export let MUTAGEN_PASTE_HUNGER_RELIEF = 90;
 // Non-Adult fish that eat Mutagen Paste instantly become an Adult, no matter
 // what stage they were at (per direct request — a full replacement of the
 // old "advance ONE growth stage" behavior); an Adult instead gets a
@@ -1096,7 +1096,7 @@ export const CLEANLINESS_COLOR_DIRTY = '#8a6f45';
 // (CLEANLINESS_MIN_MONEY_FRACTION at 0% clean, 1.0 at 100% clean), applied
 // directly to a coin's own dropValue in updateFish's real coin-drop branch
 // and to computeTheoreticalGoldPerMinute's own stat.
-export const CLEANLINESS_MIN_MONEY_FRACTION = 0.5; // at 0% cleanliness, fish produce half as much money
+export let CLEANLINESS_MIN_MONEY_FRACTION = 0.5; // at 0% cleanliness, fish produce half as much money
 
 // ---- Floating pickup text ----
 export const PICKUP_TEXT_LIFETIME_MS = 900; // how long a "+$N" pickup readout stays on screen after a coin is banked
@@ -1250,7 +1250,7 @@ export const EYE_PUPIL_OFFSET_RATIO = 0.5; // how far the pupil can travel from 
 // creation time, so Shift+G/cheat-spawning an already-grown fish can't farm
 // points. `available` is what purchases spend; `total` never decreases
 // (lifetime-earned, in case a later phase wants it for stats/achievements).
-export const TANK_POINT_PER_ADULT_FISH = 1;
+export let TANK_POINT_PER_ADULT_FISH = 1;
 export const TANK_POINT_COLOR = '#ffcc4d'; // floating "+1 Tank Point!" text color, and the panel's accent
 
 // Food Quality's own 5-level cost ladder — was a flat [1,2,3,4] 4-level
@@ -1729,7 +1729,7 @@ export const SPECIES_LIST = Object.values(SPECIES);
 // always-available right-click, there's no risk of it being used as a free
 // item-conveyor exploit the way a partial-refund policy was originally
 // hedging against.
-export const TILE_REFUND_FRACTION = 1.0;
+export let TILE_REFUND_FRACTION = 1.0;
 // Every building's shop cost is dynamic, mirroring the Economy Fish
 // dynamic-pricing pattern (compounding, not additive) — per direct request.
 // Platform is a flat $3 regardless of how many are already placed. Every
@@ -1745,9 +1745,9 @@ export const TILE_REFUND_FRACTION = 1.0;
 // removed still counts toward its own N — see Grid.js's removeTile), not a
 // separately-tracked original cost.
 export const PLATFORM_FLAT_COST = 3;
-export const BUILDING_COST_GROWTH_RATE_TIER1 = 1.03; // base cost <= $100
-export const BUILDING_COST_GROWTH_RATE_TIER2 = 1.06; // base cost $101-200
-export const BUILDING_COST_GROWTH_RATE_TIER3 = 1.09; // base cost > $200
+export let BUILDING_COST_GROWTH_RATE_TIER1 = 1.03; // base cost <= $100
+export let BUILDING_COST_GROWTH_RATE_TIER2 = 1.06; // base cost $101-200
+export let BUILDING_COST_GROWTH_RATE_TIER3 = 1.09; // base cost > $200
 // The two base-cost cut-offs between those 3 tiers (a building's base cost above the first uses TIER2's
 // rate, above the second TIER3's) — Grid.js's buildingCostGrowthRate. Lifted out of a hardcoded 100/200 so
 // the tuning tool (tools/sfx) can adjust them.
@@ -2034,7 +2034,7 @@ export const TURRET_STATS = {
 };
 // powerCostPerSec is always shots/sec x power per shot, so it is derived here instead of being a second literal
 // that would have to be kept in sync by hand (the tuning tool in tools/sfx edits shotsPerSec/powerCostPerShot).
-for (const stats of Object.values(TURRET_STATS)) stats.powerCostPerSec = stats.shotsPerSec * stats.powerCostPerShot;
+recomputeWorldDerived(); // powerCostPerSec = shotsPerSec x powerCostPerShot (the function lives in the World Settings block at the bottom of this file)
 // Which turret tiers consume Waste (or Biomass) as ammo (gating whether they
 // can fire at all, alongside the fire-rate cooldown) — per direct request,
 // the Electric tier ("Electric Waste Turret") now needs BOTH Waste ammo AND
@@ -2426,7 +2426,7 @@ export const BUILDING_UPTIME_SAMPLE_COUNT = 36;
 // tied to Mound progress at all. MOUND_MAX_TIER dropped from 4 to 3
 // accordingly.
 export const MOUND_MAX_TIER = 3; // reaching this shatters the Mound completely into the Science Lab instead of cracking further
-export const MOUND_TEASE_COST = 75; // cut from 150 per direct request — grants the Storage Chest and Solar Refinery, and shows the dome's first crack
+export let MOUND_TEASE_COST = 75; // cut from 150 per direct request — grants the Storage Chest and Solar Refinery, and shows the dome's first crack
 // The old paid "Tier 1.75" step (FAN_UNLOCK_COST, $500, granted ONLY the
 // Rudimentary Fan) is gone entirely, per direct request — the Rudimentary
 // Fan is unlocked from level start now instead (BUILDING_TYPES'
@@ -3060,12 +3060,12 @@ export const DYNAMIC_PRICED_SPECIES_IDS = [...ECONOMY_SPECIES_IDS, ...UTILITY_SP
 // rather than tracked as a running counter. Applies to every id in
 // DYNAMIC_PRICED_SPECIES_IDS, economy and utility alike — the name predates
 // utility fish getting the same treatment, kept as-is rather than renamed.
-export const ECONOMY_FISH_COST_GROWTH_RATE = 1.3; // was 1.4, cut to 1.25 for a gentler curve, then raised ~20% on the scaling part (1.25 -> 1.3) per direct request
+export let ECONOMY_FISH_COST_GROWTH_RATE = 1.3; // was 1.4, cut to 1.25 for a gentler curve, then raised ~20% on the scaling part (1.25 -> 1.3) per direct request
 // What the Fish Scaling lab node drops the rate to — its own fixed value, per
 // direct request ("leaving the fish scaling upgrade scale amount unchanged")
 // when the base rate above was raised: it used to be derived as half the base
 // rate's scaling (1.25 -> 1.125) and would have drifted to 1.15.
-export const FISH_SCALING_COST_GROWTH_RATE = 1.125;
+export let FISH_SCALING_COST_GROWTH_RATE = 1.125;
 
 // Two Adult economy fish of the exact same species AND exact same star tier
 // can be combined (dragged onto each other) into one Adult fish of the next
@@ -3078,7 +3078,7 @@ export const FISH_SCALING_COST_GROWTH_RATE = 1.125;
 // the adult sprite per tier — per direct request every adult gets one orbiting
 // star at Tier 1, then one more per tier (so the count equals the tier).
 export const FISH_STAR_TIER_MAX = 4;
-export const FISH_STAR_TIER_VALUE_MULTIPLIER = 2; // was 1.8 (before that 1.5) — raised per direct request so a Tier 4 fish makes exactly double a Tier 3 fish of the same species (and each tier step doubles the previous, since this is a flat per-step multiplier — see Entities.js's Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, starTier - 1) usage)
+export let FISH_STAR_TIER_VALUE_MULTIPLIER = 2; // was 1.8 (before that 1.5) — raised per direct request so a Tier 4 fish makes exactly double a Tier 3 fish of the same species (and each tier step doubles the previous, since this is a flat per-step multiplier — see Entities.js's Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, starTier - 1) usage)
 // Each combine step also makes the resulting fish 10% less hungry than the
 // previous tier (compounding, same ^(starTier-1) pattern as the value
 // multiplier above) — see Entities.js's updateFish, applied to def.hungerRate
@@ -3305,14 +3305,14 @@ export const GUIDED_TUTORIAL_IDS = ['start', 'chest', 'alienintro', 'mergefish',
 // Systems.js's waveIntervalMsAt). No more per-wave randomness on top — the
 // two anchor points ARE the exact numbers requested, not a range to roll
 // within.
-export const ALIEN_WAVE_INTERVAL_EARLY_MS = 210000; // 3.5 minutes
-export const ALIEN_WAVE_INTERVAL_LATE_MS = 270000; // 4.5 minutes
+export let ALIEN_WAVE_INTERVAL_EARLY_MS = 210000; // 3.5 minutes
+export let ALIEN_WAVE_INTERVAL_LATE_MS = 270000; // 4.5 minutes
 // Per direct request (originally "1 minute earlier," then a further "30
 // seconds earlier" on top of that — 90000 total), subtracted only from the
 // very first wave's own initial countdown seed (Levels.js's loadLevel) —
 // every wave after the first still uses the plain ramped interval above,
 // unaffected.
-export const ALIEN_FIRST_WAVE_EARLY_MS = 90000;
+export let ALIEN_FIRST_WAVE_EARLY_MS = 90000;
 // The very first wave's one alien is deliberately biased away from the right
 // portion of the water column, per direct bug report — the HUD pill cluster
 // sits fixed top-right on screen the whole game, and a portal rolled anywhere
@@ -3333,11 +3333,11 @@ export const ALIEN_FIRST_WAVE_SAFE_X_FRACTION = 0.6;
 // t=0.75 point (Tier 5's first appearance) lands around wave 36, ~2.5 hours
 // into a level, and the ramp doesn't fully max out (heavy Tier 4/5) until
 // close to 4 hours.
-export const ALIEN_WAVE_DIFFICULTY_RAMP_WAVES = 48;
-export const ALIEN_WAVE_COUNT_EARLY_MIN = 2;
-export const ALIEN_WAVE_COUNT_EARLY_MAX = 3;
-export const ALIEN_WAVE_COUNT_LATE_MIN = 10;
-export const ALIEN_WAVE_COUNT_LATE_MAX = 15;
+export let ALIEN_WAVE_DIFFICULTY_RAMP_WAVES = 48;
+export let ALIEN_WAVE_COUNT_EARLY_MIN = 2;
+export let ALIEN_WAVE_COUNT_EARLY_MAX = 3;
+export let ALIEN_WAVE_COUNT_LATE_MIN = 10;
+export let ALIEN_WAVE_COUNT_LATE_MAX = 15;
 
 // ---- Dynamic Alien Archetypes (Architectural Update) ----
 // Replaces the old single generic alien (one HP range scaled by wave
@@ -3410,7 +3410,7 @@ export const ALIEN_TIER_MIX_KEYFRAMES = [
 // un-fought. See Systems.js's spawnAlienWave, which shrinks (or skips) a
 // wave's spawn count to whatever room is left under this cap rather than
 // always spawning its full rolled amount.
-export const ALIEN_MAX_ALIVE = 20;
+export let ALIEN_MAX_ALIVE = 20;
 
 // Warnings + the on-screen countdown — per direct request ("plenty of HUD
 // chat message warnings, and a countdown timer from 10 seconds that shows up
@@ -3508,9 +3508,9 @@ export const BOSS_WHITE_FADE_OUT_MS = 1000;
 // the existing Tier 5 archetype's own hpMin/hpMax range (150-220 -> 1500-2200),
 // not a bespoke stat block, so the boss automatically stays "10x a Tier 5"
 // even if that base archetype is ever rebalanced later.
-export const BOSS_HP_MULTIPLIER = 10;
+export let BOSS_HP_MULTIPLIER = 10;
 export const BOSS_RADIUS = 90;
-export const BOSS_SPEED = 28; // slow and lumbering, "big ole" per spec
+export let BOSS_SPEED = 28; // slow and lumbering, "big ole" per spec
 export const BOSS_COLOR = '#3a0d42';
 // "spawns extra aliens out of its mouth every couple seconds" — minions are
 // plain Tier 1/2 aliens (ALIEN_ARCHETYPES[0]/[1]), still counted against
@@ -3597,9 +3597,9 @@ export const ALIEN_HEALTH_BAR_HEIGHT = 4;
 // species' own stage count generically (stage 0 = baby, the LAST stage =
 // adult, anything in between = mid), so this works unchanged for a 3-stage
 // base feeder/utility fish or a hybrid with a different stage count alike.
-export const FISH_HEALTH_BABY = 75;
-export const FISH_HEALTH_MID = 100;
-export const FISH_HEALTH_ADULT = 125;
+export let FISH_HEALTH_BABY = 75;
+export let FISH_HEALTH_MID = 100;
+export let FISH_HEALTH_ADULT = 125;
 // Damage is applied once per second (not continuously scaled by dt) to every
 // fish a living, non-hatch-grace-period alien is currently touching — see
 // Entities.js's updateAlien. Each archetype's own rate lives on its
@@ -3609,7 +3609,7 @@ export const ALIEN_FISH_DAMAGE_INTERVAL_MS = 1000;
 // Per direct request — a hostile alien can eat at most one Food item per this
 // long (previously it could clear a pile one item per tick).
 export const ALIEN_FOOD_EAT_COOLDOWN_MS = 500;
-export const BOSS_FISH_DAMAGE_PER_SEC = 50; // above Tier 5's 35, matching the boss's "far deadlier than any wave alien" flavor without a full 10x multiply (its other stats — see BOSS_SPEED's own comment — are individually hand-tuned too, not a uniform scale-up)
+export let BOSS_FISH_DAMAGE_PER_SEC = 50; // above Tier 5's 35, matching the boss's "far deadlier than any wave alien" flavor without a full 10x multiply (its other stats — see BOSS_SPEED's own comment — are individually hand-tuned too, not a uniform scale-up)
 // Per direct request: fish don't regenerate AT ALL while any alien is alive
 // anywhere in the level, but once the last one dies, every damaged fish
 // heals back to full over this long — a flat rate (maxHp / this duration),
@@ -3813,3 +3813,91 @@ export const POWER_SHORTAGE_STALLED_THRESHOLD = 0.5;
 // "drop below 90%" arms it, "back up to 99%" completes it.
 export const ACHIEVEMENT_CLEANLINESS_ARM_THRESHOLD = 90;
 export const ACHIEVEMENT_CLEANLINESS_COMPLETE_THRESHOLD = 99;
+
+
+// ---- World Settings plumbing (see js/WorldSettings.js) ----
+// Per direct request, a run can start with custom "world settings" (Easy / Normal / Challenge presets and
+// individual sliders — the New Game dialog's World Settings button). The numbers a world setting can change
+// are either plain objects/arrays (patched in place by WorldSettings.js) or the scalars below, which are
+// declared with `export let` so this module can reassign them: every importing module sees the new value
+// through the ES live binding the next time it reads it. They must only ever be READ inside functions, never
+// copied into a module-level constant (an audit of every js file confirmed none are). To make another scalar
+// world-tunable: change its `export const` to `export let`, then add it to both lists below.
+// Money a new run starts with (Levels.js's loadLevel). Was Levels.js's startingMoney literal; lifted here so a
+// world setting can change it.
+export let STARTING_MONEY = 100;
+const WORLD_SCALAR_SETTERS = {
+  STARTING_MONEY: (v) => { STARTING_MONEY = v; },
+  FOOD_COST: (v) => { FOOD_COST = v; },
+  ECONOMY_FISH_COST_GROWTH_RATE: (v) => { ECONOMY_FISH_COST_GROWTH_RATE = v; },
+  FISH_SCALING_COST_GROWTH_RATE: (v) => { FISH_SCALING_COST_GROWTH_RATE = v; },
+  BUILDING_COST_GROWTH_RATE_TIER1: (v) => { BUILDING_COST_GROWTH_RATE_TIER1 = v; },
+  BUILDING_COST_GROWTH_RATE_TIER2: (v) => { BUILDING_COST_GROWTH_RATE_TIER2 = v; },
+  BUILDING_COST_GROWTH_RATE_TIER3: (v) => { BUILDING_COST_GROWTH_RATE_TIER3 = v; },
+  TILE_REFUND_FRACTION: (v) => { TILE_REFUND_FRACTION = v; },
+  FISH_STAR_TIER_VALUE_MULTIPLIER: (v) => { FISH_STAR_TIER_VALUE_MULTIPLIER = v; },
+  CLEANLINESS_MIN_MONEY_FRACTION: (v) => { CLEANLINESS_MIN_MONEY_FRACTION = v; },
+  WASTE_HUNGER_RELIEF: (v) => { WASTE_HUNGER_RELIEF = v; },
+  MUTAGEN_PASTE_HUNGER_RELIEF: (v) => { MUTAGEN_PASTE_HUNGER_RELIEF = v; },
+  FISH_HEALTH_BABY: (v) => { FISH_HEALTH_BABY = v; },
+  FISH_HEALTH_MID: (v) => { FISH_HEALTH_MID = v; },
+  FISH_HEALTH_ADULT: (v) => { FISH_HEALTH_ADULT = v; },
+  WASTE_POOP_INTERVAL_MS: (v) => { WASTE_POOP_INTERVAL_MS = v; },
+  TANK_POINT_PER_ADULT_FISH: (v) => { TANK_POINT_PER_ADULT_FISH = v; },
+  ALIEN_WAVE_COUNT_EARLY_MIN: (v) => { ALIEN_WAVE_COUNT_EARLY_MIN = v; },
+  ALIEN_WAVE_COUNT_EARLY_MAX: (v) => { ALIEN_WAVE_COUNT_EARLY_MAX = v; },
+  ALIEN_WAVE_COUNT_LATE_MIN: (v) => { ALIEN_WAVE_COUNT_LATE_MIN = v; },
+  ALIEN_WAVE_COUNT_LATE_MAX: (v) => { ALIEN_WAVE_COUNT_LATE_MAX = v; },
+  ALIEN_WAVE_INTERVAL_EARLY_MS: (v) => { ALIEN_WAVE_INTERVAL_EARLY_MS = v; },
+  ALIEN_WAVE_INTERVAL_LATE_MS: (v) => { ALIEN_WAVE_INTERVAL_LATE_MS = v; },
+  ALIEN_FIRST_WAVE_EARLY_MS: (v) => { ALIEN_FIRST_WAVE_EARLY_MS = v; },
+  ALIEN_WAVE_DIFFICULTY_RAMP_WAVES: (v) => { ALIEN_WAVE_DIFFICULTY_RAMP_WAVES = v; },
+  ALIEN_MAX_ALIVE: (v) => { ALIEN_MAX_ALIVE = v; },
+  BOSS_HP_MULTIPLIER: (v) => { BOSS_HP_MULTIPLIER = v; },
+  BOSS_FISH_DAMAGE_PER_SEC: (v) => { BOSS_FISH_DAMAGE_PER_SEC = v; },
+  BOSS_SPEED: (v) => { BOSS_SPEED = v; },
+  MOUND_TEASE_COST: (v) => { MOUND_TEASE_COST = v; },
+};
+const WORLD_SCALAR_DEFAULTS = {
+  STARTING_MONEY,
+  FOOD_COST,
+  ECONOMY_FISH_COST_GROWTH_RATE,
+  FISH_SCALING_COST_GROWTH_RATE,
+  BUILDING_COST_GROWTH_RATE_TIER1,
+  BUILDING_COST_GROWTH_RATE_TIER2,
+  BUILDING_COST_GROWTH_RATE_TIER3,
+  TILE_REFUND_FRACTION,
+  FISH_STAR_TIER_VALUE_MULTIPLIER,
+  CLEANLINESS_MIN_MONEY_FRACTION,
+  WASTE_HUNGER_RELIEF,
+  MUTAGEN_PASTE_HUNGER_RELIEF,
+  FISH_HEALTH_BABY,
+  FISH_HEALTH_MID,
+  FISH_HEALTH_ADULT,
+  WASTE_POOP_INTERVAL_MS,
+  TANK_POINT_PER_ADULT_FISH,
+  ALIEN_WAVE_COUNT_EARLY_MIN,
+  ALIEN_WAVE_COUNT_EARLY_MAX,
+  ALIEN_WAVE_COUNT_LATE_MIN,
+  ALIEN_WAVE_COUNT_LATE_MAX,
+  ALIEN_WAVE_INTERVAL_EARLY_MS,
+  ALIEN_WAVE_INTERVAL_LATE_MS,
+  ALIEN_FIRST_WAVE_EARLY_MS,
+  ALIEN_WAVE_DIFFICULTY_RAMP_WAVES,
+  ALIEN_MAX_ALIVE,
+  BOSS_HP_MULTIPLIER,
+  BOSS_FISH_DAMAGE_PER_SEC,
+  BOSS_SPEED,
+  MOUND_TEASE_COST,
+}; // captured at load, before any world setting has been applied
+export function worldScalarDefault(name) { return WORLD_SCALAR_DEFAULTS[name]; }
+export function setWorldScalar(name, value) {
+  const setter = WORLD_SCALAR_SETTERS[name];
+  if (!setter) throw new Error('not a world-tunable scalar: ' + name);
+  setter(value);
+}
+// Anything computed from the numbers above or from the tables WorldSettings.js patches — called once at load
+// (below) and again after every world-settings change.
+export function recomputeWorldDerived() {
+  for (const stats of Object.values(TURRET_STATS)) stats.powerCostPerSec = stats.shotsPerSec * stats.powerCostPerShot;
+}

@@ -99,3 +99,10 @@ A green **Commit to GitHub** button sits in the header on every tab, with a badg
 Note it offers *every* changed file in the repo, not only ones edited through the tool; review the list before confirming. The Variables tab's "default" values move to the new commit afterwards.
 
 Every sound in `Sound.js` now has an Audio-tab card; the synthesized ones play their original sound until you pick a recording (each `playXxx()` tries `playSample('<slotId>')` first).
+
+## Desktop shortcut
+
+`tools/sfx/open-dev-tool.bat` starts this tool's server (port 8081) and the game's (8080) when they are not already running and opens http://localhost:8081. `powershell -File tools/sfx/make-desktop-shortcut.ps1` puts a "Finsanity Dev Tool" shortcut on the desktop that runs it.
+
+## Note: world-tunable scalars
+Some Config.js numbers are `export let` (not `const`) because the in-game World Settings window changes them per run (see CLAUDE.md "World Settings"). They are still plain numeric literals, so the Variables tab edits them exactly as before. When adding a new one to the World Settings list, register it in `WORLD_SCALAR_SETTERS`/`WORLD_SCALAR_DEFAULTS` at the bottom of Config.js.

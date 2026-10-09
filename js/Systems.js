@@ -59,6 +59,7 @@ import {
   SPECIES,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings } from './Levels.js';
+import { isWorldModified } from './WorldSettings.js';
 import { getFishPurchaseCost, findCombinablePair, spawnTurretTutorialWaste, spawnChestTutorialWaste } from './Entities.js';
 import { hasWasteTurretPlaced, countPlacedOfType, findPlacedChestKey } from './Grid.js';
 import { saveGame } from './Save.js';
@@ -592,6 +593,9 @@ function updateAchievements(state) {
     if (item.type === 'science' || item.type === 'science_green') scienceCount += 1;
   }
   if (scienceCount > state.meta.stats.sciencePeakOnScreen) state.meta.stats.sciencePeakOnScreen = scienceCount;
+
+  // Per direct request, a run with modified World Settings can't earn achievements (stats above still tick, nothing unlocks).
+  if (isWorldModified(state.meta.worldSettings)) return;
 
   // The generic evaluator — every achievement not already unlocked gets a
   // fresh check against its own stat field every tick; the moment one

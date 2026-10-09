@@ -3,7 +3,7 @@
 // which species/buildings are available, win conditions, alien waves, and
 // meta rewards granted on completion.
 
-import { SPECIES_LIST, BUILDING_LIST, TAB_REMINDER_NEVER_OPENED_MS, ALIEN_WAVE_INTERVAL_EARLY_MS, ALIEN_FIRST_WAVE_EARLY_MS, AUTOSAVE_INTERVAL_MS, POWER_WARNING_CHECK_INTERVAL_MS, SEA_TURTLE_SPAWN_MIN_MS, SEA_TURTLE_SPAWN_MAX_MS } from './Config.js';
+import { STARTING_MONEY, SPECIES_LIST, BUILDING_LIST, TAB_REMINDER_NEVER_OPENED_MS, ALIEN_WAVE_INTERVAL_EARLY_MS, ALIEN_FIRST_WAVE_EARLY_MS, AUTOSAVE_INTERVAL_MS, POWER_WARNING_CHECK_INTERVAL_MS, SEA_TURTLE_SPAWN_MIN_MS, SEA_TURTLE_SPAWN_MAX_MS } from './Config.js';
 import { createGrid } from './Grid.js';
 
 // The very first entry in state.level.notifications, pushed at level load
@@ -50,7 +50,7 @@ export function loadLevel(state, levelId) {
   state.level = {
     levelId: def.id,
     levelName: def.name,
-    money: def.startingMoney,
+    money: STARTING_MONEY, // Config.js; a world setting can change it (def.startingMoney is kept only as the level's documented default)
     science: 0, // Science Flasks (blue) banked so far — level-scoped like money now that Science is a real collected resource (see Entities.js's createScience/bankScience), not a permanent meta counter
     scienceGreen: 0, // Green Science's own separate reserve — the Bio-Combuster's upgraded output, banked via Entities.js's bankScienceGreen (click or Collector-routed, same as blue Science). Never mixed with `science` above — the Bio-Reactor's scienceGreenCost purchases and the Bio-Combuster's upgraded recipe both read/spend this one specifically.
 

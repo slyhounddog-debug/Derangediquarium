@@ -97,6 +97,8 @@ import {
   MAGNET_FISH_FILTER_ITEM_TYPES,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings, loadLevel } from './Levels.js';
+import { makeWorldSettings, applyWorldSettings, isWorldModified } from './WorldSettings.js';
+import { initWorldSettingsUI, worldDraftValues } from './WorldSettingsUI.js';
 import {
   getFishPurchaseCost, effectiveScienceCapacity, countTankItemsByType, resolveMergeTutorialPair,
   computeTheoreticalGoldPerMinute, computeTheoreticalCoinCountPerMinute, computeTheoreticalSciencePerMinute, computeTheoreticalFoodNeededPerMinute,
@@ -616,6 +618,7 @@ export function initUI(state) {
     tankViewCustomization: document.getElementById('tank-view-customization'),
     achievementList: document.getElementById('achievement-list'),
     achievementGemsDisplay: document.getElementById('achievement-gems-display'),
+    achievementsModifiedNote: document.getElementById('achievements-modified-note'),
     hatGrid: document.getElementById('hat-grid'),
     customizationGemsDisplay: document.getElementById('customization-gems-display'),
     customizationPreviewCanvas: document.getElementById('customization-preview-canvas'),
@@ -2929,6 +2932,7 @@ export function initStartScreen(state, onStart) {
     setTitlePaused(true);
     playPanelOpen();
   });
+  initWorldSettingsUI(state);
   els.startWarnContinueBtn.addEventListener('click', () => { showStartModeStep(false); playPanelOpen(); });
   els.startWarnCancelBtn.addEventListener('click', () => { closeStartModeOverlay(); playPanelClose(); });
   const closeStartModeOverlay = () => {
@@ -2940,6 +2944,15 @@ export function initStartScreen(state, onStart) {
     clearSaveGame(); // the warning above already told them; nothing from the old save may survive into the new game
     els.startContinueBtn.disabled = true;
     setGuidedTutorialsEnabled(guided);
+    // Per direct request, this run's World Settings (undefined = Normal) live in state.meta so they save/load with the run.
+    state.meta.worldSettings = makeWorldSettings(worldDraftValues());
+    applyWorldSettings(state.meta.worldSettings);
+    if (isWorldModified(state.meta.worldSettings)) {
+      // The level was built at boot with Normal rules (starting money etc.) — rebuild it the way restartLevel does.
+      loadLevel(state, state.level.levelId);
+      centerCameraOnMound(state.camera);
+      refreshShopPanel(state);
+    }
     closeStartModeOverlay();
     playPanelClose();
     onStart();
@@ -2963,6 +2976,7 @@ export function initStartScreen(state, onStart) {
       // campaign progress.
       state.meta = saved.meta;
       state.level = saved.level;
+      applyWorldSettings(state.meta.worldSettings); // the save's own World Settings (none = Normal)
       reconcileIdsAfterLoad(state.level); // new items/fish must not reuse ids the saved level already holds — see Entities.js
       centerCameraOnMound(state.camera); // same one-time re-center loadLevel's own callers already do, since a saved level has no camera position of its own
     }
@@ -3060,6 +3074,7 @@ function loadLastSaveFromPause(state) {
   }
   state.meta = saved.meta;
   state.level = saved.level;
+  applyWorldSettings(state.meta.worldSettings); // the loaded save's own World Settings (none = Normal)
   reconcileIdsAfterLoad(state.level); // new items/fish must not reuse ids the saved level already holds — see Entities.js
   centerCameraOnMound(state.camera); // same one-time re-center every other load-a-saved-level path already does
   pushUiNotification(state, 'Loaded your last save.');
@@ -4614,6 +4629,8 @@ function refreshAchievementPanel(state) {
     }
   }
   setText(els.achievementGemsDisplay, `💎 ${state.meta.fishyGems}`);
+  // Per direct request, modified World Settings runs can't earn achievements — say so right here too.
+  els.achievementsModifiedNote.classList.toggle('hidden', !isWorldModified(state.meta.worldSettings));
 }
 
 // ---- Customization (hats) ----

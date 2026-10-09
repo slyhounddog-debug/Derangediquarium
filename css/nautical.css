@@ -217,7 +217,7 @@
 /* ---------- 4. big windows ---------- */
 /* One heavy, dark-bound wooden frame with iron corner brackets (the 9-slice
    css/nautical/frame-wood.svg), around an aged deep-ocean chart. */
-#shop-panel, #tank-panel, #lab-modal, #lab-purchase-modal, #start-help-modal, #start-mode-modal, #pause-menu {
+#shop-panel, #tank-panel, #lab-modal, #lab-purchase-modal, #start-help-modal, #start-mode-modal, #world-settings-modal, #pause-menu {
   color: var(--cream);
   background: var(--map);
   background-clip: padding-box;
@@ -250,7 +250,7 @@
      wrapping around the wood: starfish in different poses, shells, a small
      anchor, and seaweed draped over / climbing around the edges. Every
      drawing is a different asset, and each carries a soft contact shadow. */
-#shop-panel::before, #tank-panel::before, #lab-modal::before, #start-mode-modal::before, #start-help-modal::before, #pause-menu::before {
+#shop-panel::before, #tank-panel::before, #lab-modal::before, #start-mode-modal::before, #world-settings-modal::before, #start-help-modal::before, #pause-menu::before {
   content: '';
   position: absolute; inset: -56px;
   pointer-events: none;
@@ -276,7 +276,7 @@
     url(nautical/weed-hang.svg) no-repeat left 41% top 23px / 46px 70px,
     url(nautical/weed-r1.svg) no-repeat right 55% top 12px / 46px 53px;
 }
-#start-mode-modal::before, #start-help-modal::before, #pause-menu::before {
+#start-mode-modal::before, #world-settings-modal::before, #start-help-modal::before, #pause-menu::before {
   background:
     url(nautical/starfish-1.svg) no-repeat right 14px bottom 62px / 40px,
     url(nautical/starfish-3.svg) no-repeat left 24% bottom 25px / 22px,
@@ -315,7 +315,7 @@
     var(--map);
   background-clip: padding-box;
 }
-#start-mode-modal, #start-help-modal, #pause-menu {
+#start-mode-modal, #world-settings-modal, #start-help-modal, #pause-menu {
   background:
     url(nautical/weed-in-d.svg) no-repeat right 12% bottom -6px / 52px 56px,
     var(--map);
@@ -323,11 +323,11 @@
 }
 /* #shop-panel/#tank-panel are position:fixed / flex children already; the
    decoration needs them positioned (the others are positioned by style.css). */
-#tank-panel, #lab-modal, #start-mode-modal, #start-help-modal, #pause-menu { position: relative; }
+#tank-panel, #lab-modal, #start-mode-modal, #world-settings-modal, #start-help-modal, #pause-menu { position: relative; }
 #shop-panel { position: fixed; }
 
 /* Bubbly, hand-lettered 3D titles with a thick navy outline. */
-#shop-header, #tank-title, #lab-title, #start-mode-title, #start-help-title, #pause-title {
+#shop-header, #tank-title, #lab-title, #start-mode-title, #world-settings-title, #start-help-title, #pause-title {
   font-family: var(--font-display);
   font-weight: 700;
   color: var(--orange);
@@ -337,6 +337,7 @@
   text-shadow: 0 4px 0 #0b2347, 0 7px 7px rgba(0, 0, 0, 0.35);
 }
 #start-mode-title, #start-help-title { font-size: 30px; }
+#world-settings-title { font-size: 32px; }
 #pause-title { font-size: 34px; }
 /* The Shop's big title sits up over the frame, each letter its own color. */
 #shop-header, #tank-title, #lab-title { font-size: 58px; line-height: 1; position: relative; z-index: 6; margin: -62px 0 -6px -16px; white-space: pre; }
@@ -346,7 +347,7 @@
 #shop-header > span:nth-child(4n), #tank-title > span:nth-child(4n), #lab-title > span:nth-child(4n) { color: #ff9b2e; }
 #shop-header-row, #tank-header-row, #lab-header-row { margin-bottom: 4px; align-items: flex-end; }
 /* Centered on the frame's top-right iron corner bracket (30px border, so its middle is 15px in from the window's outer edges; offsets are from the padding box, minus half the 52px button). */
-#shop-header-row .lab-close-x-btn, #tank-header-row .lab-close-x-btn, #lab-header-row .lab-close-x-btn { position: absolute; top: -41px; right: -41px; margin: 0; z-index: 6; }
+#shop-header-row .lab-close-x-btn, #tank-header-row .lab-close-x-btn, #lab-header-row .lab-close-x-btn, #world-settings-header-row .lab-close-x-btn { position: absolute; top: -41px; right: -41px; margin: 0; z-index: 6; }
 
 /* Close button: a red-and-white life preserver on a rusty iron backing. */
 .lab-close-x-btn {
@@ -597,6 +598,23 @@
 .start-mode-card-desc, .help-text { font-family: var(--font-display); font-weight: 600; color: var(--ink); }
 .start-mode-card-desc b, .help-text b { color: #b4510c; }
 #start-mode-note { color: var(--cream); font: 600 14px var(--font-display); text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5); opacity: 0.95; }
+/* World Settings window: parchment rows on the chart, a banner that is loud when the world is modified. */
+#world-settings-modal { width: 740px; padding-bottom: 14px; }
+#world-settings-banner { border: 2px solid #1d0f06; font-family: var(--font-display); font-weight: 600; box-shadow: inset 0 3px 6px rgba(0, 0, 0, 0.35); }
+#world-settings-banner b { font-weight: 700; }
+#world-settings-banner.normal { background: #2f6b3d; color: #e9ffe9; }
+#world-settings-banner.modified { background: #e8a317; color: #3a2010; border-color: #6b3a0a; box-shadow: inset 0 3px 6px rgba(255, 255, 255, 0.35), 0 0 14px rgba(255, 190, 40, 0.6); }
+#world-settings-presets .ws-preset.selected { background: radial-gradient(circle at 34% 28%, #ffe29a 0, #f0b94d 50%, #c88a2d 100%); color: #4a2610; text-shadow: none; }
+#world-settings-custom-chip { background: #e8a317; color: #3a2010; border: 2px solid #6b3a0a; }
+#world-settings-preset-desc { color: var(--cream); font-family: var(--font-display); font-weight: 600; text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5); }
+#world-settings-body { scrollbar-color: #b88048 rgba(0, 0, 0, 0.25); }
+.ws-group h3 { font-family: var(--font-display); color: var(--orange); text-shadow: 0 2px 0 #0b2347, 0 0 6px rgba(0, 0, 0, 0.4); letter-spacing: 0.03em; }
+.ws-row { background: var(--noise), var(--paper); color: var(--ink); border: 2px solid #9a6b3a; box-shadow: 0 3px 0 #5b3a1b, inset 0 0 12px rgba(120, 80, 30, 0.22); font-family: var(--font-display); }
+.ws-row.changed { border-color: #e8a317; box-shadow: 0 3px 0 #5b3a1b, 0 0 10px rgba(240, 185, 77, 0.65), inset 0 0 12px rgba(120, 80, 30, 0.22); }
+.ws-value { color: #b4510c; }
+.ws-desc { font-weight: 600; }
+.ws-reset { background: var(--plank); color: var(--cream); border: 2px solid #3a2010; }
+#achievements-modified-note { font-family: var(--font-display); }
 #start-help-list { scrollbar-color: #b88048 rgba(0, 0, 0, 0.25); }
 /* Pause menu > Controls: key chips and descriptions on parchment strips. */
 #pause-controls-list { scrollbar-color: #b88048 rgba(0, 0, 0, 0.25); }
