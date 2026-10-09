@@ -98,7 +98,7 @@
   },
   "chatMessage": {
     "file": "chatMessage.wav",
-    "gain": 1.25,
+    "gain": 2,
     "source": "583554__thehorriblejoke__notification-sound trim (2).wav"
   }
 }

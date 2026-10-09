@@ -1451,7 +1451,7 @@ export const SPECIES = {
     unlockedByDefault: true,
   },
   dartfin: {
-    id: 'dartfin', name: 'Dartfin', tier: 1, cost: 8, // cut from 10 per direct request
+    id: 'dartfin', name: 'Dartfin', tier: 1, cost: 9, // cut from 10 per direct request
     description: 'Cheaper and faster. Frequent low-value coins reward density.',
     behavior: ['FEEDER'], dropType: 'coin',
     swimSpeed: 65, // -5, see FISH_MOVEMENT_UPGRADE_SPEED_BONUS
@@ -1748,6 +1748,14 @@ export const PLATFORM_FLAT_COST = 3;
 export const BUILDING_COST_GROWTH_RATE_TIER1 = 1.03; // base cost <= $100
 export const BUILDING_COST_GROWTH_RATE_TIER2 = 1.06; // base cost $101-200
 export const BUILDING_COST_GROWTH_RATE_TIER3 = 1.09; // base cost > $200
+// The two base-cost cut-offs between those 3 tiers (a building's base cost above the first uses TIER2's
+// rate, above the second TIER3's) — Grid.js's buildingCostGrowthRate. Lifted out of a hardcoded 100/200 so
+// the tuning tool (tools/sfx) can adjust them.
+export const BUILDING_COST_TIER2_MIN_BASE = 100;
+export const BUILDING_COST_TIER3_MIN_BASE = 200;
+// How hard a power shortfall is punished: efficiency% = 100 - (shortfall% x this), floored at 0 — Grid.js's
+// computePowerEfficiency. At 2, a 50% shortfall already means 0% efficiency. (Was a hardcoded 2.)
+export const POWER_DEFICIT_PENALTY_MULTIPLIER = 2;
 // Per direct request, usage hints ("Click to filter...", "Press R...") are shown
 // as their own lines in the stats box instead of inside the description.
 const PLATFORM_STAT_NOTES = ['Click to filter items.', 'Press R to cycle platforms.'];
@@ -2020,10 +2028,13 @@ export const PROCESSOR_STATS = {
 // Damage retuned per direct request: Electric Waste Turret 4 on Waste / 6 on Biomass (4 x BIOMASS_TURRET_DAMAGE_MULTIPLIER),
 // Advanced Turret 7 on its free base shot / 10 on Biomass (ADVANCED_TURRET_BIOMASS_DAMAGE).
 export const TURRET_STATS = {
-  [TILE_TURRET_WASTE]: { shotsPerSec: 1.5, damage: 2, powerCostPerShot: 0, powerCostPerSec: 0 },
-  [TILE_TURRET_ELECTRIC]: { shotsPerSec: 1.75, damage: 4, powerCostPerShot: 10, powerCostPerSec: 17.5 },
-  [TILE_TURRET_ADVANCED]: { shotsPerSec: 2.5, damage: 7, powerCostPerShot: 40, powerCostPerSec: 100 },
+  [TILE_TURRET_WASTE]: { shotsPerSec: 1.5, damage: 2, powerCostPerShot: 0 },
+  [TILE_TURRET_ELECTRIC]: { shotsPerSec: 1.75, damage: 4, powerCostPerShot: 10 },
+  [TILE_TURRET_ADVANCED]: { shotsPerSec: 2.5, damage: 7, powerCostPerShot: 40 },
 };
+// powerCostPerSec is always shots/sec x power per shot, so it is derived here instead of being a second literal
+// that would have to be kept in sync by hand (the tuning tool in tools/sfx edits shotsPerSec/powerCostPerShot).
+for (const stats of Object.values(TURRET_STATS)) stats.powerCostPerSec = stats.shotsPerSec * stats.powerCostPerShot;
 // Which turret tiers consume Waste (or Biomass) as ammo (gating whether they
 // can fire at all, alongside the fire-rate cooldown) — per direct request,
 // the Electric tier ("Electric Waste Turret") now needs BOTH Waste ammo AND

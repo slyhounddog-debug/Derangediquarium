@@ -101,6 +101,9 @@ import {
   BUILDING_COST_GROWTH_RATE_TIER1,
   BUILDING_COST_GROWTH_RATE_TIER2,
   BUILDING_COST_GROWTH_RATE_TIER3,
+  BUILDING_COST_TIER2_MIN_BASE,
+  BUILDING_COST_TIER3_MIN_BASE,
+  POWER_DEFICIT_PENALTY_MULTIPLIER,
   CLEANLINESS_MAX,
   CLEANLINESS_PER_WASTE_EVENT,
   CAMERA_BOTTOM_BUFFER_PX,
@@ -821,8 +824,8 @@ export function findNearestWasteTurretAndWaste(state) {
 // own BASE cost — see Config.js's comment above BUILDING_COST_GROWTH_RATE_TIER1
 // for the exact thresholds/rationale.
 function buildingCostGrowthRate(baseCost) {
-  if (baseCost > 200) return BUILDING_COST_GROWTH_RATE_TIER3;
-  if (baseCost > 100) return BUILDING_COST_GROWTH_RATE_TIER2;
+  if (baseCost > BUILDING_COST_TIER3_MIN_BASE) return BUILDING_COST_GROWTH_RATE_TIER3;
+  if (baseCost > BUILDING_COST_TIER2_MIN_BASE) return BUILDING_COST_GROWTH_RATE_TIER2;
   return BUILDING_COST_GROWTH_RATE_TIER1;
 }
 
@@ -3422,7 +3425,7 @@ export function computePowerEfficiency(supplyMw, demandMw) {
   if (demandMw <= 0) return 1;
   const ratio = Math.min(1, supplyMw / demandMw);
   const deficitPercent = 100 - ratio * 100;
-  const efficiencyPercent = Math.max(0, Math.min(100, 100 - deficitPercent * 2));
+  const efficiencyPercent = Math.max(0, Math.min(100, 100 - deficitPercent * POWER_DEFICIT_PENALTY_MULTIPLIER));
   return efficiencyPercent / 100;
 }
 

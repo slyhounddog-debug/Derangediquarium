@@ -225,6 +225,175 @@
     ]
   },
   {
+    "id": "playEat",
+    "label": "Fish eats",
+    "synth": true,
+    "want": "A very soft eating tick",
+    "plays": "Whenever a fish eats Food or Waste. Extremely frequent, so keep it tiny, quiet and short.",
+    "search": [
+      "tiny bubble pop",
+      "soft nibble",
+      "small water tick",
+      "gentle chomp"
+    ]
+  },
+  {
+    "id": "playHunger",
+    "label": "Fish gets very hungry",
+    "synth": true,
+    "want": "A gentle, non-alarming murmur",
+    "plays": "When a fish reaches its second hunger stage (the \"!!\" icon). It repeats 4 times as hunger worsens; the game makes each repeat 15% louder than the last.",
+    "search": [
+      "soft low hum",
+      "gentle groan",
+      "bubbly murmur",
+      "low soft bloop"
+    ]
+  },
+  {
+    "id": "playFishDeath",
+    "label": "Fish starves",
+    "synth": true,
+    "want": "A soft, sad sound",
+    "plays": "When a fish dies of hunger.",
+    "search": [
+      "sad descending",
+      "soft fail",
+      "deflate",
+      "gentle sad bloop"
+    ]
+  },
+  {
+    "id": "playFishKilledByAlien",
+    "label": "Fish killed by an alien",
+    "synth": true,
+    "want": "A sudden, harsher sound than starving",
+    "plays": "When an alien finishes off a fish.",
+    "search": [
+      "small chomp",
+      "wet snap",
+      "sudden gulp",
+      "creature bite soft"
+    ]
+  },
+  {
+    "id": "playBuildPlace",
+    "label": "Place a building",
+    "synth": true,
+    "want": "A positive, soft placing sound",
+    "plays": "When a building is placed or replaced (the drop-in thud plays separately when it lands).",
+    "search": [
+      "soft place",
+      "gentle thunk",
+      "wood tap",
+      "confirm soft click"
+    ]
+  },
+  {
+    "id": "playInsufficientFunds",
+    "label": "Cannot afford it",
+    "synth": true,
+    "want": "A clear but gentle \"denied\" sound",
+    "plays": "When you try to buy something (Food, a fish, a building) without enough money.",
+    "search": [
+      "soft denied",
+      "gentle error",
+      "low bloop no",
+      "muted buzz"
+    ]
+  },
+  {
+    "id": "playProductionBlocked",
+    "label": "Production blocked (cap full)",
+    "synth": true,
+    "want": "A dull \"nope\" sound",
+    "plays": "When a fish finishes a Science brew but the Science cap is already full.",
+    "search": [
+      "dull thud",
+      "soft fizzle",
+      "deflating pop",
+      "muted nope"
+    ]
+  },
+  {
+    "id": "playTankPoint",
+    "label": "Tank Point earned",
+    "synth": true,
+    "want": "A small sparkle",
+    "plays": "When a fish reaches adulthood and awards a Tank Point (plays together with the Grow to adult chime).",
+    "search": [
+      "small sparkle",
+      "tiny chime",
+      "soft twinkle",
+      "gentle star"
+    ]
+  },
+  {
+    "id": "playGrowToMid",
+    "label": "Fish grows to mid-size",
+    "synth": true,
+    "want": "A small two-note chime",
+    "plays": "When a fish grows from baby to mid-size.",
+    "search": [
+      "small chime",
+      "soft grow",
+      "gentle level up",
+      "tiny rising bloop"
+    ]
+  },
+  {
+    "id": "playGrowToAdult",
+    "label": "Fish grows to adult",
+    "synth": true,
+    "want": "A more magical chime than the mid-size one",
+    "plays": "When a fish reaches full adult size (also on every merge or splice result).",
+    "search": [
+      "magical chime",
+      "soft level up",
+      "sparkle rise",
+      "gentle fanfare"
+    ]
+  },
+  {
+    "id": "playPanelOpen",
+    "label": "Open a window / panel",
+    "synth": true,
+    "want": "A soft rising blip",
+    "plays": "Opening any window or popup (Shop, Tank Upgrades, Science Lab, pause menu, recipe/filter/chest/info popups, the Mound).",
+    "search": [
+      "soft open",
+      "gentle whoosh up",
+      "bubble rise",
+      "ui open soft"
+    ]
+  },
+  {
+    "id": "playPanelClose",
+    "label": "Close a window / panel",
+    "synth": true,
+    "want": "The falling counterpart to opening",
+    "plays": "Closing any window or popup.",
+    "search": [
+      "soft close",
+      "gentle whoosh down",
+      "bubble fall",
+      "ui close soft"
+    ]
+  },
+  {
+    "id": "playIntake",
+    "label": "Building takes in an item",
+    "synth": true,
+    "want": "A soft rising whoosh",
+    "plays": "When a Collector, Refinery, Manufacturer, Power Plant, Turret or Storage Chest pulls an item in. Fires often in a busy base, so keep it quiet and short.",
+    "search": [
+      "soft suck in",
+      "gentle whoosh",
+      "small swallow",
+      "bubble slurp"
+    ]
+  },
+  {
     "id": "finSanity",
     "label": "Fin Sanity intro sting",
     "synth": false,

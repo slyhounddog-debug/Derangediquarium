@@ -1,7 +1,10 @@
-# SFX audition tool
+# Dev tools (sound effects + game tuning)
 
-A small local web tool for finding, trimming and levelling the game's recorded sound effects.
-It is a dev tool only; the game never loads it.
+A small local web tool with three tabs. It is a dev tool only; the game never loads it.
+
+- **Audio** — find, trim and level the game's recorded sound effects (below).
+- **Variables** — the numbers worth tuning (prices, hunger, species stats, building speeds and power, aliens and waves, Science Lab costs, audio levels, ...), each with a slider and a number box.
+- **Formulas** — how the game calculates things (fish/building prices, merged-fish value, feeder economy, hunger timeline, cleanliness, power efficiency, alien waves, turret damage vs waves, fish health vs aliens, fan lift, building throughput, progression totals, gem economy). Each card has the values it depends on (same sliders) and live tables of what the formula produces.
 
 ```
 npm run sfx          # or: node tools/sfx/server.mjs
@@ -13,6 +16,8 @@ and so it can be restarted without touching the game. **Restart it after editing
 `server.mjs`** (they are read once at startup); `index.html` is served fresh on every reload.
 
 ## Using it
+
+Needs `npm install` once (the Variables tab uses `acorn`, a dev dependency, to read the game's source).
 
 One card per sound (the list lives in `slots.json`). On a card you can:
 
@@ -64,3 +69,33 @@ hand; the tool's *Use this* writes a single `file` per slot, so using it on `uiH
 3. Call it where the event happens (see the wiring list in `CLAUDE.md`, "Recorded Sound Effects & the SFX
    Audition Tool"). Test in a browser by hooking `AudioContext.prototype.createBufferSource` and checking which
    buffers play.
+
+## Variables and Formulas tabs
+
+These edit the game's own source: each variable is a plain numeric literal in `js/Config.js` (or `js/Sound.js`
+for the audio levels). Moving a slider / typing a number replaces just that number in the file (comments and
+formatting are untouched) and **you reload the game tab to see it**. "Default" is the value in the last git commit
+(`git show HEAD:...`), so **Reset** always has somewhere to go back to; `git diff` shows everything you changed.
+The game's text descriptions sometimes quote numbers literally and will not update by themselves.
+
+| File | What |
+|---|---|
+| `tools/sfx/tuning.json` | Which numbers are listed, in which group. A string = one constant in Config.js; `{name, file, label, min, max, step}` = one with overrides; `{deep: NAME, fields: [...], label, step, firstIndex}` = every numeric literal inside that table/array (optionally only the named properties). |
+| `tools/sfx/tuning.mjs` | The engine: parses the source with acorn, finds each literal's exact range, lists values/defaults/slider ranges, sets and resets values. Only plain numeric literals are editable; anything computed from other constants is skipped (and reported in the "Skipped" note). |
+| `tools/sfx/tuning.js` | The two tabs' UI, and the formula definitions (`FORMULAS`) with their live-table code. |
+
+Restart the tool server after editing `tuning.json`, `tuning.mjs` or `server.mjs`; `tuning.js` and `index.html` load fresh on reload.
+
+### Adding a variable
+Add its name (or a `deep` entry) to a group in `tuning.json` and restart the tool. It must be a plain number in the source. If a value is derived from other numbers in code (like turret power per second, now computed in Config.js from shots/sec x power per shot) make the *inputs* the literals instead.
+
+### Adding a formula
+Add an object to `FORMULAS` in `tuning.js`: `id`, `title`, `formula` (text), `note`, `params` (variable ids to show sliders for; ids are `NAME` for a constant or `NAME.path.segments`, e.g. `SPECIES.guppy.cost`), optional `inputs` (extra number/select controls that are not game values), and `render(inputs)` returning an HTML string (use the `tbl()` helper and `V(id)` to read current slider values). Keep the math identical to the game code it mirrors, and say in `note` what is ignored.
+
+## Commit to GitHub button
+
+A green **Commit to GitHub** button sits in the header on every tab, with a badge showing how many files have changed since the last commit (it refreshes every few seconds and after each slider/sound edit). Pressing it opens a review dialog: a summary line and details written from what changed (slider edits as "old → new" grouped by Variables group, sound picks/gain changes from `audio/sfx/manifest.json`, and any other changed files), a file list with everything ticked, and **Commit & push**. Nothing is committed until that button is pressed; unticked files are left out. It commits to the current branch and pushes to `origin`. If the push fails (offline, rejected) the commit is kept locally and pressing the button again retries the push. The server side is `tools/sfx/gitcommit.mjs`, the dialog is `tools/sfx/gitcommit.js`.
+
+Note it offers *every* changed file in the repo, not only ones edited through the tool; review the list before confirming. The Variables tab's "default" values move to the new commit afterwards.
+
+Every sound in `Sound.js` now has an Audio-tab card; the synthesized ones play their original sound until you pick a recording (each `playXxx()` tries `playSample('<slotId>')` first).

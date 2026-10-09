@@ -127,7 +127,8 @@ let ambienceVolume = getSavedVolume('ambience') ?? 0.5;
 const MUSIC_VOLUME_MAX_GAIN = 0.4; // per direct request, the baseline for the Game/Battle/menu music (was 0.504)
 // The Boss track sits at its own, higher ceiling (0.5) at the same slider position, per direct request —
 // expressed as a multiplier on its per-track gain node, since every track shares the one musicGain above.
-const BOSS_TRACK_GAIN = 0.5 / MUSIC_VOLUME_MAX_GAIN;
+const BOSS_MUSIC_MAX_GAIN = 0.5; // the Boss track's own ceiling at the same slider position (tools/sfx can tune it)
+const BOSS_TRACK_GAIN = BOSS_MUSIC_MAX_GAIN / MUSIC_VOLUME_MAX_GAIN;
 const SFX_VOLUME_MAX_GAIN = 0.7;
 const AMBIENCE_VOLUME_MAX_GAIN = 0.7;
 
@@ -524,7 +525,7 @@ function loadSampleSfx() {
 }
 // Plays one sample of a sound (index picks which, for cycling sounds); false means none is loaded, so the caller should fall back
 // to its synth. A suspended/missing context counts as handled (the synth would bail out too).
-function playSample(name, index = 0) {
+function playSample(name, index = 0, gainMultiplier = 1) {
   const list = sampleBuffers[name];
   if (!list || !list.length) return false;
   const audioCtx = ensureContext();
@@ -532,7 +533,7 @@ function playSample(name, index = 0) {
   const src = audioCtx.createBufferSource();
   src.buffer = list[index % list.length];
   const gain = audioCtx.createGain();
-  gain.gain.value = sampleGains[name] ?? 1;
+  gain.gain.value = (sampleGains[name] ?? 1) * gainMultiplier;
   src.connect(gain).connect(sfxGain);
   src.start();
   return true;
@@ -559,6 +560,7 @@ export function playFoodPlace() {
 // Deliberately quiet, per direct request — a fish eating (Food or Waste).
 export function playEat() {
   if (sfxOnCooldown('playEat')) return;
+  if (playSample('playEat')) return;
   playTone(660, 0.05, { type: 'sine', gain: 0.05, attack: 0.002, release: 0.03 });
 }
 
@@ -585,6 +587,7 @@ export function playEat() {
 export function playHunger(chimeIndex = 0) {
   if (sfxOnCooldown('playHunger')) return;
   const volumeMultiplier = 1 + chimeIndex * 0.15;
+  if (playSample('playHunger', 0, volumeMultiplier)) return; // the recording gets the same escalating volume
   playTone(196, 0.1, { type: 'triangle', gain: 0.09 * volumeMultiplier, attack: 0.01, release: 0.06 }); // G3
   playTone(174.61, 0.14, { type: 'triangle', gain: 0.075 * volumeMultiplier, attack: 0.01, release: 0.08, when: 0.1 }); // F3
 }
@@ -592,6 +595,7 @@ export function playHunger(chimeIndex = 0) {
 // A short descending sad phrase — a fish starving.
 export function playFishDeath() {
   if (sfxOnCooldown('playFishDeath')) return;
+  if (playSample('playFishDeath')) return;
   playTone(440, 0.13, { type: 'triangle', gain: 0.14 }); // A4
   playTone(370, 0.13, { type: 'triangle', gain: 0.13, when: 0.12 }); // F#4
   playTone(311, 0.22, { type: 'triangle', gain: 0.12, when: 0.24 }); // Eb4
@@ -607,6 +611,7 @@ export function playFishDeath() {
 // more violent/sudden rather than a slow fade-out.
 export function playFishKilledByAlien() {
   if (sfxOnCooldown('playFishKilledByAlien')) return;
+  if (playSample('playFishKilledByAlien')) return;
   playNoise(0.07, { gain: 0.13 });
   playTone(330, 0.1, { type: 'sawtooth', gain: 0.12, when: 0.02 }); // E4
   playTone(220, 0.16, { type: 'sawtooth', gain: 0.11, when: 0.13 }); // A3
@@ -639,6 +644,7 @@ export function playCoinBank(isDiamond = false) {
 // attack/release instead of harsh squares, at roughly half the old volume.
 export function playBuildPlace() {
   if (sfxOnCooldown('playBuildPlace')) return;
+  if (playSample('playBuildPlace')) return;
   playTone(196, 0.09, { type: 'triangle', gain: 0.06, attack: 0.012, release: 0.06 }); // G3
   playTone(261.63, 0.13, { type: 'triangle', gain: 0.07, attack: 0.012, release: 0.09, when: 0.06 }); // C4
 }
@@ -705,6 +711,7 @@ export function playChatMessage() {
 // having nowhere to put its output.
 export function playInsufficientFunds() {
   if (sfxOnCooldown('playInsufficientFunds')) return;
+  if (playSample('playInsufficientFunds')) return;
   playTone(196, 0.09, { type: 'sawtooth', gain: 0.11 }); // G3
   playTone(146.83, 0.13, { type: 'sawtooth', gain: 0.1, when: 0.08 }); // D3
 }
@@ -721,6 +728,7 @@ export function playInsufficientFunds() {
 // into the background.
 export function playProductionBlocked() {
   if (sfxOnCooldown('playProductionBlocked')) return;
+  if (playSample('playProductionBlocked')) return;
   playNoise(0.03, { gain: 0.07 });
   playTone(294, 0.08, { type: 'triangle', gain: 0.16, when: 0.01 }); // D4
   playTone(220, 0.1, { type: 'triangle', gain: 0.14, when: 0.09 }); // A3
@@ -730,6 +738,7 @@ export function playProductionBlocked() {
 // A small sparkle — a fish reaching adulthood and awarding a Tank Point.
 export function playTankPoint() {
   if (sfxOnCooldown('playTankPoint')) return;
+  if (playSample('playTankPoint')) return;
   playTone(1174.7, 0.06, { type: 'triangle', gain: 0.12 }); // D6
   playTone(1567.98, 0.09, { type: 'triangle', gain: 0.12, when: 0.05 }); // G6
 }
@@ -742,6 +751,7 @@ export function playTankPoint() {
 // moment, not a duplicate of each other).
 export function playGrowToMid() {
   if (sfxOnCooldown('playGrowToMid')) return;
+  if (playSample('playGrowToMid')) return;
   playTone(880, 0.07, { type: 'sine', gain: 0.1 }); // A5
   playTone(1174.66, 0.09, { type: 'sine', gain: 0.1, when: 0.05 }); // D6
 }
@@ -754,6 +764,7 @@ export function playGrowToMid() {
 // magical sound when growing to the adult size").
 export function playGrowToAdult() {
   if (sfxOnCooldown('playGrowToAdult')) return;
+  if (playSample('playGrowToAdult')) return;
   playTone(659.25, 0.06, { type: 'sine', gain: 0.09 }); // E5
   playTone(880, 0.07, { type: 'sine', gain: 0.1, when: 0.06 }); // A5
   playTone(1318.5, 0.12, { type: 'sine', gain: 0.11, when: 0.13 }); // E6
@@ -767,6 +778,7 @@ export function playGrowToAdult() {
 // needs to stay unobtrusive rather than compete for attention.
 export function playPanelOpen() {
   if (sfxOnCooldown('playPanelOpen')) return;
+  if (playSample('playPanelOpen')) return;
   playTone(659.25, 0.05, { type: 'sine', gain: 0.09 }); // E5
   playTone(880, 0.07, { type: 'sine', gain: 0.09, when: 0.04 }); // A5
 }
@@ -775,6 +787,7 @@ export function playPanelOpen() {
 // pause-menu sub-tab.
 export function playPanelClose() {
   if (sfxOnCooldown('playPanelClose')) return;
+  if (playSample('playPanelClose')) return;
   playTone(659.25, 0.05, { type: 'sine', gain: 0.08 }); // E5
   playTone(493.88, 0.07, { type: 'sine', gain: 0.08, when: 0.04 }); // B4
 }
@@ -852,6 +865,7 @@ export function playAlienDeath() {
 // quiet/short, since this can fire often in a busy factory.
 export function playIntake() {
   if (sfxOnCooldown('playIntake')) return;
+  if (playSample('playIntake')) return;
   playSweep(300, 700, 0.07, { type: 'sine', gain: 0.055 });
 }
 

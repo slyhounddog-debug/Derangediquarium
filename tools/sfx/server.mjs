@@ -1,4 +1,4 @@
-// Sound-effect audition tool server. Run: node tools/sfx/server.mjs  ->  http://localhost:8081
+// Dev tool server (sound-effect audition + game tuning). Run: node tools/sfx/server.mjs  ->  http://localhost:8081
 // Deliberately a separate server from the game's (server.js, port 8080): it has file-writing
 // endpoints, and keeping it separate means the game server never needs restarting for it.
 //
@@ -9,6 +9,8 @@ import express from 'express';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import * as tuning from './tuning.mjs';
+import * as gitcommit from './gitcommit.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..', '..');
@@ -19,7 +21,7 @@ const MANIFEST = path.join(CHOSEN, 'manifest.json');
 const SLOTS = JSON.parse(fs.readFileSync(path.join(__dirname, 'slots.json'), 'utf8'));
 const SLOT_IDS = new Set(SLOTS.map((s) => s.id));
 const EXTS = new Set(['.mp3', '.wav', '.ogg', '.m4a', '.flac']);
-const PORT = 8081;
+const PORT = Number(process.env.PORT) || 8081;
 
 for (const slot of SLOTS) if (!slot.gainOnly) fs.mkdirSync(path.join(CANDIDATES, slot.id), { recursive: true });
 fs.mkdirSync(CHOSEN, { recursive: true });
@@ -44,6 +46,7 @@ function slotOr400(res, slot) {
 const app = express();
 app.use('/js', express.static(path.join(ROOT, 'js')));       // the page imports the game's Sound.js for the "current synth" buttons
 app.use('/audio', express.static(AUDIO));
+app.use('/app', express.static(__dirname, { index: false })); // the page's extra scripts (tuning.js, ...)
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
 
 app.get('/api/slots', (req, res) => {
@@ -119,6 +122,30 @@ app.post('/api/delete', express.json(), (req, res) => {
   if (!name) return res.status(400).json({ error: 'bad name' });
   try { fs.unlinkSync(path.join(CANDIDATES, slot, name)); } catch { /* already gone */ }
   res.json({ ok: true });
+});
+
+// ---- Game tuning (Variables / Formulas tabs) — see tuning.mjs ----
+app.get('/api/tuning', async (req, res) => {
+  try { res.json(await tuning.listTuning()); } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
+});
+app.post('/api/tuning/set', express.json(), (req, res) => {
+  try { res.json({ ok: true, value: tuning.setValue(String(req.body.id), req.body.value) }); }
+  catch (e) { res.status(400).json({ error: String(e.message || e) }); }
+});
+app.post('/api/tuning/reset', express.json(), (req, res) => {
+  try { res.json({ ok: true, value: tuning.resetValue(String(req.body.id)) }); }
+  catch (e) { res.status(400).json({ error: String(e.message || e) }); }
+});
+
+// ---- Commit to GitHub (header button) — see gitcommit.mjs ----
+app.get('/api/git/counts', (req, res) => {
+  try { res.json(gitcommit.gitCounts()); } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
+});
+app.get('/api/git/summary', async (req, res) => {
+  try { res.json(await gitcommit.gitSummary()); } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
+});
+app.post('/api/git/commit', express.json({ limit: '2mb' }), (req, res) => {
+  try { res.json(gitcommit.gitCommit(req.body || {})); } catch (e) { res.status(400).json({ error: String((e.stderr || e.message || e)).trim() }); }
 });
 
 app.listen(PORT, () => console.log(`SFX audition tool at http://localhost:${PORT}`));

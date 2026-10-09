@@ -1,0 +1,163 @@
+{
+  "files": { "Config": "js/Config.js", "Sound": "js/Sound.js" },
+  "note": "Curated list of the numbers worth tuning. Item kinds: a plain string = one numeric constant in Config.js; {name, file, label, desc, min, max, step, unit} = one constant with overrides; {deep: NAME, fields: [...], skip: [...], label} = every numeric literal found anywhere inside that table/array (optionally only properties named in fields). Only plain numeric literals can be edited; anything computed from other constants is left out.",
+  "groups": [
+    {
+      "id": "economy", "label": "Prices & economy",
+      "items": [
+        "FOOD_COST", "PLATFORM_FLAT_COST",
+        "ECONOMY_FISH_COST_GROWTH_RATE", "FISH_SCALING_COST_GROWTH_RATE",
+        "BUILDING_COST_GROWTH_RATE_TIER1", "BUILDING_COST_GROWTH_RATE_TIER2", "BUILDING_COST_GROWTH_RATE_TIER3",
+        "BUILDING_COST_TIER2_MIN_BASE", "BUILDING_COST_TIER3_MIN_BASE",
+        "TILE_REFUND_FRACTION", "BANKRUPTCY_BAILOUT_AMOUNT",
+        "FISH_STAR_TIER_VALUE_MULTIPLIER", "FISH_STAR_TIER_HUNGER_MULTIPLIER",
+        "CLEANLINESS_MIN_MONEY_FRACTION",
+        { "deep": "BUILDING_TYPES", "fields": ["cost"], "label": "Shop price" },
+        { "deep": "MOUND_CRACK_COST", "label": "Mound crack cost, tier" },
+        "MOUND_TEASE_COST",
+        "SEA_TURTLE_COIN_BASE_VALUE", "SEA_TURTLE_COIN_VALUE_PER_COLLECT"
+      ]
+    },
+    {
+      "id": "tankUpgrades", "label": "Tank Points & Tank Upgrades",
+      "items": [
+        "TANK_POINT_PER_ADULT_FISH",
+        { "deep": "TANK_EXPANSION_UPGRADE_COSTS", "label": "Tank expansion cost (Tank Points), tier" },
+        { "deep": "FOOD_QUALITY_UPGRADE_COSTS", "label": "Food Quality cost (Tank Points), level" },
+        { "deep": "FOOD_HUNGER_RELIEF_BY_LEVEL", "label": "Hunger relief per Food, Food Quality level", "firstIndex": 0 },
+        { "deep": "COIN_TIMER_FEED_BONUS_FRACTION_BY_LEVEL", "label": "Coin-timer bonus per Food, Food Quality level", "firstIndex": 0 },
+        { "deep": "FISH_MOVEMENT_UPGRADE_COSTS", "label": "Fish Movement cost (Tank Points), level" },
+        "FISH_MOVEMENT_UPGRADE_SPEED_BONUS", "FISH_HEALTH_UPGRADE_BONUS_PER_LEVEL"
+      ]
+    },
+    {
+      "id": "fish", "label": "Fish: hunger, growth & health",
+      "items": [
+        "HUNGER_MAX", "HUNGER_SEEK_THRESHOLD", "HUNGER_CRITICAL_FRACTION",
+        "WASTE_HUNGER_RELIEF", "MUTAGEN_PASTE_HUNGER_RELIEF", "MUTAGEN_PASTE_COIN_MULTIPLIER",
+        "WASTE_TIMER_FEED_BONUS_FRACTION", "FISH_GROWTH_FEED_STREAK_TARGET",
+        "WASTE_POOP_INTERVAL_MS",
+        "CLEANLINESS_PER_WASTE_EVENT", "CLEANLINESS_WARNING_THRESHOLD",
+        "FISH_SPEED_MULTIPLIER", "FISH_SEEK_SPEED_MULTIPLIER",
+        "FISH_HEALTH_BABY", "FISH_HEALTH_MID", "FISH_HEALTH_ADULT", "FISH_HEALTH_REGEN_DURATION_MS"
+      ]
+    },
+    {
+      "id": "species", "label": "Species stats",
+      "items": [
+        { "deep": "SPECIES", "fields": ["cost", "swimSpeed", "hungerRate", "wastePoopIntervalMultiplier", "dropValue", "dropInterval", "feedsRequired", "pixelsPerMW", "eatCooldownMs"] }
+      ]
+    },
+    {
+      "id": "items", "label": "Items & physics",
+      "items": [
+        "GRAVITY", "MAX_FALL_SPEED", "FOOD_GRAVITY", "FOOD_MAX_FALL_SPEED", "ITEM_HORIZONTAL_DAMPING",
+        { "deep": "ITEM_MASS_BY_TYPE", "label": "Item mass", "step": 0.1, "max": 12 },
+        "FOOD_RADIUS", "COIN_RADIUS", "WASTE_RADIUS", "SCIENCE_ITEM_RADIUS",
+        "FOOD_STATIONARY_TO_WASTE_MS", "COIN_CLICK_RADIUS_MULTIPLIER", "ITEM_DRAG_CLICK_RADIUS_MULTIPLIER",
+        "ALIEN_EGG_HATCH_MS", "FRIENDLY_ALIEN_WASTE_INTERVAL_MS",
+        "ELECTRIC_SUCKER_FOOD_INTERVAL_MS", "SCIENCE_ALIEN_DNA_INTERVAL_MS",
+        "BUFFER_FISH_MAGNET_RADIUS", "BUFFER_FISH_MAGNET_FORCE"
+      ]
+    },
+    {
+      "id": "fans", "label": "Fans",
+      "items": [
+        "FAN_CONE_HALF_ANGLE_DEG",
+        "FAN_T2_MAX_FORCE", "FAN_T2_MAX_RANGE", "FAN_T2_POWER_COST",
+        "FAN_T3_MAX_FORCE", "FAN_T3_MAX_RANGE", "FAN_T3_POWER_COST",
+        "FAN_T4_MAX_FORCE", "FAN_T4_MAX_RANGE", "FAN_T4_POWER_COST"
+      ]
+    },
+    {
+      "id": "buildings", "label": "Buildings: speed, power & capacity",
+      "items": [
+        { "deep": "PROCESSOR_STATS", "label": "Collector" },
+        { "deep": "REFINERY_STATS", "label": "Refinery" },
+        "ALIEN_DNA_REFINERY_TIME_MULTIPLIER",
+        { "deep": "MANUFACTURER_ITEM_PROCESS_MS", "label": "Manufacturer process time (ms)" },
+        { "deep": "MANUFACTURER_ITEM_POWER_COST_MW", "label": "Manufacturer power per ingredient (mw)" },
+        { "deep": "POWER_PLANT_RECIPES", "fields": ["powerOutputMw", "durationMs"], "label": "Power Plant" },
+        { "deep": "STORAGE_CHEST_CAPACITY", "label": "Storage Chest capacity" },
+        "EEL_BLIMP_BATTERY_CAPACITY_MW", "EEL_BLIMP_BATTERY_CAPACITY_MUTAGEN_MW", "EEL_BLIMP_MUTAGEN_PRODUCTION_MULTIPLIER",
+        "POWER_DEFICIT_PENALTY_MULTIPLIER", "POWER_SHORTAGE_STALLED_THRESHOLD",
+        "PRODUCTION_LAUNCH_MIN_TILES", "PRODUCTION_LAUNCH_MAX_TILES"
+      ]
+    },
+    {
+      "id": "turrets", "label": "Turrets & combat",
+      "items": [
+        { "deep": "TURRET_STATS", "fields": ["shotsPerSec", "damage", "powerCostPerShot"], "label": "Turret" },
+        "TURRET_FIRE_RATE_UPGRADE_MULTIPLIER",
+        "WASTE_TURRET_SHOTS_PER_WASTE", "WASTE_TURRET_MAX_WASTE", "WASTE_TURRET_MAX_AMMO",
+        "BIOMASS_TURRET_SHOTS_PER_AMMO", "BIOMASS_TURRET_DAMAGE_MULTIPLIER",
+        "ADVANCED_TURRET_MAX_BIOMASS_AMMO", "ADVANCED_TURRET_BIOMASS_DAMAGE",
+        "TURRET_PROJECTILE_SPEED", "ALIEN_CLICK_DAMAGE"
+      ]
+    },
+    {
+      "id": "aliens", "label": "Aliens & waves",
+      "items": [
+        { "deep": "ALIEN_ARCHETYPES", "fields": ["hpMin", "hpMax", "speed", "dnaYield", "fishDamagePerSec"] },
+        "ALIEN_WAVE_DIFFICULTY_RAMP_WAVES",
+        "ALIEN_WAVE_COUNT_EARLY_MIN", "ALIEN_WAVE_COUNT_EARLY_MAX", "ALIEN_WAVE_COUNT_LATE_MIN", "ALIEN_WAVE_COUNT_LATE_MAX",
+        "ALIEN_WAVE_INTERVAL_EARLY_MS", "ALIEN_WAVE_INTERVAL_LATE_MS", "ALIEN_FIRST_WAVE_EARLY_MS", "ALIEN_MAX_ALIVE",
+        { "deep": "ALIEN_TIER_MIX_KEYFRAMES", "label": "Wave mix keyframe", "step": 0.05, "min": 0, "max": 1 },
+        "ALIEN_CHASE_CHANCE", "ALIEN_FLEE_CHANCE", "ALIEN_AWARENESS_RADIUS", "ALIEN_INCOME_BLOCK_RADIUS",
+        "ALIEN_FISH_DAMAGE_INTERVAL_MS", "ALIEN_FOOD_EAT_COOLDOWN_MS"
+      ]
+    },
+    {
+      "id": "boss", "label": "Boss",
+      "items": [
+        "BOSS_HP_MULTIPLIER", "BOSS_SPEED", "BOSS_RADIUS", "BOSS_FISH_DAMAGE_PER_SEC",
+        "BOSS_MINION_SPAWN_INTERVAL_MS", "BOSS_MINION_SPAWN_COUNT",
+        "BOSS_DEATH_SCIENCE_COUNT", "BOSS_DEATH_SCIENCE_GREEN_COUNT"
+      ]
+    },
+    {
+      "id": "lab", "label": "Science Lab",
+      "items": [
+        { "deep": "SCIENCE_LAB_UPGRADES", "fields": ["scienceCost", "scienceGreenCost", "goldCost"] },
+        { "deep": "SCIENCE_CAP_BY_LEVEL", "label": "Science cap, level", "firstIndex": 0 },
+        { "deep": "SCIENCE_CAP_UPGRADE_SCIENCE_COSTS", "label": "Science cap upgrade, science cost, step" },
+        { "deep": "SCIENCE_CAP_UPGRADE_GOLD_COSTS", "label": "Science cap upgrade, gold cost, step" }
+      ]
+    },
+    {
+      "id": "achievements", "label": "Achievements & hats",
+      "items": [
+        { "deep": "ACHIEVEMENT_GEM_REWARD_BY_TIER", "label": "Fishy Gems for an achievement of tier" },
+        { "deep": "ACHIEVEMENTS", "fields": ["threshold"] },
+        { "deep": "HATS", "fields": ["gemCost"] }
+      ]
+    },
+    {
+      "id": "timers", "label": "Timers, tutorials & events",
+      "items": [
+        "AUTOSAVE_INTERVAL_MS",
+        "ALIEN_WARNING_MS_1", "ALIEN_WARNING_MS_2", "ALIEN_COUNTDOWN_START_MS",
+        "TURRET_TUTORIAL_GOLD_GRANT", "CHEST_TUTORIAL_GOLD_GRANT", "CHEST_TUTORIAL_ITEM_THRESHOLD",
+        "IDLE_PURCHASE_HINT_DELAY_MS",
+        "SEA_TURTLE_SPAWN_MIN_MS", "SEA_TURTLE_SPAWN_MAX_MS", "SEA_TURTLE_SPEED_PX_PER_S"
+      ]
+    },
+    {
+      "id": "controls", "label": "Controls & cheats",
+      "items": [
+        "CAMERA_PAN_SPEED", "CAMERA_SCROLL_SENSITIVITY",
+        "CHEAT_GRANT_AMOUNT", "CHEAT_TANK_POINTS_GRANT_AMOUNT", "CHEAT_SCIENCE_GRANT_AMOUNT", "CHEAT_SCIENCE_GREEN_GRANT_AMOUNT", "CHEAT_FISHY_GEMS_GRANT_AMOUNT"
+      ]
+    },
+    {
+      "id": "audio", "label": "Audio levels (Sound.js)",
+      "items": [
+        { "name": "MUSIC_VOLUME_MAX_GAIN", "file": "Sound", "label": "Music level at 100% slider (Game/Battle/menu)", "min": 0, "max": 1, "step": 0.01 },
+        { "name": "BOSS_MUSIC_MAX_GAIN", "file": "Sound", "label": "Boss music level at 100% slider", "min": 0, "max": 1, "step": 0.01 },
+        { "name": "SFX_VOLUME_MAX_GAIN", "file": "Sound", "label": "Sound effects level at 100% slider", "min": 0, "max": 1, "step": 0.01 },
+        { "name": "AMBIENCE_VOLUME_MAX_GAIN", "file": "Sound", "label": "Ambient level at 100% slider", "min": 0, "max": 1, "step": 0.01 },
+        { "name": "SFX_COOLDOWN_MS", "file": "Sound", "label": "Same-sound cooldown (ms)", "min": 0, "max": 500, "step": 5 }
+      ]
+    }
+  ]
+}
