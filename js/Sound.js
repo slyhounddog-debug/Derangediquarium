@@ -16,6 +16,7 @@ import { ALIEN_MUSIC_BATTLE_LEAD_MS, BOSS_MUSIC_FADE_OUT_MS, BOSS_MUSIC_FADE_IN_
 let ctx = null;
 let musicGain = null;
 let sfxGain = null;
+let ambienceGain = null;
 let musicStarted = false;
 
 // ---- Music post-processing chain: musicGain -> musicLowpassFilter ->
@@ -104,6 +105,10 @@ let bossActive = false;
 // refreshes and New Games — these load it, falling back to the defaults until then.
 let musicVolume = getSavedVolume('music') ?? 0.45;
 let sfxVolume = getSavedVolume('sfx') ?? 0.5;
+// Per direct request, the looping water ambience has its own Settings slider (and its own saved value),
+// separate from Music and Sounds. Same 0-1 fraction + max-gain scheme as the SFX slider, so at the default
+// 50% it plays at the same level the tool's audition preview used.
+let ambienceVolume = getSavedVolume('ambience') ?? 0.5;
 // Per direct request ("the max loudness the music and sound effects can get
 // are 30% quieter than they are now") — a slider at 100% used to map
 // straight to gain 1.0 (the loudest this app could ever get); now it maps to
@@ -118,6 +123,7 @@ let sfxVolume = getSavedVolume('sfx') ?? 0.5;
 // deliberately untouched, only the music ceiling moved.
 const MUSIC_VOLUME_MAX_GAIN = 0.63;
 const SFX_VOLUME_MAX_GAIN = 0.7;
+const AMBIENCE_VOLUME_MAX_GAIN = 0.7;
 
 function ensureContext() {
   if (ctx) return ctx;
@@ -138,6 +144,9 @@ function ensureContext() {
   sfxGain = ctx.createGain();
   sfxGain.gain.value = sfxVolume * SFX_VOLUME_MAX_GAIN;
   sfxGain.connect(ctx.destination);
+  ambienceGain = ctx.createGain();
+  ambienceGain.gain.value = ambienceVolume * AMBIENCE_VOLUME_MAX_GAIN;
+  ambienceGain.connect(ctx.destination);
   loadDropSound();
   loadSampleSfx();
   return ctx;
@@ -255,8 +264,14 @@ export function setSfxVolume(v) {
   setSavedVolume('sfx', sfxVolume);
   if (sfxGain) sfxGain.gain.value = sfxVolume * SFX_VOLUME_MAX_GAIN;
 }
+export function setAmbienceVolume(v) {
+  ambienceVolume = Math.max(0, Math.min(1, v));
+  setSavedVolume('ambience', ambienceVolume);
+  if (ambienceGain) ambienceGain.gain.value = ambienceVolume * AMBIENCE_VOLUME_MAX_GAIN;
+}
 export function getMusicVolume() { return musicVolume; }
 export function getSfxVolume() { return sfxVolume; }
+export function getAmbienceVolume() { return ambienceVolume; }
 
 // Called from main.js on the very first pointerdown/keydown anywhere on the
 // page — browsers refuse to run an AudioContext at all until a real user
@@ -291,6 +306,33 @@ export function startGameMusic() {
     musicStarted = true;
     startMusic();
   }
+  startAmbience();
+}
+
+// ---- Water ambience loop ----
+// Per direct request, a quiet looping water track under the whole game, picked in tools/sfx (the
+// manifest's "ambience" entry) and played as a looping AudioBufferSource — unlike an <audio loop>,
+// that wraps with no gap. Started with the game music (Start/Continue); if the file hasn't finished
+// decoding by then, loadSampleSfx calls startAmbience again the moment it has.
+let ambienceWanted = false;
+let ambienceSource = null;
+function startAmbience() {
+  ambienceWanted = true;
+  if (ambienceSource || !ctx) return;
+  const list = sampleBuffers.ambience;
+  if (!list || !list.length) return; // not decoded yet — loadSampleSfx retries
+  const src = ctx.createBufferSource();
+  src.buffer = list[0];
+  src.loop = true;
+  const gain = ctx.createGain();
+  gain.gain.value = sampleGains.ambience ?? 1;
+  src.connect(gain).connect(ambienceGain);
+  src.start();
+  ambienceSource = src;
+}
+function stopAmbience() {
+  ambienceWanted = false;
+  if (ambienceSource) { try { ambienceSource.stop(); } catch { /* already stopped */ } ambienceSource = null; }
 }
 
 // ---- Main-menu music ----
@@ -455,7 +497,10 @@ function loadSampleSfx() {
         const files = entry.files || [entry.file];
         sampleGains[name] = Number.isFinite(entry.gain) ? entry.gain : 1;
         Promise.all(files.map((f) => fetch('audio/sfx/' + f).then((r) => r.arrayBuffer()).then((d) => ctx.decodeAudioData(d))))
-          .then((buffers) => { sampleBuffers[name] = buffers; })
+          .then((buffers) => {
+            sampleBuffers[name] = buffers;
+            if (name === 'ambience' && ambienceWanted) startAmbience();
+          })
           .catch(() => {});
       }
     })
@@ -818,6 +863,17 @@ export function playUiHover() {
   if (playSample('uiHover', uiHoverIndex)) uiHoverIndex++;
 }
 
+// A tool/item being picked (shop item, Food, a Favorite, Tank menu tab/hat) vs. put back to the plain
+// cursor — UI.js decides which one a given change is, so a single click never plays both.
+export function playUiSelect() {
+  if (sfxOnCooldown('playUiSelect')) return;
+  playSample('uiSelect');
+}
+export function playUiDeselect() {
+  if (sfxOnCooldown('playUiDeselect')) return;
+  playSample('uiDeselect');
+}
+
 // ---- Background music ----
 // Replaced entirely with 3 real tracks, per direct request — the previous
 // synthesized chiptune loop (hand-composed melody/chords/bass, all pure
@@ -1035,6 +1091,7 @@ export function triggerBossMusic() {
 // wired to any UI control, since none was requested.
 export function stopMusic() {
   musicStarted = false;
+  stopAmbience();
   if (gameMusicEl) gameMusicEl.pause();
   if (battleMusicEl) battleMusicEl.pause();
   if (bossMusicEl) bossMusicEl.pause();

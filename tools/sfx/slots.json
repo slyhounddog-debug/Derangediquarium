@@ -1,35 +1,198 @@
 [
-  { "id": "playPurchase", "label": "Buy a fish", "synth": true,
-    "want": "A dropping-in-water sound", "plays": "When you buy and place a fish.",
-    "search": ["water drop plop", "small bloop", "single drop into pond", "gentle splash"] },
-  { "id": "playFoodPlace", "label": "Drop food", "synth": true,
-    "want": "A different soft plink", "plays": "When you drop a food pellet. Fires often, so keep it short and quiet.",
-    "search": ["soft plink", "tiny water tick", "pebble in water", "soft pluck"] },
-  { "id": "playDispense", "label": "Building ejects an item", "synth": true,
-    "want": "A soft ejecting sound (not a menu-closing blip)", "plays": "When a Refinery or Manufacturer ejects its output, or a Collector finishes a Science Flask.",
-    "search": ["soft pop", "bubble pop", "muffled spit", "gentle puff", "cork pop soft"] },
-  { "id": "playDemolish", "label": "Delete a building", "synth": true,
-    "want": "A grounded thud or muted crack", "plays": "When you delete or replace a building.",
-    "search": ["wood thud", "stone crack muted", "dull crunch", "brick break soft", "low impact thump"] },
-  { "id": "playTurretShoot", "label": "Turret fires", "synth": true,
-    "want": "A less harsh blip, or an electric pew", "plays": "Every turret shot. Plays up to 4 at once and very often, so it must stay soft and short.",
-    "search": ["soft laser pew", "electric zap small", "sci-fi blip soft", "water gun shot", "energy pulse short"] },
-  { "id": "playAlienHit", "label": "Alien takes a hit", "synth": true,
-    "want": "A different thudding sound", "plays": "When a click or turret shot damages an alien without killing it.",
-    "search": ["wet thud", "soft body impact", "squishy hit", "rubber thump", "gelatin hit"] },
-  { "id": "playAlienDeath", "label": "Alien dies", "synth": true,
-    "want": "Less harsh than now", "plays": "When an alien dies.",
-    "search": ["alien squelch death", "wet burst", "slime splat soft", "descending groan", "bubbly pop out"] },
-  { "id": "playCoinBank", "label": "Bank a coin", "synth": true,
-    "want": "A more organic, non-harsh coin chink (current one is not bad)", "plays": "When a coin is banked by click or by a Collector. Fires very often.",
-    "search": ["single coin chink", "coin drop soft", "small metal ding muted", "coin pickup gentle"] },
-  { "id": "portalOpen", "label": "Alien portal opens (new)", "synth": false,
-    "want": "An organic portal-opening sound", "plays": "New sound for when an alien portal opens before a wave spawns (about 1 second).",
-    "search": ["organic portal open", "wet rip", "slimy swell", "underwater whoosh rising", "bubbling vortex", "flesh stretch"] },
-  { "id": "waveWarning", "label": "Wave warning (new)", "synth": false,
-    "want": "An organic warning sound", "plays": "New sound for the 60-second and 30-second alien wave warnings.",
-    "search": ["distant whale call", "deep underwater groan", "low organic rumble", "sonar ping soft", "foghorn muffled"] },
-  { "id": "uiHover", "label": "UI hover blip (new)", "synth": false,
-    "want": "A soft hover blip", "plays": "New sound when the mouse moves over a UI or shop button. Fires constantly, so it must be tiny, very quiet and short (under 100 ms).",
-    "search": ["ui hover soft", "tiny bubble tick", "soft tick", "gentle click hover", "water droplet tiny"] }
+  {
+    "id": "playPurchase",
+    "label": "Buy a fish",
+    "synth": true,
+    "want": "A dropping-in-water sound",
+    "plays": "When you buy and place a fish.",
+    "search": [
+      "water drop plop",
+      "small bloop",
+      "single drop into pond",
+      "gentle splash"
+    ]
+  },
+  {
+    "id": "playFoodPlace",
+    "label": "Drop food",
+    "synth": true,
+    "want": "A different soft plink",
+    "plays": "When you drop a food pellet. Fires often, so keep it short and quiet.",
+    "search": [
+      "soft plink",
+      "tiny water tick",
+      "pebble in water",
+      "soft pluck"
+    ]
+  },
+  {
+    "id": "playDispense",
+    "label": "Building ejects an item",
+    "synth": true,
+    "want": "A soft ejecting sound (not a menu-closing blip)",
+    "plays": "When a Refinery or Manufacturer ejects its output, or a Collector finishes a Science Flask.",
+    "search": [
+      "soft pop",
+      "bubble pop",
+      "muffled spit",
+      "gentle puff",
+      "cork pop soft"
+    ]
+  },
+  {
+    "id": "playDemolish",
+    "label": "Delete a building",
+    "synth": true,
+    "want": "A grounded thud or muted crack",
+    "plays": "When you delete or replace a building.",
+    "search": [
+      "wood thud",
+      "stone crack muted",
+      "dull crunch",
+      "brick break soft",
+      "low impact thump"
+    ]
+  },
+  {
+    "id": "playTurretShoot",
+    "label": "Turret fires",
+    "synth": true,
+    "want": "A less harsh blip, or an electric pew",
+    "plays": "Every turret shot. Plays up to 4 at once and very often, so it must stay soft and short.",
+    "search": [
+      "soft laser pew",
+      "electric zap small",
+      "sci-fi blip soft",
+      "water gun shot",
+      "energy pulse short"
+    ]
+  },
+  {
+    "id": "playAlienHit",
+    "label": "Alien takes a hit",
+    "synth": true,
+    "want": "A different thudding sound",
+    "plays": "When a click or turret shot damages an alien without killing it.",
+    "search": [
+      "wet thud",
+      "soft body impact",
+      "squishy hit",
+      "rubber thump",
+      "gelatin hit"
+    ]
+  },
+  {
+    "id": "playAlienDeath",
+    "label": "Alien dies",
+    "synth": true,
+    "want": "Less harsh than now",
+    "plays": "When an alien dies.",
+    "search": [
+      "alien squelch death",
+      "wet burst",
+      "slime splat soft",
+      "descending groan",
+      "bubbly pop out"
+    ]
+  },
+  {
+    "id": "playCoinBank",
+    "label": "Bank a coin",
+    "synth": true,
+    "want": "A more organic, non-harsh coin chink (current one is not bad)",
+    "plays": "When a coin is banked by click or by a Collector. Fires very often.",
+    "search": [
+      "single coin chink",
+      "coin drop soft",
+      "small metal ding muted",
+      "coin pickup gentle"
+    ]
+  },
+  {
+    "id": "portalOpen",
+    "label": "Alien portal opens (new)",
+    "synth": false,
+    "want": "An organic portal-opening sound",
+    "plays": "New sound for when an alien portal opens before a wave spawns (about 1 second).",
+    "search": [
+      "organic portal open",
+      "wet rip",
+      "slimy swell",
+      "underwater whoosh rising",
+      "bubbling vortex",
+      "flesh stretch"
+    ]
+  },
+  {
+    "id": "waveWarning",
+    "label": "Wave warning (new)",
+    "synth": false,
+    "want": "An organic warning sound",
+    "plays": "New sound that plays once, 10 seconds before an alien wave (when the countdown banner appears).",
+    "search": [
+      "distant whale call",
+      "deep underwater groan",
+      "low organic rumble",
+      "sonar ping soft",
+      "foghorn muffled"
+    ]
+  },
+  {
+    "id": "uiHover",
+    "label": "UI hover blip (new)",
+    "synth": false,
+    "want": "A soft hover blip",
+    "plays": "New sound when the mouse moves over a UI or shop button. Fires constantly, so it must be tiny, very quiet and short (under 100 ms).",
+    "search": [
+      "ui hover soft",
+      "tiny bubble tick",
+      "soft tick",
+      "gentle click hover",
+      "water droplet tiny"
+    ]
+  },
+  {
+    "id": "uiSelect",
+    "label": "Select / click an item (new)",
+    "synth": false,
+    "want": "A soft selection click",
+    "plays": "New sound when you pick something from the Shop or Tank menu, or choose the Food tool or a Favorite slot. Fires often, so keep it short and soft.",
+    "search": [
+      "soft ui click",
+      "gentle select",
+      "bubble click",
+      "wooden tick soft",
+      "small water tap"
+    ]
+  },
+  {
+    "id": "uiDeselect",
+    "label": "Deselect / put back (new)",
+    "synth": false,
+    "want": "A softer, lower or reversed counterpart to the select sound",
+    "plays": "New sound when you deselect the tool or item under the cursor: right-click, Q, or clicking an already-selected shop item. Only plays instead of (never together with) the select sound.",
+    "search": [
+      "soft ui cancel",
+      "gentle deselect",
+      "reverse bubble",
+      "low soft tick",
+      "soft pop down"
+    ]
+  },
+  {
+    "id": "ambience",
+    "label": "Water ambience loop (new)",
+    "synth": false,
+    "loop": true,
+    "want": "A seamless, calm underwater ambience that loops",
+    "plays": "New looping background track under the whole game, on its own Ambience volume slider in Settings (the slider comes once you have picked a loop). Longer files are fine (30 s to a few minutes). Play loops it; use Seam to hear the loop point, and Trim > Seamless loop crossfade to fix a clicky seam.",
+    "search": [
+      "underwater ambience loop",
+      "aquarium ambience",
+      "deep water loop",
+      "ocean underwater drone",
+      "gentle bubbling water loop",
+      "fish tank hum"
+    ]
+  }
 ]

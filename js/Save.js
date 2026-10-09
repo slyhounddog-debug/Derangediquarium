@@ -30,7 +30,7 @@ const PREFS_KEY = 'finsanity_prefs_v1';
 const prefs = loadPrefs();
 
 function loadPrefs() {
-  const fresh = { guidedTutorials: true, guidedTutorialsUserSet: false, tutorialsSeen: [], musicVolume: null, sfxVolume: null };
+  const fresh = { guidedTutorials: true, guidedTutorialsUserSet: false, tutorialsSeen: [], musicVolume: null, sfxVolume: null, ambienceVolume: null };
   try {
     const parsed = JSON.parse(localStorage.getItem(PREFS_KEY));
     if (!parsed || typeof parsed !== 'object') return fresh;
@@ -38,6 +38,7 @@ function loadPrefs() {
     if (typeof parsed.guidedTutorialsUserSet === 'boolean') fresh.guidedTutorialsUserSet = parsed.guidedTutorialsUserSet;
     if (typeof parsed.musicVolume === 'number') fresh.musicVolume = Math.max(0, Math.min(1, parsed.musicVolume));
     if (typeof parsed.sfxVolume === 'number') fresh.sfxVolume = Math.max(0, Math.min(1, parsed.sfxVolume));
+    if (typeof parsed.ambienceVolume === 'number') fresh.ambienceVolume = Math.max(0, Math.min(1, parsed.ambienceVolume));
     if (Array.isArray(parsed.tutorialsSeen)) fresh.tutorialsSeen = parsed.tutorialsSeen.filter((id) => GUIDED_TUTORIAL_IDS.includes(id));
   } catch {
     // no stored prefs, or localStorage is unavailable — the defaults above are fine
@@ -55,11 +56,13 @@ function savePrefs() {
 
 // The saved Settings volumes (null = never touched), read by Sound.js at load.
 export function getSavedVolume(kind) {
+  if (kind === 'ambience') return prefs.ambienceVolume;
   return kind === 'music' ? prefs.musicVolume : prefs.sfxVolume;
 }
 
 export function setSavedVolume(kind, v) {
   if (kind === 'music') prefs.musicVolume = v;
+  else if (kind === 'ambience') prefs.ambienceVolume = v;
   else prefs.sfxVolume = v;
   savePrefs();
 }

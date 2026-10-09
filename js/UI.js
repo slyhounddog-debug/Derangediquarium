@@ -113,7 +113,7 @@ import {
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
-import { playUpgrade, setMusicVolume, setSfxVolume, getMusicVolume, getSfxVolume, playPanelOpen, playPanelClose, playInsufficientFunds, playUiHover, setMusicUnderwaterMuffle, setMusicSpeedBoost, setMusicPaused } from './Sound.js';
+import { playUpgrade, setMusicVolume, setSfxVolume, setAmbienceVolume, getMusicVolume, getSfxVolume, getAmbienceVolume, playPanelOpen, playPanelClose, playInsufficientFunds, playUiHover, playUiSelect, playUiDeselect, setMusicUnderwaterMuffle, setMusicSpeedBoost, setMusicPaused } from './Sound.js';
 import { computeProductionInfo } from './ProductionInfo.js';
 import { hasSaveGame, saveGame, loadSaveGame, clearSaveGame, isGuidedTutorialsEnabled, setGuidedTutorialsEnabled } from './Save.js';
 import { pushGameNotification } from './Notifications.js';
@@ -398,6 +398,19 @@ const UI_HOVER_SELECTOR = [
   '#start-help-overlay button',
 ].join(',');
 
+// Tank menu clicks (per direct request): the three tabs and a hat card's body. The buy/equip and Claim
+// buttons already have playUpgrade, so they are deliberately left out rather than doubled up.
+const TANK_SELECT_TABS = '#tank-tab-upgrades,#tank-tab-achievements,#tank-tab-customization';
+function initTankMenuSelectSound() {
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest) return;
+    const inTank = e.target.closest('#tank-panel');
+    if (!inTank) return;
+    if (e.target.closest(TANK_SELECT_TABS)) { playUiSelect(); return; }
+    if (e.target.closest('.hat-card') && !e.target.closest('button')) playUiSelect();
+  });
+}
+
 function initUiHoverSound() {
   // mouseover bubbles, so one delegated listener covers buttons that get rebuilt (shop icons, lab nodes).
   document.addEventListener('mouseover', (e) => {
@@ -410,6 +423,7 @@ function initUiHoverSound() {
 
 export function initUI(state) {
   initUiHoverSound();
+  initTankMenuSelectSound();
   els = {
     hud: document.getElementById('hud'),
     minimapWrap: document.getElementById('minimap-wrap'),
@@ -499,6 +513,7 @@ export function initUI(state) {
     pauseSettingsBackBtn: document.getElementById('pause-settings-back-btn'),
     musicVolumeSlider: document.getElementById('music-volume-slider'),
     sfxVolumeSlider: document.getElementById('sfx-volume-slider'),
+    ambienceVolumeSlider: document.getElementById('ambience-volume-slider'),
     guidedTutorialToggle: document.getElementById('guided-tutorial-toggle'),
     debugOverlay: document.getElementById('debug-overlay'),
     debugLines: document.getElementById('debug-lines'),
@@ -808,8 +823,7 @@ export function initUI(state) {
   setWindowTitle(els.tankTitle, els.tankTitle.textContent); // the HTML's plain text becomes per-letter spans like the others
   // Shop's X — the only mouse way to close it, per direct request (clicking
   // outside it must NOT close it, unlike the Tank/Lab windows). Same effect
-  // as the E hotkey, which keeps a selected fish selected (keepSelection) —
-  // the X doesn't, matching what the toggle button already did.
+  // as the E hotkey.
   els.shopCloseBtn.addEventListener('click', () => toggleShopCollapse(state));
 
   // The dedicated pause-menu button is gone per direct request — Escape is
@@ -886,8 +900,10 @@ export function initUI(state) {
 
   els.musicVolumeSlider.value = String(Math.round(getMusicVolume() * 100));
   els.sfxVolumeSlider.value = String(Math.round(getSfxVolume() * 100));
+  els.ambienceVolumeSlider.value = String(Math.round(getAmbienceVolume() * 100));
   els.musicVolumeSlider.addEventListener('input', () => setMusicVolume(Number(els.musicVolumeSlider.value) / 100));
   els.sfxVolumeSlider.addEventListener('input', () => setSfxVolume(Number(els.sfxVolumeSlider.value) / 100));
+  els.ambienceVolumeSlider.addEventListener('input', () => setAmbienceVolume(Number(els.ambienceVolumeSlider.value) / 100));
   // Per direct request — persisted across sessions by Save.js (main.js's
   // applyGuidedTutorialPreference is what actually enforces it).
   els.guidedTutorialToggle.addEventListener('change', () => setGuidedTutorialsEnabled(els.guidedTutorialToggle.checked));
@@ -942,9 +958,9 @@ export function closeSidePanels(state, keepShop = false) {
 // so both paths share one place that actually flips the state. Opening the
 // shop closes the Tank and Lab windows — only one of the three centered
 // windows is ever open at a time.
-// keepSelection: the E hotkey passes true — per direct request it only ever
-// opens/closes the shop, so closing it must NOT deselect a selected fish (see
-// updateShopCollapse); every other close path still deselects.
+// Closing the shop never changes the selected tool/fish, by any path (per direct request) —
+// it used to deselect a selected fish, which stopped making sense once the Shop became a window you
+// leave open and pick from while playing.
 // The Shop, Tank and Lab windows share one title look (nautical.css colors each
 // letter by position, like the Shop's hand-written <span> letters), so their
 // titles are built the same way: one span per character.
@@ -959,7 +975,7 @@ function setWindowTitle(el, text) {
   }
 }
 
-export function toggleShopCollapse(state, keepSelection = false) {
+export function toggleShopCollapse(state) {
   state.ui.shopCollapsed = !state.ui.shopCollapsed;
   if (!state.ui.shopCollapsed) {
     state.ui.tankPanelCollapsed = true;
@@ -967,20 +983,11 @@ export function toggleShopCollapse(state, keepSelection = false) {
     closeLabMenu();
     state.level.tutorialFlags.firstShopOpened = true; // stops scheduleShopButtonReminder's bounce for good, this playthrough
   }
-  updateShopCollapse(state, keepSelection);
+  updateShopCollapse(state);
   (state.ui.shopCollapsed ? playPanelClose : playPanelOpen)();
 }
 
-function updateShopCollapse(state, keepSelection = false) {
-  // Per direct request ("if a fish is selected and you close the shop, have
-  // it deselect the fish and default to the food") — checked here, the one
-  // place every close path (the toggle button/S hotkey, opening the Tank
-  // panel, closeSidePanels) funnels through, rather than duplicated at each
-  // call site. Idempotent: once deselected, selectedTool is 'cursor', so a
-  // later call with the shop still collapsed is a no-op.
-  if (state.ui.shopCollapsed && !keepSelection && state.ui.selectedTool.startsWith('fish:')) {
-    deselectShopSelection(state);
-  }
+function updateShopCollapse(state) {
   els.shopPanel.classList.toggle('collapsed', state.ui.shopCollapsed);
   els.shopCollapseBtn.classList.toggle('panel-toggle-active', !state.ui.shopCollapsed); // which of the two toggle buttons is "pressed" needs to be obvious at a glance since both stay visible regardless of panel state
   // The preview canvas is invisible while collapsed — no point animating
@@ -5431,7 +5438,25 @@ function updateSaveToast(state) {
   }, TOAST_DURATION_MS);
 }
 
+// Per direct request, one sound when a tool/item gets picked and a different one when it's put back —
+// never both for one click. Watching state.ui.selectedTool in ONE place (instead of at every click
+// handler, hotkey, right-click and shop re-click that can change it) is what guarantees that: a change
+// to 'cursor' is a deselect, a change to anything else is a select. Automatic deselects during a guided
+// tutorial (e.g. dropping the turret tool after it's placed) stay silent; the tutorial's own forced tool
+// changes call syncObservedTool so they aren't heard as a click either.
+let lastObservedTool = null;
+function syncObservedTool(state) { lastObservedTool = state.ui.selectedTool; }
+function updateToolChangeSound(state) {
+  const tool = state.ui.selectedTool;
+  if (lastObservedTool === null) { lastObservedTool = tool; return; }
+  if (tool === lastObservedTool) return;
+  lastObservedTool = tool;
+  if (tool === 'cursor') { if (!state.level.tutorialFlow) playUiDeselect(); }
+  else playUiSelect();
+}
+
 export function updateHUD(state) {
+  updateToolChangeSound(state);
   updateSaveToast(state);
   // Keeps the toolbar's selected highlights live every frame — see updateToolbar's own
   // comment on why this can't just wait for the next tool-select event.
@@ -6370,6 +6395,7 @@ function updateTutorialOverlay(state) {
   // applying the instant the flow moves on, with no separate clear needed.
   if (stepDef.tool && state.ui.selectedTool !== stepDef.tool && state.ui.tutorialToolOverrideStep !== `${flow.id}:${flow.step}`) {
     state.ui.selectedTool = stepDef.tool;
+    syncObservedTool(state); // a forced tutorial tool isn't a click, so it shouldn't sound like one
     updateToolbar(state);
   }
   // The target isn't on screen right now — show a plain "scroll to find

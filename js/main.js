@@ -3587,7 +3587,7 @@ input.keydownHandlers.push((e) => {
   // and post-alien flows both do) still progresses whether the player used
   // the hotkey or clicked the real button.
   if (e.code === 'KeyE' && state.level.tutorialFlow) {
-    toggleShopCollapse(state, true);
+    toggleShopCollapse(state);
     if (!state.ui.shopCollapsed) {
       advanceTutorialFlow(state, 'start', 'shop');
       advanceTutorialFlow(state, 'postalien', 'shop');
@@ -3724,8 +3724,8 @@ input.keydownHandlers.push((e) => {
         performUndo();
       }
       break;
-    case 'KeyE': // toggle-collapse the shop panel — moved off KeyQ per direct request, freeing Q up for the Pipette Tool below. Per a later direct request it ONLY opens/closes the shop (keepSelection), never deselecting a selected fish.
-      toggleShopCollapse(state, true);
+    case 'KeyE': // toggle-collapse the shop panel — moved off KeyQ per direct request, freeing Q up for the Pipette Tool below. Per a later direct request it ONLY opens/closes the shop, never changing the selection.
+      toggleShopCollapse(state);
       break;
     case 'KeyQ': { // Clear Blueprint / Pipette Tool / "last used" fallback / Clear Cursor — per direct request
       if (groupMove != null) { // a carried group move is cleared first, like a copied Blueprint

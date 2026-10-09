@@ -37,7 +37,7 @@
   "playAlienDeath": {
     "file": "playAlienDeath.wav",
     "gain": 1,
-    "source": "568594__thesoundbandit__bloodspit trim.wav"
+    "source": "568594__thesoundbandit__bloodspit trim (2).wav"
   },
   "portalOpen": {
     "file": "portalOpen.wav",
@@ -46,8 +46,8 @@
   },
   "waveWarning": {
     "file": "waveWarning.wav",
-    "gain": 1,
-    "source": "67397__noisecollector__quiet_bendyping.wav"
+    "gain": 0.2,
+    "source": "844241__atp2-kh__bubbling-water-notification-ui-alert-cc0 trim.wav"
   },
   "playCoinBankDiamond": {
     "file": "playCoinBankDiamond.wav",
@@ -65,5 +65,20 @@
     ],
     "gain": 0.21,
     "source": "6 files, cycled in order"
+  },
+  "uiSelect": {
+    "file": "uiSelect.wav",
+    "gain": 0.75,
+    "source": "776443__chaferwitt__pop-out-bubble-soft-bursting trim.wav"
+  },
+  "uiDeselect": {
+    "file": "uiDeselect.wav",
+    "gain": 0.25,
+    "source": "433649__dersuperanton__plopp-bubble-popping trim.wav"
+  },
+  "ambience": {
+    "file": "ambience.wav",
+    "gain": 0.2,
+    "source": "269867__arnaud-coutancier__bubbles trim (2).wav"
   }
 }

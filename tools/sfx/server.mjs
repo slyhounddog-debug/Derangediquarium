@@ -58,7 +58,7 @@ app.get('/api/slots', (req, res) => {
   }));
 });
 
-app.post('/api/upload', express.raw({ type: '*/*', limit: '12mb' }), (req, res) => {
+app.post('/api/upload', express.raw({ type: '*/*', limit: '100mb' }), (req, res) => {
   const slot = String(req.query.slot);
   if (!slotOr400(res, slot)) return;
   const name = safeName(req.query.name);

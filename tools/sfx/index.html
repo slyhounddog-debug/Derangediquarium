@@ -129,18 +129,19 @@ async function loadBuffer(url) {
 function stopCurrent() {
   if (current) { try { current.src.stop(); } catch {} current.btn.classList.remove('playing'); current = null; }
 }
-async function playUrl(url, gain, btn) {
+async function playUrl(url, gain, btn, opts = {}) {
   stopCurrent();
   const c = ensureCtx();
   let info;
   try { info = await loadBuffer(url); } catch { say('Could not decode that file'); return; }
   const src = c.createBufferSource();
   src.buffer = info.buf;
+  if (opts.loop) { src.loop = true; src.loopStart = 0; src.loopEnd = info.buf.duration; }
   const g = c.createGain();
   g.gain.value = gain;
   src.connect(g).connect(master);
   src.onended = () => { if (current && current.src === src) { btn.classList.remove('playing'); current = null; } };
-  src.start();
+  src.start(0, opts.offset || 0);
   btn.classList.add('playing');
   current = { src, btn };
 }
@@ -176,16 +177,28 @@ function encodeWav(channels, sampleRate) {
 }
 
 // Channel arrays for the range [a,b] seconds with fades applied and an optional peak-normalise.
-function renderRange(buf, a, b, fadeMs, normalize) {
+function renderRange(buf, a, b, fadeMs, normalize, xfadeMs = 0) {
   const sr = buf.sampleRate;
   const i0 = Math.max(0, Math.floor(a * sr)), i1 = Math.min(buf.length, Math.ceil(b * sr)), n = Math.max(1, i1 - i0);
-  const fade = Math.min(Math.floor(fadeMs / 1000 * sr), Math.floor(n / 2));
+  // Seamless loop: the last x samples are blended (equal-power) into the first x, and the file ends where the
+  // blend began, so the wrap-around has no jump. Plain fades are skipped then — they would dip at the seam.
+  const x = Math.min(Math.floor(xfadeMs / 1000 * sr), Math.floor(n / 2));
+  const fade = x > 0 ? 0 : Math.min(Math.floor(fadeMs / 1000 * sr), Math.floor(n / 2));
   const out = [];
   let peak = 0;
   for (let c = 0; c < buf.numberOfChannels; c++) {
-    const d = buf.getChannelData(c).slice(i0, i1);
-    for (let i = 0; i < fade; i++) { const g = i / fade; d[i] *= g; d[n - 1 - i] *= g; }
-    for (let i = 0; i < n; i++) { const x = Math.abs(d[i]); if (x > peak) peak = x; }
+    let d = buf.getChannelData(c).slice(i0, i1);
+    if (x > 0) {
+      const head = d.slice(0, x), tail = d.slice(n - x);
+      d = d.slice(0, n - x);
+      for (let i = 0; i < x; i++) {
+        const t = (i / x) * Math.PI / 2;
+        d[i] = head[i] * Math.sin(t) + tail[i] * Math.cos(t);
+      }
+    }
+    const len = d.length;
+    for (let i = 0; i < fade; i++) { const g = i / fade; d[i] *= g; d[len - 1 - i] *= g; }
+    for (let i = 0; i < len; i++) { const v = Math.abs(d[i]); if (v > peak) peak = v; }
     out.push(d);
   }
   if (normalize && peak > 0) {
@@ -216,6 +229,7 @@ function buildTrimmer(slot, cand, buf, candEl) {
     <div class="trow">
       <label>Fade <input class="tf" type="number" min="0" max="500" step="1" value="5"> ms</label>
       <label><input class="tn" type="checkbox"> Normalise to -3 dB peak</label>
+      <label title="Blends the end into the start so the file loops with no click. 0 = off. Replaces the fades.">Seamless loop crossfade <input class="tx" type="number" min="0" max="5000" step="50" value="0"> ms</label>
       <button class="tauto">Auto-trim silence</button>
       <button class="tall">Select all</button>
       <button class="tplay">▶ Play selection</button>
@@ -225,7 +239,7 @@ function buildTrimmer(slot, cand, buf, candEl) {
   candEl.appendChild(wrap);
 
   const cv = wrap.querySelector('canvas'), ta = wrap.querySelector('.ta'), tb = wrap.querySelector('.tb');
-  const tf = wrap.querySelector('.tf'), tn = wrap.querySelector('.tn'), ro = wrap.querySelector('.readout');
+  const tf = wrap.querySelector('.tf'), tn = wrap.querySelector('.tn'), tx = wrap.querySelector('.tx'), ro = wrap.querySelector('.readout');
   const g2 = cv.getContext('2d');
 
   let peaks = null, cw = 0, ch = 0;
@@ -308,7 +322,7 @@ function buildTrimmer(slot, cand, buf, candEl) {
   playBtn.addEventListener('click', () => {
     stopCurrent();
     const c = ensureCtx();
-    const parts = renderRange(buf, sel.a, sel.b, +tf.value || 0, tn.checked);
+    const parts = renderRange(buf, sel.a, sel.b, +tf.value || 0, tn.checked, +tx.value || 0);
     const ab = c.createBuffer(parts.length, parts[0].length, buf.sampleRate);
     parts.forEach((d, i) => ab.copyToChannel(d, i));
     const src = c.createBufferSource(), g = c.createGain();
@@ -321,7 +335,7 @@ function buildTrimmer(slot, cand, buf, candEl) {
   });
 
   wrap.querySelector('.tsave').addEventListener('click', async () => {
-    const parts = renderRange(buf, sel.a, sel.b, +tf.value || 0, tn.checked);
+    const parts = renderRange(buf, sel.a, sel.b, +tf.value || 0, tn.checked, +tx.value || 0);
     const base = cand.file.replace(/\.[^.]+$/, '').replace(/ trim( \(\d+\))?$/, '');
     const ok = await upload(slot.id, encodeWav(parts, buf.sampleRate), `${base} trim.wav`);
     if (ok) { say('Saved trimmed copy'); refresh(); }
@@ -383,13 +397,18 @@ function render() {
       const url = candUrl(s.id, c.file);
       const el = document.createElement('div');
       el.className = 'cand' + (s.chosen && s.chosen.source === c.file ? ' sel' : '');
-      el.innerHTML = `<button class="play">▶ Play</button><span class="name"></span><span class="meta"></span><button class="trimbtn" title="Trim this file into a new candidate">✂ Trim</button><button class="use">Use this</button><button class="danger" title="Delete this candidate file">✕</button>`;
+      el.innerHTML = `<button class="play">${s.loop ? '▶ Play loop' : '▶ Play'}</button>${s.loop ? '<button class="seam" title="Play the last 1.5 s, then wrap to the start, to hear the loop point">Seam</button>' : ''}<span class="name"></span><span class="meta"></span><button class="trimbtn" title="Trim this file into a new candidate">✂ Trim</button><button class="use">Use this</button><button class="danger" title="Delete this candidate file">✕</button>`;
       el.querySelector('.name').textContent = c.file;
       const meta = el.querySelector('.meta');
       meta.textContent = fmtSize(c.size);
       loadBuffer(url).then((i) => { meta.textContent = `${fmtSize(c.size)} · ${i.buf.duration.toFixed(2)}s · peak ${i.peakDb} dB · rms ${i.rmsDb} dB`; }).catch(() => { meta.textContent += ' · cannot decode'; });
       const pb = el.querySelector('.play');
-      pb.addEventListener('click', () => playUrl(url, cardGain[s.id], pb));
+      pb.addEventListener('click', () => playUrl(url, cardGain[s.id], pb, { loop: !!s.loop }));
+      const seamBtn = el.querySelector('.seam');
+      if (seamBtn) seamBtn.addEventListener('click', async () => {
+        const info = await loadBuffer(url).catch(() => null);
+        if (info) playUrl(url, cardGain[s.id], seamBtn, { loop: true, offset: Math.max(0, info.buf.duration - 1.5) });
+      });
       el.querySelector('.trimbtn').addEventListener('click', () => toggleTrimmer(s, c, url, el));
       el.querySelector('.use').addEventListener('click', async () => {
         if (await api('choose', { slot: s.id, file: c.file, gain: cardGain[s.id] })) { say(`${s.id} <- ${c.file}`); refresh(); }
