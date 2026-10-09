@@ -78,7 +78,7 @@
   },
   "ambience": {
     "file": "ambience.wav",
-    "gain": 0.2,
+    "gain": 0.5,
     "source": "269867__arnaud-coutancier__bubbles trim (2).wav"
   }
 }

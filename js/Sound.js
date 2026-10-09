@@ -312,7 +312,7 @@ export function startGameMusic() {
 // ---- Water ambience loop ----
 // Per direct request, a quiet looping water track under the whole game, picked in tools/sfx (the
 // manifest's "ambience" entry) and played as a looping AudioBufferSource — unlike an <audio loop>,
-// that wraps with no gap. Started with the game music (Start/Continue); if the file hasn't finished
+// that wraps with no gap. Started with the main-menu music and kept running into the game (startAmbience is a no-op once playing); if the file hasn't finished
 // decoding by then, loadSampleSfx calls startAmbience again the moment it has.
 let ambienceWanted = false;
 let ambienceSource = null;
@@ -358,6 +358,7 @@ let menuLoopGain = null;
 export function startMenuMusic() {
   menuMusicWanted = true;
   if (!ensureContext()) return;
+  startAmbience(); // per direct request, the water ambience also plays under the start menu and just keeps going into the game
   tryStartMenuMusic();
 }
 
