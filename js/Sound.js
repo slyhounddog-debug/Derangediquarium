@@ -633,7 +633,7 @@ export function playCoinBank(isDiamond = false) {
 // confirmed" feel. Keeps the same low, chunky square-wave mechanical
 // character (still distinct from playPurchase's own brighter, higher fish
 // blip) but climbs up a fourth instead of dropping a fifth — the same
-// "rising pitch reads as a good outcome" language playPurchase/playUpgrade
+// "rising pitch reads as a good outcome" language playPurchase/playUnlock
 // already use elsewhere in this file.
 // Per direct request, softened and quieter: triangle waves with a gentle
 // attack/release instead of harsh squares, at roughly half the old volume.
@@ -678,21 +678,21 @@ export function playDemolish() {
   playTone(130, 0.08, { type: 'sawtooth', gain: 0.08, when: 0.02 });
 }
 
-// A rising 4-note arpeggio — buying a Tank Upgrade.
-export function playUpgrade() {
-  if (sfxOnCooldown('playUpgrade')) return;
-  const notes = [392, 523.25, 659.25, 783.99]; // G4, C5, E5, G5
-  notes.forEach((freq, i) => playTone(freq, 0.09, { type: 'square', gain: 0.14, when: i * 0.07 }));
-}
-
-// Unlocking something from the Mound or the Science Lab — per direct request its own sound, separate from
-// playUpgrade (which Tank Upgrade/achievement/hat purchases still use). Falls back to the same arpeggio
-// until a recording is picked in tools/sfx.
+// Unlocking or buying something from the Mound, the Science Lab, or the Tank Upgrades window (its upgrades,
+// achievement claims and hats) — per direct request one shared sound. Falls back to a rising 4-note arpeggio
+// until/unless a recording is picked in tools/sfx.
 export function playUnlock() {
   if (sfxOnCooldown('playUnlock')) return;
   if (playSample('playUnlock')) return;
   const notes = [392, 523.25, 659.25, 783.99]; // G4, C5, E5, G5
   notes.forEach((freq, i) => playTone(freq, 0.09, { type: 'square', gain: 0.14, when: i * 0.07 }));
+}
+
+// A new chat/notification message arrived — UI.js's updateNotificationTicker. Sample only; the longer
+// cooldown keeps a burst of messages from machine-gunning.
+export function playChatMessage() {
+  if (sfxOnCooldown('playChatMessage', 250)) return;
+  playSample('chatMessage');
 }
 
 // A clear "denied" buzz — attempting to buy something (Food, a fish, a

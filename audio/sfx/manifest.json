@@ -95,5 +95,10 @@
     "file": "playUnlock.wav",
     "gain": 0.35,
     "source": "646672__sounddesignforyou__coin-pickup-sfx-2 trim.wav"
+  },
+  "chatMessage": {
+    "file": "chatMessage.wav",
+    "gain": 1.25,
+    "source": "583554__thehorriblejoke__notification-sound trim (2).wav"
   }
 }

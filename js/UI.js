@@ -113,7 +113,7 @@ import {
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
 import { drawFish } from './FishRenderer.js';
-import { playUpgrade, playUnlock, setMusicVolume, setSfxVolume, setAmbienceVolume, getMusicVolume, getSfxVolume, getAmbienceVolume, playPanelOpen, playPanelClose, playInsufficientFunds, playUiHover, playUiSelect, playUiDeselect, setMusicUnderwaterMuffle, setMusicSpeedBoost, setMusicPaused } from './Sound.js';
+import { playUnlock, playChatMessage, setMusicVolume, setSfxVolume, setAmbienceVolume, getMusicVolume, getSfxVolume, getAmbienceVolume, playPanelOpen, playPanelClose, playInsufficientFunds, playUiHover, playUiSelect, playUiDeselect, setMusicUnderwaterMuffle, setMusicSpeedBoost, setMusicPaused } from './Sound.js';
 import { computeProductionInfo } from './ProductionInfo.js';
 import { hasSaveGame, saveGame, loadSaveGame, clearSaveGame, isGuidedTutorialsEnabled, setGuidedTutorialsEnabled } from './Save.js';
 import { pushGameNotification } from './Notifications.js';
@@ -186,6 +186,7 @@ let lastScienceCapCount = null; // previous frame's live Science Flask count, to
 let notificationLogExpanded = false;
 let lastRenderedNotificationCount = -1; // rebuild the log list only when it actually changes, not every frame
 let lastPillNotificationCount = null; // separate from the above — tracks the pill's own bounce/shimmer trigger regardless of whether the log is expanded; null means "not yet initialized," so the very first real notification on page load doesn't bounce
+let lastPillNotificationEntry = null;
 let moundMenuOpen = false;
 let moundMenuClosing = false; // true while the shrink-back transition is still playing, before it's actually hidden
 let moundMenuCloseTimer = null;
@@ -399,7 +400,7 @@ const UI_HOVER_SELECTOR = [
 ].join(',');
 
 // Tank menu clicks (per direct request): the three tabs and a hat card's body. The buy/equip and Claim
-// buttons already have playUpgrade, so they are deliberately left out rather than doubled up.
+// buttons already have playUnlock, so they are deliberately left out rather than doubled up.
 const TANK_SELECT_TABS = '#tank-tab-upgrades,#tank-tab-achievements,#tank-tab-customization';
 function initTankMenuSelectSound() {
   document.addEventListener('click', (e) => {
@@ -1116,6 +1117,7 @@ export function toggleAltMode(state) {
 // freeze the sim (state.ui.paused) — it's a lightweight decision popup, not
 // a full pause state, same as the shop staying live while open.
 export function openMoundMenu(state) {
+  if (!moundMenuOpen) playPanelOpen(); // same open sound every other window uses, per direct request
   moundMenuOpen = true;
   moundMenuClosing = false;
   if (moundMenuCloseTimer !== null) { clearTimeout(moundMenuCloseTimer); moundMenuCloseTimer = null; }
@@ -1136,6 +1138,7 @@ export function openMoundMenu(state) {
 // vanishing instantly.
 export function closeMoundMenu() {
   if (!moundMenuOpen) return;
+  playPanelClose();
   moundMenuOpen = false;
   moundMenuClosing = true;
   els.moundMenu.classList.add('mound-menu-closed');
@@ -2372,7 +2375,7 @@ function buyLabUpgrade(state, id) {
   if (node.grants.scienceCapLevel) {
     state.level.upgrades.scienceCapLevel += node.grants.scienceCapLevel;
   }
-  playUnlock(); // Science Lab unlocks have their own sound now; Tank Upgrade purchases still use playUpgrade
+  playUnlock(); // Mound, Science Lab, Tank Upgrade, achievement and hat purchases all share the unlock sound
   // Mother Alien Fish, per direct spec — triggers the whole 10-second
   // end-game reveal sequence. Closes the Lab itself right here (UI.js
   // already owns closeLabMenu), then hands off to main.js via a cross-module
@@ -4025,7 +4028,7 @@ function buildTankPanel(state) {
     if (state.level.tankPoints.available < cost) return;
     state.level.tankPoints.available -= cost;
     state.level.upgrades.foodQuality += 1;
-    playUpgrade();
+    playUnlock();
     refreshTankPanel(state);
   });
   fishMovement.buyBtn.addEventListener('click', () => {
@@ -4035,7 +4038,7 @@ function buildTankPanel(state) {
     if (state.level.tankPoints.available < cost) return;
     state.level.tankPoints.available -= cost;
     state.level.upgrades.fishMovement += 1;
-    playUpgrade();
+    playUnlock();
     refreshTankPanel(state);
   });
   // A 5-tier leveled ladder, same shape as Food Quality/Fish Movement above —
@@ -4051,7 +4054,7 @@ function buildTankPanel(state) {
     if (state.level.tankPoints.available < cost) return;
     state.level.tankPoints.available -= cost;
     state.level.upgrades.tankExpansionTier += 1;
-    playUpgrade();
+    playUnlock();
     refreshTankPanel(state);
   });
   // Bottom-of-the-list 5-level ladder, per direct request — see Config.js's
@@ -4064,7 +4067,7 @@ function buildTankPanel(state) {
     if (state.level.tankPoints.available < cost) return;
     state.level.tankPoints.available -= cost;
     state.level.upgrades.fishHealth += 1;
-    playUpgrade();
+    playUnlock();
     refreshTankPanel(state);
   });
 
@@ -4535,7 +4538,7 @@ function claimAchievement(state, id) {
   const achievement = ACHIEVEMENTS[id];
   state.meta.achievementsClaimed.push(id);
   state.meta.fishyGems += ACHIEVEMENT_GEM_REWARD_BY_TIER[achievement.tier];
-  playUpgrade();
+  playUnlock();
   // Per direct request ("claiming currently just updates the panel
   // silently... a small confetti burst or flash on the card would make it
   // feel more rewarding") — see celebrateAchievementClaim below.
@@ -4702,7 +4705,7 @@ function buyOrEquipHat(state, id) {
   if (owned) {
     state.meta.equippedHatId = id;
     state.ui.customizationPreviewHatId = id;
-    playUpgrade();
+    playUnlock();
     refreshCustomizationPanel(state);
     return;
   }
@@ -4712,7 +4715,7 @@ function buyOrEquipHat(state, id) {
   state.meta.hatsUnlocked.push(id);
   state.meta.equippedHatId = id; // buying a hat also wears it immediately — no reason to make that a separate click
   state.ui.customizationPreviewHatId = id;
-  playUpgrade();
+  playUnlock();
   refreshCustomizationPanel(state);
 }
 
@@ -6556,13 +6559,20 @@ export function updateNotificationTicker(state) {
   // periodic "keep bouncing every 3-6s until the log is opened" reminder
   // loop (scheduleNotificationReminder/notificationUnread) is removed
   // entirely rather than just suppressed, since nothing else ever needs it.
-  if (lastPillNotificationCount !== null && notifications.length !== lastPillNotificationCount) {
+  // Compared by the newest entry itself (not the log length) so a new message still registers once the log
+  // is full and the oldest entries are being dropped.
+  const newestNotification = notifications.length ? notifications[notifications.length - 1] : null;
+  if (lastPillNotificationCount !== null && newestNotification !== lastPillNotificationEntry) {
+    // Per direct request, a sound for a new chat message — but not for a whole saved log appearing at once
+    // when a save is loaded: a fresh message was posted within the last moment of game time.
+    if (newestNotification && state.level.elapsed - newestNotification.elapsed < 1500) playChatMessage();
     playFlash(els.notificationLatest, 'bounce-play');
     els.notificationLatest.classList.remove('sheen-play');
     void els.notificationLatest.offsetWidth;
     els.notificationLatest.classList.add('sheen-play');
   }
   lastPillNotificationCount = notifications.length;
+  lastPillNotificationEntry = newestNotification;
 
   if (!notificationLogExpanded || notifications.length === lastRenderedNotificationCount) return;
   lastRenderedNotificationCount = notifications.length;

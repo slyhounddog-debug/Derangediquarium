@@ -197,10 +197,10 @@
   },
   {
     "id": "playUnlock",
-    "label": "Unlock something (Mound / Science Lab)",
+    "label": "Unlock / buy an upgrade",
     "synth": true,
     "want": "A rewarding \"you unlocked something\" sound",
-    "plays": "When you buy a Mound crack or a Science Lab node (including the end-game one). Rare, so it can be bigger and more celebratory than the other sounds. Tank Upgrade purchases keep their own current sound. Until you pick a file, the old rising-arpeggio synth plays.",
+    "plays": "When you buy a Mound crack, a Science Lab node, a Tank Upgrade, an achievement Claim, or a hat (buy or equip). Fairly rare, so it can be bigger and more celebratory than the other sounds. Until you pick a file, a rising-arpeggio synth plays.",
     "search": [
       "unlock",
       "magical chime soft",
@@ -208,6 +208,20 @@
       "upgrade unlock gentle",
       "treasure open",
       "water sparkle"
+    ]
+  },
+  {
+    "id": "chatMessage",
+    "label": "New chat message (new)",
+    "synth": false,
+    "want": "A soft notification sound",
+    "plays": "When a new message arrives in the chat. Messages are fairly rare but can come in a cluster, so keep it short and gentle (the game also limits it to one per quarter second).",
+    "search": [
+      "soft notification",
+      "bubble notification",
+      "gentle message ping",
+      "water drop notification",
+      "subtle chat alert"
     ]
   },
   {
