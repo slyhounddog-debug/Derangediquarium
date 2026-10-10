@@ -97,7 +97,7 @@ import {
   MAGNET_FISH_FILTER_ITEM_TYPES,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings, loadLevel } from './Levels.js';
-import { makeWorldSettings, applyWorldSettings, isWorldModified, worldSettingsLabel } from './WorldSettings.js';
+import { makeWorldSettings, applyWorldSettings, isWorldModified, isRunTainted, worldSettingsLabel } from './WorldSettings.js';
 import { initWorldSettingsUI, worldDraftValues, openWorldSettingsForSave } from './WorldSettingsUI.js';
 import {
   getFishPurchaseCost, effectiveScienceCapacity, countTankItemsByType, resolveMergeTutorialPair,
@@ -2989,9 +2989,9 @@ export function initStartScreen(state, onStart) {
       } else {
         const modified = isWorldModified(summary.worldSettings);
         const chip = document.createElement('span');
-        chip.className = 'slot-chip' + (modified ? ' modified' : '');
-        chip.textContent = modified ? `⚠ ${worldSettingsLabel(summary.worldSettings)}` : 'Normal';
-        chip.title = modified ? 'Modified world — no achievements' : 'Unmodified world';
+        chip.className = 'slot-chip' + (modified || summary.worldEverModified ? ' modified' : '');
+        chip.textContent = modified ? `⚠ ${worldSettingsLabel(summary.worldSettings)}` : (summary.worldEverModified ? '⚠ Normal (was modified)' : 'Normal');
+        chip.title = modified ? 'Modified world — no achievements' : (summary.worldEverModified ? 'These settings are Normal now, but this save was modified before — achievements stay disabled on it' : 'Unmodified world');
         title.append(chip);
         detail.textContent = `💰 $${summary.money.toLocaleString('en-US')}  ·  🐟 ${summary.fishCount} fish  ·  ⏱ ${fmtPlayTime(summary.playMs)}`;
         const when = summary.savedAtMs ? new Date(summary.savedAtMs).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'earlier';
@@ -3013,6 +3013,7 @@ export function initStartScreen(state, onStart) {
           openWorldSettingsForSave({
             label: `Slot ${slot}`,
             worldSettings: summary.worldSettings,
+            everModified: summary.worldEverModified || isWorldModified(summary.worldSettings),
             onSave: (ws) => {
               setSaveWorldSettings(slot, ws);
               renderSaveSlots();
@@ -3119,6 +3120,7 @@ export function initStartScreen(state, onStart) {
     setGuidedTutorialsEnabled(pendingGuided);
     // Per direct request, this run's World Settings (undefined = Normal) live in state.meta so they save/load with the run.
     state.meta.worldSettings = makeWorldSettings(worldDraftValues());
+    if (isWorldModified(state.meta.worldSettings)) state.meta.worldEverModified = true; // permanent mark — see WorldSettings.js isRunTainted
     applyWorldSettings(state.meta.worldSettings);
     if (isWorldModified(state.meta.worldSettings)) {
       // The level was built at boot with Normal rules (starting money etc.) — rebuild it the way restartLevel does.
@@ -4792,7 +4794,13 @@ function refreshAchievementPanel(state) {
   }
   setText(els.achievementGemsDisplay, `💎 ${state.meta.fishyGems}`);
   // Per direct request, modified World Settings runs can't earn achievements — say so right here too.
-  els.achievementsModifiedNote.classList.toggle('hidden', !isWorldModified(state.meta.worldSettings));
+  const tainted = isRunTainted(state.meta);
+  els.achievementsModifiedNote.classList.toggle('hidden', !tainted);
+  if (tainted) {
+    els.achievementsModifiedNote.textContent = isWorldModified(state.meta.worldSettings)
+      ? '⚠ This run uses modified World Settings — achievements and Fishy Gems are disabled.'
+      : '⚠ This save has used modified World Settings — achievements and Fishy Gems stay disabled on it for good.';
+  }
 }
 
 // ---- Customization (hats) ----

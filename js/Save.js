@@ -357,6 +357,7 @@ export function getSaveSummary(slot) {
       playMs: level.elapsed || 0,
       achievements: Array.isArray(parsed.meta.achievementsUnlocked) ? parsed.meta.achievementsUnlocked.length : 0,
       worldSettings: parsed.meta.worldSettings,
+      worldEverModified: !!parsed.meta.worldEverModified,
     };
   } catch {
     return { corrupt: true };
@@ -374,6 +375,8 @@ export function setSaveWorldSettings(slot, worldSettings) {
     if (!parsed || !parsed.meta) return false;
     if (worldSettings) parsed.meta.worldSettings = worldSettings;
     else delete parsed.meta.worldSettings;
+    // Permanent: once a save has been modified, going back to Normal never re-enables its achievements.
+    if (worldSettings && Object.keys(worldSettings.values || {}).length) parsed.meta.worldEverModified = true;
     localStorage.setItem(saveKey(slot), JSON.stringify(parsed));
     return true;
   } catch {

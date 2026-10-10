@@ -594,8 +594,9 @@ function updateAchievements(state) {
   }
   if (scienceCount > state.meta.stats.sciencePeakOnScreen) state.meta.stats.sciencePeakOnScreen = scienceCount;
 
-  // Per direct request, a run with modified World Settings can't earn achievements (stats above still tick, nothing unlocks).
-  if (isWorldModified(state.meta.worldSettings)) return;
+  // Per direct request, a save that has ever had modified World Settings can't earn achievements (stats above still tick, nothing unlocks).
+  if (isWorldModified(state.meta.worldSettings)) state.meta.worldEverModified = true; // permanent, per direct request: even back at Normal later, this save never earns achievements
+  if (state.meta.worldEverModified) return;
 
   // The generic evaluator — every achievement not already unlocked gets a
   // fresh check against its own stat field every tick; the moment one

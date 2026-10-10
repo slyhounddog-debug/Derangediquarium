@@ -41,12 +41,18 @@ function refreshAll() {
   const d = draft();
   const preset = matchingPreset(d);
   const modified = worldDraftModified();
-  els.banner.classList.toggle('modified', modified);
-  els.banner.classList.toggle('normal', !modified);
-  els.bannerIcon.textContent = modified ? '⚠' : '✔';
-  els.bannerText.innerHTML = modified
-    ? '<b>Modified world</b> — Achievements and Fishy Gems are <b>disabled</b> for this run.'
-    : '<b>Normal world</b> — Achievements and Fishy Gems can be earned.';
+  // Per direct request: a save that was ever modified never earns achievements again, even set back to Normal.
+  const locked = modified || (editing && editing.everModified);
+  els.banner.classList.toggle('modified', !!locked);
+  els.banner.classList.toggle('normal', !locked);
+  els.bannerIcon.textContent = locked ? '⚠' : '✔';
+  els.bannerText.innerHTML = editing && editing.everModified
+    ? '<b>This save has been modified</b> — Achievements and Fishy Gems stay <b>disabled</b> on it permanently, even if you set everything back to Normal.'
+    : modified
+      ? (editing
+        ? '<b>Modified world</b> — saving this makes achievements and Fishy Gems <b>permanently disabled</b> on this save, even if you set it back to Normal later.'
+        : '<b>Modified world</b> — Achievements and Fishy Gems are <b>disabled</b> for this run (permanently for this save).')
+      : '<b>Normal world</b> — Achievements and Fishy Gems can be earned.';
   for (const btn of els.presetBtns) btn.classList.toggle('selected', btn.dataset.preset === preset);
   els.customChip.classList.toggle('hidden', preset !== 'custom');
   els.presetDesc.textContent = preset === 'custom' ? 'Your own mix of settings.' : WORLD_PRESETS[preset].desc;
@@ -130,8 +136,8 @@ export function closeWorldSettings() {
   playPanelClose();
 }
 // Per direct request: edit the World Settings of a saved game. onSave receives the new world (undefined = Normal).
-export function openWorldSettingsForSave({ label, worldSettings, onSave }) {
-  editing = { values: worldValues(worldSettings), onSave };
+export function openWorldSettingsForSave({ label, worldSettings, everModified, onSave }) {
+  editing = { values: worldValues(worldSettings), onSave, everModified: !!everModified };
   els.title.textContent = `🌍 World Settings — ${label}`;
   els.doneBtn.textContent = 'Save changes';
   openWorldSettings();

@@ -186,6 +186,13 @@ export function isWorldModified(ws) {
   const v = worldValues(ws);
   return WORLD_RULES.some((r) => isRuleModified(r, v[r.id]));
 }
+// Per direct request, a save that has EVER had modified World Settings can never earn achievements again — setting
+// everything back to Normal does not undo it. meta.worldEverModified is the permanent mark (set when a modified world
+// is started or loaded, or when a modified world is saved into a slot from the Load Game screen); this is the one
+// question every "may this save earn achievements?" check asks.
+export function isRunTainted(meta) {
+  return !!(meta && (meta.worldEverModified || isWorldModified(meta.worldSettings)));
+}
 // Which preset (if any) a values map matches exactly — 'custom' otherwise.
 export function matchingPreset(values) {
   for (const [id] of Object.entries(WORLD_PRESETS)) {
