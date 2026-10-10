@@ -21,13 +21,13 @@
   },
   "playTurretShoot": {
     "file": "playTurretShoot.wav",
-    "gain": 1.3,
+    "gain": 2.05,
     "source": "634317__adhdreaming__flutter-laser trim.wav"
   },
   "playAlienHit": {
     "file": "playAlienHit.wav",
-    "gain": 1,
-    "source": "330245__deleted_user_2104797__rubber-squeeze-2 trim.wav"
+    "gain": 0.2,
+    "source": "50553__broumbroum__hit-mid trim.wav"
   },
   "playCoinBank": {
     "file": "playCoinBank.wav",
@@ -68,17 +68,17 @@
   },
   "uiSelect": {
     "file": "uiSelect.wav",
-    "gain": 1.3,
+    "gain": 1.75,
     "source": "776443__chaferwitt__pop-out-bubble-soft-bursting trim.wav"
   },
   "uiDeselect": {
     "file": "uiDeselect.wav",
-    "gain": 0.35,
+    "gain": 0.45,
     "source": "433649__dersuperanton__plopp-bubble-popping trim.wav"
   },
   "ambience": {
     "file": "ambience.wav",
-    "gain": 0.5,
+    "gain": 0.7,
     "source": "269867__arnaud-coutancier__bubbles trim (4).wav"
   },
   "finSanity": {
@@ -88,22 +88,22 @@
   },
   "playBuildDrop": {
     "gainOnly": true,
-    "gain": 2.75,
+    "gain": 3,
     "source": "Drop.mp3"
   },
   "playUnlock": {
     "file": "playUnlock.wav",
-    "gain": 0.35,
+    "gain": 0.45,
     "source": "646672__sounddesignforyou__coin-pickup-sfx-2 trim.wav"
   },
   "chatMessage": {
     "file": "chatMessage.wav",
-    "gain": 2,
+    "gain": 2.75,
     "source": "583554__thehorriblejoke__notification-sound trim (2).wav"
   },
   "playFishKilledByAlien": {
     "file": "playFishKilledByAlien.wav",
-    "gain": 0.75,
+    "gain": 0.65,
     "source": "a_cute_game_with40 trim.wav"
   },
   "playFishDeath": {
@@ -113,7 +113,7 @@
   },
   "playInsufficientFunds": {
     "file": "playInsufficientFunds.wav",
-    "gain": 1.5,
+    "gain": 1.85,
     "source": "643139__joelleohworld__boop trim.wav"
   }
 }

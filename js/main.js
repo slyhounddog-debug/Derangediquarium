@@ -3326,8 +3326,8 @@ input.clickHandlers.push((sx, sy) => {
     // like the building modal"). A toggle-capable fish's click is deferred
     // through the double-click check above instead, and only ever reaches
     // openFishInfoMenu through ITS OWN timeout, never through this line.
-    // Per direct request, the food tool prevents opening fish modals.
-    if (clickedFish && effectiveTool !== 'food') { openFishInfoMenu(state, clickedFish.id); return; }
+    // Per direct request, fish modals only open with nothing armed on the cursor — not with Food, a shop fish, a building or a Blueprint selected.
+    if (clickedFish && effectiveTool === 'cursor') { openFishInfoMenu(state, clickedFish.id); return; }
   }
   // Per direct request ("the default cursor CANNOT drop food. The food tool
   // has to be selected to drop food") — this is the ONE and only place Food
