@@ -284,6 +284,9 @@ export async function listTuning() {
     hatCount: Object.keys(runtime.HATS).filter((k) => k !== 'none').length,
     speciesNames: Object.fromEntries(Object.entries(runtime.SPECIES).map(([k, s]) => [k, s.name])),
     speciesBehavior: Object.fromEntries(Object.entries(runtime.SPECIES).map(([k, s]) => [k, s.behavior])),
+    // The game's own wastePoopIntervalMultiplier for each species — Dartfin's is written as a sum of divisions, not a plain
+    // number, so it is not an editable variable; the Formulas tab reads it from here instead.
+    speciesWasteIntervalMultiplier: Object.fromEntries(Object.entries(runtime.SPECIES).map(([k, s]) => [k, s.wastePoopIntervalMultiplier || 1])),
     stageCounts: Object.fromEntries(Object.entries(runtime.SPECIES).map(([k, s]) => [k, s.growthStages.length])),
     archetypeNames: runtime.ALIEN_ARCHETYPES.map((a) => a.name),
     tileIds: Object.fromEntries(Object.entries(runtime).filter(([k, v]) => /^TILE_/.test(k) && typeof v === 'string')),

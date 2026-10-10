@@ -48,6 +48,16 @@ import {
   WASTE_SWAY_AMPLITUDE,
   WASTE_SWAY_FREQUENCY,
   COIN_TIERS,
+  DARTFIN_SCHOOL_MAX_SIZE,
+  DARTFIN_SCHOOL_MAX_COIN_MULTIPLIER,
+  DARTFIN_SCHOOL_MAX_WASTE_MULTIPLIER,
+  DARTFIN_SCHOOL_PULL_CHANCE,
+  DARTFIN_SCHOOL_LOOSE_RADIUS_PX,
+  DARTFIN_SCHOOL_PULL_WOBBLE_RAD,
+  BLIMPFISH_COIN_APPRECIATION_MS,
+  BLIMPFISH_COIN_START_FRACTION,
+  BLIMPFISH_COIN_END_FRACTION,
+  APPRECIATE_PULSE_MS,
   PICKUP_TEXT_LIFETIME_MS,
   PICKUP_TEXT_RISE_SPEED,
   FISH_SEEK_SPEED_MULTIPLIER,
@@ -294,6 +304,59 @@ function cleanlinessMoneyMultiplier(state) {
   return CLEANLINESS_MIN_MONEY_FRACTION + cleanFraction * (1 - CLEANLINESS_MIN_MONEY_FRACTION);
 }
 
+// ---- Dartfin schooling (see Config.js's DARTFIN_SCHOOL_*) ----
+// How many Dartfin are alive and where their centre is, counted in ONE pass
+// over the entity list and then reused by every Dartfin that asks this tick.
+// `state.level.entities` is replaced by a fresh array at the end of every
+// updateEntities pass, so the array's identity is the cache key: no per-tick
+// reset, no stored state to save, and a tank with no Dartfin never pays for
+// the scan at all (only a schooling species calls this).
+const dartfinSchool = { entities: null, count: 0, sumX: 0, sumY: 0 };
+function getDartfinSchool(state) {
+  const entities = state.level.entities;
+  if (dartfinSchool.entities === entities) return dartfinSchool;
+  let count = 0, sumX = 0, sumY = 0;
+  for (let i = 0; i < entities.length; i++) {
+    const e = entities[i];
+    if (e.type !== 'fish' || e.dying || !SPECIES[e.speciesId].schooling) continue;
+    count++;
+    sumX += e.x;
+    sumY += e.y;
+  }
+  dartfinSchool.entities = entities;
+  dartfinSchool.count = count;
+  dartfinSchool.sumX = sumX;
+  dartfinSchool.sumY = sumY;
+  return dartfinSchool;
+}
+
+export function dartfinSchoolCount(state) {
+  return getDartfinSchool(state).count;
+}
+
+// 0 for a lone Dartfin, 1 at DARTFIN_SCHOOL_MAX_SIZE or more — the linear
+// "how full is the school" fraction both bonuses below ride on.
+export function dartfinSchoolFraction(state) {
+  const count = getDartfinSchool(state).count;
+  return count <= 1 ? 0 : Math.min(1, (count - 1) / (DARTFIN_SCHOOL_MAX_SIZE - 1));
+}
+
+// Coin-value multiplier for this species: 1 for everything but a schooling
+// fish, up to DARTFIN_SCHOOL_MAX_COIN_MULTIPLIER for a full school.
+export function schoolCoinMultiplier(state, def) {
+  if (!def.schooling) return 1;
+  return 1 + (DARTFIN_SCHOOL_MAX_COIN_MULTIPLIER - 1) * dartfinSchoolFraction(state);
+}
+
+// The Waste poop interval for this species — the flat global interval times
+// its own multiplier, stretched for a schooling fish so a full school makes
+// DARTFIN_SCHOOL_MAX_WASTE_MULTIPLIER of the normal amount of Waste.
+export function fishPoopIntervalMs(state, def) {
+  const base = WASTE_POOP_INTERVAL_MS * (def.wastePoopIntervalMultiplier || 1);
+  if (!def.schooling) return base;
+  return base / (1 - (1 - DARTFIN_SCHOOL_MAX_WASTE_MULTIPLIER) * dartfinSchoolFraction(state));
+}
+
 // The tank's current THEORETICAL max gold/min — "theoretical" because it
 // deliberately ignores the Coin Cap entirely (a fish still counts in full
 // even if a real drop would currently be blocked by an already-full cap) —
@@ -321,7 +384,7 @@ export function computeTheoreticalGoldPerMinute(state) {
     const mutagenMultiplier = fish.mutagenBuffActive ? MUTAGEN_PASTE_COIN_MULTIPLIER : 1;
     const dropValue = (fish.dropValueOverride != null
       ? fish.dropValueOverride
-      : stageDef.dropValue * Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, (fish.starTier || 1) - 1)) * mutagenMultiplier * moneyMultiplier;
+      : stageDef.dropValue * Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, (fish.starTier || 1) - 1)) * mutagenMultiplier * moneyMultiplier * schoolCoinMultiplier(state, def);
     total += (dropValue / stageDef.dropInterval) * 60000;
   }
   return total;
@@ -409,7 +472,7 @@ export function computeTheoreticalWastePerMinute(state) {
     if (fish.type !== 'fish' || fish.dying) continue;
     const def = SPECIES[fish.speciesId];
     if (def.behavior.includes('SCAVENGER')) continue;
-    const interval = WASTE_POOP_INTERVAL_MS * (def.wastePoopIntervalMultiplier || 1);
+    const interval = fishPoopIntervalMs(state, def);
     total += 60000 / interval;
   }
   return total;
@@ -466,7 +529,7 @@ export function computeFishInfoModalStats(state, fish) {
       const mutagenMultiplier = fish.mutagenBuffActive ? MUTAGEN_PASTE_COIN_MULTIPLIER : 1;
       const baseDropValue = (fish.dropValueOverride != null
         ? fish.dropValueOverride
-        : stageDef.dropValue * Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, (fish.starTier || 1) - 1)) * mutagenMultiplier;
+        : stageDef.dropValue * Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, (fish.starTier || 1) - 1)) * mutagenMultiplier * schoolCoinMultiplier(state, def);
       const cleanRate = (baseDropValue / stageDef.dropInterval) * 60000;
       goldPerMin = cleanRate * cleanlinessMoneyMultiplier(state);
       goldPenaltyPerMin = cleanRate - goldPerMin;
@@ -485,7 +548,7 @@ export function computeFishInfoModalStats(state, fish) {
   if (isScavenger) {
     wasteEatenPerMin = 60000 / stageDef.dropInterval;
   } else {
-    const interval = WASTE_POOP_INTERVAL_MS * (def.wastePoopIntervalMultiplier || 1);
+    const interval = fishPoopIntervalMs(state, def);
     wastePerMin = 60000 / interval;
   }
 
@@ -616,6 +679,110 @@ export function createCoin(x, y, value) {
     spinTargetRad: 0, // how far (in radians) the CURRENT spin burst's rotation phase goes before it stops, 0 while not actively rotating
     spinSettleMs: 0, // counts down during the brief "ease back to normal" phase right after a spin's rotation ends, 0 the rest of the time — see updateCoinSpin's own comment
   };
+}
+
+// A Blimpfish coin (def.appreciatingCoin): born worth START_FRACTION of
+// `normalValue` (the value the drop would normally have had) and grown toward
+// END_FRACTION of it by appreciateCoin below. `apprActive` is the only thing
+// that makes a coin ripen, so every other coin — and every coin from an older
+// save — is untouched, and the per-tick cost for them is one falsy check.
+function createAppreciatingCoin(x, y, normalValue) {
+  const coin = createCoin(x, y, Math.max(1, Math.round(normalValue * BLIMPFISH_COIN_START_FRACTION)));
+  coin.apprActive = true; // still ripening (drives the in-pulling particles)
+  coin.apprBase = normalValue;
+  coin.apprAgeMs = 0;
+  coin.apprPulseMs = 0; // counts down after each +value tick (drives the ring pulse)
+  ripeningCoins.push(coin);
+  return coin;
+}
+
+// The coins currently ripening (or still showing their last pulse). Stepped
+// by stepRipeningCoins, so the thousand-odd ordinary coins in a busy tank are
+// never visited — a per-coin "is this one ripening?" check inside the hot
+// item loop measurably slowed the whole simulation step (about 1.5% on the
+// 1000-item stress save), while this loop only ever touches a handful.
+// Module-level, not saved: ripeningLevel remembers which state.level it was
+// built for, and rebuilds from the coins' own saved fields when that changes
+// (a loaded save, a new level).
+const ripeningCoins = [];
+let ripeningLevel = null;
+
+// Is this coin still in the world? Item ids only ever grow, so state.level.items
+// is ordered by id and a binary search answers almost instantly; if it misses
+// (the coin really is gone — clicked, taken into a chest — or an old save left
+// the order odd) one linear pass settles it for certain.
+function coinStillInWorld(items, coin) {
+  let lo = 0, hi = items.length - 1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const midItem = items[mid];
+    if (midItem === coin) return true;
+    if (midItem.id < coin.id) lo = mid + 1; else hi = mid - 1;
+  }
+  return items.indexOf(coin) !== -1;
+}
+
+// For main.js's render pass: the coins that need their ripening overlay drawn.
+export function getRipeningCoins() {
+  return ripeningCoins;
+}
+
+function stepRipeningCoins(state, dtMs) {
+  if (ripeningLevel !== state.level) {
+    ripeningLevel = state.level;
+    ripeningCoins.length = 0;
+    for (const item of state.level.items) {
+      if (item.type === 'coin' && (item.apprActive || item.apprPulseMs > 0)) ripeningCoins.push(item);
+    }
+  }
+  if (ripeningCoins.length === 0) return;
+  const items = state.level.items;
+  let kept = 0;
+  for (let i = 0; i < ripeningCoins.length; i++) {
+    const coin = ripeningCoins[i];
+    if (!coinStillInWorld(items, coin)) continue;
+    appreciateCoin(coin, state, dtMs);
+    if (coin.apprActive || coin.apprPulseMs > 0) ripeningCoins[kept++] = coin;
+  }
+  ripeningCoins.length = kept;
+}
+
+// What a fish's coin drop creates: its species' special coin if it has one,
+// otherwise the plain coin.
+function createFishCoin(def, x, y, value) {
+  return def.appreciatingCoin ? createAppreciatingCoin(x, y, value) : createCoin(x, y, value);
+}
+
+// Ripens one Blimpfish coin: linear from START to END fraction of its normal
+// value over BLIMPFISH_COIN_APPRECIATION_MS. All the work is a few
+// multiplies; the tier lookup, collision wake-up and sparkle only run on the
+// rare tick the whole-dollar value actually changes. The coin keeps ripening
+// wherever it is — falling, resting, or held by a Collector (which reads
+// item.value when it finishes banking it).
+function appreciateCoin(item, state, dtMs) {
+  if (item.apprPulseMs > 0) item.apprPulseMs = Math.max(0, item.apprPulseMs - dtMs);
+  if (!item.apprActive) return;
+  item.apprAgeMs += dtMs;
+  const t = Math.min(1, item.apprAgeMs / BLIMPFISH_COIN_APPRECIATION_MS);
+  const value = Math.max(1, Math.round(item.apprBase * (BLIMPFISH_COIN_START_FRACTION + (BLIMPFISH_COIN_END_FRACTION - BLIMPFISH_COIN_START_FRACTION) * t)));
+  if (value !== item.value) {
+    const oldTier = getCoinTier(item.value);
+    item.value = value;
+    item.apprPulseMs = APPRECIATE_PULSE_MS;
+    const tier = getCoinTier(value);
+    if (tier !== oldTier) {
+      // Crossed into a new coin type (bronze -> silver -> gold -> diamond):
+      // swap to that tier's size/weight, wake the coin so the item collision
+      // pass can nudge it off any neighbour the extra size now overlaps, and
+      // play the same small sparkle burst a banked coin gets.
+      item.radius = COIN_RADIUS * tier.sizeMultiplier;
+      item.mass = ITEM_MASS_BY_TYPE.coin * tier.massMultiplier;
+      item.sleeping = false;
+      item.restTicks = 0;
+      state.level.coinSparkleEffects.push({ x: item.x, y: item.y, age: 0 });
+    }
+  }
+  if (t >= 1) item.apprActive = false; // fully ripe — the particles stop
 }
 
 // Byproduct of a basic (unpowered) Collector consuming an item — see
@@ -2373,6 +2540,7 @@ function updateCoinSpin(item, dtMs) {
 }
 
 function updateCoin(item, state, dtMs) {
+
   // A coin currently riding a Sea Turtle's back (item.seaTurtleAttached) is
   // entirely exempt from gravity/physics — per direct request, "isn't
   // affected by gravity" — main.js's updateSeaTurtle drives its x/y directly
@@ -2763,6 +2931,20 @@ function wander(fish, def, state, dt, nearbyAlien) {
       angle = Math.atan2(fish.y - nearbyAlien.y, fish.x - nearbyAlien.x) + (Math.random() - 0.5) * (Math.PI * 0.7);
     } else {
       angle = Math.random() * Math.PI * 2;
+      // A schooling fish (Dartfin) usually, not always, heads for the centre
+      // of the OTHER Dartfin anywhere in the tank, with the same wobble
+      // aliens give their chase — and just wanders once it is already
+      // inside the loose radius, so the school stays a lazy, shifting cloud.
+      if (def.schooling && Math.random() < DARTFIN_SCHOOL_PULL_CHANCE) {
+        const school = getDartfinSchool(state);
+        if (school.count > 1) {
+          const dx = (school.sumX - fish.x) / (school.count - 1) - fish.x;
+          const dy = (school.sumY - fish.y) / (school.count - 1) - fish.y;
+          if (dx * dx + dy * dy > DARTFIN_SCHOOL_LOOSE_RADIUS_PX * DARTFIN_SCHOOL_LOOSE_RADIUS_PX) {
+            angle = Math.atan2(dy, dx) + (Math.random() - 0.5) * DARTFIN_SCHOOL_PULL_WOBBLE_RAD;
+          }
+        }
+      }
     }
     fish.vx = Math.cos(angle) * speed;
     fish.vy = Math.sin(angle) * speed * FISH_VERTICAL_DAMPING;
@@ -3296,7 +3478,7 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
           // branch below), using that exact same per-species interval
           // formula so the bonus fraction always applies to the fish's real
           // current cycle length, not a flat guess.
-          if (!isScavenger) fish.poopTimer += WASTE_POOP_INTERVAL_MS * (def.wastePoopIntervalMultiplier || 1) * WASTE_TIMER_FEED_BONUS_FRACTION;
+          if (!isScavenger) fish.poopTimer += fishPoopIntervalMs(state, def) * WASTE_TIMER_FEED_BONUS_FRACTION;
           fish.totalFeeds += 1;
           const wasAdult = fish.stage === def.growthStages.length - 1;
           const prevStage = fish.stage;
@@ -3489,8 +3671,8 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
       const streakBase = fish.dropValueOverride != null
         ? fish.dropValueOverride
         : Math.ceil(stageDef.dropValue * Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, (fish.starTier || 1) - 1));
-      const streakValue = Math.round(streakBase * (fish.mutagenBuffActive ? MUTAGEN_PASTE_COIN_MULTIPLIER : 1) * cleanlinessMoneyMultiplier(state));
-      if (streakValue > 0) state.level.items.push(createCoin(fish.x, fish.y, streakValue));
+      const streakValue = Math.round(streakBase * (fish.mutagenBuffActive ? MUTAGEN_PASTE_COIN_MULTIPLIER : 1) * cleanlinessMoneyMultiplier(state) * schoolCoinMultiplier(state, def));
+      if (streakValue > 0) state.level.items.push(createFishCoin(def, fish.x, fish.y, streakValue));
     }
     fish.dropTimer += dtMs;
     // Per direct request, a fish can't produce money at all while close to a
@@ -3541,7 +3723,7 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
       // Math.round (not ceil) on this final step — cleanlinessMoneyMultiplier
       // can land anywhere in a continuous 0.5-1.0 range, so ceiling it back
       // up every time would silently erase most of the intended penalty.
-      const dropValue = Math.round(baseDropValue * mutagenMultiplier * moneyMultiplier);
+      const dropValue = Math.round(baseDropValue * mutagenMultiplier * moneyMultiplier * schoolCoinMultiplier(state, def));
       // Skip entirely for a $0 drop (any not-yet-behavior-wired species) — a
       // worthless coin still lands on a Processor like any other, which is
       // actively counterproductive busywork for no payout. No Coin Cap gate
@@ -3550,7 +3732,7 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
       // Science ("Bubble") Cap still gates a resource this way, further
       // down in this same function.
       if (dropValue > 0) {
-        state.level.items.push(createCoin(fish.x, fish.y, dropValue));
+        state.level.items.push(createFishCoin(def, fish.x, fish.y, dropValue));
       }
     }
   }
@@ -3570,7 +3752,7 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
   // explicit override) via the `|| 1` fallback.
   if (!isScavenger) {
     fish.poopTimer += dtMs;
-    const wastePoopInterval = WASTE_POOP_INTERVAL_MS * (def.wastePoopIntervalMultiplier || 1);
+    const wastePoopInterval = fishPoopIntervalMs(state, def);
     if (fish.poopTimer >= wastePoopInterval) {
       fish.poopTimer = 0;
       if (canSpawnMoreWaste(state)) { // see Config.js's WASTE_MAX_ON_SCREEN
@@ -3926,6 +4108,7 @@ export function updateEntities(state, dtMs) {
   perfMark('e: effect timers');
   pendingFoodToWasteSpawns.length = 0; // updateFood (below) fills this — see its own comment for why it can't push into state.level.items directly
   const itemCamera = state.camera;
+  stepRipeningCoins(state, dtMs); // Blimpfish coins gaining value — see createAppreciatingCoin
   state.level.items = state.level.items.filter((item) => {
     // Load mode: a far-from-view item (not one a building is mid-processing)
     // skips every other tick and takes a doubled step on the ticks it runs —

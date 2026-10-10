@@ -363,13 +363,13 @@ const FORMULAS = [
   {
     id: 'fishEconomy', title: 'Feeder fish economy',
     formula: 'gold / min = coin value × 60000 / coin interval ms × cleanliness multiplier\nfood / min = hunger rate × 60 / hunger relief per Food\nwaste / min = 60000 / (poop interval × species multiplier)',
-    note: 'The three coin-dropping species side by side for each growth stage. “Gold per Food” is the number to watch when balancing: a Food costs the Food price, so anything under that loses money. Cleanliness multiplier is shown at a fully clean tank and at 0%.',
+    note: 'The three coin-dropping species side by side for each growth stage. “Gold per Food” is the number to watch when balancing: a Food costs the Food price, so anything under that loses money. Cleanliness multiplier is shown at a fully clean tank and at 0%. Dartfin are shown as a lone fish (a full school doubles coins and halves waste — see “Dartfin school”), and a Blimpfish coin is shown at its normal value, the middle of its ripening curve (see “Blimpfish coin”).',
     params: ['FOOD_COST', 'FOOD_HUNGER_RELIEF_BY_LEVEL.0', 'WASTE_POOP_INTERVAL_MS', 'CLEANLINESS_MIN_MONEY_FRACTION', ...BASE_FEEDERS.flatMap((s) => [sp(s, 'hungerRate'), ...[0, 1, 2].flatMap((i) => [sp(s, `growthStages.${i}.dropValue`), sp(s, `growthStages.${i}.dropInterval`)])]), sp('dartfin', 'wastePoopIntervalMultiplier'), sp('blimpfish', 'wastePoopIntervalMultiplier')],
     render() {
       const rows = [];
       for (const s of BASE_FEEDERS) {
         if (!has(sp(s, 'hungerRate'))) continue;
-        const mult = V(sp(s, 'wastePoopIntervalMultiplier'), 1);
+        const mult = V(sp(s, 'wastePoopIntervalMultiplier'), (meta.speciesWasteIntervalMultiplier && meta.speciesWasteIntervalMultiplier[s]) || 1);
         for (let i = 0; i < 3; i++) {
           const val = V(sp(s, `growthStages.${i}.dropValue`)), iv = V(sp(s, `growthStages.${i}.dropInterval`), 1);
           const gold = val * 60000 / iv;
@@ -379,6 +379,42 @@ const FORMULAS = [
         }
       }
       return tbl('', ['', 'Coin', 'Gold / min (clean)', 'Gold / min (0% clean)', 'Food / min', 'Gold per Food', 'Waste / min'], rows);
+    },
+  },
+  {
+    id: 'dartfinSchool', title: 'Dartfin school',
+    formula: 'fraction = (min(Dartfin, full size) − 1) / (full size − 1)\ncoin value = round( normal coin × (1 + (coin multiplier at full − 1) × fraction) )\nwaste rate = 1 − (1 − waste multiplier at full) × fraction;  poop interval = normal interval / waste rate',
+    note: 'Every living Dartfin counts (any size or merge tier, anywhere in the tank). A lone Dartfin is the baseline. Tables show an adult tier-1 Dartfin in a clean tank; “school” columns are the whole group together. Movement (pull chance, loose radius, wobble) has no effect on income, so it is not in these tables.',
+    params: ['DARTFIN_SCHOOL_MAX_SIZE', 'DARTFIN_SCHOOL_MAX_COIN_MULTIPLIER', 'DARTFIN_SCHOOL_MAX_WASTE_MULTIPLIER', 'DARTFIN_SCHOOL_PULL_CHANCE', 'DARTFIN_SCHOOL_LOOSE_RADIUS_PX', 'DARTFIN_SCHOOL_PULL_WOBBLE_RAD', 'WASTE_POOP_INTERVAL_MS', sp('dartfin', 'wastePoopIntervalMultiplier'), sp('dartfin', 'growthStages.2.dropValue'), sp('dartfin', 'growthStages.2.dropInterval')],
+    render() {
+      const full = Math.max(2, V('DARTFIN_SCHOOL_MAX_SIZE', 10));
+      const coinMax = V('DARTFIN_SCHOOL_MAX_COIN_MULTIPLIER', 2), wasteMax = V('DARTFIN_SCHOOL_MAX_WASTE_MULTIPLIER', 0.5);
+      const normal = Math.ceil(V(sp('dartfin', 'growthStages.2.dropValue'))), iv = V(sp('dartfin', 'growthStages.2.dropInterval'), 1);
+      const poop = V('WASTE_POOP_INTERVAL_MS', 1) * V(sp('dartfin', 'wastePoopIntervalMultiplier'), (meta.speciesWasteIntervalMultiplier && meta.speciesWasteIntervalMultiplier.dartfin) || 1);
+      const rows = [];
+      for (let n = 1; n <= full + 2; n++) {
+        const f = n <= 1 ? 0 : Math.min(1, (n - 1) / (full - 1));
+        const mult = 1 + (coinMax - 1) * f, coin = Math.round(normal * mult);
+        const wasteRate = 1 - (1 - wasteMax) * f, wastePerFish = 60000 / (poop / wasteRate);
+        rows.push([n === full ? `${n} (full)` : n, '× ' + fmtNum(mult, 2), money(coin), money(coin * 60000 / iv), fmtNum(wastePerFish, 2), money(coin * 60000 / iv * n), fmtNum(wastePerFish * n, 1)]);
+      }
+      return tbl('Dartfin in the tank', ['Dartfin', 'Coin multiplier', 'Coin (adult)', 'Gold / min each', 'Waste / min each', 'Gold / min school', 'Waste / min school'], rows);
+    },
+  },
+  {
+    id: 'blimpCoin', title: 'Blimpfish coin',
+    formula: 'normal value = ceil( coin value × merge value multiplier ^ (tier − 1) )\nvalue after t = round( normal value × ( start + (end − start) × min(1, t / ripen time) ) )',
+    note: 'A Blimpfish coin starts at the start fraction of its normal value and ripens in a straight line. Every other bonus (Mutagen, cleanliness) multiplies the whole curve. The “collected after” columns show what a Blimpfish earns per minute if every coin is banked that many seconds after it drops (the Collector routing time counts, since the coin keeps ripening while it is held).',
+    params: ['BLIMPFISH_COIN_APPRECIATION_MS', 'BLIMPFISH_COIN_START_FRACTION', 'BLIMPFISH_COIN_END_FRACTION', 'FISH_STAR_TIER_VALUE_MULTIPLIER', sp('blimpfish', 'growthStages.0.dropValue'), sp('blimpfish', 'growthStages.1.dropValue'), sp('blimpfish', 'growthStages.2.dropValue'), sp('blimpfish', 'growthStages.2.dropInterval')],
+    inputs: [{ key: 'tier', label: 'Merge tier', value: 1, min: 1, max: 4, step: 1 }],
+    render(inp) {
+      const total = V('BLIMPFISH_COIN_APPRECIATION_MS', 1), a = V('BLIMPFISH_COIN_START_FRACTION', 0.5), b = V('BLIMPFISH_COIN_END_FRACTION', 1.5);
+      const iv = V(sp('blimpfish', 'growthStages.2.dropInterval'), 1);
+      const normals = [0, 1, 2].map((i) => Math.ceil(V(sp('blimpfish', `growthStages.${i}.dropValue`)) * Math.pow(V('FISH_STAR_TIER_VALUE_MULTIPLIER', 1), inp.tier - 1)));
+      const at = (normal, ms) => Math.max(1, Math.round(normal * (a + (b - a) * Math.min(1, ms / total))));
+      const secs = [0, 5, 10, 15, 20, 30, 45, 60, 75].filter((s) => s * 1000 < total).concat([total / 1000]);
+      const rows = secs.map((s) => [s === total / 1000 ? `${fmtNum(s, 0)} (ripe)` : fmtNum(s, 0), ...normals.map((n) => money(at(n, s * 1000))), money(at(normals[2], s * 1000) * 60000 / iv)]);
+      return tbl(`Coin value by seconds since it dropped (tier ${inp.tier}, clean tank)`, ['Seconds', `${STAGES[0]}`, `${STAGES[1]}`, `${STAGES[2]}`, 'Adult gold / min if collected then'], rows);
     },
   },
   {

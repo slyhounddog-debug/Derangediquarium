@@ -64,6 +64,12 @@ import {
   SPECIES_LIST,
   FISH_BASE_SIZE,
   WASTE_POOP_INTERVAL_MS,
+  DARTFIN_SCHOOL_MAX_SIZE,
+  DARTFIN_SCHOOL_MAX_COIN_MULTIPLIER,
+  DARTFIN_SCHOOL_MAX_WASTE_MULTIPLIER,
+  BLIMPFISH_COIN_APPRECIATION_MS,
+  BLIMPFISH_COIN_START_FRACTION,
+  BLIMPFISH_COIN_END_FRACTION,
   FISH_SPEED_MULTIPLIER,
   ALIEN_COUNTDOWN_START_MS,
   CAP_WARNING_THRESHOLD_FRACTION,
@@ -104,6 +110,7 @@ import {
   computeTheoreticalGoldPerMinute, computeTheoreticalCoinCountPerMinute, computeTheoreticalSciencePerMinute, computeTheoreticalFoodNeededPerMinute,
   computeTheoreticalWastePerMinute, computeTheoreticalWasteEatenPerMinute, computeTheoreticalManufacturerOutputPerMinute, computeTheoreticalBiomassPerMinute,
   computeFishInfoModalStats, describeFishMergeOptions, createPickupText, reconcileIdsAfterLoad,
+  dartfinSchoolCount, schoolCoinMultiplier, fishPoopIntervalMs,
 } from './Entities.js';
 import {
   getTile, worldToTile, getBuildingCost, FAN_STATS,
@@ -2658,6 +2665,18 @@ function fishEconomyStatsHtml(state, speciesId) {
     // toFixed(1) (nearest tenth) before that, toFixed(2) before that; a
     // dollar range doesn't need fractional-cent precision to be useful.
     html += `<div class="building-stat">${itemIconImgHtml('coin')} Money: <b>$${Math.round(babyMoneyPerMin)} - $${Math.round(adultMoneyPerMin)}/min</b>${fishStatBarHtml('money', adult.dropValue / adult.dropInterval)}</div>`;
+  }
+  // A Blimpfish coin ripens after it drops (Config.js's BLIMPFISH_COIN_*), so
+  // the Money line above is its nominal rate; this shows the per-coin range.
+  if (s.appreciatingCoin) {
+    const adultCoin = Math.ceil(adult.dropValue);
+    html += `<div class="building-stat">⏳ Coin ripens: <b>$${Math.round(adultCoin * BLIMPFISH_COIN_START_FRACTION)} → $${Math.round(adultCoin * BLIMPFISH_COIN_END_FRACTION)} over ${Math.round(BLIMPFISH_COIN_APPRECIATION_MS / 1000)}s</b></div>`;
+  }
+  // A Dartfin's coins and waste depend on the school size (Config.js's DARTFIN_SCHOOL_*);
+  // the Money/Waste lines are the lone-fish baseline, so show the live bonus here.
+  if (s.schooling) {
+    const n = dartfinSchoolCount(state);
+    html += `<div class="building-stat">🐟 School: <b>${Math.min(n, DARTFIN_SCHOOL_MAX_SIZE)}/${DARTFIN_SCHOOL_MAX_SIZE}</b> · coins <b>×${schoolCoinMultiplier(state, s).toFixed(2)}</b> (max ×${DARTFIN_SCHOOL_MAX_COIN_MULTIPLIER}) · waste <b>${Math.round(WASTE_POOP_INTERVAL_MS * (s.wastePoopIntervalMultiplier || 1) / fishPoopIntervalMs(state, s) * 100)}%</b> (min ${Math.round(DARTFIN_SCHOOL_MAX_WASTE_MULTIPLIER * 100)}%)</div>`;
   }
   // Per direct request ("add in a stat line for the electric eels in the
   // shop showing the range of electricity they produce"). A pure Generator

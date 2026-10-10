@@ -43,6 +43,24 @@
       ]
     },
     {
+      "id": "fishSpecials", "label": "Fish: Dartfin school & Blimpfish coin",
+      "items": [
+        { "name": "DARTFIN_SCHOOL_MAX_SIZE", "label": "Dartfin school: size for the full bonus", "desc": "Living Dartfin needed for the biggest coin and waste bonus. One Dartfin is the baseline; each extra one adds an equal step up to this many.", "min": 2, "max": 40, "step": 1 },
+        { "name": "DARTFIN_SCHOOL_MAX_COIN_MULTIPLIER", "label": "Dartfin school: coin value at full size", "desc": "Coin value multiplier once the school is full (2 = double).", "min": 1, "max": 5, "step": 0.05, "unit": "x" },
+        { "name": "DARTFIN_SCHOOL_MAX_WASTE_MULTIPLIER", "label": "Dartfin school: waste at full size", "desc": "Fraction of normal Waste a Dartfin makes once the school is full (0.5 = half).", "min": 0.05, "max": 1, "step": 0.05, "unit": "x" },
+        { "name": "DARTFIN_SCHOOL_PULL_CHANCE", "label": "Dartfin school: pull chance", "desc": "Chance, each time a Dartfin picks a new heading (every 1-2s), that it heads for the rest of the school instead of a random direction.", "min": 0, "max": 1, "step": 0.05 },
+        { "name": "DARTFIN_SCHOOL_LOOSE_RADIUS_PX", "label": "Dartfin school: loose radius", "desc": "A Dartfin closer than this to the rest of the school just wanders. Bigger = a looser cloud.", "min": 20, "max": 600, "step": 10, "unit": "px" },
+        { "name": "DARTFIN_SCHOOL_PULL_WOBBLE_RAD", "label": "Dartfin school: pull wobble", "desc": "Total random spread of the pull heading in radians (the heading is off by up to half of this either way). Bigger = sloppier swimming.", "min": 0, "max": 6.28, "step": 0.1, "unit": "rad" },
+        { "name": "BLIMPFISH_COIN_APPRECIATION_MS", "label": "Blimpfish coin: time to ripen", "desc": "How long a Blimpfish coin takes to grow from its start value to its end value.", "min": 5000, "max": 300000, "step": 1000, "unit": "ms" },
+        { "name": "BLIMPFISH_COIN_START_FRACTION", "label": "Blimpfish coin: start value", "desc": "A fresh Blimpfish coin is worth this fraction of the value it would normally have (stage, merge tier, Mutagen and cleanliness included).", "min": 0.05, "max": 2, "step": 0.05, "unit": "x" },
+        { "name": "BLIMPFISH_COIN_END_FRACTION", "label": "Blimpfish coin: fully ripe value", "desc": "A fully ripe Blimpfish coin is worth this fraction of its normal value.", "min": 0.05, "max": 4, "step": 0.05, "unit": "x" },
+        { "name": "APPRECIATE_PULSE_MS", "label": "Ripening coin: pulse length", "desc": "How long the small ring pulse lasts each time a ripening coin gains value.", "min": 50, "max": 1000, "step": 10, "unit": "ms" },
+        { "name": "APPRECIATE_PARTICLE_COUNT", "label": "Ripening coin: motes", "desc": "How many tiny motes drift into a coin while it is still ripening.", "min": 0, "max": 12, "step": 1 },
+        { "name": "APPRECIATE_PARTICLE_CYCLE_MS", "label": "Ripening coin: mote travel time", "desc": "How long one mote takes to drift from the edge of the halo into the coin.", "min": 200, "max": 4000, "step": 50, "unit": "ms" },
+        { "name": "APPRECIATE_PARTICLE_HALO_PX", "label": "Ripening coin: halo size", "desc": "How far past the coin's edge the motes start.", "min": 4, "max": 80, "step": 1, "unit": "px" }
+      ]
+    },
+    {
       "id": "species", "label": "Species stats",
       "items": [
         { "deep": "SPECIES", "fields": ["cost", "swimSpeed", "hungerRate", "wastePoopIntervalMultiplier", "dropValue", "dropInterval", "feedsRequired", "pixelsPerMW", "eatCooldownMs"] }

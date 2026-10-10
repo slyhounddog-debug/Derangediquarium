@@ -90,6 +90,11 @@ import {
   TURRET_IMPACT_EFFECT_DURATION_MS,
   COIN_SPARKLE_EFFECT_DURATION_MS,
   COIN_SPARKLE_COLOR,
+  APPRECIATE_PULSE_MS,
+  APPRECIATE_PARTICLE_COUNT,
+  APPRECIATE_PARTICLE_CYCLE_MS,
+  APPRECIATE_PARTICLE_HALO_PX,
+  APPRECIATE_PARTICLE_COLOR,
   FISH_GROWTH_ORBIT_RADIUS_PX,
   FISH_GROWTH_ORBIT_FOOD_RADIUS_PX,
   FISH_GROWTH_ORBIT_TRAIL_ARC_RAD,
@@ -166,6 +171,7 @@ import {
   getCoinColor,
   getCoinTier,
   createCoin,
+  getRipeningCoins,
   createPickupText,
   updatePickupText,
   getFishPurchaseCost,
@@ -767,6 +773,49 @@ function coinSpinScaleX(item) {
     return raw + (1 - raw) * eased;
   }
   return raw;
+}
+
+// A ripening Blimpfish coin's overlay, drawn right after its sprite in the
+// item loop: a few tiny motes spiralling into the coin while it is still
+// appreciating (item.apprActive), and a small ring pulse for a moment after
+// each time its value ticks up (item.apprPulseMs). Everything is a pure
+// function of the coin's own timers — no particle objects, arrays or timers
+// are created or stored — and the motes go out in ONE path / ONE fill, the
+// ring in one stroke, so a coin costs two canvas draws and a coin that is
+// done ripening (or any other coin) costs nothing: the caller only gets here
+// when one of the two fields is set. The motes' sizes shrink as they arrive
+// instead of fading, which keeps a single fill style for the whole path.
+function drawAppreciationFx(ctx, item, x, y) {
+  if (item.apprActive) {
+    const cycle = item.apprAgeMs / APPRECIATE_PARTICLE_CYCLE_MS;
+    ctx.fillStyle = APPRECIATE_PARTICLE_COLOR;
+    ctx.beginPath();
+    for (let i = 0; i < APPRECIATE_PARTICLE_COUNT; i++) {
+      const phase = cycle + i / APPRECIATE_PARTICLE_COUNT;
+      const f = phase - Math.floor(phase); // 0 at the edge of the halo -> 1 swallowed by the coin
+      const pull = f * f; // slow to start, then drawn in faster
+      const dist = item.radius + APPRECIATE_PARTICLE_HALO_PX * (1 - pull);
+      // A fresh direction each time a mote starts over (the cycle index it
+      // belongs to), plus a gentle swirl as it falls in.
+      const angle = item.id * 1.7 + i * 2.399963 + Math.floor(phase) * 2.7 + f * 1.1;
+      const size = 0.7 + 1.5 * (1 - f);
+      const px = x + Math.cos(angle) * dist;
+      const py = y + Math.sin(angle) * dist;
+      ctx.moveTo(px + size, py);
+      ctx.arc(px, py, size, 0, Math.PI * 2);
+    }
+    ctx.fill();
+  }
+  if (item.apprPulseMs > 0) {
+    const p = 1 - item.apprPulseMs / APPRECIATE_PULSE_MS; // 0 -> 1 across the pulse
+    ctx.globalAlpha = 0.8 * (1 - p);
+    ctx.strokeStyle = APPRECIATE_PARTICLE_COLOR;
+    ctx.lineWidth = 1.3;
+    ctx.beginPath();
+    ctx.arc(x, y, item.radius * (1.05 + 0.5 * p), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+  }
 }
 
 // Every non-diamond coin tier's real render — per direct request ("rework
@@ -5945,6 +5994,18 @@ function render() {
       ctx.arc(pos.x, pos.y, item.radius + 3, -Math.PI / 2, -Math.PI / 2 + hatchFrac * Math.PI * 2);
       ctx.stroke();
     }
+  }
+
+  // Ripening Blimpfish coins' particles and pulses, drawn from the short
+  // registry Entities.js keeps (not by checking every item above), so a tank
+  // with no ripening coins pays nothing here.
+  const ripeningCoins = getRipeningCoins();
+  for (let i = 0; i < ripeningCoins.length; i++) {
+    const coin = ripeningCoins[i];
+    const pos = worldToScreen(coin.x, coin.y, state.camera);
+    if (pos.x < -40 || pos.x > canvas.width + 40 || pos.y < -40 || pos.y > canvas.height + 40) continue;
+    if (getItemDisintegrateFraction(state, coin) != null) continue; // being eaten by a Collector — drawn as dots, no halo
+    drawAppreciationFx(ctx, coin, pos.x, pos.y);
   }
 
   perfMark('r: items', ctx);

@@ -1452,8 +1452,9 @@ export const SPECIES = {
   },
   dartfin: {
     id: 'dartfin', name: 'Dartfin', tier: 1, cost: 9, // cut from 10 per direct request
-    description: 'Cheaper and faster. Frequent low-value coins reward density.',
+    description: 'Cheap and fast. Dartfin school together: the more of them in the tank, the more each coin is worth (up to double at 10) and the less waste they make (down to half).',
     behavior: ['FEEDER'], dropType: 'coin',
+    schooling: true, // coin value + waste rate scale with how many Dartfin are alive, and they drift toward each other — see DARTFIN_SCHOOL_* below and Entities.js's getDartfinSchool
     swimSpeed: 65, // -5, see FISH_MOVEMENT_UPGRADE_SPEED_BONUS
     lifespan: 240000,
     hungerRate: 0.948, // 25% slower again per direct request — was 1.264 — lowest coin value of the three, so it's the least demanding to keep fed
@@ -1486,8 +1487,9 @@ export const SPECIES = {
   },
   blimpfish: {
     id: 'blimpfish', name: 'Blimpfish', tier: 1, cost: 40, // cut from 60 per direct request
-    description: 'Expensive and sluggish. Voracious appetite, rare high-value coins.',
+    description: 'Expensive and sluggish. Voracious appetite, rare coins that start at half value and ripen to 1.5x over 90 seconds — the longer you leave them, the more they\'re worth.',
     behavior: ['FEEDER'], dropType: 'coin',
+    appreciatingCoin: true, // its coins are created at BLIMPFISH_COIN_START_FRACTION of their normal value and grow to BLIMPFISH_COIN_END_FRACTION of it — see Entities.js's createAppreciatingCoin/appreciateCoin
     swimSpeed: 17, // 10% faster than the original 20, then -5, see FISH_MOVEMENT_UPGRADE_SPEED_BONUS
     lifespan: 360000,
     hungerRate: 1.554, // 25% slower again per direct request — was 2.072 — highest coin value of the three, so it's still the most demanding to keep fed
@@ -3666,6 +3668,43 @@ export const ALIEN_DEATH_EFFECT_DURATION_MS = 500;
 // cursorBubbles pool (see its spawnCoinPickupBubbles).
 export const COIN_SPARKLE_EFFECT_DURATION_MS = 450;
 export const COIN_SPARKLE_COLOR = { r: 255, g: 214, b: 92 }; // warm gold, distinct from the alien-death burst's red/tier colors
+
+// ---- Dartfin schooling ----
+// Per direct request: a Dartfin's coin value and Waste output depend on how
+// many Dartfin are alive in the tank (anywhere — not how close they are, so
+// there's nothing to position by hand). One Dartfin is the baseline; each
+// extra one adds an equal step up to DARTFIN_SCHOOL_MAX_SIZE, where coin
+// value reaches DARTFIN_SCHOOL_MAX_COIN_MULTIPLIER (2 = double) and Waste
+// production falls to DARTFIN_SCHOOL_MAX_WASTE_MULTIPLIER of normal (0.5 =
+// half). Entities.js's getDartfinSchool counts them once per tick.
+export const DARTFIN_SCHOOL_MAX_SIZE = 10;
+export const DARTFIN_SCHOOL_MAX_COIN_MULTIPLIER = 2;
+export const DARTFIN_SCHOOL_MAX_WASTE_MULTIPLIER = 0.5;
+// Schooling movement: each time a Dartfin re-rolls its heading (every 1-2s,
+// see WANDER_INTERVAL_*), it has this chance to head for the rest of the
+// school's centre instead of a random direction — the same "kinda dumb"
+// biased wander aliens use to chase fish (ALIEN_CHASE_CHANCE), with no
+// distance limit so the whole tank is in range. Inside the loose radius it
+// just wanders, so the school stays a lazy, shifting cloud instead of
+// collapsing onto one point.
+export const DARTFIN_SCHOOL_PULL_CHANCE = 0.7;
+export const DARTFIN_SCHOOL_LOOSE_RADIUS_PX = 170;
+export const DARTFIN_SCHOOL_PULL_WOBBLE_RAD = 1.2; // total spread of the pull heading (+/- half of this)
+
+// ---- Blimpfish appreciating coin ----
+// Per direct request: a Blimpfish coin is created worth START_FRACTION of its
+// normal value and grows linearly to END_FRACTION of it over
+// APPRECIATION_MS. "Normal value" is everything the drop already computes
+// (stage, star tier, mutagen, tank cleanliness). Entities.js's appreciateCoin
+// steps it; main.js's drawAppreciationFx draws the particles and pulses.
+export const BLIMPFISH_COIN_APPRECIATION_MS = 90000;
+export const BLIMPFISH_COIN_START_FRACTION = 0.5;
+export const BLIMPFISH_COIN_END_FRACTION = 1.5;
+export const APPRECIATE_PULSE_MS = 280; // how long the small ring pulse lasts each time the coin gains value
+export const APPRECIATE_PARTICLE_COUNT = 5; // motes drifting into the coin while it is still ripening
+export const APPRECIATE_PARTICLE_CYCLE_MS = 1100; // how long one mote takes from the edge of the halo to the coin
+export const APPRECIATE_PARTICLE_HALO_PX = 24; // how far out a mote starts, past the coin's own edge
+export const APPRECIATE_PARTICLE_COLOR = '#ffe9a0';
 
 // A fish tints gray under two conditions — per direct request ("make fish
 // visually turn a gray color when they aren't producing coins, and make

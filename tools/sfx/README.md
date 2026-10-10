@@ -4,7 +4,7 @@ A small local web tool with three tabs. It is a dev tool only; the game never lo
 
 - **Audio** — find, trim and level the game's recorded sound effects (below).
 - **Variables** — the numbers worth tuning (prices, hunger, species stats, building speeds and power, aliens and waves, Science Lab costs, audio levels, ...), each with a slider and a number box.
-- **Formulas** — how the game calculates things (fish/building prices, merged-fish value, feeder economy, hunger timeline, cleanliness, power efficiency, alien waves, turret damage vs waves, fish health vs aliens, fan lift, building throughput, progression totals, gem economy). Each card has the values it depends on (same sliders) and live tables of what the formula produces.
+- **Formulas** — how the game calculates things (fish/building prices, merged-fish value, feeder economy, Dartfin school, Blimpfish coin, hunger timeline, cleanliness, power efficiency, alien waves, turret damage vs waves, fish health vs aliens, fan lift, building throughput, progression totals, gem economy). Each card has the values it depends on (same sliders) and live tables of what the formula produces.
 
 ```
 npm run sfx          # or: node tools/sfx/server.mjs
