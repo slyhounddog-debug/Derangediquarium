@@ -633,7 +633,6 @@ export function initUI(state) {
     startModeBackBtn: document.getElementById('start-mode-back-btn'),
     startModeModal: document.getElementById('start-mode-modal'),
     startModeTitle: document.getElementById('start-mode-title'),
-    startWarnCancelBtn: document.getElementById('start-warn-cancel-btn'),
     startWarnContinueBtn: document.getElementById('start-warn-continue-btn'),
     startModeNewBtn: document.getElementById('start-mode-new-btn'),
     startModeExpBtn: document.getElementById('start-mode-exp-btn'),
@@ -2867,6 +2866,8 @@ let settingsOpenedFromStartScreen = false;
 // running yet), and this function has no other way to reach main.js's
 // onStart callback.
 let startOnStartCallback = null;
+// True while the shared start-mode warning window is showing the pause menu's "Return to the main menu?" warning.
+let mainMenuWarningOpen = false;
 
 // Shared by the pause-settings Back button and a backdrop click alike (see
 // the click wiring above) — per direct request, the start screen's Settings
@@ -2942,7 +2943,11 @@ export function initStartScreen(state, onStart) {
     els.startModeStartBtn.disabled = guided === null;
     els.startModeStartBtn.title = guided === null ? 'Pick New player or Experienced player first' : 'Begin';
   };
-  const closeStartModeOverlay = () => { els.startModeOverlay.classList.add('hidden'); }; // the slot screen underneath stays up
+  const closeStartModeOverlay = () => {
+    els.startModeOverlay.classList.add('hidden'); // the slot screen underneath stays up
+    els.startModeOverlay.classList.remove('over-pause');
+    mainMenuWarningOpen = false;
+  };
   const closeSlotOverlay = () => {
     els.saveSlotsOverlay.classList.add('hidden');
     slotMode = null;
@@ -3091,8 +3096,19 @@ export function initStartScreen(state, onStart) {
     playPanelClose();
   });
   initWorldSettingsUI(state);
-  els.startWarnContinueBtn.addEventListener('click', () => { showStartModeStep(false); playPanelOpen(); });
-  els.startWarnCancelBtn.addEventListener('click', () => { closeStartModeOverlay(); playPanelClose(); });
+  els.startWarnContinueBtn.addEventListener('click', () => {
+    if (mainMenuWarningOpen) { window.location.reload(); return; } // the pause menu's Main Menu warning: Continue = go
+    showStartModeStep(false);
+    playPanelOpen();
+  });
+  // Escape closes the Main Menu warning first (instead of also toggling the pause menu behind it).
+  window.addEventListener('keydown', (e) => {
+    if (e.code !== 'Escape' || !mainMenuWarningOpen) return;
+    e.preventDefault();
+    e.stopPropagation();
+    closeStartModeOverlay();
+    playPanelClose();
+  }, true);
   els.startModeNewBtn.addEventListener('click', () => { setGuidedPick(pendingGuided === true ? null : true); playUiSelect(); });
   els.startModeExpBtn.addEventListener('click', () => { setGuidedPick(pendingGuided === false ? null : false); playUiSelect(); });
   els.startModeStartBtn.addEventListener('click', () => {
@@ -3265,9 +3281,15 @@ function restartLevel(state) {
 // confirm() — a reload does lose any UNSAVED progress since the last real
 // Save/autosave, which is real enough to warrant asking first.
 function returnToMainMenuFromPause(state) {
-  const ok = window.confirm('Return to the main menu? Any progress since your last save will be lost (your saved game itself is kept).');
-  if (!ok) return;
-  window.location.reload();
+  // Per direct request, no native browser confirm: this reuses the "Overwrite your save?" warning window (same
+  // layout; Back closes it, Continue reloads).
+  mainMenuWarningOpen = true;
+  els.startModeModal.classList.add('warn');
+  els.startModeTitle.textContent = 'Return to the main menu?';
+  els.startWarnText.innerHTML = 'Any progress since your last save will be <b>lost</b>. Your saved game itself is kept.';
+  els.startModeOverlay.classList.add('over-pause');
+  els.startModeOverlay.classList.remove('hidden');
+  playPanelOpen();
 }
 
 // Highlights whichever single shop selection is active — Food, a species, or

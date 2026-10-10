@@ -86,11 +86,10 @@
       <div id="start-mode-title">How would you like to start?</div>
       <button id="start-mode-back-btn" class="pause-btn sheen-target">← Back</button>
     </div>
-    <!-- Per direct request: shown first when a save exists — New Game overwrites it, so the player must confirm. -->
+    <!-- Per direct request: shown first when a save exists — New Game overwrites it, so the player must confirm. Also reused by the pause menu's Main Menu button (UI.js openMainMenuWarning). Only Continue here — the header's Back button is the way out. -->
     <div id="start-warn-body">
       <div id="start-warn-text">Starting a new game will <b>overwrite your existing save file</b>. Your saved fish, buildings and money will be gone for good.</div>
       <div id="start-warn-buttons">
-        <button id="start-warn-cancel-btn" class="pause-btn sheen-target">Cancel</button>
         <button id="start-warn-continue-btn" class="pause-btn sheen-target">Continue</button>
       </div>
     </div>

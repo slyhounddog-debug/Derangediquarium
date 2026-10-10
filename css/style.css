@@ -1987,8 +1987,10 @@ body.time-paused #time-pause-overlay { opacity: 1; }
 #start-mode-modal.warn #start-warn-body { display: block; }
 #start-mode-modal.warn #start-mode-cards, #start-mode-modal.warn #start-mode-note { display: none; }
 #start-warn-text { font-size: 16px; line-height: 1.5; margin-bottom: 18px; }
-#start-warn-buttons { display: flex; gap: 14px; }
-#start-warn-buttons .pause-btn { flex: 1; margin-bottom: 0; }
+#start-warn-buttons { display: flex; justify-content: center; }
+#start-warn-buttons .pause-btn { flex: none; width: 240px; margin-bottom: 0; }
+/* Opened from the pause menu (z-index 650) for the Main Menu warning — has to sit above it. */
+#start-mode-overlay.over-pause { z-index: 660; }
 /* Per direct request, the cards are a touch smaller to make room for the World Settings button under them. */
 .start-mode-card canvas { width: 82%; align-self: center; }
 .start-mode-card { gap: 7px; padding: 10px; }
