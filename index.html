@@ -665,18 +665,22 @@
      its X/E close it, per direct request; #tank-overlay (like #lab-overlay)
      is full-screen so a click outside the window closes it. -->
 <div id="shop-panel" class="collapsed">
-  <div id="shop-header-row">
-    <div id="shop-header"><span>S</span><span>h</span><span>o</span><span>p</span></div>
-    <div id="shop-money" class="sheen-target">💰 $0</div>
-    <button id="shop-close-btn" class="lab-close-x-btn" title="Close (E)">✕</button>
-  </div>
   <div id="shop-body">
-    <div id="shop-panel-scroll">
-      <div class="shop-section-title">Fish</div>
-      <div id="shop-species-grid"></div>
-      <div id="shop-buildings-title" class="shop-section-title">Buildings</div>
-      <div id="tool-bar">
-        <div id="build-tool-grid"></div>
+    <!-- Per direct request the money readout sits at the top left beside the title, and the title row
+         lives in the LEFT column only, so the preview paper on the right runs the full height of the window. -->
+    <div id="shop-left">
+      <div id="shop-header-row">
+        <div id="shop-header"><span>S</span><span>h</span><span>o</span><span>p</span></div>
+        <div id="shop-money" class="sheen-target">💰 $0</div>
+        <button id="shop-close-btn" class="lab-close-x-btn" title="Close (E)">✕</button>
+      </div>
+      <div id="shop-panel-scroll">
+        <div class="shop-section-title">Fish</div>
+        <div id="shop-species-grid"></div>
+        <div id="shop-buildings-title" class="shop-section-title">Buildings</div>
+        <div id="tool-bar">
+          <div id="build-tool-grid"></div>
+        </div>
       </div>
     </div>
     <div id="shop-preview" class="sheen-target">

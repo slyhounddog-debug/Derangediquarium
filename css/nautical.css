@@ -807,6 +807,9 @@ body:has(#tank-overlay:not(.collapsed)) #bottom-bar-row, body:has(#lab-overlay:n
 }
 .merge-node-btn:hover { filter: brightness(1.12); }
 .merge-node-btn.locked { color: #e9e4d8; text-shadow: 0 1px 0 #3a362f; background: linear-gradient(180deg, #a9a49a 0%, #7d7870 100%); border-color: #4a463f; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 2px 0 #4a463f; }
+/* Per direct request: the Eternal Fish merge line is set smaller so it fits on one line. */
+.merge-eternal { font-size: 0.86em; white-space: nowrap; }
+.merge-eternal .merge-node-btn { font-size: 10.5px; padding: 2px 7px; }
 /* The Shop's Factory / Power Plant recipe buttons sit in a row under the note, so they need a gap on the right instead of the lead-in text's margin-left. */
 .merge-node-btn.recipe-btn { margin: 0 4px 0 0; }
 .recipe-btn-section { padding-bottom: 6px; }
@@ -855,3 +858,11 @@ body:has(#tank-overlay:not(.collapsed)) #bottom-bar-row, body:has(#lab-overlay:n
     radial-gradient(circle at 50% 50%, rgba(255, 244, 190, 0.45) 0 50%, rgba(255, 226, 150, 0.55) 82%, rgba(255, 250, 220, 0.9) 100%),
     radial-gradient(circle at 34% 28%, #ffe9a8 0, #f6cd6a 45%, #d99f3a 100%);
 }
+
+/* Shop, per direct request: a taller window (the Tank and Lab keep their size), the money pill at the top left beside the
+   title, and the title row only spans the LEFT column so the preview paper runs the full height of the window — tall
+   enough that its stat box never has to scroll. */
+#shop-panel { height: 700px; }
+#shop-left { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+#shop-header { flex: none; } /* the title stops stretching so the money pill sits right beside it */
+#shop-preview-desc { height: 118px; } /* the two-line Dartfin/Blimpfish descriptions used to scroll in the old 92px box */

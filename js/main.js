@@ -97,6 +97,8 @@ import {
   APPRECIATE_PARTICLE_CYCLE_MS,
   APPRECIATE_PARTICLE_HALO_PX,
   APPRECIATE_PARTICLE_COLOR,
+  APPRECIATE_FILL_COLOR,
+  BLIMPFISH_COIN_APPRECIATION_MS,
   FISH_GROWTH_ORBIT_RADIUS_PX,
   FISH_GROWTH_ORBIT_FOOD_RADIUS_PX,
   FISH_GROWTH_ORBIT_TRAIL_ARC_RAD,
@@ -783,15 +785,19 @@ function coinSpinScaleX(item) {
 }
 
 // A ripening Blimpfish coin's overlay, drawn right after its sprite in the
-// item loop: a few tiny motes spiralling into the coin while it is still
-// appreciating (item.apprActive), and a small ring pulse for a moment after
-// each time its value ticks up (item.apprPulseMs). Everything is a pure
-// function of the coin's own timers — no particle objects, arrays or timers
-// are created or stored — and the motes go out in ONE path / ONE fill, the
-// ring in one stroke, so a coin costs two canvas draws and a coin that is
-// done ripening (or any other coin) costs nothing: the caller only gets here
-// when one of the two fields is set. The motes' sizes shrink as they arrive
-// instead of fading, which keeps a single fill style for the whole path.
+// item loop: while it is still appreciating (item.apprActive) a dark "empty"
+// cap covers the unripe part of the coin and shrinks downward as it ripens —
+// so the coin reads as a rising fill, per direct request, and the fill level
+// is how ripe it is — plus a couple of tiny motes drifting into it, and a
+// small ring pulse for a moment after each time its value ticks up
+// (item.apprPulseMs). Everything is a pure function of the coin's own timers —
+// no particle objects, arrays or timers are created or stored. The cap is one
+// path / one fill (a circular segment, so no clip), the motes go out in ONE
+// path / ONE fill, the ring in one stroke, so a ripening coin costs three
+// canvas draws and a coin that is done ripening (or any other coin) costs
+// nothing: the caller only gets here when one of the fields is set. The motes'
+// sizes shrink as they arrive instead of fading, which keeps a single fill
+// style for the whole path. The cap ignores the coin's brief spin squash.
 function drawAppreciationFx(ctx, item, x, y) {
   if (item.eternalFx) {
     // An Eternal Fish's coin (per direct request, visibly not a plain diamond coin): a slowly turning dashed
@@ -818,6 +824,17 @@ function drawAppreciationFx(ctx, item, x, y) {
     }
   }
   if (item.apprActive) {
+    // The fill: the bottom (ripe) part of the coin stays bright, the cap above the fill level is darkened. The
+    // fill level f is the fraction of the ripening time elapsed; the cap is the disc minus its bottom segment.
+    const f = Math.min(1, item.apprAgeMs / BLIMPFISH_COIN_APPRECIATION_MS);
+    const half = Math.acos(1 - 2 * f); // half-angle of the bottom segment seen from the centre: 0 = empty, PI = full
+    if (f < 1) {
+      ctx.fillStyle = APPRECIATE_FILL_COLOR;
+      ctx.beginPath();
+      ctx.arc(x, y, item.radius, Math.PI / 2 + half, Math.PI * 2.5 - half);
+      ctx.closePath();
+      ctx.fill();
+    }
     const cycle = item.apprAgeMs / APPRECIATE_PARTICLE_CYCLE_MS;
     ctx.fillStyle = APPRECIATE_PARTICLE_COLOR;
     ctx.beginPath();
@@ -832,8 +849,7 @@ function drawAppreciationFx(ctx, item, x, y) {
       const size = 0.7 + 1.5 * (1 - f);
       const px = x + Math.cos(angle) * dist;
       const py = y + Math.sin(angle) * dist;
-      ctx.moveTo(px + size, py);
-      ctx.arc(px, py, size, 0, Math.PI * 2);
+      ctx.rect(px - size, py - size, size * 2, size * 2); // a square mote: cheaper to fill than an arc, and it is only a pixel or two wide
     }
     ctx.fill();
   }

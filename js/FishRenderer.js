@@ -32,6 +32,13 @@ import {
   FISH_STAR_MERGE_SPIN_MS,
   FISH_STAR_MERGE_GLIDE_MS,
   FISH_STAR_MERGE_SPIN_TURNS,
+  FISH_STAR_MERGE_PAIR_MS,
+  FISH_STAR_MERGE_PAIR_STAGGER_MS,
+  FISH_STAR_MERGE_PAIR_SPREAD_RATIO,
+  FISH_TIER4_BRIGHTEN,
+  FISH_SHIMMER_PERIOD_MS,
+  FISH_SHIMMER_ACTIVE,
+  FISH_SHIMMER_SIZE_RATIO,
   FISH_RIM_PERIOD_MS,
   FISH_RIM_LIGHTEN,
   FISH_RIM_BAND_BY_TIER,
@@ -179,13 +186,27 @@ function drawOrbitStar(ctx, sprite, x, y, rx, ry, baseRadius, angle) {
 
 const ORBIT_TWO_PI = Math.PI * 2;
 const ECONOMY_SPECIES = new Set(ECONOMY_SPECIES_IDS);
-const MERGE_DROP_SPIN_MS = FISH_STAR_MERGE_DROP_MS + FISH_STAR_MERGE_SPIN_MS;
-const MERGE_TOTAL_MS = MERGE_DROP_SPIN_MS + FISH_STAR_MERGE_GLIDE_MS;
+// How a merge's arriving stars are timed. One star plays the full drop/spin/glide; the Tier 1 -> 2 merge's two stars
+// (per direct request) each play a scaled-down copy that lasts FISH_STAR_MERGE_PAIR_MS, the second one starting
+// FISH_STAR_MERGE_PAIR_STAGGER_MS after the first. Module constants, so drawing never allocates.
+const MERGE_FULL_MS = FISH_STAR_MERGE_DROP_MS + FISH_STAR_MERGE_SPIN_MS + FISH_STAR_MERGE_GLIDE_MS;
+function mergeTiming(scale, stagger, stars) {
+  const drop = FISH_STAR_MERGE_DROP_MS * scale;
+  const dropSpin = drop + FISH_STAR_MERGE_SPIN_MS * scale;
+  const glide = FISH_STAR_MERGE_GLIDE_MS * scale;
+  return { drop, dropSpin, glide, stagger, total: (stars - 1) * stagger + dropSpin + glide };
+}
+const MERGE_TIMING_ONE = mergeTiming(1, 0, 1);
+const MERGE_TIMING_TWO = mergeTiming(FISH_STAR_MERGE_PAIR_MS / MERGE_FULL_MS, FISH_STAR_MERGE_PAIR_STAGGER_MS, 2);
+const MERGE_MAX_MS = Math.max(MERGE_TIMING_ONE.total, MERGE_TIMING_TWO.total);
+// How many stars the merge INTO a fish with this many stars adds (Tier 2: 2, then 1 per tier).
+const NEW_STARS_BY_COUNT = {};
+for (const tier in FISH_STAR_COUNT_BY_TIER) NEW_STARS_BY_COUNT[FISH_STAR_COUNT_BY_TIER[tier]] = FISH_STAR_COUNT_BY_TIER[tier] - (FISH_STAR_COUNT_BY_TIER[tier - 1] || 0);
 
 // Draws one half of a fish's orbiting stars (and the same half of its faint orbit oval, `ring`): frontPass=false is the far side (call
 // BEFORE the body so it tucks behind), true the near side (call after the body).
-// mergeAgeMs >= 0 while a merge's new star is still arriving (see
-// fish.starAnimStartedAt): it drops/spins above the head in the front pass, then glides
+// mergeAgeMs >= 0 while a merge's new star(s) are still arriving (see
+// fish.starAnimStartedAt): each drops/spins above the head in the front pass, then glides
 // into the orbit while the other stars re-space around it — the existing stars keep
 // their old spacing until the glide starts, so nothing jumps when the count goes up.
 function drawOrbitStars(ctx, x, y, size, count, elapsedMs, fishPhase, mergeAgeMs, frontPass, ring) {
@@ -197,16 +218,15 @@ function drawOrbitStars(ctx, x, y, size, count, elapsedMs, fishPhase, mergeAgeMs
   const baseRadius = size * FISH_STAR_RADIUS_RATIO;
   const base = fishPhase + (elapsedMs / FISH_STAR_ORBIT_PERIOD_MS) * ORBIT_TWO_PI;
   const prevAlpha = ctx.globalAlpha;
-  const animating = mergeAgeMs >= 0 && mergeAgeMs < MERGE_TOTAL_MS && count >= 2;
+  const newStars = mergeAgeMs >= 0 && mergeAgeMs < MERGE_MAX_MS ? NEW_STARS_BY_COUNT[count] : 0; // the cheap range test first: a merged fish keeps its age forever
+  const t = newStars > 1 ? MERGE_TIMING_TWO : MERGE_TIMING_ONE;
+  const animating = newStars > 0 && mergeAgeMs < t.total;
 
-  let orbiting = count;
+  const orbiting = animating ? count - newStars : count;
   let spacing = ORBIT_TWO_PI / count;
-  let glideE = 0;
-  if (animating) {
-    orbiting = count - 1;
-    const gu = Math.max(0, (mergeAgeMs - MERGE_DROP_SPIN_MS) / FISH_STAR_MERGE_GLIDE_MS);
-    glideE = gu * gu * (3 - 2 * gu);
-    spacing = ORBIT_TWO_PI / (count - 1) + (ORBIT_TWO_PI / count - ORBIT_TWO_PI / (count - 1)) * glideE;
+  if (animating && orbiting > 0) {
+    const gu = Math.min(1, Math.max(0, (mergeAgeMs - t.dropSpin) / t.glide));
+    spacing = ORBIT_TWO_PI / orbiting + (ORBIT_TWO_PI / count - ORBIT_TWO_PI / orbiting) * (gu * gu * (3 - 2 * gu));
   }
   for (let k = 0; k < orbiting; k++) {
     const angle = base + k * spacing;
@@ -215,38 +235,88 @@ function drawOrbitStars(ctx, x, y, size, count, elapsedMs, fishPhase, mergeAgeMs
 
   if (animating) {
     const hoverY = y - size * FISH_STAR_MERGE_HOVER_RATIO;
-    if (mergeAgeMs < MERGE_DROP_SPIN_MS) {
-      if (frontPass) {
-        let py = hoverY;
-        let alpha = 1;
-        let scaleX = 1;
-        if (mergeAgeMs < FISH_STAR_MERGE_DROP_MS) {
-          const u = mergeAgeMs / FISH_STAR_MERGE_DROP_MS;
-          const e = 1 - (1 - u) * (1 - u) * (1 - u); // ease-out: falls fast, settles softly
-          py = hoverY - (1 - e) * size * FISH_STAR_MERGE_DROP_RATIO;
-          alpha = e;
-        } else {
-          scaleX = Math.cos(((mergeAgeMs - FISH_STAR_MERGE_DROP_MS) / FISH_STAR_MERGE_SPIN_MS) * ORBIT_TWO_PI * FISH_STAR_MERGE_SPIN_TURNS);
+    for (let j = 0; j < newStars; j++) {
+      const age = mergeAgeMs - j * t.stagger;
+      if (age < 0) continue; // not dropped in yet
+      // Several arriving stars hover on opposite sides of the head so they don't overlap.
+      const hoverX = x + (newStars > 1 ? (j - (newStars - 1) / 2) * 2 * size * FISH_STAR_MERGE_PAIR_SPREAD_RATIO : 0);
+      if (age < t.dropSpin) {
+        if (frontPass) {
+          let py = hoverY;
+          let alpha = 1;
+          let scaleX = 1;
+          if (age < t.drop) {
+            const u = age / t.drop;
+            const e = 1 - (1 - u) * (1 - u) * (1 - u); // ease-out: falls fast, settles softly
+            py = hoverY - (1 - e) * size * FISH_STAR_MERGE_DROP_RATIO;
+            alpha = e;
+          } else {
+            scaleX = Math.cos(((age - t.drop) / (t.dropSpin - t.drop)) * ORBIT_TWO_PI * FISH_STAR_MERGE_SPIN_TURNS);
+          }
+          const r = baseRadius * 1.25;
+          ctx.globalAlpha = alpha;
+          ctx.save();
+          ctx.translate(hoverX, py);
+          ctx.scale(scaleX, 1);
+          ctx.drawImage(sprite, -r, -r, r * 2, r * 2);
+          ctx.restore();
         }
-        const r = baseRadius * 1.25;
-        ctx.globalAlpha = alpha;
-        ctx.save();
-        ctx.translate(x, py);
-        ctx.scale(scaleX, 1);
-        ctx.drawImage(sprite, -r, -r, r * 2, r * 2);
-        ctx.restore();
-      }
-    } else {
-      const angle = base + orbiting * spacing; // its slot, on the same moving orbit as the others
-      if ((Math.sin(angle) >= 0) === frontPass) {
-        const depth = Math.sin(angle);
-        const r = baseRadius * (1.25 + (1 + FISH_STAR_DEPTH_SCALE * depth - 1.25) * glideE);
-        const sx = x + (Math.cos(angle) * rx) * glideE;
-        const sy = hoverY + (y + depth * ry - hoverY) * glideE;
-        ctx.globalAlpha = 1 - (1 - (0.85 + 0.15 * depth)) * glideE;
-        ctx.drawImage(sprite, sx - r, sy - r, r * 2, r * 2);
+      } else {
+        const gu = Math.min(1, (age - t.dropSpin) / t.glide);
+        const glideE = gu * gu * (3 - 2 * gu);
+        const angle = base + (orbiting + j) * spacing; // its slot, on the same moving orbit as the others
+        if ((Math.sin(angle) >= 0) === frontPass) {
+          const depth = Math.sin(angle);
+          const r = baseRadius * (1.25 + (1 + FISH_STAR_DEPTH_SCALE * depth - 1.25) * glideE);
+          const sx = hoverX + (x + Math.cos(angle) * rx - hoverX) * glideE;
+          const sy = hoverY + (y + depth * ry - hoverY) * glideE;
+          ctx.globalAlpha = 1 - (1 - (0.85 + 0.15 * depth)) * glideE;
+          ctx.drawImage(sprite, sx - r, sy - r, r * 2, r * 2);
+        }
       }
     }
+  }
+  ctx.globalAlpha = prevAlpha;
+}
+
+// Tier 4's shimmer, per direct request: two small white sparkles that twinkle in and out at a fresh spot on the
+// body every cycle. The sparkle is baked once; each lit sparkle is ONE drawImage (an unlit one costs nothing),
+// positions are plain math off the game clock — no per-fish state, gradients or clipping.
+const SPARKLE_SPRITE_SIZE = 32;
+let sparkleSprite = null;
+function getSparkleSprite() {
+  if (sparkleSprite) return sparkleSprite;
+  const canvas = document.createElement('canvas');
+  canvas.width = SPARKLE_SPRITE_SIZE;
+  canvas.height = SPARKLE_SPRITE_SIZE;
+  const c = canvas.getContext('2d');
+  const m = SPARKLE_SPRITE_SIZE / 2;
+  c.fillStyle = '#ffffff';
+  c.beginPath(); // a four-point twinkle
+  for (let i = 0; i < 8; i++) {
+    const r = i % 2 === 0 ? m : m * 0.16;
+    const a = (i * Math.PI) / 4 - Math.PI / 2;
+    if (i === 0) c.moveTo(m + Math.cos(a) * r, m + Math.sin(a) * r);
+    else c.lineTo(m + Math.cos(a) * r, m + Math.sin(a) * r);
+  }
+  c.closePath();
+  c.fill();
+  sparkleSprite = canvas;
+  return sparkleSprite;
+}
+function drawShimmer(ctx, x, y, size, elapsedMs, fishPhase) {
+  const prevAlpha = ctx.globalAlpha;
+  for (let i = 0; i < 2; i++) {
+    const cycle = elapsedMs / FISH_SHIMMER_PERIOD_MS + fishPhase / ORBIT_TWO_PI + i * 0.5; // the two sparkles run half a cycle apart
+    const idx = Math.floor(cycle);
+    const u = cycle - idx;
+    if (u >= FISH_SHIMMER_ACTIVE) continue;
+    const lit = Math.sin((Math.PI * u) / FISH_SHIMMER_ACTIVE);
+    const h1 = Math.sin(idx * 12.9898 + i * 78.233 + fishPhase) * 43758.5453;
+    const h2 = Math.sin(idx * 39.346 + i * 11.135 + fishPhase * 1.7) * 24634.6345;
+    const r = size * FISH_SHIMMER_SIZE_RATIO * lit;
+    ctx.globalAlpha = prevAlpha * lit;
+    ctx.drawImage(getSparkleSprite(), x + (h1 - Math.floor(h1) - 0.5) * size * 0.8 - r, y + (h2 - Math.floor(h2) - 0.5) * size * 0.4 - r, r * 2, r * 2);
   }
   ctx.globalAlpha = prevAlpha;
 }
@@ -1110,7 +1180,7 @@ function drawEternalBody(ctx, x, y, size, facing, tailPhase, stage, color, eyeDi
 export function drawFishShadow(ctx, x, y, speciesId, stage, starTier = 1) {
   const def = SPECIES[speciesId];
   const isFullyGrown = stage === def.growthStages.length - 1;
-  const size = FISH_BASE_SIZE * def.growthStages[stage].scale * (isFullyGrown && starTier >= 4 ? FISH_TIER4_SIZE_MULTIPLIER : 1); // matches drawFish's Tier 4 growth
+  const size = FISH_BASE_SIZE * def.growthStages[stage].scale * (isFullyGrown && starTier >= 3 ? FISH_TIER4_SIZE_MULTIPLIER : 1); // matches drawFish's Tier 3+ growth
   const hasEel = isFullyGrown && (speciesId === 'electric_eel' || (def.parents && def.parents.includes('electric_eel')));
   let cy = y, rx, ry;
   if (hasEel) {
@@ -1150,7 +1220,7 @@ export function drawFishShadow(ctx, x, y, speciesId, stage, starTier = 1) {
 // pulsing golden rim) — pass the game clock (state.level.elapsed), the fish's own
 // random phase, and ms since a merge made it (-1 for none). Left at the default
 // (-1) by every preview/icon caller, which then draw no stars or rim at all —
-// only the static Tier 4 look (gold pupil, +5% size) still follows starTier.
+// only the static Tier 3+ look (matching pupil, +5% size) and the Tier 4 brightening still follow starTier.
 // The look every draw path shares: species/stage -> size, and the body color after the
 // sickness / grayed tints. Split out of drawFish unchanged so drawFish and the sprite
 // cache below can't drift apart.
@@ -1158,7 +1228,7 @@ function resolveFishLook(speciesId, stage, starTier, sickness, grayed) {
   const def = SPECIES[speciesId];
   const scale = def.growthStages[stage].scale;
   const isFullyGrown = stage === def.growthStages.length - 1;
-  const size = FISH_BASE_SIZE * scale * (isFullyGrown && starTier >= 4 ? FISH_TIER4_SIZE_MULTIPLIER : 1);
+  const size = FISH_BASE_SIZE * scale * (isFullyGrown && starTier >= 3 ? FISH_TIER4_SIZE_MULTIPLIER : 1);
   // A Gene-Splicing hybrid (def.parents, [utilityId, economyId]) has no
   // FISH_COLORS entry of its own — per direct request, it's a straight
   // blend of whichever two species it was spliced from, not a flat color.
@@ -1175,6 +1245,7 @@ function resolveFishLook(speciesId, stage, starTier, sickness, grayed) {
     if (grayed > 0) rgb = mixRgb(rgb, ALIEN_BLOCKED_GRAY, grayed);
     color = `rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
   }
+  if (isFullyGrown && starTier >= 4) color = tone(color, FISH_TIER4_BRIGHTEN); // per direct request, Tier 4 is a brighter version of the fish (baked into the cached sprite)
   return { def, size, isFullyGrown, baseColor, color };
 }
 
@@ -1272,7 +1343,7 @@ function drawFishBody(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDirecti
 // game clock — previews, a dying fish — or one with no band at its tier).
 function applyTierLook(look, starTier, rimPulse) {
   const { size, isFullyGrown, color } = look;
-  pupilColor = isFullyGrown && starTier >= 4 ? color : '#1a1a1a'; // Tier 4: the pupil matches the fish's own color
+  pupilColor = isFullyGrown && starTier >= 3 ? color : '#1a1a1a'; // Tier 3+: the pupil matches the fish's own color
   rimBandAlpha = 0;
   const band = rimPulse === null ? null : FISH_RIM_BAND_BY_TIER[starTier];
   if (band) {
@@ -1291,9 +1362,11 @@ export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDire
   let starCount = 0;
   let orbitRing = null;
   let rimPulse = null;
+  let shimmer = false;
   // Only economy fish (the ones that can merge up a tier) get stars, the orbit oval and the rim.
   if (isFullyGrown && elapsedMs >= 0 && ECONOMY_SPECIES.has(speciesId)) {
     starCount = FISH_STAR_COUNT_BY_TIER[starTier] || 0;
+    shimmer = starTier >= 4;
     if (FISH_RIM_BAND_BY_TIER[starTier]) rimPulse = 0.5 + 0.5 * Math.sin((elapsedMs / FISH_RIM_PERIOD_MS) * Math.PI * 2 + fishPhase);
     applyTierLook(look, starTier, rimPulse);
     if (starCount > 0) {
@@ -1307,6 +1380,7 @@ export function drawFish(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDire
   const { headX, headY, headSize } = drawFishBody(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDirection, look);
 
   // The near half of the orbiting stars, over the body (and under any hat).
+  if (shimmer) drawShimmer(ctx, x, y, size, elapsedMs, fishPhase);
   if (starCount > 0) drawOrbitStars(ctx, x, y, size, starCount, elapsedMs, fishPhase, mergeAgeMs, true, orbitRing);
 
   // Equipped cosmetic hat — per direct spec ("achievements used for
@@ -1489,14 +1563,16 @@ export function drawFishCached(ctx, x, y, speciesId, stage, facing, tailPhase, e
   const def = SPECIES[speciesId];
   const scale = def.growthStages[stage].scale;
   const isFullyGrown = stage === def.growthStages.length - 1;
-  const size = FISH_BASE_SIZE * scale * (isFullyGrown && starTier >= 4 ? FISH_TIER4_SIZE_MULTIPLIER : 1);
+  const size = FISH_BASE_SIZE * scale * (isFullyGrown && starTier >= 3 ? FISH_TIER4_SIZE_MULTIPLIER : 1);
 
   // The same star / rim-pulse resolution drawFish does (stars stay live).
   let starCount = 0;
   let orbitRing = null;
   let rimPulseStep = -1;
+  let shimmer = false;
   if (isFullyGrown && elapsedMs >= 0 && ECONOMY_SPECIES.has(speciesId)) {
     starCount = FISH_STAR_COUNT_BY_TIER[starTier] || 0;
+    shimmer = starTier >= 4;
     if (FISH_RIM_BAND_BY_TIER[starTier]) {
       const pulse = 0.5 + 0.5 * Math.sin((elapsedMs / FISH_RIM_PERIOD_MS) * Math.PI * 2 + fishPhase);
       rimPulseStep = Math.round(pulse * FISH_RIM_PULSE_STEPS);
@@ -1533,6 +1609,7 @@ export function drawFishCached(ctx, x, y, speciesId, stage, facing, tailPhase, e
     const look = resolveFishLook(speciesId, stage, starTier, sickness, grayed);
     applyTierLook(look, starTier, rimPulseStep < 0 ? null : rimPulseStep / FISH_RIM_PULSE_STEPS);
     const anchor = drawFishBody(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDirection, look);
+    if (shimmer) drawShimmer(ctx, x, y, size, elapsedMs, fishPhase);
     if (starCount > 0) drawOrbitStars(ctx, x, y, size, starCount, elapsedMs, fishPhase, mergeAgeMs, true, orbitRing);
     if (useHat) drawHat(ctx, hatId, anchor.headX, anchor.headY, anchor.headSize, facing);
     return;
@@ -1552,6 +1629,7 @@ export function drawFishCached(ctx, x, y, speciesId, stage, facing, tailPhase, e
       ctx.fill();
     }
   }
+  if (shimmer) drawShimmer(ctx, x, y, size, elapsedMs, fishPhase);
   if (starCount > 0) drawOrbitStars(ctx, x, y, size, starCount, elapsedMs, fishPhase, mergeAgeMs, true, orbitRing);
   if (sprite.hat) ctx.drawImage(sprite.hat.canvas, x + sprite.hat.dx, y + sprite.hat.dy, sprite.hat.w, sprite.hat.h);
 }

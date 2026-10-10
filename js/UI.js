@@ -795,7 +795,7 @@ export function initUI(state) {
     const anchor = btn.closest('#fish-info-menu') ? btn : null; // from the fish modal the popup hangs under the button; from the shop it's centered
     if (btn.dataset.mergeTier) openMergeFishModal(state, btn.dataset.mergeSpecies, Number(btn.dataset.mergeTier), btn);
     else if (btn.dataset.recipeKind) openRecipeInfoModal(state, btn.dataset.recipeKind, btn.dataset.recipeId);
-    else openLabPurchaseModal(state, btn.dataset.nodeId, true, anchor);
+    else openLabPurchaseModal(state, btn.dataset.nodeId, true, anchor, btn.dataset.eternalLocked ? ETERNAL_TANK_FOOTNOTE : null);
   };
   els.fishInfoMergeLines.addEventListener('click', onMergeNodeClick);
   els.previewStats.addEventListener('click', onMergeNodeClick);
@@ -1438,9 +1438,10 @@ function updateFishInfoMenuPosition(state) {
   }
 }
 
-function fishStatRowHtml(label, perMin, penaltyPerMin, bar) {
+function fishStatRowHtml(label, perMin, penaltyPerMin, bar, bonusPerMin = 0) {
+  const bonus = bonusPerMin > 0.05 ? ` <span class="fish-info-bonus">(+${bonusPerMin.toFixed(1)})</span>` : ''; // per direct request, the school-of-fish gain
   const penalty = penaltyPerMin > 0.05 ? ` <span class="fish-info-penalty">(-${penaltyPerMin.toFixed(1)})</span>` : '';
-  return `<div>${label}: <b>${perMin.toFixed(1)}</b>${penalty}${bar}</div>`;
+  return `<div>${label}: <b>${perMin.toFixed(1)}</b>${bonus}${penalty}${bar}</div>`;
 }
 
 // Per direct request, the fish modal's meters compare this fish against the
@@ -1456,7 +1457,7 @@ function collectFishModalRanges(state) {
     if (stats.generatedMwLastSec != null && e.id !== state.ui.fishInfoModalFishId) stats.generatedMwLastSec = e.lastGeneratedMw || 0;
     for (const key in stats) {
       const v = stats[key];
-      if (v == null || key === 'goldPenaltyPerMin') continue;
+      if (v == null || key === 'goldPenaltyPerMin' || key === 'schoolBonusPerMin' || key === 'schoolSize') continue;
       const r = ranges[key] || (ranges[key] = { min: v, max: v });
       r.min = Math.min(r.min, v);
       r.max = Math.max(r.max, v);
@@ -1469,7 +1470,9 @@ function collectFishModalRanges(state) {
 function fishModalStatRowsHtml(stats, ranges) {
   const bar = (kind, key) => statBarForRange(kind, stats[key], ranges[key] ? ranges[key].min : stats[key], ranges[key] ? ranges[key].max : stats[key]);
   const rows = [];
-  if (stats.goldPerMin != null) rows.push(fishStatRowHtml('Gold/min', stats.goldPerMin, stats.goldPenaltyPerMin, bar('money', 'goldPerMin')));
+  if (stats.goldPerMin != null) rows.push(fishStatRowHtml('Gold/min', stats.goldPerMin, stats.goldPenaltyPerMin, bar('money', 'goldPerMin'), stats.schoolBonusPerMin));
+  // Per direct request, a Dartfin's modal shows its school size, the meter full at DARTFIN_SCHOOL_MAX_SIZE fish.
+  if (stats.schoolSize != null) rows.push(`<div>School: <b>${stats.schoolSize}/${DARTFIN_SCHOOL_MAX_SIZE}</b>${statBarHtml('range', (stats.schoolSize / DARTFIN_SCHOOL_MAX_SIZE) * 100)}</div>`);
   if (stats.wastePerMin != null) rows.push(`<div>Waste/min: <b>${stats.wastePerMin.toFixed(1)}</b>${bar('waste', 'wastePerMin')}</div>`);
   if (stats.wasteEatenPerMin != null) rows.push(`<div>Waste eaten/min: <b>${stats.wasteEatenPerMin.toFixed(1)}</b>${bar('waste', 'wasteEatenPerMin')}</div>`);
   if (stats.sciencePerMin != null) rows.push(`<div>Science/min: <b>${stats.sciencePerMin.toFixed(1)}</b>${bar('science', 'sciencePerMin')}</div>`);
@@ -1565,9 +1568,11 @@ function spliceEntryHtml(state, entry) {
   const nodeId = entry.isSplice ? labNodeIdForSpecies(entry.resultSpeciesId) : null;
   const arrow = entry.text.indexOf(' → ');
   if (nodeId == null || arrow < 0) return `<div>${entry.text}</div>`;
-  const locked = !state.meta.labUpgradesPurchased.includes(nodeId);
-  const title = locked ? 'Not purchased yet — click to see its Science Lab node' : 'Click to see its Science Lab node';
-  return `<div>${entry.text.slice(0, arrow)} → <button class="merge-node-btn${locked ? ' locked' : ''}" data-node-id="${nodeId}" title="${title}">${locked ? '🔒 ' : ''}${entry.text.slice(arrow + 3)}</button></div>`;
+  // Per direct request, the Eternal Fish's line is set a little smaller so it fits on one line; it also reads as locked
+  // while the tank has too few hybrid types for it (its modal then carries the footnote).
+  const locked = entry.eternalLocked || !state.meta.labUpgradesPurchased.includes(nodeId);
+  const title = entry.eternalLocked ? 'Not enough hybrid types in tank — click for details' : locked ? 'Not purchased yet — click to see its Science Lab node' : 'Click to see its Science Lab node';
+  return `<div${entry.resultSpeciesId === 'eternal_fish' ? ' class="merge-eternal"' : ''}>${entry.text.slice(0, arrow)} → <button class="merge-node-btn${locked ? ' locked' : ''}" data-node-id="${nodeId}"${entry.eternalLocked ? ' data-eternal-locked="1"' : ''} title="${title}">${locked ? '🔒 ' : ''}${entry.text.slice(arrow + 3)}</button></div>`;
 }
 
 // The shop preview's merge section for a fish: every hybrid that lists it as a parent.
@@ -1589,7 +1594,7 @@ export function refreshFishInfoMenu(state) {
   const fish = state.level.entities.find((e) => e.id === fishId && e.type === 'fish');
   if (!fish) { closeFishInfoMenu(state); return; }
   const def = SPECIES[fish.speciesId];
-  els.fishInfoName.textContent = def.name;
+  els.fishInfoName.textContent = (fish.starTier || 1) > 1 ? `Tier ${fish.starTier} ${def.name}` : def.name; // per direct request, name the tier above Tier 1 (same wording as the merge preview)
   els.fishInfoDesc.textContent = def.description;
   // A real drawFish preview instead of an emoji — fish SPECIES rows have no
   // `icon` field at all (they're canvas-drawn, not emoji), unlike a
@@ -1605,7 +1610,7 @@ export function refreshFishInfoMenu(state) {
 
   els.fishInfoFilter.classList.toggle('hidden', fish.speciesId !== 'buffer_fish'); // the Magnet Fish's own filter lives in this modal; its grid is built on open/mutation only
 
-  const mergeLines = describeFishMergeOptions(state, fish);
+  const mergeLines = describeFishMergeOptions(state, fish, true); // true: also list the grayed-out Eternal merge
   els.fishInfoMergeTitle.classList.toggle('hidden', mergeLines == null);
   els.fishInfoMergeLines.classList.toggle('hidden', mergeLines == null);
   // Per direct request, a splice reads "Partner → Result" with the result as a button to its Science Lab node.
@@ -2421,18 +2426,20 @@ function buyLabUpgrade(state, id) {
 // the stats of the building/fish being unlocked"). Opened by a node's click
 // handler above instead of buying immediately; Confirm is the only thing
 // left that actually calls buyLabUpgrade.
-function openLabPurchaseModal(state, id, infoOnly = false, anchorBtn = null) {
+const ETERNAL_TANK_FOOTNOTE = 'Not enough hybrid types in tank';
+function openLabPurchaseModal(state, id, infoOnly = false, anchorBtn = null, footnote = null) { // footnote: a lock reason other than "not bought yet" (the Eternal Fish's tank requirement)
   closeMergeFishModal();
   const node = SCIENCE_LAB_UPGRADES[id];
   labPurchaseNodeId = id;
   labPurchaseInfoOnly = infoOnly;
-  const infoLocked = infoOnly && !state.meta.labUpgradesPurchased.includes(id);
+  const notBought = infoOnly && !state.meta.labUpgradesPurchased.includes(id);
+  const infoLocked = notBought || (infoOnly && footnote != null);
   els.labPurchaseModal.classList.toggle('info-only', infoOnly);
   els.labPurchaseModal.classList.toggle('info-locked', infoLocked);
   els.labPurchaseModal.classList.toggle('anchored', !!anchorBtn); // opened from the fish modal: its paper look, hanging under the button
   if (!anchorBtn) { els.labPurchaseModal.style.left = ''; els.labPurchaseModal.style.top = ''; }
   els.labPurchaseFootnote.classList.toggle('hidden', !infoLocked);
-  els.labPurchaseFootnote.textContent = LAB_FISH_FOOTNOTE; // openRecipeInfoModal reuses this element with its own wording
+  els.labPurchaseFootnote.textContent = footnote || LAB_FISH_FOOTNOTE; // openRecipeInfoModal reuses this element with its own wording
   // A `mystery: true` node stays a total blank until its prerequisites are
   // met, per direct spec ("a question mark node... that gives no info until
   // it's unlockable") — no name, no icon, no cost, no description, nothing
@@ -2457,7 +2464,7 @@ function openLabPurchaseModal(state, id, infoOnly = false, anchorBtn = null) {
   els.labPurchaseIcon.textContent = '';
   els.labPurchaseIcon.appendChild(buildingIconOrEmojiElement(node, LAB_PURCHASE_ICON_CANVAS_SIZE));
   els.labPurchaseName.textContent = (infoLocked ? '🔒 ' : '') + node.name;
-  els.labPurchaseCost.textContent = infoOnly && !infoLocked ? 'Unlocked ✓' : labNodeCostText(node);
+  els.labPurchaseCost.textContent = infoOnly && !notBought ? 'Unlocked ✓' : labNodeCostText(node);
   refreshLabPurchaseButton(state);
 
   const descLines = [];
@@ -2728,13 +2735,15 @@ function fishEconomyStatsHtml(state, speciesId) {
     // Rounded to the nearest whole dollar now, per direct request — was
     // toFixed(1) (nearest tenth) before that, toFixed(2) before that; a
     // dollar range doesn't need fractional-cent precision to be useful.
-    html += `<div class="building-stat">${itemIconImgHtml('coin')} Money: <b>$${Math.round(babyMoneyPerMin)} - $${Math.round(adultMoneyPerMin)}/min</b>${fishStatBarHtml('money', adult.dropValue / adult.dropInterval)}</div>`;
+    // Per direct request, a schooling fish's top end includes its full-school coin multiplier.
+    const schoolMax = s.schooling ? DARTFIN_SCHOOL_MAX_COIN_MULTIPLIER : 1;
+    html += `<div class="building-stat">${itemIconImgHtml('coin')} Money: <b>$${Math.round(babyMoneyPerMin)} - $${Math.round(adultMoneyPerMin * schoolMax)}/min</b>${fishStatBarHtml('money', adult.dropValue / adult.dropInterval)}</div>`;
   }
   // A Blimpfish coin ripens after it drops (Config.js's BLIMPFISH_COIN_*), so
   // the Money line above is its nominal rate; this shows the per-coin range.
   if (s.appreciatingCoin) {
     const adultCoin = Math.ceil(adult.dropValue);
-    html += `<div class="building-stat">⏳ Coin ripens: <b>$${Math.round(adultCoin * BLIMPFISH_COIN_START_FRACTION)} → $${Math.round(adultCoin * BLIMPFISH_COIN_END_FRACTION)} over ${Math.round(BLIMPFISH_COIN_APPRECIATION_MS / 1000)}s</b></div>`;
+    html += `<div class="building-stat">⏳ Coins appreciate: <b>$${Math.round(adultCoin * BLIMPFISH_COIN_START_FRACTION)} → $${Math.round(adultCoin * BLIMPFISH_COIN_END_FRACTION)} over ${Math.round(BLIMPFISH_COIN_APPRECIATION_MS / 1000)}s</b></div>`;
   }
   // A Dartfin's coins and waste depend on the school size (Config.js's DARTFIN_SCHOOL_*);
   // the Money/Waste lines are the lone-fish baseline, so show the live bonus here.
@@ -2778,7 +2787,9 @@ function fishEconomyStatsHtml(state, speciesId) {
     // actual poop timer; only this display-side stat had drifted out of
     // sync with it).
     const wastePerMin = 60000 / (WASTE_POOP_INTERVAL_MS * (s.wastePoopIntervalMultiplier || 1));
-    html += `<div class="building-stat">${itemIconImgHtml('waste')} Waste: <b>${wastePerMin.toFixed(1)}/min</b>${fishStatBarHtml('waste', 1 / (s.wastePoopIntervalMultiplier || 1))}</div>`; // nearest tenth, per direct request — see the Money line's own comment
+    // Per direct request, a schooling fish shows its full-school waste rate -> its lone-fish rate.
+    const wasteText = s.schooling ? `${(wastePerMin * DARTFIN_SCHOOL_MAX_WASTE_MULTIPLIER).toFixed(1)} - ${wastePerMin.toFixed(1)}` : wastePerMin.toFixed(1);
+    html += `<div class="building-stat">${itemIconImgHtml('waste')} Waste: <b>${wasteText}/min</b>${fishStatBarHtml('waste', 1 / (s.wastePoopIntervalMultiplier || 1))}</div>`; // nearest tenth, per direct request — see the Money line's own comment
   }
   // Per direct request ("add in the fish speed stat"). The base swimSpeed
   // times the flat game-wide multiplier — deliberately NOT the live

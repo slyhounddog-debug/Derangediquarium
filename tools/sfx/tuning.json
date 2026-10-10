@@ -70,6 +70,23 @@
       ]
     },
     {
+      "id": "fishTierLook", "label": "Fish: merge tier look & coin fill",
+      "items": [
+        { "deep": "FISH_STAR_COUNT_BY_TIER", "label": "Orbiting stars at merge tier" },
+        { "name": "FISH_STAR_MERGE_PAIR_MS", "label": "Tier 2 merge: time per star", "desc": "The Tier 1 to Tier 2 merge adds two stars; each plays the drop / spin / glide scaled to take this long (a single new star, for Tier 3 and 4, takes the sum of the three below).", "min": 800, "max": 5000, "step": 50, "unit": "ms" },
+        { "name": "FISH_STAR_MERGE_PAIR_STAGGER_MS", "label": "Tier 2 merge: delay of the second star", "desc": "How long after the first star the second one starts dropping.", "min": 0, "max": 2000, "step": 50, "unit": "ms" },
+        { "name": "FISH_STAR_MERGE_PAIR_SPREAD_RATIO", "label": "Tier 2 merge: stars' hover spread", "desc": "How far to each side of the head the two stars hover while they spin, as a fraction of the fish's size.", "min": 0, "max": 0.8, "step": 0.02, "unit": "x size" },
+        { "name": "FISH_STAR_MERGE_DROP_MS", "label": "Single new star: drop time", "desc": "Tier 3 and 4 merges: how long the new star takes to fall in above the head.", "min": 100, "max": 3000, "step": 50, "unit": "ms" },
+        { "name": "FISH_STAR_MERGE_SPIN_MS", "label": "Single new star: spin time", "desc": "Tier 3 and 4 merges: how long it spins above the head.", "min": 100, "max": 4000, "step": 50, "unit": "ms" },
+        { "name": "FISH_STAR_MERGE_GLIDE_MS", "label": "Single new star: glide time", "desc": "Tier 3 and 4 merges: how long it takes to glide into the orbit.", "min": 100, "max": 3000, "step": 50, "unit": "ms" },
+        { "name": "FISH_TIER4_SIZE_MULTIPLIER", "label": "Tier 3+ fish: size", "desc": "Tier 3 and Tier 4 adults are drawn this much bigger (render only; hitboxes are unchanged).", "min": 1, "max": 1.5, "step": 0.01, "unit": "x" },
+        { "name": "FISH_TIER4_BRIGHTEN", "label": "Tier 4 fish: brightness", "desc": "How far toward white a Tier 4 fish's body color is lightened.", "min": 0, "max": 0.6, "step": 0.01 },
+        { "name": "FISH_SHIMMER_PERIOD_MS", "label": "Tier 4 shimmer: cycle time", "desc": "Each of a Tier 4 fish's two sparkles twinkles once per cycle at a fresh spot on the body.", "min": 400, "max": 6000, "step": 50, "unit": "ms" },
+        { "name": "FISH_SHIMMER_ACTIVE", "label": "Tier 4 shimmer: lit fraction", "desc": "The fraction of each cycle a sparkle is visible.", "min": 0.05, "max": 1, "step": 0.05 },
+        { "name": "FISH_SHIMMER_SIZE_RATIO", "label": "Tier 4 shimmer: sparkle size", "desc": "Peak size of a sparkle as a fraction of the fish's size.", "min": 0.05, "max": 1, "step": 0.01, "unit": "x size" }
+      ]
+    },
+    {
       "id": "species", "label": "Species stats",
       "items": [
         { "deep": "SPECIES", "fields": ["cost", "swimSpeed", "hungerRate", "wastePoopIntervalMultiplier", "dropValue", "dropInterval", "feedsRequired", "pixelsPerMW", "eatCooldownMs"] }

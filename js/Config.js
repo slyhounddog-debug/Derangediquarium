@@ -2717,7 +2717,7 @@ export const SCIENCE_LAB_UPGRADES = {
   // labNodeHasEnoughScience's comment in UI.js.
   power_plant_science: {
     id: 'power_plant_science', name: 'Power Plant: Blue Science', icon: '🔬', scienceCost: 140, scienceGreenCost: 70, goldCost: 15000,
-    requires: ['power_plant', 'green_science_tech'], grants: {},
+    requires: ['green_science_tech'], grants: {}, // per direct request, no longer requires the Power Plant directly (Science Cap 60 -> 80 -> Green Science Tech already implies it)
   },
   // Bio Refinery — the top Refinery tier now that Ultra Refinery is gone
   // entirely, per direct request ("remove the Ultra Refinery... have the
@@ -2836,13 +2836,13 @@ export const SCIENCE_LAB_UPGRADES = {
     id: 'science_cap_3', name: 'Science Cap 60', icon: '🫧',
     description: 'Raises the Science Cap from 40 to 60 — how many can exist unbanked in the tank at once before an Octopus\'s brew is blocked.',
     scienceCost: SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[2], goldCost: SCIENCE_CAP_UPGRADE_GOLD_COSTS[2],
-    requires: ['manufacturer', 'science_cap_2'], grants: { scienceCapLevel: 1 },
+    requires: ['manufacturer', 'power_plant', 'science_cap_2'], grants: { scienceCapLevel: 1 }, // per direct request: Science Cap 60 also needs the Power Plant (which power_plant_science no longer requires itself, see below)
   },
   science_cap_4: {
     id: 'science_cap_4', name: 'Science Cap 80', icon: '🫧',
     description: 'Raises the Science Cap from 60 to 80 — how many can exist unbanked in the tank at once before an Octopus\'s brew is blocked.',
     scienceCost: SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[3], goldCost: SCIENCE_CAP_UPGRADE_GOLD_COSTS[3],
-    requires: ['hybrid_eternal_fish'], grants: { scienceCapLevel: 1 }, // per direct request: Science Cap 80 needs the Eternal Fish (which itself needs Science Cap 60, so cap 60 is still required transitively)
+    requires: ['science_cap_3', 'hybrid_xeno_octopus', 'hybrid_eternal_fish'], grants: { scienceCapLevel: 1 }, // per direct request: Science Cap 80 needs Science Cap 60 (explicitly now), the Bio Fish, and the Eternal Fish
   },
   science_cap_5: {
     id: 'science_cap_5', name: 'Science Cap 100', icon: '🫧',
@@ -3117,8 +3117,9 @@ export let FISH_SCALING_COST_GROWTH_RATE = 1.125;
 // FISH_STAR_TIER_VALUE_MULTIPLIER over the previous tier's, capped at
 // FISH_STAR_TIER_MAX (a Tier-4 pair can no longer be combined further).
 // FISH_STAR_COUNT_BY_TIER is the number of stars FishRenderer.js orbits around
-// the adult sprite per tier — per direct request every adult gets one orbiting
-// star at Tier 1, then one more per tier (so the count equals the tier).
+// the adult sprite per tier — per direct request a Tier 1 adult has no stars or
+// orbit ring at all; Tier 2 gets two (both arrive in one merge, see
+// FISH_STAR_MERGE_PAIR_* below), then one more per tier (so Tier 3 has 3, Tier 4 has 4).
 export const FISH_STAR_TIER_MAX = 4;
 export let FISH_STAR_TIER_VALUE_MULTIPLIER = 2; // was 1.8 (before that 1.5) — raised per direct request so a Tier 4 fish makes exactly double a Tier 3 fish of the same species (and each tier step doubles the previous, since this is a flat per-step multiplier — see Entities.js's Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, starTier - 1) usage)
 // Each combine step also makes the resulting fish 10% less hungry than the
@@ -3130,7 +3131,7 @@ export let FISH_STAR_TIER_VALUE_MULTIPLIER = 2; // was 1.8 (before that 1.5) —
 // poop block — so a Tier-4 fish still only ever poops the same single Waste
 // item per interval as a Tier-1 adult, per direct request.
 export const FISH_STAR_TIER_HUNGER_MULTIPLIER = 0.9;
-export const FISH_STAR_COUNT_BY_TIER = { 1: 1, 2: 2, 3: 3, 4: 4 };
+export const FISH_STAR_COUNT_BY_TIER = { 1: 0, 2: 2, 3: 3, 4: 4 };
 export const FISH_STAR_COLOR = '#ffd700';
 // Orbiting-star look (FishRenderer.js's drawOrbitStars) — per direct request:
 // golden stars shaped/outlined like the Mound's pointing arrow (same fill and
@@ -3154,6 +3155,13 @@ export const FISH_STAR_MERGE_DROP_MS = 800;
 export const FISH_STAR_MERGE_SPIN_MS = 1200;
 export const FISH_STAR_MERGE_GLIDE_MS = 800;
 export const FISH_STAR_MERGE_SPIN_TURNS = 2;
+// The Tier 1 -> 2 merge adds TWO stars back to back (per direct request): each plays the same
+// drop/spin/glide, scaled down so it takes FISH_STAR_MERGE_PAIR_MS instead of the ~2.8s above, the
+// second starting FISH_STAR_MERGE_PAIR_STAGGER_MS after the first and hovering to the other side of
+// the head (+/- FISH_STAR_MERGE_PAIR_SPREAD_RATIO of the fish's size) so they don't overlap.
+export const FISH_STAR_MERGE_PAIR_MS = 2000;
+export const FISH_STAR_MERGE_PAIR_STAGGER_MS = 600;
+export const FISH_STAR_MERGE_PAIR_SPREAD_RATIO = 0.3;
 // Tier 2+ rim — per direct request, NOT gold any more (it clashed with some
 // fish's darkened outline): a lighter shade of the fish's own color drawn as a
 // band just INSIDE the existing dark outline (FishRenderer.js's strokeRimBand),
@@ -3172,11 +3180,20 @@ export const FISH_RIM_BAND_BY_TIER = {
 export const FISH_ORBIT_RING_LIGHTEN = 0.5;
 export const FISH_ORBIT_RING_ALPHA = 0.4;
 export const FISH_ORBIT_RING_WIDTH_RATIO = 0.05; // line width as a fraction of the fish's size
-// Tier 4 extras — per direct request: the pupil takes the fish's own color
-// (instead of black) and the body is 5% bigger. The size bump is RENDER-ONLY:
-// the hit radius, eat radius and physics still read the species' own scale,
-// so nothing about collision or clicking changes.
+// Tier 3+ extras — per direct request (these were Tier 4 only, so Tier 3 stands out from Tier 2): the
+// pupil takes the fish's own color (instead of black) and the body is 5% bigger. The size bump is
+// RENDER-ONLY: the hit radius, eat radius and physics still read the species' own scale, so nothing
+// about collision or clicking changes. (The constant keeps its old name.)
 export const FISH_TIER4_SIZE_MULTIPLIER = 1.05;
+// Tier 4 only, on top of the above — per direct request so it stands out from Tier 3: the body color is
+// lightened toward white (baked into the cached sprite, so free at draw time), plus a cheap shimmer: two
+// small sparkles (one drawImage each, only while lit) twinkling at wandering spots on the body. Each sparkle
+// is lit for the first FISH_SHIMMER_ACTIVE fraction of its FISH_SHIMMER_PERIOD_MS cycle; the size is a
+// fraction of the fish's own.
+export const FISH_TIER4_BRIGHTEN = 0.22;
+export const FISH_SHIMMER_PERIOD_MS = 1800;
+export const FISH_SHIMMER_ACTIVE = 0.45;
+export const FISH_SHIMMER_SIZE_RATIO = 0.32;
 // Hit-test radius (as a fraction of the fish's current on-screen size) used
 // by main.js's drag-to-combine mousedown/mouseup and the live hover-target
 // check — generous enough to grab a fish without needing pixel precision,
@@ -3741,7 +3758,8 @@ export const BLIMPFISH_COIN_APPRECIATION_MS = 90000;
 export const BLIMPFISH_COIN_START_FRACTION = 0.5;
 export const BLIMPFISH_COIN_END_FRACTION = 1.5;
 export const APPRECIATE_PULSE_MS = 280; // how long the small ring pulse lasts each time the coin gains value
-export const APPRECIATE_PARTICLE_COUNT = 5; // motes drifting into the coin while it is still ripening
+export const APPRECIATE_PARTICLE_COUNT = 3; // motes drifting into the coin while it is still ripening (was 5; trimmed per direct request now that the rising fill carries the "how ripe" read)
+export const APPRECIATE_FILL_COLOR = 'rgba(30, 18, 6, 0.45)'; // the darkened cap over the unripe part of a ripening coin — it shrinks downward as the coin fills (main.js's drawAppreciationFx)
 export const APPRECIATE_PARTICLE_CYCLE_MS = 1100; // how long one mote takes from the edge of the halo to the coin
 export const APPRECIATE_PARTICLE_HALO_PX = 24; // how far out a mote starts, past the coin's own edge
 export const APPRECIATE_PARTICLE_COLOR = '#ffe9a0';

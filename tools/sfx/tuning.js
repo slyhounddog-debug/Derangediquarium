@@ -384,8 +384,8 @@ const FORMULAS = [
   },
   {
     id: 'dartfinSchool', title: 'Dartfin school',
-    formula: 'fraction = (min(Dartfin, full size) − 1) / (full size − 1)\ncoin value = round( normal coin × (1 + (coin multiplier at full − 1) × fraction) )\nwaste rate = 1 − (1 − waste multiplier at full) × fraction;  poop interval = normal interval / waste rate',
-    note: 'Every living Dartfin counts (any size or merge tier, anywhere in the tank). A lone Dartfin is the baseline. Tables show an adult tier-1 Dartfin in a clean tank; “school” columns are the whole group together. Movement (pull chance, loose radius, wobble) has no effect on income, so it is not in these tables.',
+    formula: 'fraction = (min(Dartfin, full size) − 1) / (full size − 1)\ncoin value = round( normal coin × (1 + (coin multiplier at full − 1) × fraction) )\nwaste rate = 1 − (1 − waste multiplier at full) × fraction;  poop interval = normal interval / waste rate\nShop Money line = baby coin per min (lone fish) – adult coin per min × coin multiplier at full;  Shop Waste line = waste per min × waste multiplier at full – lone-fish waste per min\nFish modal Gold / min (+bonus) = gold now × (1 − 1 / current coin multiplier), shown in green beside the total; the (−) beside it is the dirty-tank loss',
+    note: 'Every living Dartfin counts (any size or merge tier, anywhere in the tank). A lone Dartfin is the baseline. Tables show an adult tier-1 Dartfin in a clean tank; “school” columns are the whole group together. Movement (pull chance, loose radius, wobble) has no effect on income, so it is not in these tables. The second table is exactly what the Shop’s Dartfin Money and Waste lines show.',
     params: ['DARTFIN_SCHOOL_MAX_SIZE', 'DARTFIN_SCHOOL_MAX_COIN_MULTIPLIER', 'DARTFIN_SCHOOL_MAX_WASTE_MULTIPLIER', 'DARTFIN_SCHOOL_PULL_CHANCE', 'DARTFIN_SCHOOL_LOOSE_RADIUS_PX', 'DARTFIN_SCHOOL_PULL_WOBBLE_RAD', 'WASTE_POOP_INTERVAL_MS', sp('dartfin', 'wastePoopIntervalMultiplier'), sp('dartfin', 'growthStages.2.dropValue'), sp('dartfin', 'growthStages.2.dropInterval')],
     render() {
       const full = Math.max(2, V('DARTFIN_SCHOOL_MAX_SIZE', 10));
@@ -399,12 +399,16 @@ const FORMULAS = [
         const wasteRate = 1 - (1 - wasteMax) * f, wastePerFish = 60000 / (poop / wasteRate);
         rows.push([n === full ? `${n} (full)` : n, '× ' + fmtNum(mult, 2), money(coin), money(coin * 60000 / iv), fmtNum(wastePerFish, 2), money(coin * 60000 / iv * n), fmtNum(wastePerFish * n, 1)]);
       }
-      return tbl('Dartfin in the tank', ['Dartfin', 'Coin multiplier', 'Coin (adult)', 'Gold / min each', 'Waste / min each', 'Gold / min school', 'Waste / min school'], rows);
+      const baby = Math.ceil(V(sp('dartfin', 'growthStages.0.dropValue'))), babyIv = V(sp('dartfin', 'growthStages.0.dropInterval'), 1);
+      const lonePerMin = 60000 / poop;
+      const shop = [['Money', money(baby * 60000 / babyIv) + ' – ' + money(normal * coinMax * 60000 / iv) + ' / min'], ['Waste', fmtNum(lonePerMin * wasteMax, 1) + ' – ' + fmtNum(lonePerMin, 1) + ' / min']];
+      return tbl('Dartfin in the tank', ['Dartfin', 'Coin multiplier', 'Coin (adult)', 'Gold / min each', 'Waste / min each', 'Gold / min school', 'Waste / min school'], rows)
+        + tbl('Shop stat lines (baby, lone fish → adult, full school)', ['Line', 'Shows'], shop);
     },
   },
   {
     id: 'blimpCoin', title: 'Blimpfish coin',
-    formula: 'normal value = ceil( coin value × merge value multiplier ^ (tier − 1) )\nvalue after t = round( normal value × ( start + (end − start) × min(1, t / ripen time) ) )',
+    formula: 'normal value = ceil( coin value × merge value multiplier ^ (tier − 1) )\nvalue after t = round( normal value × ( start + (end − start) × min(1, t / ripen time) ) )\ncoin fill level = min(1, t / ripen time): the bottom part of the coin stays bright, the part above the level is darkened until it is ripe',
     note: 'A Blimpfish coin starts at the start fraction of its normal value and ripens in a straight line. Every other bonus (Mutagen, cleanliness) multiplies the whole curve. The “collected after” columns show what a Blimpfish earns per minute if every coin is banked that many seconds after it drops (the Collector routing time counts, since the coin keeps ripening while it is held).',
     params: ['BLIMPFISH_COIN_APPRECIATION_MS', 'BLIMPFISH_COIN_START_FRACTION', 'BLIMPFISH_COIN_END_FRACTION', 'FISH_STAR_TIER_VALUE_MULTIPLIER', sp('blimpfish', 'growthStages.0.dropValue'), sp('blimpfish', 'growthStages.1.dropValue'), sp('blimpfish', 'growthStages.2.dropValue'), sp('blimpfish', 'growthStages.2.dropInterval')],
     inputs: [{ key: 'tier', label: 'Merge tier', value: 1, min: 1, max: 4, step: 1 }],

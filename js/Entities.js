@@ -524,19 +524,23 @@ export function computeFishInfoModalStats(state, fish) {
   let generatedMwLastSec = null;
   if (isPureGenerator || fish.speciesId === 'eel_blimp') generatedMwLastSec = state.ui.fishInfoModalFrozenGeneratedMw;
 
-  let goldPerMin = null, goldPenaltyPerMin = null;
+  let goldPerMin = null, goldPenaltyPerMin = null, schoolBonusPerMin = null;
   if (isFeeder) {
     if (blocked) {
       goldPerMin = 0;
       goldPenaltyPerMin = 0;
+      if (def.schooling) schoolBonusPerMin = 0;
     } else {
       const mutagenMultiplier = fish.mutagenBuffActive ? MUTAGEN_PASTE_COIN_MULTIPLIER : 1;
+      const schoolMultiplier = schoolCoinMultiplier(state, def);
       const baseDropValue = (fish.dropValueOverride != null
         ? fish.dropValueOverride
-        : stageDef.dropValue * Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, (fish.starTier || 1) - 1)) * mutagenMultiplier * schoolCoinMultiplier(state, def);
+        : stageDef.dropValue * Math.pow(FISH_STAR_TIER_VALUE_MULTIPLIER, (fish.starTier || 1) - 1)) * mutagenMultiplier * schoolMultiplier;
       const cleanRate = (baseDropValue / stageDef.dropInterval) * 60000;
       goldPerMin = cleanRate * cleanlinessMoneyMultiplier(state);
       goldPenaltyPerMin = cleanRate - goldPerMin;
+      // Per direct request, a schooling fish's modal also shows the +gold its school adds (already inside goldPerMin).
+      if (def.schooling) schoolBonusPerMin = goldPerMin * (1 - 1 / schoolMultiplier);
     }
   }
 
@@ -564,7 +568,8 @@ export function computeFishInfoModalStats(state, fish) {
     foodPerMin = (hungerRate * 60) / relief;
   }
 
-  return { goldPerMin, goldPenaltyPerMin, sciencePerMin, wastePerMin, wasteEatenPerMin, foodPerMin, generatedMwLastSec };
+  const schoolSize = def.schooling ? Math.min(getDartfinSchool(state).count, DARTFIN_SCHOOL_MAX_SIZE) : null; // the School row's n/max, only for a schooling fish
+  return { goldPerMin, goldPenaltyPerMin, schoolBonusPerMin, schoolSize, sciencePerMin, wastePerMin, wasteEatenPerMin, foodPerMin, generatedMwLastSec };
 }
 
 // A Manufacturer recipe's theoretical items/min, assuming it's fed
@@ -2114,7 +2119,7 @@ function mergePairOutcome(state, fish, other, combineSource, spliceSource, splic
   return null;
 }
 
-export function describeFishMergeOptions(state, fish) {
+export function describeFishMergeOptions(state, fish, includeLockedEternal = false) {
   // Per direct request the Alien-Egg friendly alien counts as a fish here: its
   // only merge is the Bio Fish splice with a grown Octopus.
   if (fish.type === 'friendly_alien') {
@@ -2128,8 +2133,9 @@ export function describeFishMergeOptions(state, fish) {
   const combineSource = isCombinableFish(state, fish);
   const spliceSource = isSpliceSource(state, fish);
   const spliceTarget = isSpliceTargetCandidate(state, fish);
-  const eternalKinds = eternalKindsFor(state, fish);
+  const eternalKinds = eternalKindsFor(state, fish, includeLockedEternal);
   if (!combineSource && !spliceSource && !spliceTarget && !eternalKinds) return null;
+  const eternalLocked = eternalKinds != null && !eternalSlotFree(state); // per direct request: unlocked in the Lab but too few hybrid types in the tank
   const entries = [];
   const seen = new Set();
   for (const other of state.level.entities) {
@@ -2143,7 +2149,7 @@ export function describeFishMergeOptions(state, fish) {
     }
     if (other.type !== 'fish' || other.id === fish.id || other.dying) continue;
     const outcome = mergePairOutcome(state, fish, other, combineSource, spliceSource, spliceTarget, eternalKinds);
-    if (outcome && !seen.has(outcome.text)) { seen.add(outcome.text); entries.push({ text: outcome.text, isSplice: !!outcome.isSplice, resultTier: outcome.resultTier || null, otherSpeciesId: other.speciesId, resultSpeciesId: outcome.resultSpeciesId }); }
+    if (outcome && !seen.has(outcome.text)) { seen.add(outcome.text); entries.push({ text: outcome.text, isSplice: !!outcome.isSplice, resultTier: outcome.resultTier || null, otherSpeciesId: other.speciesId, resultSpeciesId: outcome.resultSpeciesId, eternalLocked: eternalLocked && outcome.resultSpeciesId === 'eternal_fish' }); }
   }
   return entries.length > 0 ? entries : [{ text: 'No available fish to merge.', otherSpeciesId: null, resultSpeciesId: null }];
 }
@@ -2328,8 +2334,9 @@ function eternalThirdKind(a, b) {
 // For the hover legend / partner lines / fish info modal: null unless `fish` could start an Eternal merge right now
 // (unlocked, no sphere already, a free slot), else the set of economy kinds that have a living adult in the tank.
 // Computed once per call so the per-partner checks stay O(1) instead of rescanning the tank for every partner.
-function eternalKindsFor(state, fish) {
-  if (!isEternalParent(fish) || state.level.eternalSphere || !eternalSlotFree(state)) return null;
+function eternalKindsFor(state, fish, allowLocked = false) {
+  if (!isEternalParent(fish) || state.level.eternalSphere) return null;
+  if (!eternalSlotFree(state) && !(allowLocked && state.meta.speciesUnlocked.includes('eternal_fish'))) return null; // allowLocked: the fish modal still lists it, grayed out, when only the hybrid-type count is short
   const kinds = new Set();
   for (const e of state.level.entities) if (isEternalParent(e)) kinds.add(e.speciesId);
   return kinds;
