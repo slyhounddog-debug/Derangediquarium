@@ -43,7 +43,7 @@
   <canvas id="title-canvas"></canvas>
   <div id="start-planks">
     <button id="start-new-game-btn" class="plank-btn">New Game</button>
-    <button id="start-continue-btn" class="plank-btn" disabled>Continue</button>
+    <button id="start-continue-btn" class="plank-btn" disabled>Load Game</button>
     <button id="start-achievements-btn" class="plank-btn">Achievements</button>
     <button id="start-settings-btn" class="plank-btn">Settings</button>
     <button id="start-help-btn" class="plank-btn">Help</button>
@@ -66,6 +66,20 @@
      any change made in Settings afterward is remembered between sessions the
      same way it always was. Same layer-on-top pattern as the Help overlay
      below. -->
+<!-- Per direct request, three save slots. New Game opens this first ("Choose a save slot": pick where the new run will
+     save, an occupied slot asks before it is overwritten), and Load Game opens it too (pick a save to load; each can be
+     deleted or have its World Settings edited). The rows are built by UI.js's renderSaveSlots. -->
+<div id="save-slots-overlay" class="hidden">
+  <div id="save-slots-modal">
+    <div id="save-slots-header-row">
+      <div id="save-slots-title">Choose a save slot</div>
+      <button id="save-slots-back-btn" class="pause-btn sheen-target">← Back</button>
+    </div>
+    <div id="save-slots-list"></div>
+    <div id="save-slots-note"></div>
+  </div>
+</div>
+
 <div id="start-mode-overlay" class="hidden">
   <div id="start-mode-modal">
     <div id="start-mode-header-row">
@@ -81,19 +95,22 @@
       </div>
     </div>
     <div id="start-mode-cards">
-      <button id="start-mode-new-btn" class="start-mode-card">
+      <button id="start-mode-new-btn" class="start-mode-card" aria-pressed="false">
         <canvas id="start-mode-new-canvas" width="260" height="170"></canvas>
         <div class="start-mode-card-title">New player</div>
-        <div class="start-mode-card-desc">The guided tutorial is turned <b>on</b> — step-by-step prompts walk you through your first fish, the shop, aliens and more.</div>
+        <div class="start-mode-card-desc">The guided tutorial is turned <b>on</b> — step-by-step prompts walk you through your first fish, the shop, aliens and more. You can change this anytime in Settings.</div>
       </button>
-      <button id="start-mode-exp-btn" class="start-mode-card">
+      <button id="start-mode-exp-btn" class="start-mode-card" aria-pressed="false">
         <canvas id="start-mode-exp-canvas" width="260" height="170"></canvas>
         <div class="start-mode-card-title">Experienced player</div>
-        <div class="start-mode-card-desc">The guided tutorial is turned <b>off</b> — jump straight in with no hand-holding.</div>
+        <div class="start-mode-card-desc">The guided tutorial is turned <b>off</b> — jump straight in with no hand-holding. You can change this anytime in Settings.</div>
       </button>
     </div>
-    <button id="start-world-settings-btn" class="pause-btn sheen-target" title="Change the rules for this run: prices, aliens, speed and more">🌍 World Settings <span id="start-world-chip">Normal</span></button>
-    <div id="start-mode-note">You can change this anytime in Settings.</div>
+    <!-- Per direct request, the two cards above are a choice (one must be picked) and Start stays dark until it is. -->
+    <div id="start-mode-actions">
+      <button id="start-world-settings-btn" class="pause-btn sheen-target" title="Change the rules for this run: prices, aliens, speed and more">🌍 World Settings <span id="start-world-chip">Normal</span></button>
+      <button id="start-mode-start-btn" class="pause-btn sheen-target" disabled title="Pick New player or Experienced player first">Start</button>
+    </div>
   </div>
 </div>
 

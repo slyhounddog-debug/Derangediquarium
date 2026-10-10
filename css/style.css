@@ -1993,10 +1993,14 @@ body.time-paused #time-pause-overlay { opacity: 1; }
 .start-mode-card canvas { width: 82%; align-self: center; }
 .start-mode-card { gap: 7px; padding: 10px; }
 .start-mode-card-desc { font-size: 12.5px; line-height: 1.38; }
-#start-world-settings-btn { margin-top: 14px; display: flex; align-items: center; justify-content: center; gap: 10px; }
+#start-mode-actions { display: flex; gap: 12px; margin-top: 14px; }
+#start-world-settings-btn { flex: 1; margin-bottom: 0; display: flex; align-items: center; justify-content: center; gap: 10px; }
+#start-mode-start-btn { flex: none; width: 190px; margin-bottom: 0; }
+.start-mode-card { position: relative; }
+.start-mode-card.selected::after { content: '✔'; position: absolute; top: 8px; right: 10px; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 18px; font-weight: 800; background: #2f6b3d; color: #fff; box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4); }
 #start-world-chip { font-size: 12px; padding: 2px 10px; border-radius: 999px; background: rgba(0, 0, 0, 0.3); }
 #start-world-chip.modified { background: #e8a317; color: #3a2010; text-shadow: none; }
-#start-mode-modal.warn #start-world-settings-btn { display: none; }
+#start-mode-modal.warn #start-mode-actions { display: none; }
 #start-mode-note { margin-top: 14px; text-align: center; font-size: 12.5px; font-weight: 700; opacity: 0.7; }
 #start-help-modal {
   width: 520px;
@@ -2746,3 +2750,31 @@ body.time-paused #time-pause-overlay { opacity: 1; }
 .ws-slider { width: 100%; accent-color: #c25f8f; cursor: pointer; display: block; margin: 2px 0 0; }
 #achievements-modified-note { margin: 0 0 10px; padding: 8px 12px; border-radius: 10px; font-weight: 800; font-size: 13.5px; background: #e8a317; color: #3a2010; border: 2px solid #8a5a0a; }
 #achievements-modified-note.hidden { display: none; }
+
+/* ---------- Save slots (Choose a save slot / Load Game; UI.js renderSaveSlots) ---------- layout only; nautical.css skins it */
+#save-slots-overlay {
+  position: fixed; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(11, 37, 64, 0.45);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  z-index: 600;
+}
+#save-slots-overlay.hidden { display: none; }
+#save-slots-modal { width: 720px; max-width: 94vw; box-sizing: border-box; }
+#save-slots-header-row { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+#save-slots-title { flex: 1; font-size: 28px; font-weight: 800; }
+#save-slots-back-btn { flex: none; width: auto; padding: 9px 16px; margin-bottom: 0; }
+#save-slots-list { display: flex; flex-direction: column; gap: 14px; }
+.slot-card { display: flex; align-items: stretch; gap: 10px; }
+.slot-main { flex: 1; min-width: 0; display: flex; align-items: center; gap: 16px; padding: 12px 16px; text-align: left; font: inherit; cursor: pointer; border-radius: 10px; transition: transform 0.12s ease; }
+.slot-main:disabled { cursor: default; }
+.slot-badge { flex: none; width: 46px; height: 46px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 24px; font-weight: 800; }
+.slot-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.slot-title { font-size: 20px; font-weight: 800; display: flex; align-items: center; gap: 10px; }
+.slot-chip { font-size: 12px; font-weight: 800; padding: 2px 10px; border-radius: 999px; }
+.slot-detail { font-size: 13.5px; font-weight: 700; }
+.slot-sub { font-size: 12px; opacity: 0.8; }
+.slot-actions { flex: none; width: 168px; display: flex; flex-direction: column; gap: 8px; }
+.slot-actions .pause-btn { margin-bottom: 0; flex: 1; padding: 6px 8px; font-size: 13px; }
+#save-slots-note { margin-top: 14px; text-align: center; font-size: 13px; min-height: 16px; }

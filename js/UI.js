@@ -97,8 +97,8 @@ import {
   MAGNET_FISH_FILTER_ITEM_TYPES,
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings, loadLevel } from './Levels.js';
-import { makeWorldSettings, applyWorldSettings, isWorldModified } from './WorldSettings.js';
-import { initWorldSettingsUI, worldDraftValues } from './WorldSettingsUI.js';
+import { makeWorldSettings, applyWorldSettings, isWorldModified, worldSettingsLabel } from './WorldSettings.js';
+import { initWorldSettingsUI, worldDraftValues, openWorldSettingsForSave } from './WorldSettingsUI.js';
 import {
   getFishPurchaseCost, effectiveScienceCapacity, countTankItemsByType, resolveMergeTutorialPair,
   computeTheoreticalGoldPerMinute, computeTheoreticalCoinCountPerMinute, computeTheoreticalSciencePerMinute, computeTheoreticalFoodNeededPerMinute,
@@ -117,7 +117,7 @@ import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND
 import { drawFish } from './FishRenderer.js';
 import { playUnlock, playChatMessage, setMusicVolume, setSfxVolume, setAmbienceVolume, getMusicVolume, getSfxVolume, getAmbienceVolume, playPanelOpen, playPanelClose, playInsufficientFunds, playUiHover, playUiSelect, playUiDeselect, setMusicUnderwaterMuffle, setMusicSpeedBoost, setMusicPaused } from './Sound.js';
 import { computeProductionInfo } from './ProductionInfo.js';
-import { hasSaveGame, saveGame, loadSaveGame, clearSaveGame, isGuidedTutorialsEnabled, setGuidedTutorialsEnabled } from './Save.js';
+import { hasSaveGame, saveGame, loadSaveGame, clearSaveGame, isGuidedTutorialsEnabled, setGuidedTutorialsEnabled, SAVE_SLOT_COUNT, getSaveSummary, setSaveWorldSettings, lastSaveSlot, setActiveSaveSlot } from './Save.js';
 import { pushGameNotification } from './Notifications.js';
 import { setTitlePaused } from './TitleScreen.js';
 
@@ -398,6 +398,8 @@ const UI_HOVER_SELECTOR = [
   '#notification-ticker button',
   '#start-overlay button',
   '#start-mode-overlay button',
+  '#save-slots-overlay button',
+  '#world-settings-overlay button',
   '#start-help-overlay button',
 ].join(',');
 
@@ -637,6 +639,13 @@ export function initUI(state) {
     startModeExpBtn: document.getElementById('start-mode-exp-btn'),
     startModeNewCanvas: document.getElementById('start-mode-new-canvas'),
     startModeExpCanvas: document.getElementById('start-mode-exp-canvas'),
+    startModeStartBtn: document.getElementById('start-mode-start-btn'),
+    startWarnText: document.getElementById('start-warn-text'),
+    saveSlotsOverlay: document.getElementById('save-slots-overlay'),
+    saveSlotsTitle: document.getElementById('save-slots-title'),
+    saveSlotsBackBtn: document.getElementById('save-slots-back-btn'),
+    saveSlotsList: document.getElementById('save-slots-list'),
+    saveSlotsNote: document.getElementById('save-slots-note'),
     startHelpBtn: document.getElementById('start-help-btn'),
     startHelpOverlay: document.getElementById('start-help-overlay'),
     startHelpBackBtn: document.getElementById('start-help-back-btn'),
@@ -2842,7 +2851,7 @@ function showPauseControls() {
 function showPauseSettings() {
   els.pauseMain.classList.add('hidden');
   els.pauseSettings.classList.remove('hidden');
-  els.pauseLoadSaveBtn.disabled = !hasSaveGame(); // re-checked every open — a save could exist now that didn't the last time this was shown
+  els.pauseLoadSaveBtn.disabled = !lastSaveSlot(); // re-checked every open — a save could exist now that didn't the last time this was shown
   els.guidedTutorialToggle.checked = isGuidedTutorialsEnabled(); // re-synced every open — Save.js can switch it off by itself once every tutorial has been seen
 }
 
@@ -2902,48 +2911,196 @@ function drawStartModeArt() {
 
 export function initStartScreen(state, onStart) {
   startOnStartCallback = onStart;
-  // Continue Game stays visible but grayed out/disabled unless a save
-  // actually exists — per direct request (was fully hidden before) — checked
-  // once here at page load, not re-checked afterward (nothing can create a
-  // save before the start screen is even up).
+  // Load Game stays visible but grayed out/disabled unless some slot actually holds a save — per direct request (was
+  // fully hidden before) — re-checked whenever a save is deleted or a game starts.
   els.startContinueBtn.disabled = !hasSaveGame();
-  // Per direct request (new title screen), New Game/Continue no longer hide
+  // Per direct request (new title screen), New Game/Load Game no longer hide
   // #start-overlay themselves — main.js's onStart hands off to
   // TitleScreen.js's exit animation (SANITY/FIN fly up in bubble trails),
   // which hides it once that has finished playing.
-  // Per direct request, New Game first asks "New player" vs. "Experienced
-  // player" (see #start-mode-overlay in index.html) — the pick sets the
-  // guided-tutorial preference outright (overriding any earlier choice, and
-  // marking it user-set so Save.js's auto-off never second-guesses it), then
-  // carries on into the game exactly as before. Changing the setting later
-  // in Settings persists between sessions through the same Save.js call.
-  // Per direct request, if a save exists New Game first warns that it'll be overwritten; Continue on that
-  // warning carries on to the New/Experienced pick. The save itself is only deleted once a game really starts
-  // (backing out at either step leaves it alone).
+  // Per direct request (save slots), New Game now goes: slot picker (#save-slots-overlay, mode 'new') -> if that slot
+  // holds a save, the overwrite warning -> "How would you like to start?" where New player / Experienced player are a
+  // choice (one must be picked) and Start lights up. The pick sets the guided-tutorial preference outright
+  // (overriding any earlier choice, and marking it user-set so Save.js's auto-off never second-guesses it), then
+  // carries on into the game exactly as before. Each later screen layers on top of the one before it, so Back /
+  // Cancel just closes the top one. The slot's old save is only deleted once a game really starts. Load Game opens the
+  // same slot screen in mode 'load': click a save to load it, delete it, or edit its World Settings.
+  let slotMode = null; // 'new' | 'load' while the slot screen is open
+  let pendingSlot = null; // the slot a New Game will save to
+  let pendingGuided = null; // null until New player (true) / Experienced player (false) is chosen
   const showStartModeStep = (warn) => {
     els.startModeModal.classList.toggle('warn', warn);
     els.startModeTitle.textContent = warn ? 'Overwrite your save?' : 'How would you like to start?';
+    els.startWarnText.innerHTML = `Starting a new game in <b>Slot ${pendingSlot}</b> will <b>overwrite the save file stored there</b>. Its saved fish, buildings and money will be gone for good.`;
   };
-  els.startNewGameBtn.addEventListener('click', () => {
+  const setGuidedPick = (guided) => {
+    pendingGuided = guided;
+    els.startModeNewBtn.classList.toggle('selected', guided === true);
+    els.startModeNewBtn.setAttribute('aria-pressed', String(guided === true));
+    els.startModeExpBtn.classList.toggle('selected', guided === false);
+    els.startModeExpBtn.setAttribute('aria-pressed', String(guided === false));
+    els.startModeStartBtn.disabled = guided === null;
+    els.startModeStartBtn.title = guided === null ? 'Pick New player or Experienced player first' : 'Begin';
+  };
+  const closeStartModeOverlay = () => { els.startModeOverlay.classList.add('hidden'); }; // the slot screen underneath stays up
+  const closeSlotOverlay = () => {
+    els.saveSlotsOverlay.classList.add('hidden');
+    slotMode = null;
+    setTitlePaused(false);
+  };
+  const fmtPlayTime = (ms) => {
+    const minutes = Math.floor(ms / 60000);
+    return minutes >= 60 ? `${Math.floor(minutes / 60)}h ${minutes % 60}m` : `${minutes}m`;
+  };
+  const slotNote = (text) => { els.saveSlotsNote.textContent = text || ''; };
+  const renderSaveSlots = () => {
+    els.saveSlotsTitle.textContent = slotMode === 'load' ? 'Load Game' : 'Choose a save slot';
+    els.saveSlotsList.innerHTML = '';
+    for (let slot = 1; slot <= SAVE_SLOT_COUNT; slot++) {
+      const summary = getSaveSummary(slot);
+      const card = document.createElement('div');
+      card.className = 'slot-card';
+      const main = document.createElement('button');
+      main.type = 'button';
+      main.className = 'slot-main' + (summary ? '' : ' empty');
+      main.disabled = slotMode === 'load' && (!summary || !!summary.corrupt);
+      const badge = document.createElement('div');
+      badge.className = 'slot-badge';
+      badge.textContent = String(slot);
+      const info = document.createElement('div');
+      info.className = 'slot-info';
+      const title = document.createElement('div');
+      title.className = 'slot-title';
+      title.textContent = `Slot ${slot}`;
+      const detail = document.createElement('div');
+      detail.className = 'slot-detail';
+      const sub = document.createElement('div');
+      sub.className = 'slot-sub';
+      if (!summary) {
+        detail.textContent = slotMode === 'load' ? 'Empty' : 'Empty — a new game will be saved here';
+      } else if (summary.corrupt) {
+        detail.textContent = 'This save could not be read';
+        sub.textContent = slotMode === 'load' ? 'You can still delete it.' : 'Starting a new game here will replace it.';
+      } else {
+        const modified = isWorldModified(summary.worldSettings);
+        const chip = document.createElement('span');
+        chip.className = 'slot-chip' + (modified ? ' modified' : '');
+        chip.textContent = modified ? `⚠ ${worldSettingsLabel(summary.worldSettings)}` : 'Normal';
+        chip.title = modified ? 'Modified world — no achievements' : 'Unmodified world';
+        title.append(chip);
+        detail.textContent = `💰 $${summary.money.toLocaleString('en-US')}  ·  🐟 ${summary.fishCount} fish  ·  ⏱ ${fmtPlayTime(summary.playMs)}`;
+        const when = summary.savedAtMs ? new Date(summary.savedAtMs).toLocaleString([], { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'earlier';
+        sub.textContent = `Saved ${when}  ·  🎖️ ${summary.achievements} achievements`;
+      }
+      info.append(title, detail, sub);
+      main.append(badge, info);
+      main.addEventListener('click', () => chooseSlot(slot, summary));
+      card.append(main);
+      if (slotMode === 'load' && summary) {
+        const actions = document.createElement('div');
+        actions.className = 'slot-actions';
+        const worldBtn = document.createElement('button');
+        worldBtn.type = 'button';
+        worldBtn.className = 'pause-btn sheen-target';
+        worldBtn.textContent = '🌍 World Settings';
+        worldBtn.disabled = !!summary.corrupt;
+        worldBtn.addEventListener('click', () => {
+          openWorldSettingsForSave({
+            label: `Slot ${slot}`,
+            worldSettings: summary.worldSettings,
+            onSave: (ws) => {
+              setSaveWorldSettings(slot, ws);
+              renderSaveSlots();
+              slotNote(`Slot ${slot}'s World Settings were updated — they take effect when you load it.`);
+            },
+          });
+        });
+        // Deleting is permanent, so the first click only arms the button ("Really delete?"); a second click within a few seconds does it.
+        const deleteBtn = document.createElement('button');
+        deleteBtn.type = 'button';
+        deleteBtn.className = 'pause-btn sheen-target';
+        deleteBtn.textContent = '🗑 Delete';
+        let armedTimer = null;
+        deleteBtn.addEventListener('click', () => {
+          if (!armedTimer) {
+            deleteBtn.textContent = 'Really delete?';
+            deleteBtn.classList.add('confirming');
+            armedTimer = setTimeout(() => { armedTimer = null; deleteBtn.textContent = '🗑 Delete'; deleteBtn.classList.remove('confirming'); }, 3000);
+            return;
+          }
+          clearTimeout(armedTimer);
+          clearSaveGame(slot);
+          els.startContinueBtn.disabled = !hasSaveGame();
+          playPanelClose();
+          renderSaveSlots();
+          slotNote(`Slot ${slot} deleted.`);
+        });
+        actions.append(worldBtn, deleteBtn);
+        card.append(actions);
+      }
+      els.saveSlotsList.append(card);
+    }
+  };
+  const openSlotScreen = (mode) => {
     if (state.ui.gameStarted) return; // the title is already on its way out — nothing here may act on the live game
-    drawStartModeArt();
-    showStartModeStep(hasSaveGame());
-    els.startModeOverlay.classList.remove('hidden');
+    slotMode = mode;
+    slotNote(mode === 'load' ? 'Edit a save’s World Settings here — they apply the next time you load it.' : '');
+    renderSaveSlots();
+    els.saveSlotsOverlay.classList.remove('hidden');
     setTitlePaused(true);
     playPanelOpen();
+  };
+  const chooseSlot = (slot, summary) => {
+    if (state.ui.gameStarted) return;
+    if (slotMode === 'load') {
+      loadSlot(slot);
+      return;
+    }
+    pendingSlot = slot;
+    setGuidedPick(null);
+    drawStartModeArt();
+    showStartModeStep(!!summary); // an occupied slot gets the overwrite warning first
+    els.startModeOverlay.classList.remove('hidden');
+    playPanelOpen();
+  };
+  const loadSlot = (slot) => {
+    if (state.ui.gameStarted) return; // a game is already running — loading a save now would overwrite it
+    const saved = loadSaveGame(slot);
+    if (!saved) { slotNote('That save could not be read.'); return; }
+    // The whole point of a save being plain, JSON-serializable state (see
+    // CLAUDE.md's State Shape) is that "load" is just replacing these two
+    // slices wholesale — camera/ui/debug stay whatever they already were
+    // (a fresh page load's defaults), since those are session-local, not
+    // campaign progress.
+    setActiveSaveSlot(slot);
+    state.meta = saved.meta;
+    state.level = saved.level;
+    applyWorldSettings(state.meta.worldSettings); // the save's own World Settings as they are NOW (none = Normal) — including edits made from the Load Game screen
+    reconcileIdsAfterLoad(state.level); // new items/fish must not reuse ids the saved level already holds — see Entities.js
+    centerCameraOnMound(state.camera); // same one-time re-center loadLevel's own callers already do, since a saved level has no camera position of its own
+    closeSlotOverlay();
+    playPanelClose();
+    onStart();
+  };
+  els.startNewGameBtn.addEventListener('click', () => openSlotScreen('new'));
+  els.startContinueBtn.addEventListener('click', () => openSlotScreen('load'));
+  els.saveSlotsBackBtn.addEventListener('click', () => { closeSlotOverlay(); playPanelClose(); });
+  els.saveSlotsOverlay.addEventListener('click', (e) => {
+    if (e.target !== els.saveSlotsOverlay) return; // clicked the modal, not the backdrop
+    closeSlotOverlay();
+    playPanelClose();
   });
   initWorldSettingsUI(state);
   els.startWarnContinueBtn.addEventListener('click', () => { showStartModeStep(false); playPanelOpen(); });
   els.startWarnCancelBtn.addEventListener('click', () => { closeStartModeOverlay(); playPanelClose(); });
-  const closeStartModeOverlay = () => {
-    els.startModeOverlay.classList.add('hidden');
-    setTitlePaused(false);
-  };
-  const startNewGameWithTutorials = (guided) => {
-    if (state.ui.gameStarted) return;
-    clearSaveGame(); // the warning above already told them; nothing from the old save may survive into the new game
-    els.startContinueBtn.disabled = true;
-    setGuidedTutorialsEnabled(guided);
+  els.startModeNewBtn.addEventListener('click', () => { setGuidedPick(pendingGuided === true ? null : true); playUiSelect(); });
+  els.startModeExpBtn.addEventListener('click', () => { setGuidedPick(pendingGuided === false ? null : false); playUiSelect(); });
+  els.startModeStartBtn.addEventListener('click', () => {
+    if (state.ui.gameStarted || pendingSlot === null || pendingGuided === null) return;
+    clearSaveGame(pendingSlot); // the warning already told them; nothing from the old save may survive into the new game
+    setActiveSaveSlot(pendingSlot);
+    els.startContinueBtn.disabled = !hasSaveGame(); // other slots may still hold saves
+    setGuidedTutorialsEnabled(pendingGuided);
     // Per direct request, this run's World Settings (undefined = Normal) live in state.meta so they save/load with the run.
     state.meta.worldSettings = makeWorldSettings(worldDraftValues());
     applyWorldSettings(state.meta.worldSettings);
@@ -2954,34 +3111,15 @@ export function initStartScreen(state, onStart) {
       refreshShopPanel(state);
     }
     closeStartModeOverlay();
+    closeSlotOverlay();
     playPanelClose();
     onStart();
-  };
-  els.startModeNewBtn.addEventListener('click', () => startNewGameWithTutorials(true));
-  els.startModeExpBtn.addEventListener('click', () => startNewGameWithTutorials(false));
+  });
   els.startModeBackBtn.addEventListener('click', () => { closeStartModeOverlay(); playPanelClose(); });
   els.startModeOverlay.addEventListener('click', (e) => {
     if (e.target !== els.startModeOverlay) return; // clicked the modal, not the backdrop
     closeStartModeOverlay();
     playPanelClose();
-  });
-  els.startContinueBtn.addEventListener('click', () => {
-    if (state.ui.gameStarted) return; // a game is already running — loading a save now would overwrite it
-    const saved = loadSaveGame();
-    if (saved) {
-      // The whole point of a save being plain, JSON-serializable state (see
-      // CLAUDE.md's State Shape) is that "load" is just replacing these two
-      // slices wholesale — camera/ui/debug stay whatever they already were
-      // (a fresh page load's defaults), since those are session-local, not
-      // campaign progress.
-      state.meta = saved.meta;
-      state.level = saved.level;
-      applyWorldSettings(state.meta.worldSettings); // the save's own World Settings (none = Normal)
-      reconcileIdsAfterLoad(state.level); // new items/fish must not reuse ids the saved level already holds — see Entities.js
-      centerCameraOnMound(state.camera); // same one-time re-center loadLevel's own callers already do, since a saved level has no camera position of its own
-    }
-    playPanelClose();
-    onStart();
   });
   // Achievements/Customization from the start screen, per direct request
   // ("add the achievements menu and the customization menu to the start
@@ -3067,11 +3205,13 @@ function saveGameFromPause(state) {
 // actually kick off onStart() (which also plays the title's exit animation),
 // since the game was never running yet).
 function loadLastSaveFromPause(state) {
-  const saved = loadSaveGame();
+  const slot = lastSaveSlot(); // the slot this game saves to, or (from the start screen) the newest one
+  const saved = slot ? loadSaveGame(slot) : null;
   if (!saved) {
     pushUiNotification(state, "No save to load yet.");
     return;
   }
+  setActiveSaveSlot(slot);
   state.meta = saved.meta;
   state.level = saved.level;
   applyWorldSettings(state.meta.worldSettings); // the loaded save's own World Settings (none = Normal)

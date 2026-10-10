@@ -2,16 +2,24 @@
 // #world-settings-overlay). It edits a DRAFT world (state.ui.worldDraft); UI.js's New Game flow turns the draft
 // into state.meta.worldSettings when a run actually starts. See WorldSettings.js for what each rule does.
 
-import { WORLD_RULES, WORLD_GROUPS, WORLD_PRESETS, presetWorldValues, defaultWorldValues, isRuleModified, matchingPreset } from './WorldSettings.js';
+import { WORLD_RULES, WORLD_GROUPS, WORLD_PRESETS, presetWorldValues, defaultWorldValues, worldValues, makeWorldSettings, isRuleModified, matchingPreset } from './WorldSettings.js';
 import { playPanelOpen, playPanelClose, playUiSelect } from './Sound.js';
 
 let state = null;
 let els = null;
 const rowEls = {}; // rule id -> { row, slider, valueEl, resetBtn }
 
+// Two ways in: the New Game dialog edits state.ui.worldDraft; the Load Game screen edits one saved game's world
+// (`editing` = { values, onSave }), written back to that save only when "Save changes" is pressed.
+let editing = null;
 function draft() {
+  if (editing) return editing.values;
   if (!state.ui.worldDraft) state.ui.worldDraft = defaultWorldValues();
   return state.ui.worldDraft;
+}
+function setDraft(values) {
+  if (editing) editing.values = values;
+  else state.ui.worldDraft = values;
 }
 export function worldDraftValues() { return { ...draft() }; }
 export function worldDraftModified() { const d = draft(); return WORLD_RULES.some((r) => isRuleModified(r, d[r.id])); }
@@ -115,8 +123,22 @@ export function openWorldSettings() {
 export function closeWorldSettings() {
   if (els.overlay.classList.contains('hidden')) return;
   els.overlay.classList.add('hidden');
+  editing = null; // closing with the X / backdrop discards a save's edits; "Save changes" (below) commits them first
+  els.title.textContent = '🌍 World Settings';
+  els.doneBtn.textContent = 'Done';
   refreshStartChip();
   playPanelClose();
+}
+// Per direct request: edit the World Settings of a saved game. onSave receives the new world (undefined = Normal).
+export function openWorldSettingsForSave({ label, worldSettings, onSave }) {
+  editing = { values: worldValues(worldSettings), onSave };
+  els.title.textContent = `🌍 World Settings — ${label}`;
+  els.doneBtn.textContent = 'Save changes';
+  openWorldSettings();
+}
+function onDone() {
+  if (editing) editing.onSave(makeWorldSettings(editing.values));
+  closeWorldSettings();
 }
 export function isWorldSettingsOpen() { return !!els && !els.overlay.classList.contains('hidden'); }
 
@@ -126,6 +148,7 @@ export function initWorldSettingsUI(gameState) {
     overlay: document.getElementById('world-settings-overlay'),
     modal: document.getElementById('world-settings-modal'),
     body: document.getElementById('world-settings-body'),
+    title: document.getElementById('world-settings-title'),
     banner: document.getElementById('world-settings-banner'),
     bannerIcon: document.getElementById('world-settings-banner-icon'),
     bannerText: document.getElementById('world-settings-banner-text'),
@@ -141,9 +164,9 @@ export function initWorldSettingsUI(gameState) {
   buildRows();
   els.openBtn.addEventListener('click', openWorldSettings);
   els.closeBtn.addEventListener('click', closeWorldSettings);
-  els.doneBtn.addEventListener('click', closeWorldSettings);
+  els.doneBtn.addEventListener('click', onDone);
   els.overlay.addEventListener('click', (e) => { if (e.target === els.overlay) closeWorldSettings(); });
-  els.resetBtn.addEventListener('click', () => { state.ui.worldDraft = defaultWorldValues(); playUiSelect(); refreshAll(); });
-  for (const btn of els.presetBtns) btn.addEventListener('click', () => { state.ui.worldDraft = presetWorldValues(btn.dataset.preset); playUiSelect(); refreshAll(); });
+  els.resetBtn.addEventListener('click', () => { setDraft(defaultWorldValues()); playUiSelect(); refreshAll(); });
+  for (const btn of els.presetBtns) btn.addEventListener('click', () => { setDraft(presetWorldValues(btn.dataset.preset)); playUiSelect(); refreshAll(); });
   refreshStartChip();
 }

@@ -217,7 +217,7 @@
 /* ---------- 4. big windows ---------- */
 /* One heavy, dark-bound wooden frame with iron corner brackets (the 9-slice
    css/nautical/frame-wood.svg), around an aged deep-ocean chart. */
-#shop-panel, #tank-panel, #lab-modal, #lab-purchase-modal, #start-help-modal, #start-mode-modal, #world-settings-modal, #pause-menu {
+#shop-panel, #tank-panel, #lab-modal, #lab-purchase-modal, #start-help-modal, #start-mode-modal, #save-slots-modal, #world-settings-modal, #pause-menu {
   color: var(--cream);
   background: var(--map);
   background-clip: padding-box;
@@ -250,7 +250,7 @@
      wrapping around the wood: starfish in different poses, shells, a small
      anchor, and seaweed draped over / climbing around the edges. Every
      drawing is a different asset, and each carries a soft contact shadow. */
-#shop-panel::before, #tank-panel::before, #lab-modal::before, #start-mode-modal::before, #world-settings-modal::before, #start-help-modal::before, #pause-menu::before {
+#shop-panel::before, #tank-panel::before, #lab-modal::before, #start-mode-modal::before, #save-slots-modal::before, #world-settings-modal::before, #start-help-modal::before, #pause-menu::before {
   content: '';
   position: absolute; inset: -56px;
   pointer-events: none;
@@ -276,7 +276,7 @@
     url(nautical/weed-hang.svg) no-repeat left 41% top 23px / 46px 70px,
     url(nautical/weed-r1.svg) no-repeat right 55% top 12px / 46px 53px;
 }
-#start-mode-modal::before, #world-settings-modal::before, #start-help-modal::before, #pause-menu::before {
+#start-mode-modal::before, #save-slots-modal::before, #world-settings-modal::before, #start-help-modal::before, #pause-menu::before {
   background:
     url(nautical/starfish-1.svg) no-repeat right 14px bottom 62px / 40px,
     url(nautical/starfish-3.svg) no-repeat left 24% bottom 25px / 22px,
@@ -315,7 +315,7 @@
     var(--map);
   background-clip: padding-box;
 }
-#start-mode-modal, #world-settings-modal, #start-help-modal, #pause-menu {
+#start-mode-modal, #save-slots-modal, #world-settings-modal, #start-help-modal, #pause-menu {
   background:
     url(nautical/weed-in-d.svg) no-repeat right 12% bottom -6px / 52px 56px,
     var(--map);
@@ -323,11 +323,11 @@
 }
 /* #shop-panel/#tank-panel are position:fixed / flex children already; the
    decoration needs them positioned (the others are positioned by style.css). */
-#tank-panel, #lab-modal, #start-mode-modal, #world-settings-modal, #start-help-modal, #pause-menu { position: relative; }
+#tank-panel, #lab-modal, #start-mode-modal, #save-slots-modal, #world-settings-modal, #start-help-modal, #pause-menu { position: relative; }
 #shop-panel { position: fixed; }
 
 /* Bubbly, hand-lettered 3D titles with a thick navy outline. */
-#shop-header, #tank-title, #lab-title, #start-mode-title, #world-settings-title, #start-help-title, #pause-title {
+#shop-header, #tank-title, #lab-title, #start-mode-title, #save-slots-title, #world-settings-title, #start-help-title, #pause-title {
   font-family: var(--font-display);
   font-weight: 700;
   color: var(--orange);
@@ -338,6 +338,7 @@
 }
 #start-mode-title, #start-help-title { font-size: 30px; }
 #world-settings-title { font-size: 32px; }
+#save-slots-title { font-size: 30px; }
 #pause-title { font-size: 34px; }
 /* The Shop's big title sits up over the frame, each letter its own color. */
 #shop-header, #tank-title, #lab-title { font-size: 58px; line-height: 1; position: relative; z-index: 6; margin: -62px 0 -6px -16px; white-space: pre; }
@@ -585,13 +586,25 @@
 #customization-preview-wrap { border: 3px solid #5b3a1b; box-shadow: inset 0 0 12px rgba(0, 40, 70, 0.4); }
 
 /* New Game chooser cards, Help rows: paper on the chart. */
-.start-mode-card, .help-row {
+.start-mode-card, .help-row, .slot-main {
   background: var(--noise), var(--paper);
   color: var(--ink);
   border: 2px solid #9a6b3a;
   border-radius: 10px;
   box-shadow: 0 4px 0 #5b3a1b, 0 9px 12px rgba(0, 0, 0, 0.4), inset 0 0 14px rgba(120, 80, 30, 0.22);
 }
+.slot-main:not(:disabled):hover { border-color: #f0b94d; box-shadow: 0 4px 0 #5b3a1b, 0 0 18px rgba(255, 210, 100, 0.7), inset 0 0 14px rgba(120, 80, 30, 0.22); }
+.slot-main:disabled { opacity: 0.6; }
+.slot-main.empty { filter: saturate(0.6) brightness(0.96); }
+.slot-badge { background: var(--dark-wood); color: #ffe9a8; border: 2px solid #1d0f06; font-family: var(--font-display); text-shadow: 0 2px 0 rgba(0, 0, 0, 0.7); box-shadow: inset 0 3px 6px rgba(0, 0, 0, 0.6), 0 2px 0 #9a6630; }
+.slot-title { font-family: var(--font-display); color: #b4510c; }
+.slot-detail, .slot-sub { font-family: var(--font-display); font-weight: 600; color: var(--ink); }
+.slot-chip { background: #2f6b3d; color: #e9ffe9; font-family: var(--font-display); }
+.slot-chip.modified { background: #e8a317; color: #3a2010; }
+.slot-actions .pause-btn.confirming { background: linear-gradient(180deg, #e9604a 0%, #b02f1e 100%); color: #fff; }
+#save-slots-note { color: var(--cream); font-family: var(--font-display); font-weight: 600; text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5); }
+.start-mode-card.selected { border-color: #f0b94d; box-shadow: 0 4px 0 #5b3a1b, 0 0 20px rgba(255, 210, 100, 0.85), inset 0 0 14px rgba(120, 80, 30, 0.22); }
+#start-mode-start-btn:not(:disabled) { background: radial-gradient(circle at 34% 28%, #ffe29a 0, #f0b94d 50%, #c88a2d 100%); color: #4a2610; text-shadow: none; box-shadow: inset 0 3px 0 rgba(255, 255, 255, 0.5), 0 4px 0 #5a3418, 0 0 18px rgba(255, 210, 100, 0.8); }
 .start-mode-card:hover { border-color: #f0b94d; box-shadow: 0 4px 0 #5b3a1b, 0 0 18px rgba(255, 210, 100, 0.7), inset 0 0 14px rgba(120, 80, 30, 0.22); }
 .start-mode-card canvas { border: 3px solid #5b3a1b; border-radius: 8px; }
 .start-mode-card-title { font-family: var(--font-display); color: #b4510c; font-size: 24px; }
@@ -690,7 +703,7 @@
 body:has(#tank-overlay:not(.collapsed)) #bottom-bar-row, body:has(#lab-overlay:not(.hidden)) #bottom-bar-row { z-index: 215; }
 
 /* Lighter, warmer parchment grain (the dark speckle read as dirty gray). */
-.tank-upgrade-card, .achievement-card, .hat-card, .start-mode-card, .help-row, .ws-row,
+.tank-upgrade-card, .achievement-card, .hat-card, .start-mode-card, .help-row, .ws-row, .slot-main,
 #notification-log, #stats-panel, #mound-menu, #recipe-menu, #building-info-menu, #fish-info-menu, #merge-fish-menu, #platform-filter-menu, #storage-chest-menu, #hud-info-modal, #hud-power-graph {
   background: url(nautical/noise-light.svg), var(--paper);
 }

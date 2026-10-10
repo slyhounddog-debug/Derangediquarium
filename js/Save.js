@@ -9,7 +9,15 @@
 
 import { WORLD_TILES_H, WORLD_TILES_W, TILE_EMPTY, TILE_REFINERY, SEA_TURTLE_SPAWN_MIN_MS, SEA_TURTLE_SPAWN_MAX_MS, GUIDED_TUTORIAL_IDS } from './Config.js';
 
-const SAVE_KEY = 'finsanity_save_v1';
+// Per direct request, three save slots. Slot 1 keeps the original key, so a save made before slots existed is simply
+// slot 1; slots 2 and 3 get their own keys. Which slot the running game saves to (autosave, the pause menu's Save,
+// Load Last Save) is "the active slot" — set when a game starts from New Game or Load Game.
+export const SAVE_SLOT_COUNT = 3;
+const SAVE_KEYS = ['finsanity_save_v1', 'finsanity_save_v1_slot2', 'finsanity_save_v1_slot3'];
+let activeSaveSlot = null; // 1..SAVE_SLOT_COUNT, null until a game has started
+const saveKey = (slot) => SAVE_KEYS[(slot || 1) - 1];
+export function setActiveSaveSlot(slot) { activeSaveSlot = slot; }
+export function getActiveSaveSlot() { return activeSaveSlot; }
 const PREFS_KEY = 'finsanity_prefs_v1';
 
 // ---- Player preferences (Guided Tutorial toggle, Music/Sound volume) ----
@@ -94,9 +102,11 @@ export function noteTutorialFlowEnded() {
   savePrefs();
 }
 
-export function hasSaveGame() {
+// With a slot number: does that slot hold a save? With none: does ANY slot?
+export function hasSaveGame(slot) {
   try {
-    return localStorage.getItem(SAVE_KEY) != null;
+    if (slot) return localStorage.getItem(saveKey(slot)) != null;
+    return SAVE_KEYS.some((key) => localStorage.getItem(key) != null);
   } catch {
     return false; // localStorage can throw in a locked-down/private-browsing context — treat that as "no save" rather than crashing the start screen
   }
@@ -105,7 +115,7 @@ export function hasSaveGame() {
 export function saveGame(state) {
   try {
     const payload = JSON.stringify({ meta: state.meta, level: state.level, savedAtMs: Date.now() });
-    localStorage.setItem(SAVE_KEY, payload);
+    localStorage.setItem(saveKey(activeSaveSlot), payload);
     return true;
   } catch (err) {
     console.error('Finsanity: save failed', err);
@@ -115,9 +125,9 @@ export function saveGame(state) {
 
 // Returns { meta, level } (savedAtMs stripped — callers only ever want the
 // two real state slices) or null if there's no save / it's corrupt.
-export function loadSaveGame() {
+export function loadSaveGame(slot) {
   try {
-    const raw = localStorage.getItem(SAVE_KEY);
+    const raw = localStorage.getItem(saveKey(slot));
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || !parsed.meta || !parsed.level) return null;
@@ -323,10 +333,64 @@ function migrateGridSize(level) {
   }
 }
 
-export function clearSaveGame() {
+export function clearSaveGame(slot) {
   try {
-    localStorage.removeItem(SAVE_KEY);
+    localStorage.removeItem(saveKey(slot));
   } catch {
     // nothing to clean up if localStorage itself is unavailable
   }
+}
+
+// What the save-slot screens show for each slot: null = empty, { corrupt: true } = something is there but unreadable,
+// otherwise a few headline numbers. Reads the raw JSON only (no migrations — nothing here touches game state).
+export function getSaveSummary(slot) {
+  try {
+    const raw = localStorage.getItem(saveKey(slot));
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || !parsed.meta || !parsed.level) return { corrupt: true };
+    const level = parsed.level;
+    return {
+      savedAtMs: parsed.savedAtMs || 0,
+      money: Math.floor(level.money || 0),
+      fishCount: Array.isArray(level.entities) ? level.entities.filter((e) => e.type === 'fish' && !e.dying).length : 0,
+      playMs: level.elapsed || 0,
+      achievements: Array.isArray(parsed.meta.achievementsUnlocked) ? parsed.meta.achievementsUnlocked.length : 0,
+      worldSettings: parsed.meta.worldSettings,
+    };
+  } catch {
+    return { corrupt: true };
+  }
+}
+
+// Per direct request, a saved game's World Settings can be edited from the Load Game screen: this rewrites just
+// meta.worldSettings inside the stored save. Loading the save then applies the NEW settings (UI.js calls
+// applyWorldSettings on whatever meta it just loaded), not the ones the world was created with.
+export function setSaveWorldSettings(slot, worldSettings) {
+  try {
+    const raw = localStorage.getItem(saveKey(slot));
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !parsed.meta) return false;
+    if (worldSettings) parsed.meta.worldSettings = worldSettings;
+    else delete parsed.meta.worldSettings;
+    localStorage.setItem(saveKey(slot), JSON.stringify(parsed));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// The slot "Load Last Save" reads: the one the running game saves to, else (from the start screen's Settings) the most
+// recently written one. null when no slot has a save.
+export function lastSaveSlot() {
+  if (activeSaveSlot && hasSaveGame(activeSaveSlot)) return activeSaveSlot;
+  let best = null;
+  let bestMs = -1;
+  for (let slot = 1; slot <= SAVE_SLOT_COUNT; slot++) {
+    const summary = getSaveSummary(slot);
+    if (!summary) continue;
+    if ((summary.savedAtMs || 0) > bestMs) { best = slot; bestMs = summary.savedAtMs || 0; }
+  }
+  return best;
 }
