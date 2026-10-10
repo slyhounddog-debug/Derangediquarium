@@ -10,6 +10,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import * as tuning from './tuning.mjs';
+import * as text from './text.mjs';
 import * as gitcommit from './gitcommit.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -134,6 +135,19 @@ app.post('/api/tuning/set', express.json(), (req, res) => {
 });
 app.post('/api/tuning/reset', express.json(), (req, res) => {
   try { res.json({ ok: true, value: tuning.resetValue(String(req.body.id)) }); }
+  catch (e) { res.status(400).json({ error: String(e.message || e) }); }
+});
+
+// ---- Game text (Text tab) — see text.mjs ----
+app.get('/api/text', (req, res) => {
+  try { res.json(text.listText()); } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
+});
+app.post('/api/text/set', express.json({ limit: '1mb' }), (req, res) => {
+  try { res.json({ ok: true, value: text.setText(String(req.body.id), req.body.value, req.body.base) }); }
+  catch (e) { res.status(400).json({ error: String(e.message || e) }); }
+});
+app.post('/api/text/reset', express.json(), (req, res) => {
+  try { res.json({ ok: true, value: text.resetText(String(req.body.id)) }); }
   catch (e) { res.status(400).json({ error: String(e.message || e) }); }
 });
 

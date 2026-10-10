@@ -6,6 +6,7 @@ import path from 'path';
 import { execFileSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { listTuning } from './tuning.mjs';
+import { listText } from './text.mjs';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SLOTS = JSON.parse(fs.readFileSync(path.join(ROOT, 'tools', 'sfx', 'slots.json'), 'utf8'));
@@ -93,11 +94,32 @@ export async function gitSummary() {
   }
   const sounds = manifestChanges();
 
+  // text edits (Text tab): the same comparison against the last commit, grouped the way the tab groups them
+  const textByGroup = [];
+  let textCount = 0;
+  try {
+    const clip = (t) => { const one = String(t).replace(/\s+/g, ' ').trim(); return one.length > 48 ? one.slice(0, 47) + '…' : one; };
+    for (const g of listText().groups) {
+      const changed = g.entries.filter((e) => e.original !== null && e.value !== e.original);
+      if (!changed.length) continue;
+      textCount += changed.length;
+      textByGroup.push({ label: g.label, items: changed.map((e) => `${e.sub} · ${e.label}: “${clip(e.original)}” → “${clip(e.value)}”`) });
+    }
+  } catch { /* the summary still works without the text section */ }
+
   const body = [];
   if (valueCount) {
     body.push('Tuning (Variables tab):');
     for (const g of byGroup) {
       const shown = g.items.slice(0, 12);
+      body.push(`- ${g.label}: ${shown.join('; ')}${g.items.length > shown.length ? `; +${g.items.length - shown.length} more` : ''}`);
+    }
+  }
+  if (textCount) {
+    if (body.length) body.push('');
+    body.push('Text (Text tab):');
+    for (const g of textByGroup) {
+      const shown = g.items.slice(0, 8);
       body.push(`- ${g.label}: ${shown.join('; ')}${g.items.length > shown.length ? `; +${g.items.length - shown.length} more` : ''}`);
     }
   }
@@ -112,7 +134,7 @@ export async function gitSummary() {
   for (const f of jsFiles) {
     if (f.adds != null && f.adds + f.dels > 0) extra.push(f);
   }
-  const unexplained = jsFiles.filter((f) => f.adds != null && f.adds > valueCount + 2);
+  const unexplained = jsFiles.filter((f) => f.adds != null && f.adds > valueCount + textCount + 2);
   if (unexplained.length) {
     if (body.length) body.push('');
     body.push('Also edited by hand (not slider changes): ' + unexplained.map((f) => `${f.path} (+${f.adds} −${f.dels})`).join(', '));
@@ -127,12 +149,13 @@ export async function gitSummary() {
   // subject
   const bits = [];
   if (valueCount) bits.push(`tune ${valueCount} value${valueCount > 1 ? 's' : ''}${byGroup.length === 1 ? ` (${byGroup[0].label})` : ''}`);
+  if (textCount) bits.push(`edit ${textCount} text${textCount > 1 ? 's' : ''}${textByGroup.length === 1 ? ` (${textByGroup[0].label})` : ''}`);
   if (sounds.length) bits.push(`${sounds.length} sound change${sounds.length > 1 ? 's' : ''}`);
   if (other.length) bits.push(`${other.length} other file${other.length > 1 ? 's' : ''}`);
   let subject = bits.length ? bits.join(', ') : (files.length ? `update ${files.length} file${files.length > 1 ? 's' : ''}` : 'push unpushed commits');
   subject = subject.charAt(0).toUpperCase() + subject.slice(1);
   if (subject.length > 72) subject = subject.slice(0, 69) + '...';
-  return { files, subject, body: body.join('\n'), branch, ahead, valueCount, soundCount: sounds.length };
+  return { files, subject, body: body.join('\n'), branch, ahead, valueCount, textCount, soundCount: sounds.length };
 }
 
 export function gitCommit({ files, subject, body }) {

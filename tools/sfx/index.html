@@ -67,6 +67,7 @@
     <button data-tab="audio" class="tab">Audio</button>
     <button data-tab="formulas" class="tab">Formulas</button>
     <button data-tab="variables" class="tab">Variables</button>
+    <button data-tab="text" class="tab">Text</button>
   </nav>
   <span id="audioControls" style="display:flex;gap:14px;align-items:center">
     <label>Preview level <input id="master" type="range" min="0" max="1" step="0.01" value="0.35"> <span id="masterVal">0.35</span></label>
@@ -96,6 +97,7 @@
 </main>
 <main id="view-formulas" hidden></main>
 <main id="view-variables" hidden></main>
+<main id="view-text" hidden></main>
 
 <script type="module">
 import * as Synth from '/js/Sound.js';
@@ -501,6 +503,7 @@ window.addEventListener('devtools:committed', refresh);
 refresh();
 </script>
 <script type="module" src="/app/tuning.js"></script>
+<script type="module" src="/app/text.js"></script>
 <script type="module" src="/app/gitcommit.js"></script>
 </body>
 </html>

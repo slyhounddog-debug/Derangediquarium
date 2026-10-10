@@ -77,14 +77,15 @@ document.head.append(h('style', { html: `
 ` }));
 
 // ---------- tabs ----------
-const VIEWS = { audio: $('#view-audio'), formulas: $('#view-formulas'), variables: $('#view-variables') };
+const VIEWS = { audio: $('#view-audio'), formulas: $('#view-formulas'), variables: $('#view-variables'), text: $('#view-text') };
 function showTab(name) {
   if (!VIEWS[name]) name = 'audio';
   for (const [k, el] of Object.entries(VIEWS)) el.hidden = k !== name;
   for (const b of document.querySelectorAll('#tabs .tab')) b.classList.toggle('on', b.dataset.tab === name);
   $('#audioControls').style.display = name === 'audio' ? 'flex' : 'none';
   try { localStorage.setItem('devtools_tab', name); } catch {}
-  if (name !== 'audio') ensureLoaded();
+  if (name === 'formulas' || name === 'variables') ensureLoaded(); // the Text tab (text.js) loads its own data, so opening it does not read Config.js
+  window.dispatchEvent(new CustomEvent('devtools:tab', { detail: name }));
 }
 for (const b of document.querySelectorAll('#tabs .tab')) b.addEventListener('click', () => showTab(b.dataset.tab));
 let startTab = 'audio';

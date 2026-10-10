@@ -1,10 +1,11 @@
-# Dev tools (sound effects + game tuning)
+# Dev tools (sound effects + game tuning + game text)
 
-A small local web tool with three tabs. It is a dev tool only; the game never loads it.
+A small local web tool with four tabs. It is a dev tool only; the game never loads it.
 
 - **Audio** — find, trim and level the game's recorded sound effects (below).
 - **Variables** — the numbers worth tuning (prices, hunger, species stats, building speeds and power, aliens and waves, Science Lab costs, audio levels, ...), each with a slider and a number box.
 - **Formulas** — how the game calculates things (fish/building prices, merged-fish value, feeder economy, Dartfin school, Blimpfish coin, hunger timeline, cleanliness, power efficiency, alien waves, turret damage vs waves, fish health vs aliens, fan lift, building throughput, progression totals, gem economy). Each card has the values it depends on (same sliders) and live tables of what the formula produces.
+- **Text** — every player-facing string in the game, editable in place: shop fish and building descriptions, Factory/Power Plant recipes, Science Lab nodes, aliens, achievements, hats, World Settings, the tutorials and info boxes, the windows/menus/buttons in `index.html`, and **all the chat messages**. Same behaviour as the Variables tab: search, "Changed only", per-row **Reset** to the last git commit, "Reset all changed", reload the game tab to see an edit.
 
 ```
 npm run sfx          # or: node tools/sfx/server.mjs
@@ -91,6 +92,28 @@ Add its name (or a `deep` entry) to a group in `tuning.json` and restart the too
 
 ### Adding a formula
 Add an object to `FORMULAS` in `tuning.js`: `id`, `title`, `formula` (text), `note`, `params` (variable ids to show sliders for; ids are `NAME` for a constant or `NAME.path.segments`, e.g. `SPECIES.guppy.cost`), optional `inputs` (extra number/select controls that are not game values), and `render(inputs)` returning an HTML string (use the `tbl()` helper and `V(id)` to read current slider values). Keep the math identical to the game code it mirrors, and say in `note` what is ignored.
+
+## Text tab
+
+Like the Variables tab, but for words. `text.mjs` scans the game's own source with acorn (and `index.html` with a small tag tokenizer), lists the strings a player reads, and writes an edited string back by replacing just that literal's character range (comments, quoting style and formatting around it are untouched; quotes, backslashes and newlines are escaped for you). "Was" is the string in the last git commit, so Reset always has somewhere to go back to. **Reload the game tab to see an edit.** Nothing is cached in the game; the tab never touches game logic or physics.
+
+| File | What |
+|---|---|
+| `tools/sfx/text.json` | What counts as text and how it is grouped: the text-bearing property names (`textKeys`), calls/assignments that take text (`textCalls`, `textProps`), things never to list (`denyCalls`, `denyProps`, `denyKeys`), which constants are chat messages (`messageDecl`), and the tab's groups (matched by file, declaration name or call context; first match wins, the rest land in "Other in-game text"). |
+| `tools/sfx/text.mjs` | The engine: `listText()`, `setText(id, value, base)`, `resetText(id)`. |
+| `tools/sfx/text.js` | The tab's UI (groups are built lazily when opened; there are 800+ texts). |
+
+- **What is listed.** Table fields (`name`, `description`, `desc`, `label`, `text`, ... in `SPECIES`, `BUILDING_TYPES`, `SCIENCE_LAB_UPGRADES`, `ACHIEVEMENTS`, `WORLD_RULES`, `TUTORIAL_FLOWS`, ...), every `*_MESSAGE(S)` constant and anything passed to a `push*Notification`, text assigned to `textContent`/`innerHTML`/`title`/..., text passed to `setText`/`createPickupText`/`showBuildError`/..., and the static text and tooltips in `index.html`. Colours, CSS/SVG strings, selectors, class lists, reason codes and developer messages are filtered out.
+- **`${ }` parts.** A template literal with `${...}` in it is shown as written; the game fills those parts in while it runs. The tab refuses an edit that adds, removes, reorders or changes one (it would change the code). A template with no `${}` is shown as plain text.
+- **Ids.** Table strings are addressed by path (`Config:SPECIES.guppy.description`); strings inside functions by `file:function/context#n`; `index.html` by `html:#nearest-id#n`. Uncommitted code changes can renumber the `#n` of a function's strings, so "Was"/Reset pair strings with the last commit by content (see `pairWithHead`) instead of by number: an edited string still pairs with its original, and a newly added one shows as "new (not committed)".
+- **Safety.** Every save re-parses the file (JS with acorn, HTML with the tokenizer) and refuses anything that would not parse; each save also sends the text the page believes is current, and is refused if the file changed since (edit in VS Code while the tab is open and nothing gets overwritten). `index.html` text is shown as written (entities such as `&amp;` stay as typed), whitespace runs are collapsed, and `<` is not allowed.
+- **Numbers inside text.** Descriptions and chat messages that quote a number do not follow the Variables tab; change both.
+- **Commit dialog.** The summary now has a "Text (Text tab)" section listing each changed string old → new, grouped like the tab.
+
+Restart the tool's server after editing `text.json`, `text.mjs`, `server.mjs` or `gitcommit.mjs`; `text.js`, `tuning.js` and `index.html` load fresh on reload.
+
+### Adding text the scanner does not find
+Most new strings are picked up automatically (a `description:` in a table, a `*_MESSAGE` constant, `el.textContent = '...'`). If one is missed, add its property name to `textKeys`, its call to `textCalls`, or its assignment target to `textProps` in `text.json`. To move a table into its own group, add a group to `text.json`. If a string is listed that should not be, add the call/property/key to the matching `deny` list.
 
 ## Commit to GitHub button
 

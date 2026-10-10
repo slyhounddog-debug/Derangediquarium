@@ -1,0 +1,28 @@
+{
+  "_about": "Which strings the dev tool's Text tab lists and how they are grouped. Restart the tool's server after editing this file (text.mjs reads it once at startup).",
+  "skipFiles": ["PerfOverlay"],
+  "otherLabel": "Other in-game text (found in the code)",
+  "otherNote": "Everything else the scanner recognises as words a player reads: button labels, tooltips, toasts and hints built in code. Each is grouped under the function that uses it.",
+  "textKeys": ["name", "description", "desc", "label", "text", "title", "effect", "tip", "hint", "note", "notes", "message", "statLabel", "subtitle", "caption", "placeholder", "tooltip", "prompt", "heading", "body", "blurb"],
+  "textCalls": ["setText", "createPickupText", "showBuildError", "statsPanelRowHtml", "createUpgradeCard", "setWindowTitle", "slotNote", "fillText", "strokeText", "alert", "confirm", "pushStoryNotification", "pushGridNotification", "pushUiNotification", "pushMainNotification", "pushNotification", "pushGameNotification"],
+  "textProps": ["textContent", "innerHTML", "innerText", "title", "placeholder", "ariaLabel", "alt", "toastText"],
+  "denyCalls": ["querySelector", "querySelectorAll", "getElementById", "closest", "matches", "classList", "style", "dataset", "add", "remove", "toggle", "contains", "getAttribute", "removeAttribute", "hasAttribute", "addEventListener", "removeEventListener", "console", "localStorage", "sessionStorage", "setItem", "getItem", "removeItem", "fetch", "createElement", "createElementNS", "getContext", "require", "JSON", "parse", "startsWith", "endsWith", "includes", "indexOf", "test", "replace", "replaceAll", "split", "join", "padStart", "padEnd", "repeat", "localeCompare", "preloadAudioFile", "Audio", "has", "get", "set", "setProperty", "getPropertyValue", "measureText", "createLinearGradient", "addColorStop", "fromEntries", "hasOwnProperty", "dispatchEvent", "postMessage", "Symbol", "Number", "parseInt", "parseFloat", "Boolean", "RegExp", "performance", "Math", "Object"],
+  "denyProps": ["className", "id", "src", "href", "type", "font", "fillStyle", "strokeStyle", "textAlign", "textBaseline", "display", "cursor", "htmlFor", "filter", "globalCompositeOperation", "position", "visibility", "overflow", "background", "color"],
+  "denyKeys": ["id", "type", "kind", "icon", "tool", "color", "className", "font", "selector", "family", "group", "action", "reason", "statField", "tier", "fill", "stroke", "src", "file", "sound", "event", "mode", "filter", "cursor", "shape", "sprite", "background", "border", "unit", "behavior", "fontFamily", "fillStyle", "strokeStyle", "shadowColor", "cssClass", "key", "hat"],
+  "messageDecl": "(_MESSAGES?(_[A-Z0-9]+)*|_TIPS?|_NOTES|_FOOTNOTE|_TEXT)$|^WELCOME_MESSAGE$",
+  "groups": [
+    { "id": "chat", "label": "Chat messages", "note": "Everything that appears in the chat ticker at the bottom (story beats, tutorials, warnings, tips). Per project convention these are written in the sarcastic, fish-pun voice.",
+      "any": [ { "decl": "_MESSAGES?(_[A-Z0-9]+)*$" }, { "ctx": "^push\\w*Notification\\(\\)$" } ] },
+    { "id": "fish", "label": "Shop: fish", "any": [ { "file": ["Config"], "decl": "^SPECIES$" } ] },
+    { "id": "buildings", "label": "Shop: buildings", "any": [ { "file": ["Config"], "decl": "^(BUILDING_TYPES|PLATFORM_FILTER_ITEM_TYPES|\\w+_STAT_NOTES)$" } ] },
+    { "id": "recipes", "label": "Factory and Power Plant recipes", "any": [ { "file": ["Config"], "decl": "^(MANUFACTURER_RECIPES|POWER_PLANT_RECIPES)$" } ] },
+    { "id": "lab", "label": "Science Lab nodes", "any": [ { "file": ["Config"], "decl": "^SCIENCE_LAB_UPGRADES$" } ] },
+    { "id": "aliens", "label": "Aliens", "any": [ { "file": ["Config"], "decl": "^ALIEN_ARCHETYPES$" } ] },
+    { "id": "achievements", "label": "Achievements", "any": [ { "file": ["Config"], "decl": "^ACHIEVEMENTS$" } ] },
+    { "id": "hats", "label": "Hats", "any": [ { "file": ["Config"], "decl": "^HATS$" } ] },
+    { "id": "world", "label": "World Settings window", "any": [ { "file": ["WorldSettings", "WorldSettingsUI"] } ] },
+    { "id": "info", "label": "Tutorials and info boxes", "note": "The step-by-step tutorial prompts, the HUD info pop-ups and the Tank/Lab footnotes.", "any": [ { "file": ["UI"], "decl": "^(TUTORIAL_FLOWS|HUD_INFO_DATA|\\w+_FOOTNOTE)$" } ] },
+    { "id": "levels", "label": "Levels", "any": [ { "file": ["Levels"] } ] },
+    { "id": "windows", "label": "Windows, menus and buttons (index.html)", "note": "The page's own text: modals, the pause menu, the help screen, the start screens, button labels and tooltips. Entities and ampersands are shown as written in the HTML.", "any": [ { "file": ["html"] } ] }
+  ]
+}
