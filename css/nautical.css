@@ -609,9 +609,11 @@
 #world-settings-preset-desc { color: var(--cream); font-family: var(--font-display); font-weight: 600; text-shadow: 0 2px 0 rgba(0, 0, 0, 0.5); }
 #world-settings-body { scrollbar-color: #b88048 rgba(0, 0, 0, 0.25); }
 .ws-group h3 { font-family: var(--font-display); color: var(--orange); text-shadow: 0 2px 0 #0b2347, 0 0 6px rgba(0, 0, 0, 0.4); letter-spacing: 0.03em; }
-.ws-row { background: var(--noise), var(--paper); color: var(--ink); border: 2px solid #9a6b3a; box-shadow: 0 3px 0 #5b3a1b, inset 0 0 12px rgba(120, 80, 30, 0.22); font-family: var(--font-display); }
-.ws-row.changed { border-color: #e8a317; box-shadow: 0 3px 0 #5b3a1b, 0 0 10px rgba(240, 185, 77, 0.65), inset 0 0 12px rgba(120, 80, 30, 0.22); }
-.ws-value { color: #b4510c; }
+/* Same parchment card as the Tank Upgrade / Achievement cards (incl. the lighter grain override further down), per direct request. */
+.ws-row { background: var(--noise), var(--paper); color: var(--ink); border: 2px solid #9a6b3a; border-radius: 10px; box-shadow: 0 3px 0 #5b3a1b, 0 7px 10px rgba(0, 0, 0, 0.35), inset 0 0 14px rgba(120, 80, 30, 0.22); font-family: var(--font-display); }
+.ws-row.changed { border-color: #e8a317; box-shadow: 0 3px 0 #5b3a1b, 0 0 10px rgba(240, 185, 77, 0.65), 0 7px 10px rgba(0, 0, 0, 0.35), inset 0 0 14px rgba(120, 80, 30, 0.22); }
+.ws-label { font-family: var(--font-display); color: #b4510c; font-weight: 700; font-size: 16px; }
+.ws-value { color: var(--ink); font-weight: 700; }
 .ws-desc { font-weight: 600; }
 .ws-reset { background: var(--plank); color: var(--cream); border: 2px solid #3a2010; }
 #achievements-modified-note { font-family: var(--font-display); }
@@ -688,7 +690,7 @@
 body:has(#tank-overlay:not(.collapsed)) #bottom-bar-row, body:has(#lab-overlay:not(.hidden)) #bottom-bar-row { z-index: 215; }
 
 /* Lighter, warmer parchment grain (the dark speckle read as dirty gray). */
-.tank-upgrade-card, .achievement-card, .hat-card, .start-mode-card, .help-row,
+.tank-upgrade-card, .achievement-card, .hat-card, .start-mode-card, .help-row, .ws-row,
 #notification-log, #stats-panel, #mound-menu, #recipe-menu, #building-info-menu, #fish-info-menu, #merge-fish-menu, #platform-filter-menu, #storage-chest-menu, #hud-info-modal, #hud-power-graph {
   background: url(nautical/noise-light.svg), var(--paper);
 }
