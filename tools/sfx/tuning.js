@@ -418,6 +418,28 @@ const FORMULAS = [
     },
   },
   {
+    id: 'eternalFish', title: 'Eternal Fish',
+    formula: 'parent gold / min = ceil( adult coin × merge value multiplier ^ (tier − 1) ) × 60000 / adult coin interval ms\nEternal coin = round( (Guppy + Dartfin + Blimpfish gold / min) × Eternal interval ms / 60000 ), one coin per Eternal interval\nEternal Fish allowed = Eternal Fish alive < kinds of hybrid fish alive (Battery, Magnet, Feeder, Bio)',
+    note: 'Dartfin x Guppy x Blimpfish. The coin value is worked out from the three fish actually used (merge tiers included) and frozen onto the Eternal Fish when it is made, so it ignores later Dartfin school size and Blimpfish ripening (a Blimpfish coin averages its normal value anyway). Never hungry, makes no Waste, only aliens can kill it. Cleanliness still scales the coin like any other fish. The slots rule is checked when the sphere forms and when the third fish is dropped; hybrids may die afterwards.',
+    params: ['ETERNAL_COIN_INTERVAL_MS', 'ETERNAL_SPHERE_TIMEOUT_MS', 'FISH_STAR_TIER_VALUE_MULTIPLIER', ...['guppy', 'dartfin', 'blimpfish'].flatMap((s) => [sp(s, 'growthStages.2.dropValue'), sp(s, 'growthStages.2.dropInterval')])],
+    inputs: [
+      { key: 'g', label: 'Guppy tier', value: 1, min: 1, max: 4, step: 1 },
+      { key: 'd', label: 'Dartfin tier', value: 1, min: 1, max: 4, step: 1 },
+      { key: 'b', label: 'Blimpfish tier', value: 1, min: 1, max: 4, step: 1 },
+    ],
+    render(inp) {
+      const mult = V('FISH_STAR_TIER_VALUE_MULTIPLIER', 1), every = V('ETERNAL_COIN_INTERVAL_MS', 1);
+      const perMin = (s, tier) => Math.ceil(V(sp(s, 'growthStages.2.dropValue')) * Math.pow(mult, tier - 1)) * 60000 / V(sp(s, 'growthStages.2.dropInterval'), 1);
+      const row = (label, g, d, b) => {
+        const pg = perMin('guppy', g), pd = perMin('dartfin', d), pb = perMin('blimpfish', b), total = pg + pd + pb;
+        return [label, money(pg), money(pd), money(pb), money(total), money(Math.max(1, Math.round(total * every / 60000))) + ' / ' + fmtNum(every / 1000, 0) + 's'];
+      };
+      const rows = [1, 2, 3, 4].map((t) => row(`All three at tier ${t}`, t, t, t));
+      rows.push(row(`Your pick (G${inp.g} · D${inp.d} · B${inp.b})`, inp.g, inp.d, inp.b));
+      return tbl('Eternal Fish coin by the tiers of the three fish used', ['Parents', 'Guppy gold / min', 'Dartfin gold / min', 'Blimpfish gold / min', 'Eternal gold / min', 'Eternal coin'], rows);
+    },
+  },
+  {
     id: 'hunger', title: 'Hunger timeline',
     formula: 'hungry (!) at  hunger ≥ seek threshold\ncritical (!!) at  seek + critical fraction × (max − seek)\nstarves at  hunger = max\nseconds = hunger points / hunger rate;  one Food buys relief / hunger rate seconds',
     note: 'Seconds a fish can go from just-fed (hunger 0) before each stage, and how long one Food keeps it going at each Food Quality level. (Suckerfish and its hybrids never reach critical or starve.)',
@@ -547,7 +569,7 @@ const FORMULAS = [
   },
   {
     id: 'throughput', title: 'Building throughput & power',
-    formula: 'items / min = 60000 / process time ms\npower per item = power draw (mw) × process seconds\nManufacturer cycle = sum of its two ingredients’ process times;  Bio-Sludge takes the Refinery ×multiplier longer',
+    formula: 'items / min = 60000 / process time ms\npower per item = power draw (mw) × process seconds\nFactory cycle = sum of its two ingredients’ process times;  Bio-Sludge takes the Refinery ×multiplier longer',
     note: 'What each processing building can chew through per minute, and how much electricity each item costs. Use it to size how many Collectors/Refineries a base of N fish needs.',
     params: [...['TILE_COLLECTOR', 'TILE_COLLECTOR_ELECTRIC', 'TILE_COLLECTOR_ADVANCED'].flatMap((t) => [`PROCESSOR_STATS.${t}.coinMs`, `PROCESSOR_STATS.${t}.powerCostPerSecCoin`]),
       ...['TILE_REFINERY', 'TILE_REFINERY_ELECTRIC', 'TILE_REFINERY_ADVANCED'].flatMap((t) => [`REFINERY_STATS.${t}.foodProcessMs`, `REFINERY_STATS.${t}.powerCostPerSec`]), 'ALIEN_DNA_REFINERY_TIME_MULTIPLIER',
@@ -568,7 +590,7 @@ const FORMULAS = [
       });
       return tbl('Collector', ['', 'Coins / min', 'Power per coin', 'Science / min', 'Power per Science'], col) +
         tbl('Refinery', ['', 'Waste → Food / min', 'Power per Food', 'Bio-Sludge → Biomass / min', 'Power per Biomass'], ref) +
-        tbl('Manufacturer (one recipe cycle)', ['Recipe', 'Ingredients', 'Cycle', 'Rate', 'Power per output'], man);
+        tbl('Factory (one recipe cycle)', ['Recipe', 'Ingredients', 'Cycle', 'Rate', 'Power per output'], man);
     },
   },
   {

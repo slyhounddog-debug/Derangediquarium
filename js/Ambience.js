@@ -24,7 +24,7 @@
 // below everything, so they're always behind every sun ray. main.js calls
 // renderAmbienceBehindLab, then renderScienceLab, then renderAmbienceFrontLab
 // — see the job-list construction near the bottom of this file.
-import { WORLD_W, SEABED_FLOOR_Y } from './Config.js';
+import { WORLD_W, SEABED_FLOOR_Y, TILE_SIZE, MOUND_WIDTH_TILES, SCIENCE_LAB_WIDTH_TILES } from './Config.js';
 import { worldToScreen } from './Engine.js';
 import { bakeBoulderSprite, bakeSandCastleSprite, bakeCoralBaseSprite } from './SeabedArt.js';
 
@@ -1402,10 +1402,26 @@ const CHEST_BUBBLE_SPAWN_WINDOW_S = CHEST_OPEN_DURATION_S + 0.5;
 function randomChestWaitS() {
   return CHEST_WAIT_MIN_S + Math.random() * (CHEST_WAIT_MAX_S - CHEST_WAIT_MIN_S);
 }
+// Per direct request ("make the seafloor chest never overlap the mound") — the
+// chest's x is drawn only from the world outside the Mound's footprint (the
+// Science Lab that replaces it is the same width), padded by the chest's own
+// sand pile (size * 1.2 each side, the widest thing it draws). The Mound sits
+// at WORLD_W / 2 (Mound.js's MOUND_X). Both chests (the foreground one and the
+// shrunk background-parallax one) go through here, using the unshrunk size, so
+// the background one is clear of the mound too. One uniform draw mapped onto
+// the two side strips — no retry loop.
+const CHEST_SIZE = 34;
+const CHEST_MOUND_CLEARANCE = Math.max(MOUND_WIDTH_TILES, SCIENCE_LAB_WIDTH_TILES) * TILE_SIZE / 2 + CHEST_SIZE * 1.2 + 8;
+function randomChestX() {
+  const leftEnd = WORLD_W / 2 - CHEST_MOUND_CLEARANCE;
+  const rightStart = WORLD_W / 2 + CHEST_MOUND_CLEARANCE;
+  const u = Math.random() * (leftEnd + (WORLD_W - rightStart));
+  return u < leftEnd ? u : rightStart + (u - leftEnd);
+}
 function randomTreasureChest() {
   return {
-    x: Math.random() * WORLD_W,
-    size: 34,
+    x: randomChestX(),
+    size: CHEST_SIZE,
     phase: 'closed', // 'closed' -> 'opening' -> 'open' -> 'closing' -> 'closed'...
     timer: randomChestWaitS(),
     lidT: 0, // 0 = fully closed, 1 = fully open — drives the lid's rotation and the treasure reveal

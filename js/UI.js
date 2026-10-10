@@ -110,7 +110,7 @@ import {
   computeTheoreticalGoldPerMinute, computeTheoreticalCoinCountPerMinute, computeTheoreticalSciencePerMinute, computeTheoreticalFoodNeededPerMinute,
   computeTheoreticalWastePerMinute, computeTheoreticalWasteEatenPerMinute, computeTheoreticalManufacturerOutputPerMinute, computeTheoreticalBiomassPerMinute,
   computeFishInfoModalStats, describeFishMergeOptions, createPickupText, reconcileIdsAfterLoad,
-  dartfinSchoolCount, schoolCoinMultiplier, fishPoopIntervalMs,
+  dartfinSchoolCount, schoolCoinMultiplier, fishPoopIntervalMs, computeEternalCoinValue,
 } from './Entities.js';
 import {
   getTile, worldToTile, getBuildingCost, FAN_STATS,
@@ -188,6 +188,8 @@ function setDisabled(el, disabled) { if (el.disabled !== disabled) el.disabled =
 let els = null;
 let currentPreviewSpecies = null; // species currently shown in the in-panel preview, if any
 let currentPreviewBuilding = null; // building currently shown in the in-panel preview, if any — mutually exclusive with currentPreviewSpecies
+let previewRecipesHtmlShown = ''; // the recipe-buttons markup currently in the preview, so refreshPreviewInfo only touches the DOM when it changes
+let previewBuildingStatsHtml = ''; // the selected building's stat lines, built once on selection (see refreshPreviewInfo)
 let lastMoney = null; // previous frame's money, to detect gain vs spend for the flash animation
 let lastCleanliness = null; // previous frame's cleanliness, same purpose
 let lastCleanlinessColor = null; // last color actually written to the cleanliness readout — see setText's comment
@@ -792,6 +794,7 @@ export function initUI(state) {
     if (!btn) return;
     const anchor = btn.closest('#fish-info-menu') ? btn : null; // from the fish modal the popup hangs under the button; from the shop it's centered
     if (btn.dataset.mergeTier) openMergeFishModal(state, btn.dataset.mergeSpecies, Number(btn.dataset.mergeTier), btn);
+    else if (btn.dataset.recipeKind) openRecipeInfoModal(state, btn.dataset.recipeKind, btn.dataset.recipeId);
     else openLabPurchaseModal(state, btn.dataset.nodeId, true, anchor);
   };
   els.fishInfoMergeLines.addEventListener('click', onMergeNodeClick);
@@ -1572,9 +1575,9 @@ function shopSpliceSectionHtml(state, speciesId) {
   const lines = [];
   for (const s of SPECIES_LIST) {
     if (!s.parents || !s.parents.includes(speciesId)) continue;
-    const otherId = s.parents[0] === speciesId ? s.parents[1] : s.parents[0];
-    // the Bio Fish's second parent is the egg-hatched alien, which isn't a SPECIES row
-    lines.push(spliceEntryHtml(state, { text: `${SPECIES[otherId] ? SPECIES[otherId].name : 'Friendly Alien'} → ${s.name}`, isSplice: true, resultSpeciesId: s.id }));
+    // the Bio Fish's second parent is the egg-hatched alien, which isn't a SPECIES row; the Eternal Fish has two other parents
+    const otherNames = s.parents.filter((id) => id !== speciesId).map((id) => (SPECIES[id] ? SPECIES[id].name : 'Friendly Alien')).join(' + ');
+    lines.push(spliceEntryHtml(state, { text: `${otherNames} → ${s.name}`, isSplice: true, resultSpeciesId: s.id }));
   }
   if (!lines.length) return '';
   return `<div class="shop-merge-section"><div class="shop-merge-title">Available Merges</div>${lines.join('')}</div>`;
@@ -1940,7 +1943,7 @@ function refreshRecipeMenu(state) {
   if (!data) { closeRecipeMenu(); return; }
   const isManufacturer = data.type === TILE_MANUFACTURER;
   const recipeList = isManufacturer ? MANUFACTURER_RECIPE_LIST : POWER_PLANT_RECIPE_LIST;
-  els.recipeMenuTitle.textContent = isManufacturer ? 'Manufacturer Recipe' : 'Power Plant Fuel';
+  els.recipeMenuTitle.textContent = isManufacturer ? 'Factory Recipe' : 'Power Plant Fuel';
   els.recipeMenuOptions.innerHTML = '';
   for (const recipe of recipeList) {
     const unlocked = recipe.labNodeId === null || state.meta.labUpgradesPurchased.includes(recipe.labNodeId);
@@ -2429,6 +2432,7 @@ function openLabPurchaseModal(state, id, infoOnly = false, anchorBtn = null) {
   els.labPurchaseModal.classList.toggle('anchored', !!anchorBtn); // opened from the fish modal: its paper look, hanging under the button
   if (!anchorBtn) { els.labPurchaseModal.style.left = ''; els.labPurchaseModal.style.top = ''; }
   els.labPurchaseFootnote.classList.toggle('hidden', !infoLocked);
+  els.labPurchaseFootnote.textContent = LAB_FISH_FOOTNOTE; // openRecipeInfoModal reuses this element with its own wording
   // A `mystery: true` node stays a total blank until its prerequisites are
   // met, per direct spec ("a question mark node... that gives no info until
   // it's unlockable") — no name, no icon, no cost, no description, nothing
@@ -2511,6 +2515,57 @@ function openLabPurchaseModal(state, id, infoOnly = false, anchorBtn = null) {
   els.labPurchaseStats.innerHTML = statChips.join('');
   els.labPurchaseOverlay.classList.remove('hidden');
   if (anchorBtn) positionUnderButton(els.labPurchaseModal, anchorBtn);
+  playPanelOpen();
+}
+
+// Per direct request, the Shop's Factory / Power Plant preview lists every recipe as a hybrid-style button;
+// clicking one opens this — the same read-only centered modal the hybrid fish buttons open (it reuses the
+// Lab purchase modal's own elements and info-only styling), but explaining the recipe instead of a Lab node:
+// what the output is for, what goes in, how long and how much power it takes, and what unlocks it. Every number
+// is read live from the recipe tables, so a dev-tool retune shows up here with no text to update.
+const LAB_FISH_FOOTNOTE = '* Locked — purchase this fish from the Science Lab.';
+function openRecipeInfoModal(state, kind, recipeId) {
+  closeMergeFishModal();
+  const isFactory = kind === 'factory';
+  const recipe = (isFactory ? MANUFACTURER_RECIPES : POWER_PLANT_RECIPES)[recipeId];
+  if (!recipe) return;
+  const node = recipe.labNodeId ? SCIENCE_LAB_UPGRADES[recipe.labNodeId] : null;
+  const locked = node != null && !state.meta.labUpgradesPurchased.includes(node.id);
+  labPurchaseNodeId = `recipe:${recipe.id}`; // only has to be non-null (so the close paths see it open); info-only modals never read it as a node
+  labPurchaseInfoOnly = true;
+  els.labPurchaseModal.classList.add('info-only');
+  els.labPurchaseModal.classList.toggle('info-locked', locked);
+  els.labPurchaseModal.classList.remove('anchored');
+  els.labPurchaseModal.style.left = '';
+  els.labPurchaseModal.style.top = '';
+  els.labPurchaseFootnote.classList.toggle('hidden', !locked);
+  if (locked) els.labPurchaseFootnote.textContent = `* Locked — buy "${node.name}" in the Science Lab to use this recipe.`;
+  const icon = document.createElement('canvas');
+  icon.width = icon.height = LAB_PURCHASE_ICON_CANVAS_SIZE;
+  drawItemIconCanvas(icon, isFactory ? recipe.output : recipe.inputs[0]);
+  els.labPurchaseIcon.textContent = '';
+  els.labPurchaseIcon.appendChild(icon);
+  els.labPurchaseName.textContent = `${locked ? '🔒 ' : ''}${recipe.name} ${isFactory ? 'Recipe' : 'Fuel'}`;
+  els.labPurchaseCost.textContent = locked ? `Requires: ${node.name} (Science Lab)` : node ? 'Unlocked ✓' : `Unlocked with the ${isFactory ? 'Factory' : 'Power Plant'} ✓`;
+  const label = (id) => PLATFORM_FILTER_ITEM_TYPES.find((t) => t.id === id)?.label || id;
+  const chip = (html) => `<div class="building-stat">${html}</div>`;
+  const item = (id) => `${itemIconImgHtml(id, 16)} <b>${label(id)}</b>`;
+  let stats;
+  if (isFactory) {
+    const times = recipe.inputs.map((id) => MANUFACTURER_ITEM_PROCESS_MS[id] / 1000);
+    stats =
+      chip(`Needs: ${recipe.inputs.map(item).join(' + ')}`) +
+      chip(`Makes: ${item(recipe.output)}`) +
+      chip(`⏱️ One batch: <b>${times.reduce((a, b) => a + b, 0)}s</b> (${recipe.inputs.map((id, i) => `${label(id)} ${times[i]}s`).join(' + ')}, one at a time)`) +
+      chip(`⚡ Power, only while working: ${recipe.inputs.map((id) => `<b>${MANUFACTURER_ITEM_POWER_COST_MW[id]}mw</b> on ${label(id)}`).join(', ')}`);
+  } else {
+    stats =
+      chip(`Burns: ${item(recipe.inputs[0])}, one at a time`) +
+      chip(`⚡ Makes: <b>+${recipe.powerOutputMw}mw</b> for <b>${recipe.durationMs / 1000}s</b> per item`);
+  }
+  els.labPurchaseDesc.innerHTML = `<div>${recipe.effect}</div>`;
+  els.labPurchaseStats.innerHTML = stats;
+  els.labPurchaseOverlay.classList.remove('hidden');
   playPanelOpen();
 }
 
@@ -2647,6 +2702,15 @@ function fishEconomyStatsHtml(state, speciesId) {
   if (!s) return '';
   const baby = s.growthStages[0];
   const adult = s.growthStages[s.growthStages.length - 1];
+  // The Eternal Fish never eats or poops, and its coin comes from its three parents (Tier 1 shown), not its own row.
+  if (s.eternal) {
+    const coin = computeEternalCoinValue(s.parents.map((id) => ({ speciesId: id, starTier: 1 })));
+    const interval = adult.dropInterval / 1000;
+    return `<div class="building-stat">🍽️ Hunger: <b>None</b></div>` +
+      `<div class="building-stat">${itemIconImgHtml('coin')} Coin: <b>$${coin} every ${interval}s</b></div>` +
+      `<div class="building-stat">${itemIconImgHtml('coin')} Money: <b>$${Math.round((coin / interval) * 60)}/min</b> with Tier 1 parents (higher tiers pay more)</div>` +
+      `<div class="building-stat">🏊 Speed: <b>${Math.round(s.swimSpeed * FISH_SPEED_MULTIPLIER)}px/s</b>${fishStatBarHtml('speed', s.swimSpeed)}</div>`;
+  }
   const foodPerMin = (s.hungerRate * 60) / FOOD_HUNGER_RELIEF_BY_LEVEL[state.level.upgrades.foodQuality];
   // Per direct request, a Scavenger (Suckerfish) shows Waste as what it eats, with a full meter.
   const eatsWaste = s.behavior.includes('SCAVENGER');
@@ -5071,8 +5135,9 @@ function selectBuildingForPreview(state, building) {
   els.previewEmpty.classList.add('hidden');
   els.previewContent.classList.remove('hidden');
   els.previewDesc.textContent = building.description;
-  const statsHtml = buildingStatsHtml(building.id);
-  setHtml(els.previewStats, statsHtml);
+  previewBuildingStatsHtml = buildingStatsHtml(building.id);
+  previewRecipesHtmlShown = recipeButtonsHtml(state, building.id);
+  setHtml(els.previewStats, previewBuildingStatsHtml + previewRecipesHtmlShown);
   refreshPreviewInfo(state);
   renderPreviewCanvas();
   state.ui.selectedTool = `build:${building.id}`;
@@ -5361,7 +5426,34 @@ function refreshPreviewInfo(state) {
     setHtml(els.previewStats, statsHtml);
   } else if (currentPreviewBuilding) {
     setText(els.previewName, currentPreviewBuilding.name);
+    // The recipe buttons' lock icons follow the Science Lab live; the base stats were built once on selection.
+    if (currentPreviewBuilding.id === TILE_MANUFACTURER || currentPreviewBuilding.id === TILE_POWER_PLANT) {
+      const recipesHtml = recipeButtonsHtml(state, currentPreviewBuilding.id); // memoized, so an unchanged lock state is the same string object
+      if (recipesHtml !== previewRecipesHtmlShown) {
+        previewRecipesHtmlShown = recipesHtml;
+        setHtml(els.previewStats, previewBuildingStatsHtml + recipesHtml);
+      }
+    }
   }
+}
+
+// Per direct request, under the "Click to pick a recipe once placed." note the Factory and Power Plant list their
+// recipes as hybrid-style buttons (grey + lock until their Science Lab node is bought) that open openRecipeInfoModal.
+let recipeButtonsMemo = { key: '', html: '' };
+function recipeButtonsHtml(state, buildingId) {
+  const isFactory = buildingId === TILE_MANUFACTURER;
+  if (!isFactory && buildingId !== TILE_POWER_PLANT) return '';
+  const list = isFactory ? MANUFACTURER_RECIPE_LIST : POWER_PLANT_RECIPE_LIST;
+  const purchased = state.meta.labUpgradesPurchased;
+  let key = buildingId; // the only thing that can change the markup is which recipes are still locked
+  for (const r of list) key += r.labNodeId !== null && !purchased.includes(r.labNodeId) ? '1' : '0';
+  if (recipeButtonsMemo.key === key) return recipeButtonsMemo.html;
+  const buttons = list.map((r) => {
+    const locked = r.labNodeId !== null && !purchased.includes(r.labNodeId);
+    return `<button class="merge-node-btn recipe-btn${locked ? ' locked' : ''}" data-recipe-kind="${isFactory ? 'factory' : 'power'}" data-recipe-id="${r.id}" title="${locked ? 'Not unlocked yet — click to see what it does' : 'Click to see what it does'}">${locked ? '🔒 ' : ''}${r.name}</button>`;
+  }).join('');
+  recipeButtonsMemo = { key, html: `<div class="shop-merge-section recipe-btn-section"><div class="shop-merge-title">Recipes</div>${buttons}</div>` };
+  return recipeButtonsMemo.html;
 }
 
 // speciesId -> price-tag <span>, populated by buildShopPanel — lets

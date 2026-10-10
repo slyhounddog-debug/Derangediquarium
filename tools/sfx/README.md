@@ -98,6 +98,10 @@ A green **Commit to GitHub** button sits in the header on every tab, with a badg
 
 Note it offers *every* changed file in the repo, not only ones edited through the tool; review the list before confirming. The Variables tab's "default" values move to the new commit afterwards.
 
+## Revert button
+
+A red **Revert** button sits right next to Commit. It opens the same kind of dialog with the same uncommitted files (grouped the same way): tick the ones to throw away, or use *Tick all*. Modified and deleted files go back to exactly what the last commit has. Brand-new files have no earlier version, so reverting one **deletes** it; they sit in their own red group and start unticked. The red button needs a second click (it re-labels itself with the count and expires after 4 seconds) before anything happens, and closing the dialog after a revert reloads the page so the Variables/Audio tabs show the restored values. Only files git currently lists as changed can be touched. The endpoints are `GET /api/git/revert-list` and `POST /api/git/revert` (`gitRevertList`/`gitRevert` in `gitcommit.mjs`); **restart the tool's server after pulling this in**, since `server.mjs` is read once at startup.
+
 Every sound in `Sound.js` now has an Audio-tab card; the synthesized ones play their original sound until you pick a recording (each `playXxx()` tries `playSample('<slotId>')` first).
 
 ## Desktop shortcut

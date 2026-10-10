@@ -43,6 +43,15 @@
       ]
     },
     {
+      "id": "eternalFish", "label": "Fish: Eternal Fish",
+      "items": [
+        { "name": "ETERNAL_COIN_INTERVAL_MS", "label": "Eternal Fish: coin interval", "desc": "An Eternal Fish drops one coin this often, worth the sum of its three parents' adult gold per minute over this time (so a longer interval means a bigger coin, the same income).", "min": 5000, "max": 120000, "step": 1000, "unit": "ms" },
+        { "name": "ETERNAL_SPHERE_TIMEOUT_MS", "label": "Eternal sphere: time to add the third fish", "desc": "After two economy fish fuse into the glowing sphere, how long the player has to drop the third kind on it before the sphere splits back into the two fish.", "min": 1000, "max": 30000, "step": 500, "unit": "ms" },
+        { "name": "ETERNAL_SPHERE_DROP_RADIUS_PX", "label": "Eternal sphere: drop radius", "desc": "How close (world px) a dragged fish must be to the sphere's centre to count as dropped on it.", "min": 10, "max": 200, "step": 2, "unit": "px" },
+        { "name": "ETERNAL_SPHERE_RADIUS_PX", "label": "Eternal sphere: drawn size", "desc": "Radius of the glowing sphere as drawn (world px at normal zoom). Looks only.", "min": 6, "max": 80, "step": 1, "unit": "px" }
+      ]
+    },
+    {
       "id": "fishSpecials", "label": "Fish: Dartfin school & Blimpfish coin",
       "items": [
         { "name": "DARTFIN_SCHOOL_MAX_SIZE", "label": "Dartfin school: size for the full bonus", "desc": "Living Dartfin needed for the biggest coin and waste bonus. One Dartfin is the baseline; each extra one adds an equal step up to this many.", "min": 2, "max": 40, "step": 1 },
@@ -93,8 +102,8 @@
         { "deep": "PROCESSOR_STATS", "label": "Collector" },
         { "deep": "REFINERY_STATS", "label": "Refinery" },
         "ALIEN_DNA_REFINERY_TIME_MULTIPLIER",
-        { "deep": "MANUFACTURER_ITEM_PROCESS_MS", "label": "Manufacturer process time (ms)" },
-        { "deep": "MANUFACTURER_ITEM_POWER_COST_MW", "label": "Manufacturer power per ingredient (mw)" },
+        { "deep": "MANUFACTURER_ITEM_PROCESS_MS", "label": "Factory process time (ms)" },
+        { "deep": "MANUFACTURER_ITEM_POWER_COST_MW", "label": "Factory power per ingredient (mw)" },
         { "deep": "POWER_PLANT_RECIPES", "fields": ["powerOutputMw", "durationMs"], "label": "Power Plant" },
         { "deep": "STORAGE_CHEST_CAPACITY", "label": "Storage Chest capacity" },
         "EEL_BLIMP_BATTERY_CAPACITY_MW", "EEL_BLIMP_BATTERY_CAPACITY_MUTAGEN_MW", "EEL_BLIMP_MUTAGEN_PRODUCTION_MULTIPLIER",

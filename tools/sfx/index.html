@@ -73,7 +73,10 @@
     <button id="stopAll">Stop all</button>
   </span>
   <span id="status" style="color:var(--mute)"></span>
-  <button id="commitBtn" title="Commit and push every change made on any tab">⬆ Commit to GitHub <span class="badge zero" id="commitBadge">0</span></button>
+  <span id="gitBtns" style="display:flex;gap:8px;align-items:center;margin-left:auto">
+    <button id="commitBtn" title="Commit and push every change made on any tab">⬆ Commit to GitHub <span class="badge zero" id="commitBadge">0</span></button>
+    <button id="revertBtn" title="Throw away uncommitted changes (pick which files)">↩ Revert</button>
+  </span>
 </header>
 <main id="view-audio">
   <div class="help">

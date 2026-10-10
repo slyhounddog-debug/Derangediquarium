@@ -30,7 +30,7 @@
     "label": "Building ejects an item",
     "synth": true,
     "want": "A soft ejecting sound (not a menu-closing blip)",
-    "plays": "When a Refinery or Manufacturer ejects its output, or a Collector finishes a Science Flask.",
+    "plays": "When a Refinery or Factory ejects its output, or a Collector finishes a Science Flask.",
     "search": [
       "soft pop",
       "bubble pop",
@@ -385,7 +385,7 @@
     "label": "Building takes in an item",
     "synth": true,
     "want": "A soft rising whoosh",
-    "plays": "When a Collector, Refinery, Manufacturer, Power Plant, Turret or Storage Chest pulls an item in. Fires often in a busy base, so keep it quiet and short.",
+    "plays": "When a Collector, Refinery, Factory, Power Plant, Turret or Storage Chest pulls an item in. Fires often in a busy base, so keep it quiet and short.",
     "search": [
       "soft suck in",
       "gentle whoosh",

@@ -160,3 +160,37 @@ export function gitCommit({ files, subject, body }) {
   result.ok = !!result.commit || result.pushed;
   return result;
 }
+
+// ---- Revert (header button next to Commit) ----
+// Lists the same uncommitted files the commit dialog does (cheaper: no tuning/manifest summary), and puts the
+// ticked ones back to the last commit. Tracked files are restored with `git checkout HEAD`; brand-new files
+// have no commit to go back to, so reverting one deletes it. Only paths git currently reports as changed can
+// be touched, so a stale or forged request can never reach an unrelated file.
+export function gitRevertList() {
+  const files = changedFiles();
+  const stats = numstat(files);
+  for (const f of files) { f.group = groupOf(f.path); Object.assign(f, stats[f.path] || {}); }
+  return { files, branch: (tryGit(['rev-parse', '--abbrev-ref', 'HEAD']) || '').trim() };
+}
+
+export function gitRevert({ files }) {
+  const wanted = new Set(files || []);
+  const chosen = changedFiles().filter((f) => wanted.has(f.path));
+  if (!chosen.length) throw new Error('Nothing selected to revert');
+  const restore = [];
+  const remove = [];
+  for (const f of chosen) {
+    // A new file git already tracks in the index but HEAD has never seen (staged add) is "new" too.
+    if (f.status === 'new' || tryGit(['cat-file', '-e', `HEAD:${f.path}`]) === null) remove.push(f.path); else restore.push(f.path);
+  }
+  if (restore.length) {
+    git(['reset', '-q', '--', ...restore]);
+    git(['checkout', 'HEAD', '--', ...restore]);
+  }
+  for (const p of remove) {
+    tryGit(['rm', '-q', '-f', '--cached', '--', p]); // no-op for plain untracked files
+    const abs = path.resolve(ROOT, p);
+    if (abs.startsWith(ROOT + path.sep)) fs.rmSync(abs, { force: true });
+  }
+  return { ok: true, restored: restore.length, deleted: remove.length };
+}

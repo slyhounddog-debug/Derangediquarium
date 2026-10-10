@@ -11,6 +11,8 @@ import {
   BUILDING_TYPES,
   FISH_COLORS,
   FISH_BASE_SIZE,
+  ETERNAL_SPHERE_RADIUS_PX,
+  ETERNAL_SPHERE_TIMEOUT_MS,
   HUNGER_SEEK_THRESHOLD,
   HUNGER_CRITICAL_THRESHOLD,
   SCIENCE_BLOCKED_SICKNESS,
@@ -189,6 +191,11 @@ import {
   findFishMergePartners,
   findMergeSubjectAt,
   canMergeOrSplicePair,
+  canStartEternalSphere,
+  startEternalSphere,
+  canFinishEternalSphere,
+  finishEternalSphere,
+  eternalSphereContainsPoint,
   canSpliceOctopusWithAlien,
   spliceOctopusWithAlien,
   createMotherAlienFish,
@@ -786,6 +793,30 @@ function coinSpinScaleX(item) {
 // when one of the two fields is set. The motes' sizes shrink as they arrive
 // instead of fading, which keeps a single fill style for the whole path.
 function drawAppreciationFx(ctx, item, x, y) {
+  if (item.eternalFx) {
+    // An Eternal Fish's coin (per direct request, visibly not a plain diamond coin): a slowly turning dashed
+    // lavender ring and three tiny beads in its parents' colors orbiting it. One stroke and three fills per
+    // coin, and only the few coins Entities.js's registry lists ever get here.
+    const t = performance.now();
+    const ringR = item.radius * 1.4;
+    ctx.save();
+    ctx.strokeStyle = '#e4c8ff';
+    ctx.lineWidth = 1.6;
+    ctx.setLineDash([5, 4]);
+    ctx.lineDashOffset = -t * 0.02;
+    ctx.beginPath();
+    ctx.arc(x, y, ringR, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore(); // also clears the dash
+    const orbit = t / 900;
+    for (let i = 0; i < 3; i++) {
+      const a = orbit + (i * Math.PI * 2) / 3;
+      ctx.fillStyle = ETERNAL_BEAD_COLORS[i];
+      ctx.beginPath();
+      ctx.arc(x + Math.cos(a) * ringR, y + Math.sin(a) * ringR, 2.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
   if (item.apprActive) {
     const cycle = item.apprAgeMs / APPRECIATE_PARTICLE_CYCLE_MS;
     ctx.fillStyle = APPRECIATE_PARTICLE_COLOR;
@@ -1729,7 +1760,13 @@ function renderMergeToolPartnerHighlight(ctx, state, subject, nowMs, fade = 1) {
     mergeHoverPartners = findFishMergePartners(state, subject);
     mergeHoverRefreshAtMs = nowMs + MERGE_HOVER_REFRESH_MS;
   }
-  if (mergeHoverPartners.length === 0) return;
+  drawMergePartnerHighlight(ctx, state, subject, mergeHoverPartners, nowMs, fade);
+}
+
+// The lines, glows and result bubbles from `subject` (anything with x/y) out to each of `partners` — shared by the
+// hover/drag highlight above and by the Eternal sphere, whose lines run from the sphere to every adult of the third kind.
+function drawMergePartnerHighlight(ctx, state, subject, partners, nowMs, fade) {
+  if (partners.length === 0) return;
   if (!mergeHoverGlowSprite) mergeHoverGlowSprite = bakeMergeHoverGlow();
   const pulse = 0.5 + 0.5 * Math.sin((nowMs / MERGE_HOVER_PULSE_PERIOD_MS) * Math.PI * 2);
   const lineAlpha = (0.12 + 0.3 * pulse) * fade;
@@ -1741,7 +1778,7 @@ function renderMergeToolPartnerHighlight(ctx, state, subject, nowMs, fade = 1) {
   ctx.strokeStyle = '#ffe27a';
   ctx.lineWidth = Math.max(1, 1.5 * state.camera.zoom);
   ctx.beginPath();
-  for (const { entity, resultSpeciesId } of mergeHoverPartners) {
+  for (const { entity, resultSpeciesId } of partners) {
     if (entity.dying) continue;
     const p = worldToScreen(entity.x, entity.y, state.camera);
     const dx = p.x - subjectPos.x;
@@ -1760,7 +1797,7 @@ function renderMergeToolPartnerHighlight(ctx, state, subject, nowMs, fade = 1) {
   }
   ctx.stroke();
   ctx.globalAlpha = glowAlpha;
-  for (const { entity } of mergeHoverPartners) {
+  for (const { entity } of partners) {
     if (entity.dying) continue;
     const p = worldToScreen(entity.x, entity.y, state.camera);
     const baseR = entity.type === 'fish'
@@ -1771,7 +1808,7 @@ function renderMergeToolPartnerHighlight(ctx, state, subject, nowMs, fade = 1) {
   }
   // The bubbles: a big version of the fish/building bubbles in the line's color,
   // dead center on each line, fading with it, holding the resulting fish.
-  for (const { entity, resultSpeciesId } of mergeHoverPartners) {
+  for (const { entity, resultSpeciesId } of partners) {
     if (entity.dying) continue;
     const p = worldToScreen(entity.x, entity.y, state.camera);
     const mx = (subjectPos.x + p.x) / 2;
@@ -1793,6 +1830,85 @@ function renderMergeToolPartnerHighlight(ctx, state, subject, nowMs, fade = 1) {
     ctx.globalAlpha = glowAlpha;
     const half = MERGE_BUBBLE_ICON_HALF * icon.drawScale;
     ctx.drawImage(icon.canvas, mx - half, my - half, half * 2, half * 2);
+  }
+  ctx.restore();
+}
+
+// ---- Eternal sphere (see Entities.js's startEternalSphere) ----
+// Per direct request: a glowing, pulsing sphere where the two fish fused, with the merge-hover lines fading in and
+// out between it and every adult fish of the third kind, plus a ring counting down the timeout. Cheap by
+// construction: it only runs while state.level.eternalSphere exists (a few seconds at a time), the glow and core are
+// two sprites baked once, the lines/glows/bubbles are the shared drawMergePartnerHighlight, and the rest is one arc
+// stroke and three beads.
+const ETERNAL_SPHERE_PULSE_PERIOD_MS = 900;
+const ETERNAL_SPHERE_LINE_FADE_PERIOD_MS = 1600;
+const ETERNAL_SPHERE_SPAWN_MS = 280;
+let eternalGlowSprite = null;
+let eternalCoreSprite = null;
+function bakeEternalSphereSprites() {
+  const glow = document.createElement('canvas');
+  glow.width = glow.height = 128;
+  const g = glow.getContext('2d');
+  const gg = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+  gg.addColorStop(0, 'rgba(255, 255, 255, 0.9)');
+  gg.addColorStop(0.25, 'rgba(236, 200, 255, 0.55)');
+  gg.addColorStop(0.6, 'rgba(180, 120, 255, 0.2)');
+  gg.addColorStop(1, 'rgba(160, 100, 255, 0)');
+  g.fillStyle = gg;
+  g.fillRect(0, 0, 128, 128);
+  const core = document.createElement('canvas');
+  core.width = core.height = 64;
+  const c = core.getContext('2d');
+  const cg = c.createRadialGradient(24, 22, 2, 32, 32, 30);
+  cg.addColorStop(0, '#ffffff');
+  cg.addColorStop(0.45, '#e9d4ff');
+  cg.addColorStop(1, '#a56bff');
+  c.fillStyle = cg;
+  c.beginPath();
+  c.arc(32, 32, 30, 0, Math.PI * 2);
+  c.fill();
+  eternalGlowSprite = glow;
+  eternalCoreSprite = core;
+}
+const ETERNAL_BEAD_COLORS = [FISH_COLORS.guppy, FISH_COLORS.dartfin, FISH_COLORS.blimpfish];
+function renderEternalSphere(ctx, state, sphere, nowMs) {
+  if (!eternalGlowSprite) bakeEternalSphereSprites();
+  const pos = worldToScreen(sphere.x, sphere.y, state.camera);
+  const zoom = state.camera.zoom;
+  if (pos.x < -80 || pos.x > canvas.width + 80 || pos.y < -80 || pos.y > canvas.height + 80) return;
+  // The lines run out to every living adult of the third kind (a handful of fish, only while a sphere exists).
+  const partners = [];
+  for (const e of state.level.entities) {
+    if (e.type === 'fish' && !e.dying && e.speciesId === sphere.thirdSpeciesId && e.stage === SPECIES[e.speciesId].growthStages.length - 1) partners.push({ entity: e, resultSpeciesId: 'eternal_fish' });
+  }
+  const lineFade = 0.15 + 0.85 * (0.5 + 0.5 * Math.sin((nowMs / ETERNAL_SPHERE_LINE_FADE_PERIOD_MS) * Math.PI * 2));
+  drawMergePartnerHighlight(ctx, state, sphere, partners, nowMs, lineFade);
+  const age = state.level.elapsed - sphere.startedAtMs;
+  const spawn = Math.min(1, age / ETERNAL_SPHERE_SPAWN_MS);
+  const grow = 1 - (1 - spawn) * (1 - spawn); // ease-out, so the sphere pops into existence
+  const pulse = 0.5 + 0.5 * Math.sin((nowMs / ETERNAL_SPHERE_PULSE_PERIOD_MS) * Math.PI * 2);
+  const r = ETERNAL_SPHERE_RADIUS_PX * zoom * grow * (0.92 + 0.12 * pulse);
+  const glowR = r * (2.6 + 0.6 * pulse);
+  ctx.save();
+  ctx.globalAlpha = 0.7 + 0.3 * pulse;
+  ctx.drawImage(eternalGlowSprite, pos.x - glowR, pos.y - glowR, glowR * 2, glowR * 2);
+  ctx.globalAlpha = 1;
+  ctx.drawImage(eternalCoreSprite, pos.x - r, pos.y - r, r * 2, r * 2);
+  // Timeout ring: shrinks clockwise from full as the 6 seconds run out.
+  const left = Math.max(0, 1 - age / ETERNAL_SPHERE_TIMEOUT_MS);
+  ctx.strokeStyle = draggedFishId != null && state.level.entities.some((e) => e.id === draggedFishId && canFinishEternalSphere(state, e)) ? '#4dff88' : 'rgba(240, 215, 255, 0.9)';
+  ctx.lineWidth = Math.max(1.5, 2.5 * zoom);
+  ctx.beginPath();
+  ctx.arc(pos.x, pos.y, r * 1.55, -Math.PI / 2, -Math.PI / 2 + left * Math.PI * 2);
+  ctx.stroke();
+  // One bead per parent, orbiting.
+  const orbit = (nowMs / 1400) * Math.PI * 2;
+  for (let i = 0; i < 3; i++) {
+    const a = orbit + (i * Math.PI * 2) / 3;
+    ctx.fillStyle = ETERNAL_BEAD_COLORS[i];
+    ctx.beginPath();
+    ctx.arc(pos.x + Math.cos(a) * r * 1.2, pos.y + Math.sin(a) * r * 1.2, Math.max(1.5, 3 * zoom * grow), 0, Math.PI * 2);
+    ctx.fill();
   }
   ctx.restore();
 }
@@ -1854,6 +1970,12 @@ input.rightMouseDownHandlers.push((sx, sy) => {
 // dropped and resumes swimming.
 function resolveFishDrop(dragged, world) {
   if (hostileAliensActive(state)) return;
+  // Eternal Fish: the third kind of economy fish dropped on the glowing sphere finishes it.
+  const sphere = state.level.eternalSphere;
+  if (sphere && canFinishEternalSphere(state, dragged) && (eternalSphereContainsPoint(sphere, world.x, world.y) || eternalSphereContainsPoint(sphere, dragged.x, dragged.y))) {
+    finishEternalSphere(state, dragged);
+    return;
+  }
   const target = findMergeSubjectAt(state, world.x, world.y, dragged.id);
   if (!target) return;
   if (dragged.type === 'friendly_alien' || target.type === 'friendly_alien') {
@@ -1874,6 +1996,8 @@ function resolveFishDrop(dragged, world) {
     advanceTutorialFlow(state, 'mergefish', 'drag');
   } else if (canSpliceFish(state, dragged, target)) {
     spliceFish(state, dragged, target);
+  } else if (canStartEternalSphere(state, dragged, target)) {
+    startEternalSphere(state, dragged, target); // two different adult economy fish fuse into the sphere; the third kind finishes it
   } else if (canSpliceFish(state, target, dragged)) {
     // The reverse ordering — the player grabbed the TARGET half of the
     // pair (an ordinary economy/hybrid fish) and dropped it onto the
@@ -6225,6 +6349,7 @@ function render() {
   }
   if (mergeHighlightSubject) renderMergeToolPartnerHighlight(ctx, state, mergeHighlightSubject, performance.now(), mergeHighlightFade);
   else mergeHoverSubjectId = null;
+  if (state.level.eternalSphere) renderEternalSphere(ctx, state, state.level.eternalSphere, performance.now());
   beginFishSpriteFrame(); // resets the per-frame sprite-bake budget — see FishRenderer.js's drawFishCached
   for (const fish of state.level.entities) {
     if (fish.type !== 'fish') continue; // state.level.entities also holds Alien Invasion aliens now — rendered separately above, BEFORE this loop, so fish (and their health bars) always draw on top and never disappear behind an alien

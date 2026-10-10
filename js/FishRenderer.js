@@ -1080,6 +1080,28 @@ function drawHybridBody(ctx, x, y, size, facing, tailPhase, stage, color, eyeDir
   };
 }
 
+// The Eternal Fish (Dartfin x Guppy x Blimpfish), per direct request: an ordinary oval fish in a pearly lavender with a
+// soft glowing halo behind it and one bead in each parent's color along its flank. Everything here is part of the
+// body, so it is baked into the fish sprite cache like any other body — the halo and beads cost nothing per frame.
+function drawEternalBody(ctx, x, y, size, facing, tailPhase, stage, color, eyeDirection) {
+  const halo = ctx.createRadialGradient(x, y, size * 0.2, x, y, size * 1.05);
+  halo.addColorStop(0, 'rgba(235, 215, 255, 0.55)');
+  halo.addColorStop(1, 'rgba(235, 215, 255, 0)');
+  ctx.fillStyle = halo;
+  ctx.beginPath();
+  ctx.arc(x, y, size * 1.05, 0, Math.PI * 2);
+  ctx.fill();
+  drawStandardBody(ctx, x, y, size, facing, tailPhase, 2, true, color, eyeDirection, 'normal'); // stage 2 = the adult tail fin (it has a single stage, index 0, which would draw none)
+  const beads = [FISH_COLORS.guppy, FISH_COLORS.dartfin, FISH_COLORS.blimpfish];
+  for (let i = 0; i < 3; i++) {
+    ctx.fillStyle = beads[i];
+    ctx.beginPath();
+    ctx.arc(x - facing * size * (0.24 - i * 0.2), y + size * 0.09, size * 0.075, 0, Math.PI * 2);
+    ctx.fill();
+    strokeRim(ctx, beads[i], size);
+  }
+}
+
 // The soft shadow a fish casts, drawn by main.js's separate shadow pass (NOT
 // inside drawFish) so it can be masked to appear only over seafloor
 // decorations — per direct request. Same offset-ellipse shadow the bodies used
@@ -1103,7 +1125,7 @@ export function drawFishShadow(ctx, x, y, speciesId, stage, starTier = 1) {
     rx = size * 0.68;
     ry = size * 0.3;
   } else {
-    const shapeId = isFullyGrown && def.parents
+    const shapeId = def.eternal ? 'guppy' : isFullyGrown && def.parents
       ? def.parents.find((p) => p === 'dartfin' || p === 'blimpfish')
       : (def.parents ? def.parents[1] : speciesId);
     const bodyShape = shapeId === 'dartfin' ? 'slim' : shapeId === 'blimpfish' ? 'round' : 'normal';
@@ -1210,6 +1232,11 @@ function drawFishBody(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDirecti
     headX = x + facing * size * 0.15;
     headY = y - size * 0.42;
     headSize = size * 0.6;
+  } else if (def.eternal) {
+    drawEternalBody(ctx, x, y, size, facing, tailPhase, stage, color, eyeDirection);
+    headX = x + facing * size * BODY_SHAPE_RATIOS.normal.bodyW * 0.15;
+    headY = y - size * BODY_SHAPE_RATIOS.normal.bodyH * 0.85;
+    headSize = size * BODY_SHAPE_RATIOS.normal.bodyW * 0.85;
   } else if (isFullyGrown && def.parents) {
     // A Gene-Splicing hybrid's Adult body is composed from its own two
     // parents' signature traits (eel form / sucker bumps / octopus

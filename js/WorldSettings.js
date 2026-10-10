@@ -141,7 +141,7 @@ export const WORLD_RULES = [
   // ---- defence & buildings ----
   { id: 'turretDamage', group: 'base', label: 'Turret damage', desc: 'Damage of every turret shot.', kind: 'mult', def: 1, ...MULT, apply: (v) => mul(T.turretDamage, v) },
   { id: 'turretRate', group: 'base', label: 'Turret fire rate', desc: 'How often turrets shoot.', kind: 'mult', def: 1, min: 0.25, max: 5, step: 0.05, apply: (v) => mul(T.turretRate, v) },
-  { id: 'buildingSpeed', group: 'base', label: 'Building speed', desc: 'How fast Collectors, Refineries and Manufacturers work.', kind: 'mult', def: 1, min: 0.2, max: 5, step: 0.05, apply: (v) => div(T.buildingTimes, v, true) },
+  { id: 'buildingSpeed', group: 'base', label: 'Building speed', desc: 'How fast Collectors, Refineries and Factories work.', kind: 'mult', def: 1, min: 0.2, max: 5, step: 0.05, apply: (v) => div(T.buildingTimes, v, true) },
   { id: 'powerUse', group: 'base', label: 'Electricity used', desc: 'Power drawn by buildings and turret shots. 0 = everything is free to run.', kind: 'mult', def: 1, min: 0, max: 5, step: 0.05, apply: (v) => mul(T.powerUse, v) },
   { id: 'powerOutput', group: 'base', label: 'Electricity made', desc: 'Power from Power Plants and Electric Eels.', kind: 'mult', def: 1, min: 0.1, max: 10, step: 0.05, apply: (v) => { mul(T.powerOutput, v); div(T.speciesPixelsPerMW, v); } },
   // ---- progression ----

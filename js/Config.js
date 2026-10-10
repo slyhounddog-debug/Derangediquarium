@@ -1402,6 +1402,7 @@ export const FISH_COLORS = {
   // (#ff9b8a).
   eel_blimp: '#96d771',
   zap_sucker: '#ffa76e',
+  eternal_fish: '#e4d4ff', // pearly lavender-white — FishRenderer.js's drawEternalBody adds the three parents' colors on top
 };
 
 // ---- Species table (§4) ----
@@ -1414,6 +1415,16 @@ export const FISH_COLORS = {
 // future design pass (see CLAUDE.md "Species Roster & Progression").
 // A hybrid's `behavior` array is the union of its two parents' tags — see the
 // `parents` field below.
+// ---- Eternal Fish (Dartfin x Guppy x Blimpfish) ----
+// Per direct request: made by dragging one adult economy fish onto a different adult economy fish (they fuse into
+// a glowing sphere), then dragging an adult of the third kind onto the sphere within the timeout. It never gets
+// hungry or poops and can only die to aliens. Its coin is worth what the three parents' coins would have been over
+// the same time: the sum of their adult $/min, paid as one coin every ETERNAL_COIN_INTERVAL_MS (Entities.js's
+// computeEternalCoinValue; the number is frozen onto the fish as dropValueOverride when it is made).
+export const ETERNAL_COIN_INTERVAL_MS = 30000;
+export const ETERNAL_SPHERE_TIMEOUT_MS = 6000; // the sphere splits back into its two fish if no third fish is dropped on it in this long
+export const ETERNAL_SPHERE_RADIUS_PX = 24; // drawn size of the sphere (world px, before camera zoom)
+export const ETERNAL_SPHERE_DROP_RADIUS_PX = 48; // how close to the sphere's centre a dropped fish must be to count (a bit generous: the sphere is small)
 export const SPECIES = {
   // ---- Tier 1 — Feeding (Phase 1, unlocked from the start) ----
   guppy: {
@@ -1689,6 +1700,20 @@ export const SPECIES = {
     ],
     unlockedByDefault: false,
   },
+  // Per direct request. `parents` (all three economy fish) is only here so the shop's `!s.parents` filter hides it
+  // like every other hybrid — the real merge is Entities.js's eternal-sphere flow (startEternalSphere/
+  // finishEternalSphere), not the two-parent getHybridSpeciesId pipeline. hungerRate 0 plus Entities.js's
+  // def.eternal checks (no poop, no starvation) make it skip hunger; `dropValue` is 0 on purpose because the real
+  // coin value is frozen onto each fish as dropValueOverride (computeEternalCoinValue). `lifespan` is unread, like
+  // every other species' (dead code).
+  eternal_fish: {
+    id: 'eternal_fish', name: 'Eternal Fish', tier: 5, unlockPhase: 4, cost: 200, eternal: true,
+    description: 'Dartfin × Guppy × Blimpfish — never gets hungry and never produces Waste; only aliens can kill it. Drops one big coin every 30 seconds, worth everything the three fish it was made from would have earned in that time. Drag one adult economy fish onto a different one to fuse them into a glowing sphere, then drag an adult of the third kind onto the sphere within 6 seconds. You can have one Eternal Fish for each kind of hybrid fish currently in the tank.',
+    behavior: ['FEEDER'], dropType: 'coin', parents: ['dartfin', 'guppy', 'blimpfish'],
+    swimSpeed: 30, lifespan: 300000, hungerRate: 0,
+    growthStages: [{ feedsRequired: 0, scale: 0.95, dropInterval: ETERNAL_COIN_INTERVAL_MS, dropValue: 0 }],
+    unlockedByDefault: false,
+  },
 };
 
 // Per direct request ("for all fish types, make the baby fish stage size 20%
@@ -1885,7 +1910,7 @@ export const BUILDING_TYPES = {
     color: '#ffd76f', unlockedByDefault: false,
   },
   [TILE_MANUFACTURER]: {
-    id: TILE_MANUFACTURER, name: 'Manufacturer', icon: '🏭', cost: 125, // cut from 300 per direct request, to compensate for its own tier-2 (6%, base cost $101-200) compounding cost curve
+    id: TILE_MANUFACTURER, name: 'Factory', icon: '🏭', cost: 125, // cut from 300 per direct request, to compensate for its own tier-2 (6%, base cost $101-200) compounding cost curve
     description: 'Combines items into new ones using a recipe.',
     statNotes: ['Click to pick a recipe once placed.'],
     color: '#e690e0', unlockedByDefault: false,
@@ -2030,9 +2055,9 @@ export const PROCESSOR_STATS = {
 // Damage retuned per direct request: Electric Waste Turret 4 on Waste / 6 on Biomass (4 x BIOMASS_TURRET_DAMAGE_MULTIPLIER),
 // Advanced Turret 7 on its free base shot / 10 on Biomass (ADVANCED_TURRET_BIOMASS_DAMAGE).
 export const TURRET_STATS = {
-  [TILE_TURRET_WASTE]: { shotsPerSec: 1.5, damage: 2, powerCostPerShot: 0 },
-  [TILE_TURRET_ELECTRIC]: { shotsPerSec: 1.75, damage: 4, powerCostPerShot: 10 },
-  [TILE_TURRET_ADVANCED]: { shotsPerSec: 2.5, damage: 7, powerCostPerShot: 40 },
+  [TILE_TURRET_WASTE]: { shotsPerSec: 1.1, damage: 2, powerCostPerShot: 0 },
+  [TILE_TURRET_ELECTRIC]: { shotsPerSec: 1.4, damage: 4, powerCostPerShot: 10 },
+  [TILE_TURRET_ADVANCED]: { shotsPerSec: 1.7, damage: 6, powerCostPerShot: 40 },
 };
 // powerCostPerSec is always shots/sec x power per shot, so it is derived here instead of being a second literal
 // that would have to be kept in sync by hand (the tuning tool in tools/sfx edits shotsPerSec/powerCostPerShot).
@@ -2073,7 +2098,7 @@ export const WASTE_TURRET_MAX_WASTE = 5; // -> 50 max stored shots from Waste al
 // pools share the same WASTE_TURRET_MAX_AMMO combined-shots cap so loading
 // stays a meaningful choice rather than just stacking two full reserves.
 export const BIOMASS_TURRET_SHOTS_PER_AMMO = 15;
-export const BIOMASS_TURRET_DAMAGE_MULTIPLIER = 1.5;
+export const BIOMASS_TURRET_DAMAGE_MULTIPLIER = 1.25;
 // Per direct report ("make sure the turrets aren't capped at 50 shots too,
 // in case they use biomass, it should be able to hold up to 75 shots") — a
 // real bug fix, not just a bump: this used to be WASTE_TURRET_SHOTS_PER_WASTE
@@ -2286,6 +2311,8 @@ export const MANUFACTURER_RECIPES = {
     id: 'bio_sludge', name: 'Bio-Sludge', icon: '🧫', color: ALIEN_DNA_COLOR,
     inputs: ['food', 'waste'], output: 'alien_dna', labNodeId: null,
     description: 'Food + Waste -> Bio-Sludge',
+    // Per direct request, `effect` is what the recipe's OUTPUT does once it exists — shown in the shop's recipe info modal (UI.js's openRecipeInfoModal). Numbers live in the modal's stat chips, not here, so a retune can't leave this text stale (the three below that interpolate a constant re-read it on load).
+    effect: 'A raw, acid-green feedstock that does nothing on its own. A Refinery turns it into Biomass (slower than refining Waste into Food), which is how you unlock everything else the Factory makes. A Bio Fish can brew it too.',
   },
   // Object key order drives the recipe pop-up's own display order
   // (MANUFACTURER_RECIPE_LIST = Object.values(...) below) — Blue Science
@@ -2295,16 +2322,19 @@ export const MANUFACTURER_RECIPES = {
     id: 'bio_combustor', name: 'Blue Science', icon: '🔥', color: '#ff9f5a',
     inputs: ['waste', 'biomass'], output: 'science', labNodeId: 'recipe_bio_combustor',
     description: 'Waste + Biomass -> Blue Science',
+    effect: 'Science Flasks without an Octopus. Blue Science is what most Science Lab upgrades are paid in; a Collector banks it. It is also an ingredient for Alien Eggs and Green Science, and burns as Power Plant fuel.',
   },
   bio_feeder: {
     id: 'bio_feeder', name: 'Mutagen Paste', icon: '🩷', color: '#e690e0',
     inputs: ['food', 'biomass'], output: 'mutagen_paste', labNodeId: 'recipe_bio_feeder',
     description: 'Food + Biomass -> Mutagen Paste',
+    effect: `A super-Food that fish prefer over plain Food. A fish that isn't an Adult yet grows up instantly when it eats one; an Adult that eats one earns ${MUTAGEN_PASTE_COIN_MULTIPLIER}x coins, with a glow, until it gets hungry again. A Battery fish fed Mutagen doubles its output.`,
   },
   alien_egg: {
     id: 'alien_egg', name: 'Alien Egg', icon: '🥚', color: '#c9a86b',
     inputs: ['science', 'food'], output: 'alien_egg', labNodeId: 'recipe_alien_egg',
     description: 'Blue Science + Food -> Alien Egg',
+    effect: `Hatches after ${ALIEN_EGG_HATCH_MS / 1000} seconds into a harmless friendly alien that never needs feeding and drops a piece of Waste every ${FRIENDLY_ALIEN_WASTE_INTERVAL_MS / 1000}s. Drag a grown Science Octopus onto it to splice a Bio Fish (once that fish is unlocked).`,
   },
   // Real bug fix, found during a balance/logic audit pass: Green Science had
   // NO way to be earned in actual gameplay at all — an earlier batch
@@ -2322,6 +2352,7 @@ export const MANUFACTURER_RECIPES = {
     id: 'green_science', name: 'Green Science', icon: '🟢', color: SCIENCE_GREEN_COLOR,
     inputs: ['science', 'biomass'], output: 'science_green', labNodeId: 'green_science_tech',
     description: 'Blue Science + Biomass -> Green Science',
+    effect: 'Premium Science Flasks. The Science Lab\'s late-game upgrades cost Green Science on top of Blue, and a Collector banks it. Needs the Green Science tech first.',
   },
 };
 export const MANUFACTURER_RECIPE_LIST = Object.values(MANUFACTURER_RECIPES);
@@ -2361,16 +2392,19 @@ export const POWER_PLANT_RECIPES = {
     id: 'food', name: 'Food', icon: '🍖', color: '#ffb238',
     inputs: ['food'], powerOutputMw: 20, durationMs: 15000, labNodeId: null,
     description: 'Food -> 20mw for 15s',
+    effect: 'Burns one Food at a time for electricity, so a Feeder Fish or a Fan line of Food can keep the grid topped up. The cheapest and weakest fuel, and available as soon as the Power Plant is.',
   },
   biomass: {
     id: 'biomass', name: 'Biomass', icon: '🟩', color: BIOMASS_COLOR,
     inputs: ['biomass'], powerOutputMw: 40, durationMs: 20000, labNodeId: 'power_plant_biomass',
     description: 'Biomass -> 40mw for 20s',
+    effect: 'Burns one Biomass at a time. More electricity per item than Food, and for longer, but Biomass is also Turret ammo and a Factory ingredient, so burning it is a trade-off.',
   },
   science: {
     id: 'science', name: 'Blue Science', icon: '🔬', color: '#5fb8ff',
     inputs: ['science'], powerOutputMw: 100, durationMs: 30000, labNodeId: 'power_plant_science',
     description: 'Blue Science -> 100mw for 30s',
+    effect: 'Burns one Blue Science at a time. The strongest fuel by far, but every flask burned is a flask you can no longer spend in the Science Lab.',
   },
 };
 export const POWER_PLANT_RECIPE_LIST = Object.values(POWER_PLANT_RECIPES);
@@ -2597,7 +2631,7 @@ export const SCIENCE_LAB_UPGRADES = {
   // separately requires Suckerfish, since reaching Bubble Cap 20 already
   // requires it transitively.
   manufacturer: {
-    id: 'manufacturer', name: 'Manufacturer', icon: '🏭', scienceCost: 70, goldCost: 5000,
+    id: 'manufacturer', name: 'Factory', icon: '🏭', scienceCost: 70, goldCost: 5000,
     requires: ['science_cap_2'], grants: { buildings: [TILE_MANUFACTURER] },
   },
   power_plant: {
@@ -2622,7 +2656,7 @@ export const SCIENCE_LAB_UPGRADES = {
   // chain was pure friction.
   recipe_bio_feeder: {
     id: 'recipe_bio_feeder', name: 'Mutagen Paste Recipe', icon: '🩷', scienceCost: 90, goldCost: 7000,
-    description: 'Unlocks the Manufacturer\'s Food+Biomass recipe, producing Mutagen Paste. Feeding it to a non-Adult fish instantly grows it to Adult; feeding it to an already-Adult fish instead gives a temporary 2x coin-drop buff with a glowing visual.',
+    description: 'Unlocks the Factory\'s Food+Biomass recipe, producing Mutagen Paste. Feeding it to a non-Adult fish instantly grows it to Adult; feeding it to an already-Adult fish instead gives a temporary 2x coin-drop buff with a glowing visual.',
     requires: ['manufacturer'], grants: {},
   },
   // Per direct request, now requires Bubble Cap 30 AND the Alien Egg recipe
@@ -2752,6 +2786,12 @@ export const SCIENCE_LAB_UPGRADES = {
     id: 'hybrid_xeno_octopus', name: 'Bio Fish', icon: '👽', scienceCost: 90, goldCost: 12000,
     requires: ['recipe_alien_egg'], grants: { species: ['xeno_octopus'] },
   },
+  // Per direct request: costs 1.5x the most expensive hybrid (Bio Fish: 90 Science / $12000), gated only on
+  // Science Cap 60, and Science Cap 80 in turn requires buying it (see science_cap_4 below).
+  hybrid_eternal_fish: {
+    id: 'hybrid_eternal_fish', name: 'Eternal Fish', icon: '♾️', scienceCost: 135, goldCost: 18000,
+    requires: ['science_cap_3'], grants: { species: ['eternal_fish'] },
+  },
 
   // ---- Bubble (Science) Capacity chain ----
   // Per direct request ("change the max science upgrades so each one is a
@@ -2802,7 +2842,7 @@ export const SCIENCE_LAB_UPGRADES = {
     id: 'science_cap_4', name: 'Science Cap 80', icon: '🫧',
     description: 'Raises the Science Cap from 60 to 80 — how many can exist unbanked in the tank at once before an Octopus\'s brew is blocked.',
     scienceCost: SCIENCE_CAP_UPGRADE_SCIENCE_COSTS[3], goldCost: SCIENCE_CAP_UPGRADE_GOLD_COSTS[3],
-    requires: ['science_cap_3'], grants: { scienceCapLevel: 1 },
+    requires: ['hybrid_eternal_fish'], grants: { scienceCapLevel: 1 }, // per direct request: Science Cap 80 needs the Eternal Fish (which itself needs Science Cap 60, so cap 60 is still required transitively)
   },
   science_cap_5: {
     id: 'science_cap_5', name: 'Science Cap 100', icon: '🫧',
@@ -3268,11 +3308,11 @@ export const POWER_WARNING_PARTIAL_MESSAGE = "Your grid's running short — buil
 // (alien_dna) items are sitting in the tank at once, but only for a player
 // who doesn't have a Manufacturer yet (the tip's whole point is nudging them
 // toward getting one, so it'd be a non sequitur once they already have it).
-export const BIO_SLUDGE_PILE_MESSAGE = "That's a lot of Bio-Sludge piling up out there. A Manufacturer could actually put it to use.";
+export const BIO_SLUDGE_PILE_MESSAGE = "That's a lot of Bio-Sludge piling up out there. A Factory could actually put it to use.";
 export const BIO_SLUDGE_PILE_THRESHOLD = 5;
 // One-time tip, per direct request — fires the first time a Biomass item is
 // ever created (the Refinery's own Alien-DNA/Bio-Sludge -> Biomass recipe).
-export const FIRST_BIOMASS_MESSAGE = "Ooh, fresh Biomass. That'd go nicely with some Blue Science from the Manufacturer.";
+export const FIRST_BIOMASS_MESSAGE = "Ooh, fresh Biomass. That'd go nicely with some Blue Science from the Factory.";
 
 // ---- Autosave (Save.js) ----
 // Per direct request — a background save every 5 minutes of real elapsed sim

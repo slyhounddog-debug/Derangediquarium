@@ -17,7 +17,7 @@ function h(tag, attrs, ...kids) {
 }
 
 document.head.append(h('style', { html: `
-  #commitBtn { background:#245c3d; border-color:#33895a; font-weight:600; display:flex; gap:8px; align-items:center; margin-left:auto; }
+  #commitBtn { background:#245c3d; border-color:#33895a; font-weight:600; display:flex; gap:8px; align-items:center; }
   #commitBtn:hover { background:#2c7549; }
   #commitBtn .badge { background:var(--acc); color:#1b1204; border-radius:99px; padding:0 8px; font-size:12px; min-width:20px; text-align:center; }
   #commitBtn .badge.zero { background:#35516a; color:var(--mute); }
@@ -37,6 +37,12 @@ document.head.append(h('style', { html: `
   #commitModal .result { margin-top:10px; padding:9px 12px; border-radius:8px; font-size:13px; white-space:pre-wrap; }
   #commitModal .result.ok { background:#1f4a35; color:#b9f0d0; }
   #commitModal .result.bad { background:#4a2323; color:#ffc9c9; }
+  #revertBtn { background:#5a2d2d; border-color:#8a4747; font-weight:600; }
+  #revertBtn:hover { background:#733a3a; }
+  #commitModal button.revert { background:#8a3030; border-color:#b34a4a; }
+  #commitModal button.revert:hover { background:#a43a3a; }
+  #commitModal button.revert.armed { background:#c22; border-color:#f66; }
+  #commitModal .files .grp.warn { color:var(--bad); }
 ` }));
 
 const btn = $('#commitBtn');
@@ -60,7 +66,8 @@ window.addEventListener('focus', refreshCounts);
 refreshCounts();
 
 let overlay = null;
-function closeModal() { if (overlay) { overlay.remove(); overlay = null; } }
+let reloadOnClose = false; // set by a successful revert: the Variables/Audio tabs are showing values that no longer exist
+function closeModal() { if (overlay) { overlay.remove(); overlay = null; if (reloadOnClose) location.reload(); } }
 
 btn.addEventListener('click', async () => {
   if (overlay) return;
@@ -131,6 +138,93 @@ function openModal(s) {
       result.className = 'result bad'; result.textContent = 'Failed: ' + e.message;
     }
     cancel.disabled = false; cancel.textContent = 'Close';
+  });
+}
+// ---- Revert changes (button next to Commit) ----
+// Same dialog shape as the commit one: tick which uncommitted files to throw away (or all of them). Modified and
+// deleted files go back to the last commit; brand-new files have nothing to go back to, so they are DELETED, which
+// is why they sit in their own group, start unticked, and the red button needs a second click to confirm.
+const revertBtn = $('#revertBtn');
+revertBtn.addEventListener('click', async () => {
+  if (overlay) return;
+  revertBtn.disabled = true;
+  let s;
+  try {
+    const r = await fetch('/api/git/revert-list');
+    s = await r.json();
+    if (!r.ok) throw new Error(s.error);
+  } catch (e) { alert('Could not read the git status: ' + e.message); revertBtn.disabled = false; return; }
+  revertBtn.disabled = false;
+  openRevertModal(s);
+});
+
+function openRevertModal(s) {
+  const noFiles = s.files.length === 0;
+  const checks = [];
+  const filesBox = h('div', { class: 'files' });
+  const groups = [
+    ['variables', 'Values changed in the Variables tab (Config.js / Sound.js)'],
+    ['audio', 'Sounds changed in the Audio tab (audio/sfx)'],
+    ['other', 'Other changed files in the project'],
+  ];
+  const sections = [];
+  for (const [key, title] of groups) sections.push([title, s.files.filter((f) => f.group === key && f.status !== 'new'), true, false]);
+  sections.push(['New files — reverting these DELETES them (there is no earlier version)', s.files.filter((f) => f.status === 'new'), false, true]);
+  for (const [title, list, ticked, warn] of sections) {
+    if (!list.length) continue;
+    filesBox.append(h('div', { class: 'grp' + (warn ? ' warn' : '') }, title));
+    for (const f of list) {
+      const cb = h('input', { type: 'checkbox', checked: ticked });
+      checks.push({ cb, path: f.path });
+      filesBox.append(h('label', {}, cb, h('span', { class: 'st' }, f.status), h('span', {}, f.path), h('span', { class: 'dif' }, f.adds != null ? `+${f.adds} −${f.dels}` : '')));
+    }
+  }
+  filesBox.style.maxHeight = '340px';
+  const result = h('div');
+  const go = h('button', { class: 'revert' }, 'Revert selected');
+  const cancel = h('button', {}, 'Cancel');
+  let armed = null;
+  overlay = h('div', { id: 'commitOverlay', onmousedown: (e) => { if (e.target === overlay) closeModal(); } },
+    h('div', { id: 'commitModal' },
+      h('h2', {}, 'Revert changes'),
+      h('div', { class: 'sub' }, `Branch ${s.branch}. Ticked files are put back exactly as they were in the last commit and your edits to them are lost. Nothing happens until you press the red button twice.`),
+      noFiles ? h('div', { class: 'result ok' }, 'Nothing to revert — no files have changed since the last commit.') : [
+        h('label', { class: 'lbl' }, `Files (${s.files.length}) — untick anything you want to keep`), filesBox,
+        h('div', { style: 'margin-top:6px;display:flex;gap:10px' },
+          h('button', { onclick: () => checks.forEach((c) => (c.cb.checked = true)) }, 'Tick all'),
+          h('button', { onclick: () => checks.forEach((c) => (c.cb.checked = false)) }, 'Untick all'))],
+      result,
+      h('div', { class: 'actions' }, cancel, noFiles ? null : go)));
+  document.body.append(overlay);
+  cancel.addEventListener('click', closeModal);
+  const disarm = () => { clearTimeout(armed); armed = null; go.classList.remove('armed'); go.textContent = 'Revert selected'; };
+  go.addEventListener('click', async () => {
+    const chosen = checks.filter((c) => c.cb.checked).map((c) => c.path);
+    if (!chosen.length) { result.className = 'result bad'; result.textContent = 'Tick at least one file.'; return; }
+    if (armed === null) {
+      const del = s.files.filter((f) => f.status === 'new' && chosen.includes(f.path)).length;
+      go.classList.add('armed');
+      go.textContent = `Really revert ${chosen.length} file${chosen.length === 1 ? '' : 's'}${del ? ` (deletes ${del} new)` : ''}? Click again`;
+      armed = setTimeout(disarm, 4000);
+      return;
+    }
+    disarm();
+    go.disabled = cancel.disabled = true;
+    result.className = 'result'; result.textContent = 'Reverting…';
+    try {
+      const r = await fetch('/api/git/revert', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ files: chosen }) });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error);
+      result.className = 'result ok';
+      result.textContent = `Restored ${j.restored} file${j.restored === 1 ? '' : 's'} to the last commit${j.deleted ? ` and deleted ${j.deleted} new file${j.deleted === 1 ? '' : 's'}` : ''}. The page reloads when you close this.`;
+      reloadOnClose = true;
+      window.dispatchEvent(new Event('devtools:changed'));
+      cancel.textContent = 'Close & reload';
+    } catch (e) {
+      result.className = 'result bad'; result.textContent = 'Failed: ' + e.message;
+      go.disabled = false;
+    }
+    cancel.disabled = false;
   });
 }
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });

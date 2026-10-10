@@ -85,6 +85,9 @@ import {
   ITEM_MASS_BY_TYPE,
   FISH_BASE_SIZE,
   ECONOMY_SPECIES_IDS,
+  ETERNAL_COIN_INTERVAL_MS,
+  ETERNAL_SPHERE_TIMEOUT_MS,
+  ETERNAL_SPHERE_DROP_RADIUS_PX,
   DYNAMIC_PRICED_SPECIES_IDS,
   ECONOMY_FISH_COST_GROWTH_RATE,
   FISH_SCALING_COST_GROWTH_RATE,
@@ -234,6 +237,7 @@ export function reconcileIdsAfterLoad(level) {
   for (const key in level) if (Array.isArray(level[key])) lists.push(level[key]);
   let maxId = 0;
   for (const list of lists) for (const obj of list) if (obj && typeof obj.id === 'number' && obj.id > maxId) maxId = obj.id;
+  if (level.eternalSphere) for (const f of level.eternalSphere.fish) if (f.id > maxId) maxId = f.id; // the two fish fused into an Eternal sphere live outside entities until it resolves
   if (maxId >= _nextId) _nextId = maxId + 1;
   for (const list of lists) {
     const seen = new Set();
@@ -471,7 +475,7 @@ export function computeTheoreticalWastePerMinute(state) {
   for (const fish of state.level.entities) {
     if (fish.type !== 'fish' || fish.dying) continue;
     const def = SPECIES[fish.speciesId];
-    if (def.behavior.includes('SCAVENGER')) continue;
+    if (def.behavior.includes('SCAVENGER') || def.eternal) continue;
     const interval = fishPoopIntervalMs(state, def);
     total += 60000 / interval;
   }
@@ -547,13 +551,13 @@ export function computeFishInfoModalStats(state, fish) {
   let wastePerMin = null, wasteEatenPerMin = null;
   if (isScavenger) {
     wasteEatenPerMin = 60000 / stageDef.dropInterval;
-  } else {
+  } else if (!def.eternal) {
     const interval = fishPoopIntervalMs(state, def);
     wastePerMin = 60000 / interval;
   }
 
   let foodPerMin = null;
-  if (!isScavenger) {
+  if (!isScavenger && !def.eternal) {
     const relief = FOOD_HUNGER_RELIEF_BY_LEVEL[state.level.upgrades.foodQuality];
     const alienHungerMultiplier = (fish.speciesId === 'suckerfish' && fish.alienNearby) ? 0.5 : 1;
     const hungerRate = def.hungerRate * Math.pow(FISH_STAR_TIER_HUNGER_MULTIPLIER, (fish.starTier || 1) - 1) * alienHungerMultiplier;
@@ -732,7 +736,7 @@ function stepRipeningCoins(state, dtMs) {
     ripeningLevel = state.level;
     ripeningCoins.length = 0;
     for (const item of state.level.items) {
-      if (item.type === 'coin' && (item.apprActive || item.apprPulseMs > 0)) ripeningCoins.push(item);
+      if (item.type === 'coin' && (item.apprActive || item.apprPulseMs > 0 || item.eternalFx)) ripeningCoins.push(item);
     }
   }
   if (ripeningCoins.length === 0) return;
@@ -742,7 +746,7 @@ function stepRipeningCoins(state, dtMs) {
     const coin = ripeningCoins[i];
     if (!coinStillInWorld(items, coin)) continue;
     appreciateCoin(coin, state, dtMs);
-    if (coin.apprActive || coin.apprPulseMs > 0) ripeningCoins[kept++] = coin;
+    if (coin.apprActive || coin.apprPulseMs > 0 || coin.eternalFx) ripeningCoins[kept++] = coin;
   }
   ripeningCoins.length = kept;
 }
@@ -750,6 +754,15 @@ function stepRipeningCoins(state, dtMs) {
 // What a fish's coin drop creates: its species' special coin if it has one,
 // otherwise the plain coin.
 function createFishCoin(def, x, y, value) {
+  if (def.eternal) {
+    // Per direct request, an Eternal Fish's coin gets a cheap extra effect so it can't be mistaken for a
+    // diamond-tier coin of the same size: it joins the same short registry the ripening coins use (so ordinary
+    // coins still pay nothing) and main.js's drawAppreciationFx draws one dashed ring and three orbiting dots on it.
+    const coin = createCoin(x, y, value);
+    coin.eternalFx = true;
+    ripeningCoins.push(coin);
+    return coin;
+  }
   return def.appreciatingCoin ? createAppreciatingCoin(x, y, value) : createCoin(x, y, value);
 }
 
@@ -2083,7 +2096,10 @@ export function isSpliceTargetCandidate(state, fish) {
 // don't pair), shared by describeFishMergeOptions below and
 // findFishMergePartners — the combineSource/spliceSource/spliceTarget flags are
 // `fish`'s own eligibility, computed once by the caller.
-function mergePairOutcome(state, fish, other, combineSource, spliceSource, spliceTarget) {
+function mergePairOutcome(state, fish, other, combineSource, spliceSource, spliceTarget, eternalKinds) {
+  if (eternalKinds && isEternalParent(other) && other.speciesId !== fish.speciesId && eternalKinds.has(eternalThirdKind(fish, other))) {
+    return { resultSpeciesId: 'eternal_fish', text: `${SPECIES[other.speciesId].name} → ${SPECIES.eternal_fish.name}`, isSplice: true };
+  }
   if (combineSource && canCombineFish(state, fish, other)) {
     return { resultSpeciesId: fish.speciesId, resultTier: (fish.starTier || 1) + 1, text: `${SPECIES[other.speciesId].name} → Tier ${(fish.starTier || 1) + 1} ${SPECIES[fish.speciesId].name}` };
   }
@@ -2112,7 +2128,8 @@ export function describeFishMergeOptions(state, fish) {
   const combineSource = isCombinableFish(state, fish);
   const spliceSource = isSpliceSource(state, fish);
   const spliceTarget = isSpliceTargetCandidate(state, fish);
-  if (!combineSource && !spliceSource && !spliceTarget) return null;
+  const eternalKinds = eternalKindsFor(state, fish);
+  if (!combineSource && !spliceSource && !spliceTarget && !eternalKinds) return null;
   const entries = [];
   const seen = new Set();
   for (const other of state.level.entities) {
@@ -2125,7 +2142,7 @@ export function describeFishMergeOptions(state, fish) {
       continue;
     }
     if (other.type !== 'fish' || other.id === fish.id || other.dying) continue;
-    const outcome = mergePairOutcome(state, fish, other, combineSource, spliceSource, spliceTarget);
+    const outcome = mergePairOutcome(state, fish, other, combineSource, spliceSource, spliceTarget, eternalKinds);
     if (outcome && !seen.has(outcome.text)) { seen.add(outcome.text); entries.push({ text: outcome.text, isSplice: !!outcome.isSplice, resultTier: outcome.resultTier || null, otherSpeciesId: other.speciesId, resultSpeciesId: outcome.resultSpeciesId }); }
   }
   return entries.length > 0 ? entries : [{ text: 'No available fish to merge.', otherSpeciesId: null, resultSpeciesId: null }];
@@ -2148,14 +2165,15 @@ export function findFishMergePartners(state, fish) {
   const combineSource = isCombinableFish(state, fish);
   const spliceSource = isSpliceSource(state, fish);
   const spliceTarget = isSpliceTargetCandidate(state, fish);
+  const eternalKinds = eternalKindsFor(state, fish);
   for (const other of state.level.entities) {
     if (other.type === 'friendly_alien') {
       if (canSpliceOctopusWithAlien(state, fish, other)) partners.push({ entity: other, resultSpeciesId: 'xeno_octopus' });
       continue;
     }
-    if (!combineSource && !spliceSource && !spliceTarget) continue;
+    if (!combineSource && !spliceSource && !spliceTarget && !eternalKinds) continue;
     if (other.type !== 'fish' || other.id === fish.id || other.dying) continue;
-    const outcome = mergePairOutcome(state, fish, other, combineSource, spliceSource, spliceTarget);
+    const outcome = mergePairOutcome(state, fish, other, combineSource, spliceSource, spliceTarget, eternalKinds);
     if (outcome) partners.push({ entity: other, resultSpeciesId: outcome.resultSpeciesId });
   }
   return partners;
@@ -2188,7 +2206,7 @@ export function canMergeOrSplicePair(state, a, b) {
     const alien = a.type === 'friendly_alien' ? a : b;
     return octopus.type === 'fish' && alien.type === 'friendly_alien' && canSpliceOctopusWithAlien(state, octopus, alien);
   }
-  return canCombineFish(state, a, b) || canSpliceFish(state, a, b) || canSpliceFish(state, b, a);
+  return canCombineFish(state, a, b) || canSpliceFish(state, a, b) || canSpliceFish(state, b, a) || canStartEternalSphere(state, a, b);
 }
 
 // Per direct request, EVERY time a fish becomes an adult and has something to
@@ -2271,6 +2289,140 @@ export function spliceOctopusWithAlien(state, octopusFish, alien) {
   state.level.floatingTexts.push(createPickupText(x, y, 'Spliced!', TANK_POINT_COLOR));
   state.meta.stats.hybridsCreated += 1; // hybrids_created_1/5 achievements
   return hybrid;
+}
+
+// ---- Eternal Fish (Dartfin x Guppy x Blimpfish) ----
+// Per direct request. Dragging one adult economy fish onto a DIFFERENT adult economy fish (with the Eternal Fish
+// unlocked, an Eternal slot free, and an adult of the third kind somewhere in the tank) fuses the two into a
+// glowing sphere, state.level.eternalSphere. Dropping an adult of the third kind on the sphere within
+// ETERNAL_SPHERE_TIMEOUT_MS finishes it; otherwise the sphere splits back into the two fish. While fused the two
+// fish are held on the sphere object, OUT of state.level.entities, so the per-tick fish loops, the render loop and
+// every other scan never see them and pay nothing for the feature; with no sphere the only cost anywhere is the
+// null check in updateEternalSphere. Nothing here runs per frame except that check.
+const HYBRID_SPECIES_IDS = new Set(SPECIES_LIST.filter((s) => s.parents && !s.eternal).map((s) => s.id));
+
+function isEternalParent(fish) {
+  if (!fish || fish.type !== 'fish' || fish.dying || !ECONOMY_SPECIES_IDS.includes(fish.speciesId)) return false;
+  return fish.stage === SPECIES[fish.speciesId].growthStages.length - 1;
+}
+
+// One Eternal Fish per kind of hybrid currently in the tank, never counting Eternal Fish themselves. The hybrids
+// may die afterwards; this is only checked when the sphere forms and when it finishes.
+function eternalSlotFree(state) {
+  if (!state.meta.speciesUnlocked.includes('eternal_fish')) return false;
+  let eternal = 0;
+  const hybridTypes = new Set();
+  for (const e of state.level.entities) {
+    if (e.type !== 'fish' || e.dying) continue;
+    if (e.speciesId === 'eternal_fish') eternal += 1;
+    else if (HYBRID_SPECIES_IDS.has(e.speciesId)) hybridTypes.add(e.speciesId);
+  }
+  return eternal < hybridTypes.size;
+}
+
+// The economy kind that is neither `a`'s nor `b`'s (the one dropped on the sphere to finish it).
+function eternalThirdKind(a, b) {
+  return ECONOMY_SPECIES_IDS.find((id) => id !== a.speciesId && id !== b.speciesId);
+}
+
+// For the hover legend / partner lines / fish info modal: null unless `fish` could start an Eternal merge right now
+// (unlocked, no sphere already, a free slot), else the set of economy kinds that have a living adult in the tank.
+// Computed once per call so the per-partner checks stay O(1) instead of rescanning the tank for every partner.
+function eternalKindsFor(state, fish) {
+  if (!isEternalParent(fish) || state.level.eternalSphere || !eternalSlotFree(state)) return null;
+  const kinds = new Set();
+  for (const e of state.level.entities) if (isEternalParent(e)) kinds.add(e.speciesId);
+  return kinds;
+}
+
+export function canStartEternalSphere(state, a, b) {
+  if (state.level.eternalSphere || !isEternalParent(a) || !isEternalParent(b) || a.id === b.id || a.speciesId === b.speciesId) return false;
+  if (!eternalSlotFree(state)) return false;
+  const third = eternalThirdKind(a, b);
+  return state.level.entities.some((e) => e.speciesId === third && isEternalParent(e));
+}
+
+// What the three parents' coins would have been worth over one ETERNAL_COIN_INTERVAL_MS: the sum of their adult
+// $/min (star tier included, via getEconomyAdultDropValue), frozen onto the fish when it is made. `fishList` is
+// any three { speciesId, starTier } (real fish, or the Tier 1 stand-ins the shop and dev tool use).
+export function computeEternalCoinValue(fishList) {
+  let perMs = 0;
+  for (const f of fishList) {
+    const def = SPECIES[f.speciesId];
+    perMs += getEconomyAdultDropValue(f.speciesId, f.starTier || 1) / def.growthStages[def.growthStages.length - 1].dropInterval;
+  }
+  return Math.max(1, Math.round(perMs * ETERNAL_COIN_INTERVAL_MS));
+}
+
+export function startEternalSphere(state, a, b) {
+  if (!canStartEternalSphere(state, a, b)) return null;
+  const x = (a.x + b.x) / 2;
+  const y = (a.y + b.y) / 2;
+  for (const f of [a, b]) {
+    const i = state.level.entities.indexOf(f);
+    if (i !== -1) state.level.entities.splice(i, 1);
+  }
+  const thirdSpeciesId = ECONOMY_SPECIES_IDS.find((id) => id !== a.speciesId && id !== b.speciesId);
+  const now = state.level.elapsed;
+  state.level.eternalSphere = { x, y, fish: [a, b], thirdSpeciesId, startedAtMs: now, expiresAtMs: now + ETERNAL_SPHERE_TIMEOUT_MS };
+  state.level.coinSparkleEffects.push({ x, y, age: 0, scale: FISH_STREAK_SPARKLE_SCALE });
+  state.level.floatingTexts.push(createPickupText(x, y - 20, `Drop a ${SPECIES[thirdSpeciesId].name} on it!`, TANK_POINT_COLOR));
+  return state.level.eternalSphere;
+}
+
+export function canFinishEternalSphere(state, fish) {
+  const sphere = state.level.eternalSphere;
+  return !!sphere && isEternalParent(fish) && fish.speciesId === sphere.thirdSpeciesId && eternalSlotFree(state);
+}
+
+export function finishEternalSphere(state, third) {
+  if (!canFinishEternalSphere(state, third)) return null;
+  const sphere = state.level.eternalSphere;
+  state.level.eternalSphere = null;
+  const i = state.level.entities.indexOf(third);
+  if (i !== -1) state.level.entities.splice(i, 1);
+  const { x, y } = sphere;
+  const fish = createFish('eternal_fish', x, y, state, { grown: true, dropValueOverride: computeEternalCoinValue([...sphere.fish, third]) });
+  fish.hunger = 0; // createFish starts a grown fish at 20; this one never gets hungry
+  state.level.entities.push(fish);
+  // Extra celebration compared to an ordinary merge: the usual merge burst, plus two more growth rings and a
+  // bigger second sparkle (existing, self-culling effect arrays — nothing new runs per frame once they age out).
+  pushFishMergeEffects(state, fish);
+  state.level.fishGrowthEffects.push({ x: x - 14, y: y - 8, age: 0 }, { x: x + 14, y: y + 8, age: 0 });
+  state.level.coinSparkleEffects.push({ x, y, age: 0, scale: FISH_STREAK_SPARKLE_SCALE * 1.6 });
+  playGrowToAdult();
+  state.level.floatingTexts.push(createPickupText(x, y, 'Eternal Fish!', FISH_STAR_COLOR));
+  state.meta.stats.hybridsCreated += 1; // hybrids_created_1/5 achievements
+  return fish;
+}
+
+// The timeout: the two fish pop back out of the sphere, side by side, and carry on as before.
+function cancelEternalSphere(state) {
+  const sphere = state.level.eternalSphere;
+  state.level.eternalSphere = null;
+  sphere.fish.forEach((f, i) => {
+    const dir = i === 0 ? -1 : 1;
+    f.x = sphere.x + dir * 16;
+    f.y = sphere.y;
+    f.vx = dir * 40;
+    f.vy = 0;
+    f.wanderTimer = 0;
+    f.shimmerStartedAt = state.level.elapsed;
+    state.level.entities.push(f);
+  });
+  state.level.coinSparkleEffects.push({ x: sphere.x, y: sphere.y, age: 0 });
+  state.level.floatingTexts.push(createPickupText(sphere.x, sphere.y - 20, 'Fusion cancelled', '#ffffff'));
+}
+
+function updateEternalSphere(state) {
+  const sphere = state.level.eternalSphere;
+  if (sphere && state.level.elapsed >= sphere.expiresAtMs) cancelEternalSphere(state);
+}
+
+export function eternalSphereContainsPoint(sphere, x, y) {
+  const dx = x - sphere.x;
+  const dy = y - sphere.y;
+  return dx * dx + dy * dy <= ETERNAL_SPHERE_DROP_RADIUS_PX * ETERNAL_SPHERE_DROP_RADIUS_PX;
 }
 
 // The first pair of two fish currently on screen that could legally be
@@ -3750,7 +3902,7 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
   // 10% slower, Blimpfish 5% faster than Guppy, per direct request);
   // defaults to 1 (Guppy's own baseline, and every species without an
   // explicit override) via the `|| 1` fallback.
-  if (!isScavenger) {
+  if (!isScavenger && !def.eternal) { // an Eternal Fish never eats, so it never poops either
     fish.poopTimer += dtMs;
     const wastePoopInterval = fishPoopIntervalMs(state, def);
     if (fish.poopTimer >= wastePoopInterval) {
@@ -4242,6 +4394,7 @@ export function updateEntities(state, dtMs) {
   // steps: its whole point is dragging one live fish onto another.
   const fishAliensFrozenForTutorial = state.level.tutorialFlow != null && state.level.tutorialFlow.id !== 'mergefish';
   perfMark('e: floating text + alien checks');
+  updateEternalSphere(state); // a timed-out sphere hands its two fish back before this tick's fish pass
   state.level.entities = state.level.entities.filter((entity) => {
     if (entity.type === 'fish') return fishAliensFrozenForTutorial || updateFish(entity, state, dtMs, anyAlienAlive);
     if (entity.type === 'alien') return fishAliensFrozenForTutorial || updateAlien(entity, state, dtMs);

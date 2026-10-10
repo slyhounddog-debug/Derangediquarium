@@ -148,4 +148,12 @@ app.post('/api/git/commit', express.json({ limit: '2mb' }), (req, res) => {
   try { res.json(gitcommit.gitCommit(req.body || {})); } catch (e) { res.status(400).json({ error: String((e.stderr || e.message || e)).trim() }); }
 });
 
+// Revert (header button next to Commit) — lists uncommitted files, restores/deletes the ticked ones.
+app.get('/api/git/revert-list', (req, res) => {
+  try { res.json(gitcommit.gitRevertList()); } catch (e) { res.status(500).json({ error: String(e.message || e) }); }
+});
+app.post('/api/git/revert', express.json({ limit: '2mb' }), (req, res) => {
+  try { res.json(gitcommit.gitRevert(req.body || {})); } catch (e) { res.status(400).json({ error: String((e.stderr || e.message || e)).trim() }); }
+});
+
 app.listen(PORT, () => console.log(`SFX audition tool at http://localhost:${PORT}`));
