@@ -16,7 +16,7 @@
   },
   "playDemolish": {
     "file": "playDemolish.wav",
-    "gain": 0.6,
+    "gain": 1,
     "source": "654483__bigal13__brick-being-dropped-and-breaking-into-peices trim.wav"
   },
   "playTurretShoot": {

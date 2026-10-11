@@ -1708,7 +1708,7 @@ export const SPECIES = {
   // every other species' (dead code).
   eternal_fish: {
     id: 'eternal_fish', name: 'Eternal Fish', tier: 5, unlockPhase: 4, cost: 200, eternal: true,
-    description: 'Dartfin × Guppy × Blimpfish — never gets hungry and never produces Waste; only aliens can kill it. Drops one big coin every 30 seconds, worth everything the three fish it was made from would have earned in that time. Drag one adult economy fish onto a different one to fuse them into a glowing sphere, then drag an adult of the third kind onto the sphere within 6 seconds. You can have one Eternal Fish for each kind of hybrid fish currently in the tank.',
+    description: 'Dartfin × Guppy × Blimpfish — Never eats or poops, and only aliens can kill it. It earns the sum of the three fish. Merge two together normally, then drag an adult of the third kind onto the sphere. \nNOTE: You can ONLY have one Eternal Fish for each kind of hybrid fish currently in the tank. ',
     behavior: ['FEEDER'], dropType: 'coin', parents: ['dartfin', 'guppy', 'blimpfish'],
     swimSpeed: 30, lifespan: 300000, hungerRate: 0,
     growthStages: [{ feedsRequired: 0, scale: 0.95, dropInterval: ETERNAL_COIN_INTERVAL_MS, dropValue: 0 }],
