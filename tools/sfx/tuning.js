@@ -77,7 +77,7 @@ document.head.append(h('style', { html: `
 ` }));
 
 // ---------- tabs ----------
-const VIEWS = { audio: $('#view-audio'), formulas: $('#view-formulas'), variables: $('#view-variables'), text: $('#view-text') };
+const VIEWS = { audio: $('#view-audio'), formulas: $('#view-formulas'), variables: $('#view-variables'), text: $('#view-text'), layout: $('#view-layout') };
 function showTab(name) {
   if (!VIEWS[name]) name = 'audio';
   for (const [k, el] of Object.entries(VIEWS)) el.hidden = k !== name;

@@ -1,6 +1,6 @@
 {
   "_about": "Which strings the dev tool's Text tab lists and how they are grouped. Restart the tool's server after editing this file (text.mjs reads it once at startup).",
-  "skipFiles": ["PerfOverlay"],
+  "skipFiles": ["PerfOverlay", "LayoutOverrides"],
   "otherLabel": "Other in-game text (found in the code)",
   "otherNote": "Everything else the scanner recognises as words a player reads: button labels, tooltips, toasts and hints built in code. Each is grouped under the function that uses it.",
   "textKeys": ["name", "description", "desc", "label", "text", "title", "effect", "tip", "hint", "note", "notes", "message", "statLabel", "subtitle", "caption", "placeholder", "tooltip", "prompt", "heading", "body", "blurb"],

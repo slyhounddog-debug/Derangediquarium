@@ -12,6 +12,7 @@ import { fileURLToPath } from 'url';
 import * as tuning from './tuning.mjs';
 import * as text from './text.mjs';
 import * as gitcommit from './gitcommit.mjs';
+import * as layout from './layout.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..', '..');
@@ -49,6 +50,7 @@ app.use('/js', express.static(path.join(ROOT, 'js')));       // the page imports
 app.use('/audio', express.static(AUDIO));
 app.use('/app', express.static(__dirname, { index: false })); // the page's extra scripts (tuning.js, ...)
 app.get('/', (req, res) => res.sendFile(path.join(__dirname, 'index.html')));
+layout.mount(app, express, ROOT, __dirname);   // the Layout tab: the game under /game/ plus /api/layout
 
 app.get('/api/slots', (req, res) => {
   const manifest = readManifest();
