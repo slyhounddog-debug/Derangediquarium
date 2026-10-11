@@ -1463,7 +1463,7 @@ export const SPECIES = {
   },
   dartfin: {
     id: 'dartfin', name: 'Dartfin', tier: 1, cost: 9, // cut from 10 per direct request
-    description: 'Cheap and fast. Dartfin school together: the more of them in the tank, the more each coin is worth (up to double at 10) and the less waste they make (down to half).',
+    description: 'Cheap and fast. Dartfin school together: the more of them in the tank, the more each coin is worth (up to double at 10) and the less waste they make.',
     behavior: ['FEEDER'], dropType: 'coin',
     schooling: true, // coin value + waste rate scale with how many Dartfin are alive, and they drift toward each other — see DARTFIN_SCHOOL_* below and Entities.js's getDartfinSchool
     swimSpeed: 65, // -5, see FISH_MOVEMENT_UPGRADE_SPEED_BONUS
@@ -1498,7 +1498,7 @@ export const SPECIES = {
   },
   blimpfish: {
     id: 'blimpfish', name: 'Blimpfish', tier: 1, cost: 40, // cut from 60 per direct request
-    description: 'Expensive and sluggish. Voracious appetite, rare coins that start at half value and ripen to 1.5x over 90 seconds — the longer you leave them, the more they\'re worth.',
+    description: 'Expensive and sluggish. Spawns coins that 3x in value over 90 seconds — the longer you leave them, the more they\'re worth.',
     behavior: ['FEEDER'], dropType: 'coin',
     appreciatingCoin: true, // its coins are created at BLIMPFISH_COIN_START_FRACTION of their normal value and grow to BLIMPFISH_COIN_END_FRACTION of it — see Entities.js's createAppreciatingCoin/appreciateCoin
     swimSpeed: 17, // 10% faster than the original 20, then -5, see FISH_MOVEMENT_UPGRADE_SPEED_BONUS
@@ -1630,7 +1630,7 @@ export const SPECIES = {
   // "mention."
   eel_blimp: {
     id: 'eel_blimp', name: 'Battery fish', tier: 4, unlockPhase: 4, cost: 130,
-    description: 'Electric Eel × Blimpfish — a living 1GW battery for the power grid. Stores surplus generation and covers shortfalls before efficiency ever drops. Feed it Mutagen Paste for double production and a temporary 2GW capacity boost.',
+    description: 'Electric Eel × Blimpfish — a living 1GW battery for the power grid. Stores surplus generation and covers shortfalls before efficiency ever drops.',
     behavior: [], dropType: 'battery', parents: ['electric_eel', 'blimpfish'],
     swimSpeed: 19, lifespan: 300000, hungerRate: 1.068,
     // pixelsPerMW drives its own bespoke power-generation mechanic (see
@@ -1708,7 +1708,7 @@ export const SPECIES = {
   // every other species' (dead code).
   eternal_fish: {
     id: 'eternal_fish', name: 'Eternal Fish', tier: 5, unlockPhase: 4, cost: 200, eternal: true,
-    description: 'Dartfin × Guppy × Blimpfish — Never eats or poops, and only aliens can kill it. It earns the sum of the three fish. Merge two together normally, then drag an adult of the third kind onto the sphere. \nNOTE: You can ONLY have one Eternal Fish for each kind of hybrid fish currently in the tank. ',
+    description: 'Dartfin × Guppy × Blimpfish — Never eats or poops, and only aliens can kill it. It earns the sum of the three fish. Merge two together normally, then drag an adult of the third kind onto the sphere. \nNOTE: You can ONLY have one Eternal Fish for each kind of hybrid fish in the tank. ',
     behavior: ['FEEDER'], dropType: 'coin', parents: ['dartfin', 'guppy', 'blimpfish'],
     swimSpeed: 30, lifespan: 300000, hungerRate: 0,
     growthStages: [{ feedsRequired: 0, scale: 0.95, dropInterval: ETERNAL_COIN_INTERVAL_MS, dropValue: 0 }],
@@ -2891,7 +2891,7 @@ export const SCIENCE_LAB_UPGRADES = {
   mother_alien_fish: {
     id: 'mother_alien_fish', name: 'Escape the Fish Tank', icon: '👹', mystery: true,
     description: 'Win the game! Definitely no need to be loaded on turret power. *Glub**Glub* Thats how you wink as a fish.',
-    scienceCost: 500, scienceGreenCost: 200, goldCost: 50000,
+    scienceCost: 500, scienceGreenCost: 300, goldCost: 100000,
     requires: ['green_science_tech', 'power_plant_science', 'bio_refinery', 'science_cap_5'],
     grants: { triggersBossFight: true },
   },
@@ -3392,7 +3392,7 @@ export const ALIEN_FIRST_WAVE_SAFE_X_FRACTION = 0.6;
 // t=0.75 point (Tier 5's first appearance) lands around wave 36, ~2.5 hours
 // into a level, and the ramp doesn't fully max out (heavy Tier 4/5) until
 // close to 4 hours.
-export let ALIEN_WAVE_DIFFICULTY_RAMP_WAVES = 48;
+export let ALIEN_WAVE_DIFFICULTY_RAMP_WAVES = 60;
 export let ALIEN_WAVE_COUNT_EARLY_MIN = 2;
 export let ALIEN_WAVE_COUNT_EARLY_MAX = 3;
 export let ALIEN_WAVE_COUNT_LATE_MIN = 10;
@@ -3432,11 +3432,11 @@ export let ALIEN_WAVE_COUNT_LATE_MAX = 15;
 // was specifically "higher tiers" (1/2/4/7/12 -> 1/2/3/5/7) — Tier 1/2 are
 // untouched, Tier 3-5 each pull back toward a gentler curve.
 export const ALIEN_ARCHETYPES = [
-  { id: 'alien_t1', tier: 1, name: 'Alien Scout', hpMin: 20, hpMax: 30, speed: 40, dnaYield: 1, radius: 16, color: '#5a2d6b', fishDamagePerSec: 4, spikes: 1, bodyWidthMul: 1.0, bodyHeightMul: 1.0, glow: false },
-  { id: 'alien_t2', tier: 2, name: 'Alien Brute', hpMin: 40, hpMax: 55, speed: 46, dnaYield: 2, radius: 18, color: '#3d4a8f', fishDamagePerSec: 10, spikes: 2, bodyWidthMul: 1.08, bodyHeightMul: 1.08, glow: false },
-  { id: 'alien_t3', tier: 3, name: 'Alien Stalker', hpMin: 65, hpMax: 85, speed: 54, dnaYield: 3, radius: 20, color: '#2d8f6e', fishDamagePerSec: 16, spikes: 3, bodyWidthMul: 1.3, bodyHeightMul: 0.8, glow: false },
-  { id: 'alien_t4', tier: 4, name: 'Alien Behemoth', hpMin: 95, hpMax: 130, speed: 62, dnaYield: 5, radius: 23, color: '#c4522a', fishDamagePerSec: 22, spikes: 4, bodyWidthMul: 1.18, bodyHeightMul: 1.18, glow: true },
-  { id: 'alien_t5', tier: 5, name: 'Alien Leviathan', hpMin: 150, hpMax: 220, speed: 70, dnaYield: 7, radius: 27, color: '#ff33dd', fishDamagePerSec: 28, spikes: 5, bodyWidthMul: 1.32, bodyHeightMul: 0.92, glow: true },
+  { id: 'alien_t1', tier: 1, name: 'Alien Scout', hpMin: 25, hpMax: 40, speed: 40, dnaYield: 1, radius: 16, color: '#5a2d6b', fishDamagePerSec: 4, spikes: 1, bodyWidthMul: 1.0, bodyHeightMul: 1.0, glow: false },
+  { id: 'alien_t2', tier: 2, name: 'Alien Brute', hpMin: 65, hpMax: 85, speed: 46, dnaYield: 2, radius: 18, color: '#3d4a8f', fishDamagePerSec: 10, spikes: 2, bodyWidthMul: 1.08, bodyHeightMul: 1.08, glow: false },
+  { id: 'alien_t3', tier: 3, name: 'Alien Stalker', hpMin: 110, hpMax: 140, speed: 54, dnaYield: 3, radius: 20, color: '#2d8f6e', fishDamagePerSec: 16, spikes: 3, bodyWidthMul: 1.3, bodyHeightMul: 0.8, glow: false },
+  { id: 'alien_t4', tier: 4, name: 'Alien Behemoth', hpMin: 170, hpMax: 200, speed: 62, dnaYield: 5, radius: 23, color: '#c4522a', fishDamagePerSec: 22, spikes: 4, bodyWidthMul: 1.18, bodyHeightMul: 1.18, glow: true },
+  { id: 'alien_t5', tier: 5, name: 'Alien Leviathan', hpMin: 250, hpMax: 300, speed: 70, dnaYield: 7, radius: 27, color: '#ff33dd', fishDamagePerSec: 28, spikes: 5, bodyWidthMul: 1.32, bodyHeightMul: 0.92, glow: true },
 ];
 // The rolling wave-mix weight curve — per direct spec's 5-phase description
 // (Early 100% T1 -> Mid-Early T1/T2 -> Mid T1/T2/T3 -> Late phases out T1,
@@ -3811,7 +3811,7 @@ export const ALIEN_PORTAL_STAGGER_MS = 350; // gap between each alien's own port
 // writes into a matching stats field (a best-ever streak in ms, a one-shot
 // 0/1 flag) instead of a plain incrementing counter, so the achievement
 // table itself never needs to know which kind of stat it's reading.
-export const ACHIEVEMENT_GEM_REWARD_BY_TIER = { easy: 5, medium: 10, hard: 20 };
+export const ACHIEVEMENT_GEM_REWARD_BY_TIER = { easy: 5, medium: 10, hard: 15 };
 
 export const ACHIEVEMENTS = {
   money_1k: { id: 'money_1k', name: 'Pocket Change', description: 'Earn $1,000 total.', tier: 'easy', statField: 'moneyEarned', threshold: 1000 },
