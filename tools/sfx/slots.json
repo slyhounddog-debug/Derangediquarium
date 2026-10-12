@@ -394,6 +394,34 @@
     ]
   },
   {
+    "id": "playIntroLetterBump",
+    "label": "Studio intro: letter lands",
+    "synth": true,
+    "want": "A short bubbly bloop or soft bump, like a bubble settling into place",
+    "plays": "Once as each of the 13 letters of PARDON MY GAMES lands in the studio intro, about 0.09s apart. Each letter plays it a little higher (the game raises the playback speed ~2.5% per letter), so keep it short and clean.",
+    "search": [
+      "bubble pop soft",
+      "water bloop",
+      "cartoon bump",
+      "soft pluck",
+      "rubber bounce"
+    ]
+  },
+  {
+    "id": "playStudioIntro",
+    "label": "Studio intro: background bed",
+    "synth": true,
+    "want": "A magical, cute, rising shimmer or pad that lasts about as long as the intro",
+    "plays": "Once when the PARDON MY GAMES studio intro starts, under the whole intro (about 6-8 seconds; it is cut with a quick fade if the player skips). A one-shot, not a loop.",
+    "search": [
+      "magic sparkle riser",
+      "cute whoosh intro",
+      "fantasy shimmer pad",
+      "arcade startup jingle",
+      "bubbly synth swell"
+    ]
+  },
+  {
     "id": "finSanity",
     "label": "Fin Sanity intro sting",
     "synth": false,

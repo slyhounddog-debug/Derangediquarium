@@ -194,6 +194,24 @@
       ]
     },
     {
+      "id": "studioIntro", "label": "Studio intro splash (PARDON MY GAMES)",
+      "items": [
+        { "name": "STUDIO_INTRO_START_DELAY_S", "label": "Pause on the empty screen before the first letter", "min": 0, "max": 3, "step": 0.05, "unit": "s" },
+        { "name": "STUDIO_INTRO_LETTER_STAGGER_S", "label": "Gap between one letter launching and the next", "min": 0.02, "max": 0.5, "step": 0.01, "unit": "s" },
+        { "name": "STUDIO_INTRO_LETTER_FLY_S", "label": "One letter's flight time (ends in the bouncy overshoot)", "min": 0.2, "max": 2, "step": 0.02, "unit": "s" },
+        { "name": "STUDIO_INTRO_FLOAT_RAMP_S", "label": "How long a word takes to ease into its hover", "min": 0.1, "max": 2, "step": 0.05, "unit": "s" },
+        { "name": "STUDIO_INTRO_FLOAT_AMP_PX", "label": "Hover height (at a 1080px-tall screen)", "min": 0, "max": 30, "step": 0.5, "unit": "px" },
+        { "name": "STUDIO_INTRO_FLOAT_SPEED", "label": "Hover speed", "min": 0.2, "max": 8, "step": 0.1, "unit": "rad/s" },
+        { "name": "STUDIO_INTRO_FLOAT_WORD_PHASE", "label": "Hover offset between the words", "min": 0, "max": 3.14, "step": 0.05, "unit": "rad" },
+        { "name": "STUDIO_INTRO_PRESENTS_DELAY_S", "label": "Gap before STUDIO PRESENTS... appears", "min": 0, "max": 3, "step": 0.05, "unit": "s" },
+        { "name": "STUDIO_INTRO_PRESENTS_CHAR_STAGGER_S", "label": "Gap between each character of STUDIO PRESENTS...", "min": 0.01, "max": 0.3, "step": 0.005, "unit": "s" },
+        { "name": "STUDIO_INTRO_PRESENTS_CHAR_FADE_S", "label": "One character's slide-up + fade", "min": 0.1, "max": 2, "step": 0.05, "unit": "s" },
+        { "name": "STUDIO_INTRO_HOLD_S", "label": "How long the finished screen stays before the start menu", "min": 0, "max": 15, "step": 0.1, "unit": "s" },
+        { "name": "STUDIO_INTRO_BURST_COUNT", "label": "Sparkles/pixel bits in the STUDIO PRESENTS burst", "min": 0, "max": 150, "step": 1 },
+        { "name": "STUDIO_INTRO_AMBIENT_COUNT", "label": "Drifting bubbles/stars/hearts after the burst", "min": 0, "max": 100, "step": 1 }
+      ]
+    },
+    {
       "id": "audio", "label": "Audio levels (Sound.js)",
       "items": [
         { "name": "MUSIC_VOLUME_MAX_GAIN", "file": "Sound", "label": "Music level at 100% slider (Game/Battle/menu)", "min": 0, "max": 1, "step": 0.01 },

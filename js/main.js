@@ -257,6 +257,7 @@ import { isPointOnMound, crackMound, renderMound, centerCameraOnMound, isPointOn
 import { drawFish, drawFishCached, beginFishSpriteFrame, drawFishShadow } from './FishRenderer.js';
 import { drawCachedText } from './TextSprites.js';
 import { perfMark, perfUpdateBegin, perfUpdateEnd, perfRenderBegin, perfRenderEnd } from './PerfOverlay.js';
+import { loadStudioIntroFonts, runStudioIntro, studioIntroIsActive } from './StudioIntro.js';
 import { loadTitleFonts, initTitleScreen, showTitle, updateTitle, exitTitle, titleIsActive, titleBlocksWorldRender, titleNeedsBackdrop, captureTitleBackdrop } from './TitleScreen.js';
 import { oneShotShimmerProgress, drawShimmerSweep, shimmerFadeAlpha, createShimmerTimer, updateShimmerTimer } from './Shimmer.js';
 import {
@@ -4143,6 +4144,7 @@ async function runLoadingSequence() {
     preloadAudioFile('audio/Fin Sanity.mp3'),
     document.fonts ? document.fonts.ready : Promise.resolve(),
     loadTitleFonts(), // the title logo is baked into sprites once, so its font has to be ready first
+    loadStudioIntroFonts(), // ...and so are the studio intro's letters
   ];
   let completed = 0;
   updateLoadingBar(0);
@@ -4162,10 +4164,14 @@ async function runLoadingSequence() {
   await waitForFirstGesture();
   loadingDone = true;
   loadingOverlay.classList.add('hidden');
-  initTitleScreen();
-  document.getElementById('start-overlay').classList.remove('hidden');
-  showTitle(performance.now());
-  startMenuMusic(); // per direct request — Fin Sanity once, then the low-passed Game song, for as long as the main menu is up
+  // Per direct request, the studio intro plays first (its own sounds start inside this same gesture); the title and
+  // its Fin Sanity music begin the moment it ends or is skipped.
+  runStudioIntro(() => {
+    initTitleScreen();
+    document.getElementById('start-overlay').classList.remove('hidden');
+    showTitle(performance.now());
+    startMenuMusic(); // per direct request — Fin Sanity once, then the low-passed Game song, for as long as the main menu is up
+  });
 }
 runLoadingSequence();
 
@@ -5698,7 +5704,7 @@ function render() {
   // and once its half-resolution backdrop snapshot exists the whole game world
   // is skipped below — per direct request, so the title costs next to nothing.
   updateTitle(performance.now());
-  if (titleBlocksWorldRender()) return;
+  if (titleBlocksWorldRender() || studioIntroIsActive()) return; // the studio intro is opaque and animates on its own loop, so the world behind it isn't drawn
   updateCanvasCursor();
   fpsCounter++;
   const now = performance.now();

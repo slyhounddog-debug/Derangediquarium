@@ -6,7 +6,7 @@
 <title>Finsanity</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Comic+Neue:wght@400;700&family=Fredoka:wght@600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;600;700;800&family=Comic+Neue:wght@400;700&family=Fredoka:wght@600;700&family=Press+Start+2P&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
 <!-- Nautical/wooden re-skin, per direct request — a pure override layer on top of style.css. -->
 <link rel="stylesheet" href="css/nautical.css">
@@ -31,6 +31,13 @@
     </div>
     <div id="loading-status">Loading...</div>
   </div>
+</div>
+
+<!-- Per direct request, the "PARDON MY GAMES / STUDIO PRESENTS..." studio intro plays once the loading screen's
+     click-to-begin gesture has landed, before the start menu (StudioIntro.js). Any click/tap/key skips it. -->
+<div id="studio-intro" class="hidden">
+  <canvas id="studio-intro-canvas"></canvas>
+  <button id="studio-intro-skip" type="button">skip &gt;&gt;</button>
 </div>
 
 <!-- Per direct request, the start screen is a fully reworked title: the tank
