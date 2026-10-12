@@ -110,7 +110,7 @@ export function computeProductionInfo(state, rect) {
     } else if (PROCESSOR_STATS[type]) {
       const itemType = data.lastActiveItemType;
       const stats = PROCESSOR_STATS[type];
-      const ms = itemType === 'science' ? stats.scienceMs : itemType === 'science_green' ? stats.scienceGreenMs : stats.coinMs;
+      const ms = itemType === 'science' ? stats.scienceMs : itemType === 'science_green' ? (stats.scienceGreenMs ?? stats.scienceMs) : stats.coinMs;
       if (itemType) add(consumed, itemType, (60000 / ms) * uptime);
       const isScience = itemType === 'science' || itemType === 'science_green';
       powerDraw += (isScience ? stats.powerCostPerSecScience : stats.powerCostPerSecCoin) * uptime;

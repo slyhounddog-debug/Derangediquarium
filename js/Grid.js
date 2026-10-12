@@ -92,6 +92,8 @@ import {
   COLLECTOR_PROCESSING_MASS,
   COLLECTOR_CIRCLE_RADIUS_FRACTION,
   FAN_CONE_HALF_ANGLE_DEG,
+  FAN_CONE_ALPHA,
+  FAN_CONE_HIGHLIGHT_ALPHA,
   FAN_T2_MAX_FORCE, FAN_T2_MAX_RANGE, FAN_T2_POWER_COST,
   FAN_T3_MAX_FORCE, FAN_T3_MAX_RANGE, FAN_T3_POWER_COST,
   FAN_T4_MAX_FORCE, FAN_T4_MAX_RANGE, FAN_T4_POWER_COST,
@@ -1962,6 +1964,15 @@ export function cyclePlatformAt(state, worldX, worldY) {
 function fanRangeScale(data) {
   return Math.max(0.01, Math.min(1, (data.rangePct ?? 100) / 100));
 }
+// A placed fan's cone in world units, for UI.js to keep its filter pop-up off it
+// (per direct request). Same numbers the cone render and the force use.
+export function getFanConeGeometry(state, tileKey) {
+  const data = state.level.buildingData[tileKey];
+  const stats = data && FAN_STATS[data.type];
+  if (!stats) return null;
+  const [row, col] = tileKey.split(',').map(Number);
+  return { x: col * TILE_SIZE + TILE_SIZE / 2, y: row * TILE_SIZE + TILE_SIZE / 2, angle: data.angle, range: stats.maxRange * fanRangeScale(data), halfAngle: FAN_CONE_HALF_ANGLE_RAD };
+}
 const FAN_CONE_COS_HALF_ANGLE = Math.cos(FAN_CONE_HALF_ANGLE_RAD);
 let fanCache = { state: null, step: -1, fans: [] };
 function refreshFanCache(state) {
@@ -2399,6 +2410,20 @@ export function beginItemPhysicsStep(state) {
   refreshFanCache(state);
 }
 
+// Forces on top of the fans' that Entities.js wants applied to items down in the city — today
+// just a Magnet Fish's pull (per direct request, the magnet reaches into the city, not only
+// open water). Entities.js sets this once per sim step, and only to a function while a magnet
+// is actually on (null otherwise), so a tank without one pays a single null check per item.
+// It lives here as a hook, not an import, because Entities.js already imports this file.
+let extraItemForce = null;
+export function setExtraItemForce(fn) { extraItemForce = fn; }
+function itemForce(state, item) {
+  const fan = computeFanForce(state, item);
+  if (extraItemForce === null) return fan;
+  const extra = extraItemForce(state, item);
+  return extra === null ? fan : { fx: fan.fx + extra.fx, fy: fan.fy + extra.fy };
+}
+
 export function stepItemOnGrid(item, state, dt, physics) {
   if (item.collectorProgressMs != null) { item.sleeping = false; item.restTicks = 0; return stepCollectorProcessing(item, state, dt); }
   // A Refinery/Manufacturer-held item never reports 'consumed' from here —
@@ -2413,7 +2438,7 @@ export function stepItemOnGrid(item, state, dt, physics) {
     const calm = (item.vx || 0) < SLEEP_SPEED_EPSILON && (item.vx || 0) > -SLEEP_SPEED_EPSILON && (item.vy || 0) < SLEEP_SPEED_EPSILON && (item.vy || 0) > -SLEEP_SPEED_EPSILON;
     const refreshDue = (sleepStepCounter + item.id) % SLEEP_REFRESH_STEPS === 0;
     if (stillThere && calm && item.sleepEpoch === sleepEpoch && !item.touching) {
-      const f = computeFanForce(state, item);
+      const f = itemForce(state, item);
       if (f.fx === 0 && f.fy === 0) {
         if (!refreshDue) return 'resting';
         // Backstop refresh: run one full step, but stay one tick short of
@@ -2440,7 +2465,7 @@ export function stepItemOnGrid(item, state, dt, physics) {
   item.stepX = item.x;
   item.stepY = item.y;
 
-  const fanForce = computeFanForce(state, item);
+  const fanForce = itemForce(state, item);
   integrateItemForces(item, dt, physics, fanForce);
 
   // Horizontal: swept in GRID_SWEEP_SUBSTEP-sized sub-steps (sweepHorizontal)
@@ -2692,15 +2717,16 @@ export function updateBuildings(state, dtMs) {
       // colors are valid intake — per direct request, a Collector's stats
       // are specifically "1 coin every Xs, 1 science every Ys," not a
       // generic item eater; Food/Waste/Bio-chain items landing on top just
-      // rest there. Green Science shares blue's own scienceMs duration (see
-      // beginCollectorProcessing below) — per spec, it's routed into a
-      // Collector the exact same way blue Science already is.
+      // rest there. Green Science has its own scienceGreenMs (see
+      // beginCollectorProcessing below) and is only taken by the Advanced and
+      // Bio Collector — the base Collector skips it (checked in the scan below).
       let anyProcessing = collectorHeldItem !== null;
       if (!anyProcessing) {
         for (let i = 0; i < items.length; i++) {
           const it = items[i];
           if (it.type !== 'coin' && it.type !== 'science' && it.type !== 'science_green') continue;
           if (it.collectorProgressMs != null) continue;
+          if (it.type === 'science_green' && data.type === TILE_COLLECTOR) continue; // per direct request, only the Advanced and Bio Collector take Green Science
           // A real circle-vs-tile-square touch test, not a fixed radius from
           // center — per direct request ("make sure the Collector will
           // actually pull in any coin touching it on any side, correctly").
@@ -5854,8 +5880,8 @@ function renderDirectionIndicator(ctx, type, x, y, size, angle, zoom, showCone =
   // modal is open (see renderFanIndicators' highlightedKey) — a touch brighter
   // gold fill and a soft outline instead of the plain dim white every other
   // fan's always-on cone uses, so it's still clear which fan the open modal
-  // belongs to. The plain cone is 10% less opaque than it was (0.12 -> 0.108).
-  ctx.globalAlpha = highlight ? 0.2 : 0.108;
+  // belongs to. The plain cone is 10% less opaque than it was (0.12 -> 0.108 -> 0.0972).
+  ctx.globalAlpha = highlight ? FAN_CONE_HIGHLIGHT_ALPHA : FAN_CONE_ALPHA;
   ctx.fillStyle = highlight ? '#ffd45e' : '#ffffff';
   ctx.beginPath();
   ctx.moveTo(cx, cy);

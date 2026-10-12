@@ -118,7 +118,7 @@ import {
   findNearestWasteTurretAndWaste, getRecipeBuildingKeyAt, renderTileShape,
   getBuildingCurrentPowerDraw, getBuildingUptimeFraction, applyRecipeToBuilding,
   getChestKeyAt, armChestTrickle, setChestPourMode, findPlacedChestKey,
-  getUnlockedWorldH,
+  getUnlockedWorldH, getFanConeGeometry,
 } from './Grid.js';
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
@@ -138,7 +138,27 @@ const BUILDING_MODAL_SIDE_GAP_PX = 10; // gap between the building and a pop-up 
 // LEFT, and finally above with the card clamped into the screen. The card's real size is
 // measured each call (transforms don't affect offsetWidth/Height, so this is right even
 // mid fly-out). The anchor's modal-side-right/-left class picks the matching CSS transform.
-function placeBuildingModal(state, anchorEl, menuEl, worldX, worldTopY) {
+// A fan's pop-up also passes its aim cone (screen coords): among the placements that fit on
+// screen (never going off screen is the priority) it takes the one covering the least of the
+// cone, and may also sit BELOW the fan. Ties keep the order above, so a cone-free caller
+// behaves exactly as before.
+const MODAL_CONE_SAMPLES_X = 7;
+const MODAL_CONE_SAMPLES_Y = 5;
+// Fraction of a card's rectangle that lies inside the cone wedge, sampled on a small grid.
+function modalConeOverlap(cone, left, top, w, h) {
+  let hit = 0;
+  for (let iy = 0; iy < MODAL_CONE_SAMPLES_Y; iy++) {
+    const py = top + ((iy + 0.5) / MODAL_CONE_SAMPLES_Y) * h - cone.y;
+    for (let ix = 0; ix < MODAL_CONE_SAMPLES_X; ix++) {
+      const px = left + ((ix + 0.5) / MODAL_CONE_SAMPLES_X) * w - cone.x;
+      const d = Math.hypot(px, py);
+      if (d > cone.range) continue;
+      if (d < 1e-6 || (px * Math.cos(cone.angle) + py * Math.sin(cone.angle)) / d >= cone.cosHalf) hit++;
+    }
+  }
+  return hit / (MODAL_CONE_SAMPLES_X * MODAL_CONE_SAMPLES_Y);
+}
+function placeBuildingModal(state, anchorEl, menuEl, worldX, worldTopY, cone = null) {
   const screen = worldToScreen(worldX, worldTopY, state.camera);
   const tilePx = TILE_SIZE * state.camera.zoom;
   const w = menuEl.offsetWidth;
@@ -146,18 +166,43 @@ function placeBuildingModal(state, anchorEl, menuEl, worldX, worldTopY) {
   const m = BUILDING_MODAL_EDGE_MARGIN_PX;
   const vw = window.innerWidth;
   const vh = window.innerHeight;
-  const fitsAbove = screen.y - MOUND_MENU_GAP_PX - h >= m && screen.x - w / 2 >= m && screen.x + w / 2 <= vw - m;
+  const fitsX = screen.x - w / 2 >= m && screen.x + w / 2 <= vw - m;
   const rightX = screen.x + tilePx / 2 + BUILDING_MODAL_SIDE_GAP_PX;
   const leftX = screen.x - tilePx / 2 - BUILDING_MODAL_SIDE_GAP_PX;
-  const placement = fitsAbove ? 'top' : (rightX + w <= vw - m ? 'right' : (leftX - w >= m ? 'left' : 'top'));
+  const sideY = Math.max(m + h / 2, Math.min(vh - m - h / 2, screen.y + tilePx / 2)); // a side card's vertical center
+  const topY = screen.y - MOUND_MENU_GAP_PX - h; // the card's top edge when sitting above / below the building
+  const bottomY = screen.y + tilePx + MOUND_MENU_GAP_PX;
+  const fitsTop = topY >= m;
+  const fitsRight = rightX + w <= vw - m;
+  const fitsLeft = leftX - w >= m;
+  let placement = fitsTop && fitsX ? 'top' : (fitsRight ? 'right' : (fitsLeft ? 'left' : 'top'));
+  if (cone !== null) {
+    // Every placement that keeps the whole card on screen, scored by how much of the cone it
+    // covers (an above/below card that has to slide sideways to stay on screen pays a tiny extra
+    // so the centered one wins ties). The first of the best keeps the order top, right, left, below.
+    const clampedLeft = Math.max(m, Math.min(vw - w - m, screen.x - w / 2));
+    const candidates = [
+      ['top', fitsTop && w <= vw - 2 * m, clampedLeft, topY, fitsX ? 0 : 0.03],
+      ['right', fitsRight, rightX, sideY - h / 2, 0],
+      ['left', fitsLeft, leftX - w, sideY - h / 2, 0],
+      ['bottom', bottomY + h <= vh - m && w <= vw - 2 * m, clampedLeft, bottomY, fitsX ? 0 : 0.03],
+    ];
+    let best = Infinity;
+    for (const [candidate, fits, left, top, penalty] of candidates) {
+      if (!fits) continue;
+      const score = modalConeOverlap(cone, left, top, w, h) + penalty;
+      if (score < best - 1e-9) { best = score; placement = candidate; }
+    }
+  }
   anchorEl.classList.toggle('modal-side-right', placement === 'right');
   anchorEl.classList.toggle('modal-side-left', placement === 'left');
-  if (placement === 'top') {
+  anchorEl.classList.toggle('modal-side-bottom', placement === 'bottom');
+  if (placement === 'top' || placement === 'bottom') {
     anchorEl.style.left = `${Math.max(w / 2 + m, Math.min(vw - w / 2 - m, screen.x))}px`;
-    anchorEl.style.top = `${screen.y - MOUND_MENU_GAP_PX}px`;
+    anchorEl.style.top = placement === 'top' ? `${screen.y - MOUND_MENU_GAP_PX}px` : `${bottomY}px`;
   } else {
     anchorEl.style.left = `${placement === 'right' ? rightX : leftX}px`;
-    anchorEl.style.top = `${Math.max(m + h / 2, Math.min(vh - m - h / 2, screen.y + tilePx / 2))}px`;
+    anchorEl.style.top = `${sideY}px`;
   }
 }
 const MOUND_MENU_GAP_PX = 12; // screen px of breathing room between the popup's bottom edge and the Mound's top edge
@@ -1683,7 +1728,15 @@ function activeFilterTarget(state) {
 function updatePlatformFilterMenuPosition(state) {
   const target = activeFilterTarget(state);
   if (!target) return;
-  placeBuildingModal(state, els.platformFilterAnchor, els.platformFilterMenu, target.worldX, target.worldY);
+  let cone = null;
+  if (target.isFan) {
+    const g = getFanConeGeometry(state, platformFilterTileKey);
+    if (g) {
+      const c = worldToScreen(g.x, g.y, state.camera);
+      cone = { x: c.x, y: c.y, angle: g.angle, range: g.range * state.camera.zoom, cosHalf: Math.cos(g.halfAngle) };
+    }
+  }
+  placeBuildingModal(state, els.platformFilterAnchor, els.platformFilterMenu, target.worldX, target.worldY, cone);
 }
 
 // One filter-grid button (real item art + label + check/X badge) — shared by
@@ -5305,7 +5358,9 @@ function buildingStatsHtml(buildingId, state = null) {
     html =
       buildingStatLine(`${itemIconImgHtml('coin')} Coin time`, `${p.coinMs / 1000}s`, familyBar('time', 'coinTime', true)) +
       buildingStatLine(`${itemIconImgHtml('science')} Science time`, `${p.scienceMs / 1000}s`, familyBar('time', 'scienceTime', true)) +
-      buildingStatLine(`${itemIconImgHtml('science_green')} Green time`, `${p.scienceGreenMs / 1000}s`, familyBar('time', 'greenTime', true)) +
+      (p.scienceGreenMs != null
+        ? buildingStatLine(`${itemIconImgHtml('science_green')} Green time`, `${p.scienceGreenMs / 1000}s`, familyBar('time', 'greenTime', true))
+        : `<div class="building-stat">${itemIconImgHtml('science_green')} Green time: <b>Can't collect</b>${statBarHtml('time', 0, 0)}</div>`) +
       buildingPowerLine(buildingId, placed, 'Coin power', p.powerCostPerSecCoin, 's') +
       buildingPowerLine(buildingId, placed, 'Science power', p.powerCostPerSecScience, 's');
   } else if (f) {
@@ -5512,8 +5567,12 @@ function buildShopPanel(state) {
       if (state.ui.selectedTool === `fish:${species.id}`) deselectShopSelection(state);
       else selectSpeciesForPreview(state, species);
       // Game-start guided tutorial's second step stops specifically on the
-      // Guppy icon — see TUTORIAL_FLOWS.
-      if (species.id === 'guppy') advanceTutorialFlow(state, 'start', 'guppy');
+      // Guppy icon — see TUTORIAL_FLOWS. Per direct request the Shop closes
+      // right after the fish is chosen, so the tank is clear to place it.
+      if (species.id === 'guppy' && state.level.tutorialFlow?.id === 'start' && state.level.tutorialFlow.step === 'guppy') {
+        advanceTutorialFlow(state, 'start', 'guppy');
+        closeSidePanels(state);
+      }
     });
 
     els.shopGrid.appendChild(btn);
@@ -6301,20 +6360,23 @@ function tutorialCircleForDom(el, padding = 12) {
 }
 
 // Per direct report ("the first tutorial breaks if the player scrolls down
-// first") — a FIXED world-Y target (this used to be a plain constant,
-// SEABED_FLOOR_Y * 0.15) could scroll off the top of the screen entirely if
-// the camera had already panned down before reaching this step, leaving the
-// spotlight (and its clickable hole) unreachable. Anchored to the CURRENT
-// camera position instead: a small fixed offset below whatever's at the top
-// of the viewport right now (so it tracks scrolling and is always on
-// screen), clamped so it never crosses into the seabed city — has to stay
-// valid open water for the fish placement to actually succeed. Still
-// deliberately near the TOP of the current view, not dead center: the Shop
-// panel is open at this point (that's how the player has a fish armed to
-// place at all) and its fly-out box grows upward from the bottom tool-bar
-// tall enough to cover a good chunk of the screen's vertical middle.
+// first") — a FIXED world-Y target could scroll off the top of the screen
+// entirely if the camera had already panned down before reaching this step,
+// leaving the spotlight (and its clickable hole) unreachable. Per direct
+// request the fish now goes in the MIDDLE of the tank rather than the very
+// top (the Shop closes as soon as the Guppy is chosen, so it no longer covers
+// the middle of the screen): the middle of the water column, nudged just
+// enough to stay on screen — clear of the top edge and the bottom tool-bar —
+// when the camera isn't showing it, and never into the seabed city (has to
+// stay valid open water for the placement to succeed).
+const START_TUTORIAL_SPOT_TOP_MARGIN_PX = 100; // screen px kept clear above the spotlight
+const START_TUTORIAL_SPOT_BOTTOM_MARGIN_PX = 190; // screen px kept clear below it (the bottom tool-bar plus the spotlight's own radius)
 function startTutorialFishSpotWorld(state) {
-  return { x: WORLD_W / 2, y: Math.min(state.camera.y + 100, SEABED_FLOOR_Y - 50) };
+  const zoom = state.camera.zoom;
+  const visibleTop = state.camera.y + START_TUTORIAL_SPOT_TOP_MARGIN_PX / zoom;
+  const visibleBottom = state.camera.y + (window.innerHeight - START_TUTORIAL_SPOT_BOTTOM_MARGIN_PX) / zoom;
+  const y = Math.max(visibleTop, Math.min(SEABED_FLOOR_Y / 2, visibleBottom));
+  return { x: WORLD_W / 2, y: Math.min(y, SEABED_FLOOR_Y - 50) };
 }
 // Horizontally centered, per direct request ("the placement spot for the
 // turret in the turret tutorial should be in the middle of the city"). This

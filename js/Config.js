@@ -340,6 +340,8 @@ export const GRID_SWEEP_SUBSTEP = TILE_SIZE / 4; // px — every swept move is w
 // angle, not radiating outward from its center like an explosion), narrowing
 // force linearly to 0 at max range.
 export const FAN_CONE_HALF_ANGLE_DEG = 24; // total cone width = 2x this = 48° (was 15/30°, then 20/40°, then 25/50°, then 28/56° — narrowed a few degrees per direct request)
+export const FAN_CONE_ALPHA = 0.0972; // how opaque a fan's always-on aim cone is (was 0.12, then 0.108, then another 10% lower per direct request)
+export const FAN_CONE_HIGHLIGHT_ALPHA = 0.2; // the same cone while that fan's own filter pop-up is open
 // Placeholder balance per tier, same as every other economy/physics constant
 // in this file — tune once real playtesting exists. Power cost is drawn
 // unconditionally while a Fan is placed (Grid.js's computeCurrentPowerDemand)
@@ -1844,12 +1846,12 @@ export const BUILDING_TYPES = {
   // Bio Collector) unchanged. Base cost unchanged at 40.
   [TILE_COLLECTOR]: {
     id: TILE_COLLECTOR, name: 'Collector', icon: '🧲', cost: 40,
-    description: 'Auto-banks coins and Science that touch it.',
+    description: 'Auto-banks coins and Blue Science that touch it. No Green Science.',
     color: '#8fe0b8', unlockedByDefault: false,
   },
   [TILE_COLLECTOR_ELECTRIC]: {
     id: TILE_COLLECTOR_ELECTRIC, name: 'Advanced Collector', icon: '🧲', cost: 60,
-    description: 'Banks faster than the base Collector.',
+    description: 'Banks faster than the base Collector, and takes Green Science too.',
     color: '#5fb8ff', unlockedByDefault: false,
   },
   [TILE_COLLECTOR_ADVANCED]: {
@@ -1990,6 +1992,8 @@ export const BUILDING_FAMILIES = {
 // science takes 30 seconds for the base collector... 20 seconds for the
 // advanced... 12 seconds for the bio collector") — it used to just share
 // scienceMs; now every tier gets its own explicit value instead.
+// The base Collector has no scienceGreenMs at all: per direct request it can't collect
+// Green Science, only the Advanced and Bio Collector can (Grid.js's intake scan skips it).
 // powerCostPerSecCoin/powerCostPerSecScience are drawn only while the tile
 // is actively processing that exact kind of item, never while idle/empty,
 // and not gated on actual power availability, same not-yet-power-gated
@@ -2006,7 +2010,7 @@ export const BUILDING_FAMILIES = {
 // state.level.buildingData wasteAccumMs field) is removed entirely, not just
 // zeroed. coinMs set to the exact requested 9/6/4 seconds across the 3 tiers.
 export const PROCESSOR_STATS = {
-  [TILE_COLLECTOR]: { coinMs: 9000, scienceMs: 20000, scienceGreenMs: 30000, powerCostPerSecCoin: 2, powerCostPerSecScience: 4 },
+  [TILE_COLLECTOR]: { coinMs: 9000, scienceMs: 20000, powerCostPerSecCoin: 2, powerCostPerSecScience: 4 }, // no scienceGreenMs: the base Collector can't take Green Science at all (per direct request)
   [TILE_COLLECTOR_ELECTRIC]: { coinMs: 6000, scienceMs: 15000, scienceGreenMs: 20000, powerCostPerSecCoin: 10, powerCostPerSecScience: 20 },
   [TILE_COLLECTOR_ADVANCED]: { coinMs: 4000, scienceMs: 9000, scienceGreenMs: 12000, powerCostPerSecCoin: 20, powerCostPerSecScience: 40 },
 };
@@ -2571,7 +2575,7 @@ export const SCIENCE_LAB_UPGRADES = {
   // arrays reference, not a player-facing "mention."
   electric_collector: {
     id: 'electric_collector', name: 'Advanced Collector', icon: '🧲', scienceCost: 100, goldCost: 5000,
-    requires: ['science_cap_2'], grants: { buildings: [TILE_COLLECTOR_ELECTRIC] },
+    requires: ['science_cap_3'], grants: { buildings: [TILE_COLLECTOR_ELECTRIC] }, // per direct request: locked behind Science Cap 60 (was Cap 40)
   },
   // Grants TILE_REFINERY_ELECTRIC, now displayed "Advanced Refinery" (see
   // BUILDING_TYPES' Refinery-family rename) — same "keep the id, sync the
@@ -2584,10 +2588,12 @@ export const SCIENCE_LAB_UPGRADES = {
     id: 'advanced_fan', name: 'Advanced Fan', icon: '🌪️', scienceCost: 200, goldCost: 15000,
     requires: ['electric_fan'], grants: { buildings: [TILE_FAN_T4] },
   },
-  // Grants TILE_COLLECTOR_ADVANCED, now displayed "Bio Collector."
+  // Grants TILE_COLLECTOR_ADVANCED, now displayed "Bio Collector." Per direct request it is
+  // locked behind Science Cap 100 (on top of the Advanced Collector) and costs Green Science
+  // too — half its Blue Science cost, the same convention every other Green Science node uses.
   advanced_collector: {
-    id: 'advanced_collector', name: 'Bio Collector', icon: '🧲', scienceCost: 500, goldCost: 25000,
-    requires: ['electric_collector'], grants: { buildings: [TILE_COLLECTOR_ADVANCED] },
+    id: 'advanced_collector', name: 'Bio Collector', icon: '🧲', scienceCost: 500, scienceGreenCost: 250, goldCost: 25000,
+    requires: ['electric_collector', 'science_cap_5'], grants: { buildings: [TILE_COLLECTOR_ADVANCED] },
   },
   // Per direct request — Tier 1 Storage Chest is granted by the Mound's own
   // $75 tease (see Mound.js), not the Lab; these 2 nodes are its only
@@ -2743,8 +2749,8 @@ export const SCIENCE_LAB_UPGRADES = {
   // requiring only `electric_refinery`) is deleted outright — Bio Refinery
   // now has exactly one home in the tree, this one.
   bio_refinery: {
-    id: 'bio_refinery', name: 'Bio Refinery', icon: '⚗️', scienceCost: 200, scienceGreenCost: 100, goldCost: 20000,
-    requires: ['green_science_tech'], grants: { buildings: [TILE_REFINERY_ADVANCED] },
+    id: 'bio_refinery', name: 'Bio Refinery', icon: '⚗️', scienceCost: 200, goldCost: 20000,
+    requires: ['science_cap_4'], grants: { buildings: [TILE_REFINERY_ADVANCED] }, // per direct request: locked behind Science Cap 80 instead of Green Science Tech, and no Green Science cost
   },
 
   // ---- Gene-Splicing hybrids — completely reworked, per direct request ----

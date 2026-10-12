@@ -2367,6 +2367,9 @@ body.time-paused #time-pause-overlay { opacity: 1; }
 #platform-filter-anchor.modal-side-right #platform-filter-menu, #storage-chest-anchor.modal-side-right #storage-chest-menu { transform-origin: 0% 50%; }
 #recipe-menu-anchor.modal-side-left #recipe-menu, #building-info-anchor.modal-side-left #building-info-menu,
 #platform-filter-anchor.modal-side-left #platform-filter-menu, #storage-chest-anchor.modal-side-left #storage-chest-menu { transform-origin: 100% 50%; }
+/* Below-the-building placement — only the Fan filter uses it (placeBuildingModal's cone-avoidance). */
+#platform-filter-anchor.modal-side-bottom { transform: translate(-50%, 0); }
+#platform-filter-anchor.modal-side-bottom #platform-filter-menu { transform-origin: 50% 0%; }
 #platform-filter-items {
   display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;
   margin-bottom: 10px;

@@ -210,7 +210,7 @@ import {
   BOSS_DEATH_SCIENCE_COUNT,
   BOSS_DEATH_SCIENCE_GREEN_COUNT,
 } from './Config.js';
-import { beginItemPhysicsStep, stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemForces, updateBuildings, findChestTutorialWasteSpot } from './Grid.js';
+import { beginItemPhysicsStep, setExtraItemForce, stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemForces, updateBuildings, findChestTutorialWasteSpot } from './Grid.js';
 import { spawnCoinPickupBubbles } from './Ambience.js';
 import { pushGameNotification } from './Notifications.js';
 // Sound is a fire-and-forget side effect at the moment something already
@@ -2790,8 +2790,9 @@ function updateScience(item, state, dtMs) {
 // same UI/semantics as a Platform's own filterItems — see UI.js's
 // refreshFishInfoFilterGrid), and only pulls an item whose type is checked
 // into that list. Open-water-only, unchanged — a Magnet Fish can never swim
-// into the seabed city any more than any other fish can, so anything
-// already settled down there is just as unreachable to this as before.
+// into the seabed city any more than any other fish can, but its pull still reaches
+// down into the city: Grid.js's stepItemOnGrid adds it for city items too (cityMagnetForce
+// below, per direct request) — items in range are pulled out of the city toward the fish.
 // Returns the same { fx, fy } shape computeFanForce does, so the two can be
 // summed before integrateItemForces (see computeEnvironmentalForce below).
 // Per direct request (frame rate): every item used to scan EVERY entity each tick just to find the (usually
@@ -2853,6 +2854,15 @@ function computeBufferFishMagnetForce(state, item) {
 // mass EXPONENT, not a flat 50% force cut, which is what actually narrows
 // the gap between how a heavy item and a light item respond to the magnet.
 // Fan force itself is completely untouched.
+// The same sqrt(mass)-adjusted magnet pull, for items in the city: Grid.js's stepItemOnGrid
+// adds this to the fan force (per direct request, the magnet pulls things out of the city
+// too). null when this item feels no pull, so the common case allocates nothing.
+function cityMagnetForce(state, item) {
+  const f = computeBufferFishMagnetForce(state, item);
+  if (f.fx === 0 && f.fy === 0) return null;
+  const adjust = Math.sqrt(item.mass);
+  return { fx: f.fx * adjust, fy: f.fy * adjust };
+}
 function computeEnvironmentalForce(state, item) {
   const fanForce = computeFanForce(state, item);
   const magnetForce = computeBufferFishMagnetForce(state, item);
@@ -4254,6 +4264,7 @@ function isItemFarFromView(item, camera) {
 export function updateEntities(state, dtMs) {
   updateLoadMode(state);
   beginItemPhysicsStep(state); // per-step prep for item sleeping + the fan cache — see Grid.js
+  setExtraItemForce(activeMagnetFish(state).length > 0 ? cityMagnetForce : null); // a Magnet Fish's pull also reaches items in the city
   maybeWarnBioSludgePile(state);
   updateAlienPortals(state);
   updateAlienDeathEffects(state, dtMs);
