@@ -716,8 +716,24 @@ function finish(skipped) {
   if (cb) cb();
 }
 
+// Per direct request the splash plays on the first load and on a browser refresh, but not when the pause menu's
+// Main Menu button reloads the page: that button calls this just before reloading, and the next runStudioIntro
+// consumes the flag. (sessionStorage, so it only ever survives that one reload.)
+const SKIP_NEXT_KEY = 'finsanity_skip_studio_intro';
+export function skipStudioIntroOnNextLoad() {
+  try { sessionStorage.setItem(SKIP_NEXT_KEY, '1'); } catch { /* storage blocked: the intro just plays again */ }
+}
+function consumeSkipFlag() {
+  try {
+    const skip = sessionStorage.getItem(SKIP_NEXT_KEY) === '1';
+    if (skip) sessionStorage.removeItem(SKIP_NEXT_KEY);
+    return skip;
+  } catch { return false; }
+}
+
 // Opens the splash; onDone fires once, whether it ended by itself or was skipped.
 export function runStudioIntro(onDone) {
+  if (consumeSkipFlag()) { onDone(); return; }
   overlayEl = document.getElementById('studio-intro');
   canvasEl = document.getElementById('studio-intro-canvas');
   ctx = canvasEl.getContext('2d');

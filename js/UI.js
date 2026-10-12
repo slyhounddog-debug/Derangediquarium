@@ -2,6 +2,7 @@
 // explicit user actions (buy, toggle). Forbidden: no simulation logic —
 // this module must never tick hunger, gravity, or timers itself.
 
+import { skipStudioIntroOnNextLoad } from './StudioIntro.js';
 import {
   SEABED_FLOOR_Y,
   FOOD_COST,
@@ -3192,7 +3193,7 @@ export function initStartScreen(state, onStart) {
   });
   initWorldSettingsUI(state);
   els.startWarnContinueBtn.addEventListener('click', () => {
-    if (mainMenuWarningOpen) { window.location.reload(); return; } // the pause menu's Main Menu warning: Continue = go
+    if (mainMenuWarningOpen) { skipStudioIntroOnNextLoad(); window.location.reload(); return; } // the pause menu's Main Menu warning: Continue = go
     showStartModeStep(false);
     playPanelOpen();
   });
