@@ -1,0 +1,31 @@
+name: Deploy to itch.io
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Only the files the game loads at runtime. server.js is a local dev
+      # server; node_modules, tools/, CLAUDE.md etc. stay out of the build.
+      - name: Stage game files
+        run: |
+          mkdir dist
+          cp -r index.html css js audio dist/
+          cp "lighting effect.mp4" dist/
+
+      - name: Install butler
+        run: |
+          curl -L -o butler.zip https://broth.itch.zone/butler/linux-amd64/LATEST/archive/default
+          unzip butler.zip
+          chmod +x butler
+
+      - name: Push to itch.io
+        env:
+          BUTLER_API_KEY: ${{ secrets.BUTLER_API_KEY }}
+        run: ./butler push dist zarstine/finsanity:html5
