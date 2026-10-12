@@ -1241,6 +1241,18 @@ export const EYE_SOCKET_RADIUS_RATIO = 0.14; // white of the eye, relative to si
 export const EYE_PUPIL_RADIUS_RATIO = 0.07; // pupil, relative to size
 export const EYE_PUPIL_OFFSET_RATIO = 0.5; // how far the pupil can travel from the socket's center, as a fraction of the socket radius
 
+// Flat teardrop look for the 3 base feeders (Guppy/Dartfin/Blimpfish) only — per direct request (clean
+// flat-colour vector fish: thin uniform dark outline, teardrop body, small dorsal fin, big eye, soft top
+// gloss). Render-only (FishRenderer.js's drawStandardBody): the front tip and body size that hats, hit and
+// eat radii anchor to are unchanged, and the baked-sprite cache key is unchanged.
+export const FISH_FLAT_OUTLINE_RATIO = 0.035; // outline width relative to fish size, clamped between the next two
+export const FISH_FLAT_OUTLINE_MIN_PX = 1; // thinnest outline (babies)
+export const FISH_FLAT_OUTLINE_MAX_PX = 2; // thickest outline (big Tier 3+ adults), so it stays a thin uniform line
+export const FISH_FLAT_TAPER = 0.35; // 0 = plain oval, higher = the back half narrows more toward the tail (teardrop)
+export const FISH_FLAT_DORSAL_HEIGHT_RATIO = 0.16; // dorsal fin height above the body's top edge, relative to size
+export const FISH_FLAT_GLOSS_ALPHA = 0.3; // opacity of the soft highlight along the body's top edge
+export const FISH_FLAT_EYE_SCALE = 1.3; // eye socket + pupil size multiplier vs. the shared EYE_*_RATIO values
+
 // ---- Tank Points & Tank Upgrades (Phase 2) ----
 // state.level.tankPoints = { total, available } — level-scoped like every
 // other progression currency introduced this phase (Tier, money), not

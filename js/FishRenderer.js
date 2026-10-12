@@ -47,6 +47,13 @@ import {
   FISH_ORBIT_RING_WIDTH_RATIO,
   ECONOMY_SPECIES_IDS,
   FISH_TIER4_SIZE_MULTIPLIER,
+  FISH_FLAT_OUTLINE_RATIO,
+  FISH_FLAT_OUTLINE_MIN_PX,
+  FISH_FLAT_OUTLINE_MAX_PX,
+  FISH_FLAT_TAPER,
+  FISH_FLAT_DORSAL_HEIGHT_RATIO,
+  FISH_FLAT_GLOSS_ALPHA,
+  FISH_FLAT_EYE_SCALE,
 } from './Config.js';
 
 function hexToRgb(hex) {
@@ -115,6 +122,14 @@ function setLitFill(ctx, cx, cy, r, color, facing) {
   g.addColorStop(0, tone(color, 0.24));
   g.addColorStop(1, tone(color, -0.22));
   ctx.fillStyle = g;
+}
+// The flat look's outline: same dark shade of the fish's own color as strokeRim, but a uniform 1-2px line
+// (Config.js's FISH_FLAT_OUTLINE_*) however big the fish grows.
+function strokeFlatOutline(ctx, color, size) {
+  ctx.strokeStyle = tone(color, -0.5);
+  ctx.lineWidth = Math.min(FISH_FLAT_OUTLINE_MAX_PX, Math.max(FISH_FLAT_OUTLINE_MIN_PX, size * FISH_FLAT_OUTLINE_RATIO));
+  ctx.lineJoin = 'round';
+  ctx.stroke();
 }
 // Strokes the CURRENT path with the darker rim.
 function strokeRim(ctx, color, size) {
@@ -759,10 +774,14 @@ const BODY_SHAPE_RATIOS = {
   round: { bodyW: 0.56, bodyH: 0.48, tailLen: 0.85, tailWidth: 1.15 }, // Blimpfish — a rounder, plumper belly and a stubbier, broader tail
 };
 
-function drawStandardBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGrown, color, eyeDirection, bodyShape = 'normal') {
+// flat = the base feeders' flat teardrop look (see Config.js's FISH_FLAT_*): flat fills, one thin uniform
+// outline, a dorsal fin, a teardrop body and a top-edge gloss instead of the lit gradient. Same tail geometry
+// and animation either way, and the same front tip / body size, so hats and the mouth anchor don't move.
+function drawStandardBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGrown, color, eyeDirection, bodyShape = 'normal', flat = false) {
   const shape = BODY_SHAPE_RATIOS[bodyShape] || BODY_SHAPE_RATIOS.normal;
   const bodyRx = size * shape.bodyW;
   const bodyRy = size * shape.bodyH;
+  const outline = flat ? () => strokeFlatOutline(ctx, color, size) : () => strokeRim(ctx, color, size);
   // Mid and adult stages get a fin — small at mid, bigger (but still
   // smaller than the old fixed size) at adult. Baby stays plain.
   if (stage >= 1) {
@@ -789,28 +808,68 @@ function drawStandardBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGrow
     ctx.closePath();
     ctx.fill();
     strokeRimBand(ctx, size); // Tier 2+: the tail gets the same lighter inner band as the body, per direct request
-    strokeRim(ctx, color, size);
+    outline();
+    if (flat) {
+      // Small dorsal fin, drawn before the body so the body's fill hides its base and only its outer edge shows.
+      const finH = size * FISH_FLAT_DORSAL_HEIGHT_RATIO * finScale;
+      const topY = y - bodyRy * 0.92;
+      ctx.fillStyle = tone(color, -0.08);
+      ctx.beginPath();
+      ctx.moveTo(x + facing * bodyRx * 0.3, topY);
+      ctx.quadraticCurveTo(x - facing * bodyRx * 0.05, topY - finH * 1.5, x - facing * bodyRx * 0.5, topY - finH * 0.2);
+      ctx.lineTo(x - facing * bodyRx * 0.35, topY + finH * 0.4);
+      ctx.closePath();
+      ctx.fill();
+      strokeRimBand(ctx, size);
+      outline();
+    }
   }
 
   ctx.beginPath();
-  ctx.ellipse(x, y, bodyRx, bodyRy, 0, 0, Math.PI * 2);
-  setLitFill(ctx, x, y, bodyRx, color, facing);
+  if (flat) {
+    // Teardrop: the front half is the plain ellipse; the back half narrows toward the tail by FISH_FLAT_TAPER.
+    const K = 0.5523; // quarter-ellipse bezier handle
+    const frontX = x + facing * bodyRx;
+    const backX = x - facing * bodyRx;
+    const topX = x + facing * bodyRx * 0.1;
+    const pinch = 1 - FISH_FLAT_TAPER;
+    ctx.moveTo(frontX, y);
+    ctx.bezierCurveTo(frontX, y - bodyRy * K, topX + facing * bodyRx * 0.9 * K, y - bodyRy, topX, y - bodyRy);
+    ctx.bezierCurveTo(topX - facing * bodyRx * 0.6, y - bodyRy, backX + facing * bodyRx * 0.35, y - bodyRy * 0.5 * pinch, backX, y);
+    ctx.bezierCurveTo(backX + facing * bodyRx * 0.35, y + bodyRy * 0.5 * pinch, topX - facing * bodyRx * 0.6, y + bodyRy, topX, y + bodyRy);
+    ctx.bezierCurveTo(topX + facing * bodyRx * 0.9 * K, y + bodyRy, frontX, y + bodyRy * K, frontX, y);
+    ctx.closePath();
+    ctx.fillStyle = color;
+  } else {
+    ctx.ellipse(x, y, bodyRx, bodyRy, 0, 0, Math.PI * 2);
+    setLitFill(ctx, x, y, bodyRx, color, facing);
+  }
   ctx.fill();
   strokeRimBand(ctx, size);
-  strokeRim(ctx, color, size);
+  outline();
+  if (flat) {
+    // Soft highlight hugging the top edge (a thin crescent-like ellipse) for a glossy underwater look.
+    ctx.fillStyle = `rgba(255, 255, 255, ${FISH_FLAT_GLOSS_ALPHA})`;
+    ctx.beginPath();
+    ctx.ellipse(x + facing * bodyRx * 0.05, y - bodyRy * 0.62, bodyRx * 0.52, bodyRy * 0.15, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
   // A small glossy highlight on top of the lit gradient — per direct request
   // that fish "pop more and look less flat." Scaled proportionally to the
   // body's own (possibly non-default) width/height, so it still tracks a
   // slimmer or rounder silhouette correctly.
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.32)';
-  ctx.beginPath();
-  ctx.ellipse(x - facing * size * shape.bodyW * 0.2, y - size * shape.bodyH * 0.4, size * shape.bodyW * 0.37, size * shape.bodyH * 0.3, 0, 0, Math.PI * 2);
-  ctx.fill();
+  if (!flat) {
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.32)';
+    ctx.beginPath();
+    ctx.ellipse(x - facing * size * shape.bodyW * 0.2, y - size * shape.bodyH * 0.4, size * shape.bodyW * 0.37, size * shape.bodyH * 0.3, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
 
   if (isFullyGrown) {
+    const eyeScale = flat ? FISH_FLAT_EYE_SCALE : 1;
     const eyeX = x + facing * size * EYE_OFFSET_X_RATIO;
     const eyeY = y - size * EYE_OFFSET_Y_RATIO;
-    drawEye(ctx, eyeX, eyeY, size * EYE_SOCKET_RADIUS_RATIO, size * EYE_PUPIL_RADIUS_RATIO, eyeDirection);
+    drawEye(ctx, eyeX, eyeY, size * EYE_SOCKET_RADIUS_RATIO * eyeScale, size * EYE_PUPIL_RADIUS_RATIO * eyeScale, eyeDirection);
   }
 }
 
@@ -1329,7 +1388,7 @@ function drawFishBody(ctx, x, y, speciesId, stage, facing, tailPhase, eyeDirecti
     // non-special species.
     const shapeSourceId = def.parents ? def.parents[1] : speciesId;
     const bodyShape = shapeSourceId === 'dartfin' ? 'slim' : shapeSourceId === 'blimpfish' ? 'round' : 'normal';
-    drawStandardBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGrown, color, eyeDirection, bodyShape);
+    drawStandardBody(ctx, x, y, size, facing, tailPhase, stage, isFullyGrown, color, eyeDirection, bodyShape, ECONOMY_SPECIES.has(speciesId)); // flat look: base feeders only (hybrids/utility babies keep the lit look)
     const stdShape = BODY_SHAPE_RATIOS[bodyShape] || BODY_SHAPE_RATIOS.normal;
     headX = x + facing * size * stdShape.bodyW * 0.15;
     headY = y - size * stdShape.bodyH * 0.85;
