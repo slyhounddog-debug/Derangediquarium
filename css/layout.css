@@ -140,3 +140,23 @@ div:nth-child(24) > div.achievement-desc {
 #start-mode-exp-canvas {
   width: 150px !important;
 }
+
+#start-help-btn {
+  translate: 0px 45px !important;
+}
+
+#start-settings-btn {
+  translate: 0px 40px !important;
+}
+
+#start-achievements-btn {
+  translate: 0px 35px !important;
+}
+
+#start-continue-btn {
+  translate: 0px 30px !important;
+}
+
+#start-new-game-btn {
+  translate: 0px 25px !important;
+}

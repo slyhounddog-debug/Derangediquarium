@@ -225,6 +225,36 @@
       "text": {
         "2": " — jump straight in with no hand-holding (also in settings)."
       }
+    },
+    {
+      "sel": "#start-help-btn",
+      "css": {
+        "translate": "0px 45px"
+      }
+    },
+    {
+      "sel": "#start-settings-btn",
+      "css": {
+        "translate": "0px 40px"
+      }
+    },
+    {
+      "sel": "#start-achievements-btn",
+      "css": {
+        "translate": "0px 35px"
+      }
+    },
+    {
+      "sel": "#start-continue-btn",
+      "css": {
+        "translate": "0px 30px"
+      }
+    },
+    {
+      "sel": "#start-new-game-btn",
+      "css": {
+        "translate": "0px 25px"
+      }
     }
   ]
 }
