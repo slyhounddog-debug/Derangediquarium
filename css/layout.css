@@ -133,6 +133,15 @@ div:nth-child(24) > div.achievement-desc {
   font-size: 28px !important;
 }
 
+#start-mode-modal.warn {
+  width: 550px !important;
+  height: 275px !important;
+}
+
+#start-mode-modal.warn #start-mode-title {
+  font-size: 26px !important;
+}
+
 #start-mode-new-canvas {
   width: 150px !important;
 }
@@ -142,6 +151,10 @@ div:nth-child(24) > div.achievement-desc {
 }
 
 #start-help-btn {
+  translate: 0px 50px !important;
+}
+
+#start-controls-btn {
   translate: 0px 45px !important;
 }
 
@@ -159,4 +172,44 @@ div:nth-child(24) > div.achievement-desc {
 
 #start-new-game-btn {
   translate: 0px 25px !important;
+}
+
+#pause-menu {
+  height: 500px !important;
+}
+
+#pause-menu.controls-open {
+  height: auto !important;
+}
+
+#pause-controls {
+  height: 612px !important;
+}
+
+#pause-controls-list {
+  height: 509px !important;
+  max-height: none !important;
+  translate: 0px -23px !important;
+}
+
+#pause-controls-back-btn {
+  translate: 0px -21px !important;
+}
+
+#shop-panel {
+  height: 600px !important;
+}
+
+#shop-panel-scroll {
+  translate: 0px 0px !important;
+}
+
+#shop-left {
+  height: 518px !important;
+  translate: 0px -14px !important;
+}
+
+#tank-title {
+  height: 65px !important;
+  translate: 0px -7px !important;
 }

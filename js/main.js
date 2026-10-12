@@ -1321,7 +1321,7 @@ window.addEventListener('keydown', resumeAudio, { once: true });
 // Game-start guided tutorial timing. Per direct request (title screen rework),
 // the old "Finsanity" grow-fade splash is gone — TitleScreen.js's bubble-trail
 // exit replaces it — so this now runs off the end of that exit instead of the
-// splash's own animationend, and again off every pause-menu Restart (see
+// splash's own animationend, and again off the boss-victory Restart (see
 // UI.js's restartLevel, which arms state.ui.replayStartTutorialPending).
 const START_TUTORIAL_DELAY_AFTER_SPLASH_MS = 1000; // per direct request (cut from 2000, itself cut from 3000) — the game-start guided tutorial no longer starts the instant Start is clicked; it waits this long after the title has actually left the screen
 function startTutorialAfterDelay() {
@@ -1595,7 +1595,7 @@ const state = {
     toastText: null,
     // Same cross-module-flag pattern as
     // wasteTurretAmmoGainedPending above — set by UI.js's restartLevel
-    // (the pause menu's Restart button) the instant it calls loadLevel, so the
+    // (the boss-victory screen's Restart button) the instant it calls loadLevel, so the
     // guided start tutorial replays after a restart. startTutorialAfterDelay()
     // is a main.js-local function, so UI.js can't call it directly without a
     // circular import — read and cleared by render() below on the very next
@@ -4680,7 +4680,7 @@ function update(dtMs) {
   // Systems.js) and is called from here alone, not from updateStoryTriggers
   // any more, so it's reachable no matter what state the game's in.
   state.level.wallClockMs += dtMs;
-  if (!state.level.gameOver) updateAutosave(state);
+  updateAutosave(state);
   updateBattleMusic(state);
   // Cross-module flag (UI.js's buyLabUpgrade sets it, same pattern
   // state.ui.wasteTurretAmmoGainedPending already established) — the Mother Alien
@@ -4705,12 +4705,9 @@ function update(dtMs) {
   // entirely unreachable while paused (this whole function returns at the
   // very next line whenever state.ui.paused is true), so there was no way to
   // demolish anything while the player had deliberately paused to plan a
-  // layout. Moved up here, ahead of that gate, rather than duplicated —
-  // still skipped once the game's genuinely over (gameOver), same as every
-  // other pause-adjacent action.
-  if (!state.level.gameOver) updateKeyDDelete();
+  // layout. Moved up here, ahead of that gate, rather than duplicated.
+  updateKeyDDelete();
   if (state.ui.paused) return; // frozen behind the pause menu — render() still runs so the tank stays visible
-  if (state.level.gameOver) return; // lost — frozen the same way, but via a separate flag so Escape still reaches the pause menu's Restart without also un-freezing a lost game (see Systems.js's updateBankruptcy)
   // Mother Alien Fish end-game boss sequence — see updateBossSequence's own
   // comment for the full state machine. Called every tick once triggered
   // (not just while frozen) so it can also catch the 'fighting' -> 'defeated'

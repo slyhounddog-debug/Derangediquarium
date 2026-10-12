@@ -13,6 +13,7 @@
     { "id": "world-settings", "label": "Title > New Game > World Settings", "steps": [ { "waitFor": "#start-planks" }, { "click": "#start-new-game-btn" }, { "waitFor": "#save-slots-modal" }, { "click": "#save-slots-list .slot-card:first-child .slot-main" }, { "waitFor": "#start-mode-modal" }, { "click": "#start-world-settings-btn" }, { "waitFor": "#world-settings-modal" } ] },
     { "id": "title-settings", "label": "Title > Settings", "fixture": "midgame", "steps": [ { "waitFor": "#start-planks" }, { "click": "#start-settings-btn" }, { "wait": 600 } ] },
     { "id": "title-help", "label": "Title > Help", "fixture": "midgame", "steps": [ { "waitFor": "#start-planks" }, { "click": "#start-help-btn" }, { "wait": 600 } ] },
+    { "id": "title-controls", "label": "Title > Controls", "fixture": "midgame", "steps": [ { "waitFor": "#start-planks" }, { "click": "#start-controls-btn" }, { "wait": 600 } ] },
     { "id": "title-achievements", "label": "Title > Achievements", "fixture": "midgame", "steps": [ { "waitFor": "#start-planks" }, { "click": "#start-achievements-btn" }, { "wait": 800 } ] },
 
     { "id": "hud", "label": "In game: HUD + toolbar", "fixture": "midgame", "steps": [ { "waitFor": "#start-planks" }, { "click": "#start-continue-btn" }, { "waitFor": "#save-slots-modal" }, { "click": "#save-slots-list .slot-card:first-child .slot-main" }, { "waitFor": "#hud-money", "timeout": 15000 }, { "wait": 1500 }, { "click": "#time-pause-btn" } ] },
@@ -22,6 +23,7 @@
     { "id": "stats", "label": "In game: Base Stats (Tab)", "fixture": "midgame", "steps": [ { "include": "hud" }, { "key": "Tab" }, { "wait": 900 } ] },
     { "id": "pause", "label": "In game: Pause menu (Esc)", "fixture": "midgame", "steps": [ { "include": "hud" }, { "key": "Escape" }, { "waitFor": "#pause-resume-btn" } ] },
     { "id": "pause-settings", "label": "In game: Pause > Settings", "fixture": "midgame", "steps": [ { "include": "hud" }, { "key": "Escape" }, { "waitFor": "#pause-resume-btn" }, { "click": "#pause-settings-btn" }, { "wait": 600 } ] },
+    { "id": "pause-main-menu", "label": "In game: Pause > Main Menu warning", "fixture": "midgame", "steps": [ { "include": "hud" }, { "key": "Escape" }, { "waitFor": "#pause-resume-btn" }, { "click": "#pause-main-menu-btn" }, { "waitFor": "#start-mode-modal.warn" } ] },
     { "id": "pause-controls", "label": "In game: Pause > Controls", "fixture": "midgame", "steps": [ { "include": "hud" }, { "key": "Escape" }, { "waitFor": "#pause-resume-btn" }, { "click": "#pause-controls-btn" }, { "wait": 600 } ] }
   ]
 }

@@ -1,4 +1,4 @@
-// Systems.js — cross-cutting simulation systems: the bankruptcy/game-over
+// Systems.js — cross-cutting simulation systems: the bankruptcy bailout
 // story trigger, and Alien Invasion wave timing/scheduling
 // (updateAlienWaves — genuinely cross-cutting: reads/writes elapsed time,
 // notifications, and pushes into state.level.alienPortals, which Entities.js
@@ -68,8 +68,6 @@ import { pushGameNotification } from './Notifications.js';
 
 const BANKRUPTCY_BAILOUT_MESSAGE =
   "Oopah, looks like someone got their CDL so they could drive the struggle bus! Here's 100 gold to get you back on your feet. I'll be expecting that back (I'm lying).";
-const GAME_OVER_MESSAGE =
-  'My mama always said "Shooting a fish out of water in a barrel with bigger fish to fry" and I always took that to heart. Better luck next time! (Restart in the menu)';
 
 // A thin wrapper around Notifications.js's own pushGameNotification — the
 // one real, shared implementation of the push+cap+dedupe+timestamp logic
@@ -98,32 +96,18 @@ function cheapestAvailablePurchase(state) {
 }
 
 // "No fish left AND can't afford anything in the shop" — the first time
-// this becomes true, a $100 bailout gets the player back on their feet; the
-// second time, it's game over (the sim freezes, same as state.ui.paused,
-// but via the separate state.level.gameOver flag so Escape still reaches
-// the pause menu's Restart button without also un-freezing a lost game).
-// bankruptcyActive gates this to the RISING EDGE of the condition — without
-// it, every tick the condition stayed true would re-trigger the response.
+// this becomes true, a $100 bailout gets the player back on their feet.
+// Per direct request there is no game over any more: once the one loan is
+// spent the game just keeps running (the player can start a new run from the
+// pause menu's Main Menu), and the early return below also means the fish
+// scan/shop-price check stop running every tick after that.
 function updateBankruptcy(state) {
-  if (state.level.gameOver) return;
+  if (state.level.bankruptciesTriggered > 0) return; // the one-time loan is already spent
   const hasFish = state.level.entities.some((e) => e.type === 'fish');
-  const isBroke = !hasFish && state.level.money < cheapestAvailablePurchase(state);
-
-  if (!isBroke) {
-    state.level.bankruptcyActive = false;
-    return;
-  }
-  if (state.level.bankruptcyActive) return; // already handled this occurrence, waiting for it to clear
-  state.level.bankruptcyActive = true;
-  state.level.bankruptciesTriggered += 1;
-
-  if (state.level.bankruptciesTriggered === 1) {
-    state.level.money += BANKRUPTCY_BAILOUT_AMOUNT;
-    pushNotification(state, BANKRUPTCY_BAILOUT_MESSAGE);
-  } else {
-    state.level.gameOver = true;
-    pushNotification(state, GAME_OVER_MESSAGE);
-  }
+  if (hasFish || state.level.money >= cheapestAvailablePurchase(state)) return;
+  state.level.bankruptciesTriggered = 1;
+  state.level.money += BANKRUPTCY_BAILOUT_AMOUNT;
+  pushNotification(state, BANKRUPTCY_BAILOUT_MESSAGE);
 }
 
 // Starts the cinematic first-alien intro's 'alienintro' guided-tutorial flow

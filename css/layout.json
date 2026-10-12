@@ -194,6 +194,19 @@
       }
     },
     {
+      "sel": "#start-mode-modal.warn",
+      "css": {
+        "width": "550px",
+        "height": "275px"
+      }
+    },
+    {
+      "sel": "#start-mode-modal.warn #start-mode-title",
+      "css": {
+        "font-size": "26px"
+      }
+    },
+    {
       "sel": "#start-mode-title",
       "css": {
         "font-size": "28px"
@@ -229,6 +242,12 @@
     {
       "sel": "#start-help-btn",
       "css": {
+        "translate": "0px 50px"
+      }
+    },
+    {
+      "sel": "#start-controls-btn",
+      "css": {
         "translate": "0px 45px"
       }
     },
@@ -254,6 +273,94 @@
       "sel": "#start-new-game-btn",
       "css": {
         "translate": "0px 25px"
+      }
+    },
+    {
+      "sel": "#pause-menu",
+      "css": {
+        "height": "500px"
+      }
+    },
+    {
+      "sel": "#pause-menu.controls-open",
+      "css": {
+        "height": "auto"
+      }
+    },
+    {
+      "sel": "#pause-controls",
+      "css": {
+        "height": "612px"
+      }
+    },
+    {
+      "sel": "#pause-controls-list",
+      "css": {
+        "height": "509px",
+        "max-height": "none",
+        "translate": "0px -23px"
+      }
+    },
+    {
+      "sel": "#pause-controls-back-btn",
+      "css": {
+        "translate": "0px -21px"
+      }
+    },
+    {
+      "sel": "div:nth-child(5) > div:nth-child(2) > span.controls-text",
+      "text": {
+        "0": "Use the armed tool"
+      }
+    },
+    {
+      "sel": "div:nth-child(5) > div:nth-child(4) > span.controls-text",
+      "text": {
+        "0": "Cancel/deselect the active tool or building move"
+      }
+    },
+    {
+      "sel": "div:nth-child(5) > div:nth-child(5) > span.controls-text",
+      "text": {
+        "0": "Move a building, or drag one fish onto another to merge or splice them"
+      }
+    },
+    {
+      "sel": "div:nth-child(5) > div:nth-child(7) > span.controls-text",
+      "text": {
+        "0": "Replace the building under a placement (including group placements)"
+      }
+    },
+    {
+      "sel": "div:nth-child(5) > div:nth-child(9) > span.controls-text",
+      "text": {
+        "0": "Box-select buildings, then click to place them (Right-click or Q puts them back)"
+      }
+    },
+    {
+      "sel": "#shop-panel",
+      "css": {
+        "height": "600px"
+      }
+    },
+    {
+      "sel": "#shop-panel-scroll",
+      "css": {
+        "translate": "0px 0px"
+      }
+    },
+    {
+      "sel": "#shop-left",
+      "css": {
+        "height": "518px",
+        "translate": "0px -14px"
+      }
+    },
+    {
+      "sel": "#tank-title",
+      "css": {
+        "height": "65px",
+        "translate": "0px -7px"
       }
     }
   ]

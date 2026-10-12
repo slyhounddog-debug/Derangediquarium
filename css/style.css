@@ -1819,6 +1819,7 @@ body.time-paused #time-pause-overlay { opacity: 1; }
 .plank-btn:nth-child(3) { --tilt: -0.6deg; --i: 2; }
 .plank-btn:nth-child(4) { --tilt: 1.2deg; --i: 3; }
 .plank-btn:nth-child(5) { --tilt: -0.9deg; --i: 4; }
+.plank-btn:nth-child(6) { --tilt: 0.7deg; --i: 5; }
 .plank-btn:hover:not(:disabled) {
   transform: rotate(0deg) translateY(-4px);
   filter: brightness(1.1);

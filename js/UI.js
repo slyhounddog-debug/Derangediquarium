@@ -567,7 +567,6 @@ export function initUI(state) {
     pauseResumeBtn: document.getElementById('pause-resume-btn'),
     pauseSaveBtn: document.getElementById('pause-save-btn'),
     pauseLoadSaveBtn: document.getElementById('pause-load-save-btn'),
-    pauseRestartBtn: document.getElementById('pause-restart-btn'),
     pauseMainMenuBtn: document.getElementById('pause-main-menu-btn'),
     pauseSettingsBtn: document.getElementById('pause-settings-btn'),
     pauseSettingsBackBtn: document.getElementById('pause-settings-back-btn'),
@@ -684,6 +683,7 @@ export function initUI(state) {
     startNewGameBtn: document.getElementById('start-new-game-btn'),
     startContinueBtn: document.getElementById('start-continue-btn'),
     startSettingsBtn: document.getElementById('start-settings-btn'),
+    startControlsBtn: document.getElementById('start-controls-btn'),
     startModeOverlay: document.getElementById('start-mode-overlay'),
     startModeBackBtn: document.getElementById('start-mode-back-btn'),
     startModeModal: document.getElementById('start-mode-modal'),
@@ -901,7 +901,6 @@ export function initUI(state) {
   els.pauseResumeBtn.addEventListener('click', () => closePauseMenu(state));
   els.pauseSaveBtn.addEventListener('click', () => saveGameFromPause(state));
   els.pauseLoadSaveBtn.addEventListener('click', () => loadLastSaveFromPause(state));
-  els.pauseRestartBtn.addEventListener('click', () => restartLevel(state));
   els.pauseMainMenuBtn.addEventListener('click', () => returnToMainMenuFromPause(state));
   // minimap-expand-btn is wired in main.js now, not here — per direct
   // report, the button was supposed to control the real tank-viewport zoom
@@ -919,10 +918,11 @@ export function initUI(state) {
   els.pauseSettingsBtn.addEventListener('click', () => { showPauseSettings(); playPanelOpen(); });
   els.pauseSettingsBackBtn.addEventListener('click', () => returnFromPauseSettings(state));
   els.pauseControlsBtn.addEventListener('click', () => { showPauseControls(); playPanelOpen(); });
-  els.pauseControlsBackBtn.addEventListener('click', () => { showPauseMain(); playPanelClose(); });
+  els.pauseControlsBackBtn.addEventListener('click', returnFromPauseControls);
   els.pauseOverlay.addEventListener('click', (e) => {
     if (e.target !== els.pauseOverlay) return; // clicked the card, not the backdrop
-    if (settingsOpenedFromStartScreen) returnFromPauseSettings(state);
+    if (controlsOpenedFromStartScreen) returnFromPauseControls();
+    else if (settingsOpenedFromStartScreen) returnFromPauseSettings(state);
     else closePauseMenu(state);
   });
 
@@ -3008,6 +3008,10 @@ function showPauseSettings() {
 // shared "Back"/backdrop-click handling right above so it returns to the
 // start screen instead of resuming gameplay that was never running.
 let settingsOpenedFromStartScreen = false;
+// Same idea for the Controls sub-view — per direct request the start screen's
+// Controls plank re-shows the pause menu's own Controls list rather than a
+// second copy of it.
+let controlsOpenedFromStartScreen = false;
 // Stashed once by initStartScreen — reused by loadLastSaveFromPause's own
 // "opened via the start screen" branch, since that's the one case where
 // loading a save also has to actually kick off gameplay (the game was never
@@ -3029,6 +3033,15 @@ function returnFromPauseSettings(state) {
     return;
   }
   showPauseMain();
+  playPanelClose();
+}
+
+function returnFromPauseControls() {
+  showPauseMain(); // also drops .controls-open, so the next sub-view isn't left at the Controls card's width
+  if (controlsOpenedFromStartScreen) {
+    controlsOpenedFromStartScreen = false;
+    els.pauseOverlay.classList.add('hidden'); // #start-overlay was never hidden underneath it, same as Settings above
+  }
   playPanelClose();
 }
 
@@ -3335,6 +3348,12 @@ export function initStartScreen(state, onStart) {
     showPauseSettings();
     playPanelOpen();
   });
+  els.startControlsBtn.addEventListener('click', () => {
+    controlsOpenedFromStartScreen = true;
+    els.pauseOverlay.classList.remove('hidden');
+    showPauseControls();
+    playPanelOpen();
+  });
   // Help layers over #start-overlay (same pattern as Settings and the Tank
   // panel above) instead of hiding it, so the title art stays behind the
   // overlay's blur; the title animation is paused for the same reason as above.
@@ -3403,7 +3422,7 @@ function restartLevel(state) {
   centerCameraOnMound(state.camera); // loadLevel resets camera.x to 0 — re-center on the Mound, same as the initial load
   refreshShopPanel(state);
   closePauseMenu(state);
-  // Restart re-runs the guided start tutorial, which used to ride on the
+  // Restart (now only the boss-victory screen's button) re-runs the guided start tutorial, which used to ride on the
   // title splash finishing — main.js's startTutorialAfterDelay() is a
   // main.js-local function this file can't import without a circular
   // dependency, so this arms the same cross-module pending-flag pattern

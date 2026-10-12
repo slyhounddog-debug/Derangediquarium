@@ -222,9 +222,7 @@ export function loadLevel(state, levelId) {
     eternalSphere: null, // { x, y, fish: [a, b], thirdSpeciesId, startedAtMs, expiresAtMs } while two economy fish are fused into a glowing sphere waiting for the third kind (the two fish are held here, out of entities) — see Entities.js's startEternalSphere/finishEternalSphere
     tabReminderNextAtMs: TAB_REMINDER_NEVER_OPENED_MS, // level.elapsed time the next Tab-panel reminder is due — pushed back whenever the panel is opened, see UI.js's updateTabReminder
     lastPurchaseAtMs: 0, // real elapsed timestamp of the last fish bought OR building placed — see Entities.js's trySpawnPurchasedFish/Grid.js's placeTile (both update this on success) and Systems.js's updateIdlePurchaseHint (reads it to fire a one-time "check the Achievements tab" nudge after 60s of inactivity)
-    bankruptcyActive: false, // true while "no fish + can't afford anything" is CURRENTLY true, so the bailout/game-over response only fires once per fresh occurrence of that condition, not every tick it holds — see Systems.js's updateStoryTriggers
-    bankruptciesTriggered: 0, // 0 = never happened, 1 = the one-time $100 bailout already used, 2+ = game over
-    gameOver: false, // set true on the second bankruptcy — main.js's update() stops simulating while this is true, same as state.ui.paused, but Escape still opens the pause menu so Restart stays reachable
+    bankruptciesTriggered: 0, // 0 = the one-time $100 bailout is still available, 1 = already used — see Systems.js's updateBankruptcy
     // ---- Mother Alien Fish end-game boss sequence — see main.js's
     // updateBossSequence for the full state machine. null until the node is
     // actually purchased; walks 'intro_wait' -> 'fighting' -> 'defeated' ->
