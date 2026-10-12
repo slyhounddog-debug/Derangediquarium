@@ -115,5 +115,10 @@
     "file": "playInsufficientFunds.wav",
     "gain": 1.85,
     "source": "643139__joelleohworld__boop trim.wav"
+  },
+  "playStudioIntro": {
+    "file": "playStudioIntro.wav",
+    "gain": 1,
+    "source": "859080__tommasomotteran__fantasy-achievement-unlock-magical-stinger (1) trim (2).wav"
   }
 }

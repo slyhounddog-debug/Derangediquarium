@@ -1,4 +1,230 @@
 {
   "version": 1,
-  "rules": []
+  "rules": [
+    {
+      "sel": "#loading-status",
+      "css": {
+        "color": "#a8dfe6",
+        "font-size": "16px"
+      }
+    },
+    {
+      "sel": "div:nth-child(2) > div.achievement-desc",
+      "css": {
+        "font-size": "12px"
+      }
+    },
+    {
+      "sel": "div:nth-child(1) > div.achievement-desc",
+      "css": {
+        "font-size": "12px"
+      }
+    },
+    {
+      "sel": "div:nth-child(3) > div.achievement-desc",
+      "css": {
+        "font-size": "12px"
+      }
+    },
+    {
+      "sel": "div:nth-child(4) > div.achievement-desc",
+      "css": {
+        "font-size": "12px"
+      }
+    },
+    {
+      "sel": "div:nth-child(5) > div.achievement-desc",
+      "css": {
+        "font-size": "12px"
+      }
+    },
+    {
+      "sel": "div:nth-child(6) > div.achievement-desc",
+      "css": {
+        "font-size": "12px"
+      }
+    },
+    {
+      "sel": "div:nth-child(7) > div.achievement-desc",
+      "css": {
+        "font-size": "12px"
+      }
+    },
+    {
+      "sel": "div:nth-child(8) > div.achievement-desc",
+      "css": {
+        "font-size": "12px"
+      }
+    },
+    {
+      "sel": "div:nth-child(9) > div.achievement-desc",
+      "css": {
+        "font-size": "12px"
+      }
+    },
+    {
+      "sel": "div:nth-child(10) > div.achievement-desc",
+      "css": {
+        "font-size": "12px"
+      }
+    },
+    {
+      "sel": "div:nth-child(11) > div.achievement-desc",
+      "css": {
+        "font-size": "12px"
+      }
+    },
+    {
+      "sel": "div:nth-child(12) > div.achievement-desc",
+      "css": {
+        "font-size": "12px"
+      }
+    },
+    {
+      "sel": "div:nth-child(13) > div.achievement-desc",
+      "css": {
+        "font-size": "12px"
+      }
+    },
+    {
+      "sel": "div:nth-child(14) > div.achievement-desc",
+      "css": {
+        "font-size": "12px"
+      }
+    },
+    {
+      "sel": "div:nth-child(15) > div.achievement-desc",
+      "css": {
+        "font-size": "12px"
+      }
+    },
+    {
+      "sel": "div:nth-child(16) > div.achievement-desc",
+      "css": {
+        "font-size": "12px"
+      }
+    },
+    {
+      "sel": "div:nth-child(17) > div.achievement-desc",
+      "css": {
+        "font-size": "12px"
+      }
+    },
+    {
+      "sel": "div:nth-child(18) > div.achievement-desc",
+      "css": {
+        "font-size": "12px"
+      }
+    },
+    {
+      "sel": "div:nth-child(19) > div.achievement-desc",
+      "css": {
+        "font-size": "12px"
+      }
+    },
+    {
+      "sel": "div:nth-child(20) > div.achievement-desc",
+      "css": {
+        "font-size": "12px"
+      }
+    },
+    {
+      "sel": "div:nth-child(21) > div.achievement-desc",
+      "css": {
+        "font-size": "12px"
+      }
+    },
+    {
+      "sel": "div:nth-child(22) > div.achievement-desc",
+      "css": {
+        "font-size": "12px"
+      }
+    },
+    {
+      "sel": "div:nth-child(23) > div.achievement-desc",
+      "css": {
+        "font-size": "12px"
+      }
+    },
+    {
+      "sel": "div:nth-child(24) > div.achievement-desc",
+      "css": {
+        "font-size": "12px"
+      }
+    },
+    {
+      "sel": "#bottom-tool-bar",
+      "css": {
+        "height": "96px",
+        "translate": "0px 10px"
+      }
+    },
+    {
+      "sel": "#tool-food-btn",
+      "css": {
+        "height": "59px",
+        "translate": "0px 0px",
+        "width": "59px"
+      }
+    },
+    {
+      "sel": "#bottom-tool-bar > div:nth-child(4)",
+      "css": {
+        "width": "13px"
+      }
+    },
+    {
+      "sel": "#bottom-tool-bar > div:nth-child(6)",
+      "css": {
+        "width": "13px"
+      }
+    },
+    {
+      "sel": "#save-slots-modal",
+      "css": {
+        "width": "600px",
+        "height": "400px"
+      }
+    },
+    {
+      "sel": "#start-mode-modal",
+      "css": {
+        "width": "600px",
+        "height": "425px"
+      }
+    },
+    {
+      "sel": "#start-mode-title",
+      "css": {
+        "font-size": "28px"
+      },
+      "text": {
+        "0": "How would you like to play?"
+      }
+    },
+    {
+      "sel": "#start-mode-new-canvas",
+      "css": {
+        "width": "150px"
+      }
+    },
+    {
+      "sel": "#start-mode-exp-canvas",
+      "css": {
+        "width": "150px"
+      }
+    },
+    {
+      "sel": "#start-mode-new-btn > div.start-mode-card-desc",
+      "text": {
+        "2": " — step-by-step prompts walk you through the game (also in settings)."
+      }
+    },
+    {
+      "sel": "#start-mode-exp-btn > div.start-mode-card-desc",
+      "text": {
+        "2": " — jump straight in with no hand-holding (also in settings)."
+      }
+    }
+  ]
 }
