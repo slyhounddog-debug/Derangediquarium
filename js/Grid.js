@@ -397,8 +397,17 @@ function resolveRampCollision(item, state) {
 // top-landing check still runs first and returns early on a normal fall
 // from directly above, so this never fights it over a routine landing —
 // it only ever fires for the side/bottom contacts the flat check misses.
+// Per direct report ("Food floating directly through the bottom of factories
+// makes automation extremely annoying") this now covers EVERY solid building,
+// not just TILE_PLATFORM: factories, collectors, refineries, fans, turrets,
+// chests and power plants only ever had the top-landing and center-row checks
+// above, so anything rising into their underside (Food is buoyant) or
+// sliding in one row above passed straight through. platformIgnoresItem
+// still only ever applies to Platform variants, so a Platform's item filter
+// is the one way to let an item through. Held items never reach this
+// (stepItemOnGrid hands them to stepHeldItem first), so intake is unaffected.
 function resolvePlatformCollisionAt(item, state, tileType, col, row) {
-  if (tileType !== TILE_PLATFORM) return false;
+  if (!SOLID_TILES.has(tileType)) return false;
   if (platformIgnoresItem(state, tileType, col, row, item.type)) return false;
   const left = col * TILE_SIZE;
   const top = row * TILE_SIZE;
@@ -459,7 +468,7 @@ function resolvePlatformCollision(item, state) {
     if (!grid[row]) continue;
     for (let col = minCol; col <= maxCol; col++) {
       if (col < 0 || col >= grid[row].length) continue;
-      if (grid[row][col] !== TILE_PLATFORM) continue;
+      if (!SOLID_TILES.has(grid[row][col])) continue;
       if (resolvePlatformCollisionAt(item, state, grid[row][col], col, row)) resolvedAny = true;
     }
   }
