@@ -60,6 +60,9 @@ import {
   CHEST_TUTORIAL_GOLD_GRANT_MESSAGE,
   CHEST_TUTORIAL_DRAG_CLICK_RADIUS_TILES,
   TILE_STORAGE_CHEST,
+  TUTORIAL_VIEW_TOP_MARGIN_PX,
+  TUTORIAL_VIEW_BOTTOM_MARGIN_PX,
+  CAMERA_BOTTOM_BUFFER_PX,
   STORAGE_CHEST_CAPACITY,
   SPECIES,
   SPECIES_LIST,
@@ -114,11 +117,11 @@ import {
   dartfinSchoolCount, schoolCoinMultiplier, fishPoopIntervalMs, computeEternalCoinValue,
 } from './Entities.js';
 import {
-  getTile, worldToTile, getBuildingCost, FAN_STATS,
+  getTile, worldToTile, getBuildingCost, canPlaceTile, FAN_STATS,
   findNearestWasteTurretAndWaste, getRecipeBuildingKeyAt, renderTileShape,
   getBuildingCurrentPowerDraw, getBuildingUptimeFraction, applyRecipeToBuilding,
   getChestKeyAt, armChestTrickle, setChestPourMode, findPlacedChestKey,
-  getUnlockedWorldH, getFanConeGeometry,
+  getUnlockedWorldH, getFanConeGeometry, findFreeTileNear,
 } from './Grid.js';
 import { worldToScreen } from './Engine.js';
 import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND_X } from './Mound.js';
@@ -543,6 +546,7 @@ export function initUI(state) {
     pauseMenuBtn: document.getElementById('pause-menu-btn'),
     shopPanel: document.getElementById('shop-panel'),
     shopCollapseBtn: document.getElementById('shop-collapse-btn'),
+    bottomBarRow: document.getElementById('bottom-bar-row'),
     shopMoney: document.getElementById('shop-money'),
     shopGrid: document.getElementById('shop-species-grid'),
     previewEmpty: document.getElementById('shop-preview-empty'),
@@ -1578,7 +1582,7 @@ function closeMergeFishModal() {
 
 // Per direct request, one Escape closes everything open — every menu and pop-up — and main.js then
 // swallows that Escape so it doesn't also open the pause menu. Returns whether anything was closed.
-export function closeAllModals(state) {
+export function closeAllModals(state, keepShop = false) {
   let closed = false;
   const closeIf = (open, close) => { if (open) { close(); closed = true; } };
   closeIf(labPurchaseNodeId !== null, closeLabPurchaseModal);
@@ -1592,7 +1596,7 @@ export function closeAllModals(state) {
   closeIf(hudInfoModalOpen !== null, closeHudInfoModal);
   closeIf(statsPanelOpen, closeStatsPanel);
   closeIf(labMenuOpen, closeLabMenu);
-  closeIf(!state.ui.shopCollapsed || !state.ui.tankPanelCollapsed, () => closeSidePanels(state));
+  closeIf((!keepShop && !state.ui.shopCollapsed) || !state.ui.tankPanelCollapsed, () => closeSidePanels(state, keepShop)); // keepShop: a tutorial step that points INTO the Shop must not close it
   return closed;
 }
 
@@ -6401,7 +6405,8 @@ function tutorialCircleForDom(el, padding = 12) {
   if (!el) return null;
   const rect = el.getBoundingClientRect();
   if (rect.width === 0 && rect.height === 0) return null; // not rendered right now (e.g. a panel that's still collapsed)
-  return { cx: rect.left + rect.width / 2, cy: rect.top + rect.height / 2, r: Math.max(rect.width, rect.height) / 2 + padding };
+  // fixed: screen-anchored UI, always on screen — never subject to the "scroll to find it" view-band check.
+  return { cx: rect.left + rect.width / 2, cy: rect.top + rect.height / 2, r: Math.max(rect.width, rect.height) / 2 + padding, fixed: true };
 }
 
 // Per direct report ("the first tutorial breaks if the player scrolls down
@@ -6447,6 +6452,22 @@ function startTutorialFishSpotWorld(state) {
 function getPostAlienTurretSpot(state) {
   return { x: WORLD_W / 2, y: getUnlockedWorldH(state) - TILE_SIZE * 3 };
 }
+
+// Where a "place it here" tutorial step actually points: the preferred spot
+// above if that tile is still free, else the nearest placeable tile — the city
+// is the player's own to build in, and a spotlight on a tile they've already
+// built on can never be satisfied (a soft lock). Cached per building and only
+// re-searched when the remembered tile stops being placeable, so the ring
+// search isn't repeated every frame.
+let tutorialPlaceTile = null; // { buildingId, col, row }
+function tutorialPlaceSpotWorld(state, preferred, buildingId) {
+  if (!tutorialPlaceTile || tutorialPlaceTile.buildingId !== buildingId || !canPlaceTile(state, tutorialPlaceTile.col, tutorialPlaceTile.row, buildingId, true).ok) {
+    const pref = worldToTile(preferred.x, preferred.y);
+    const free = findFreeTileNear(state, pref.col, pref.row, buildingId) || pref;
+    tutorialPlaceTile = { buildingId, col: free.col, row: free.row };
+  }
+  return { x: tutorialPlaceTile.col * TILE_SIZE + TILE_SIZE / 2, y: tutorialPlaceTile.row * TILE_SIZE + TILE_SIZE / 2 };
+}
 // Where the 'chest' guided flow's own Storage Chest gets placed (the full
 // walkthrough's 'place' step only) — per direct design, deliberately near the
 // Mound itself (MOUND_X, already imported for the Mound's own click-target/
@@ -6491,7 +6512,7 @@ function chestDragStepCircle(state) {
   const a = worldToScreen(spot.x, spot.y, state.camera);
   const b = worldToScreen(waste.x, waste.y, state.camera);
   const r = Math.hypot(a.x - b.x, a.y - b.y) / 2 + 40;
-  return { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, r };
+  return { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, r, ys: [a.y, b.y] }; // ys: both endpoints must be in view, not just the midpoint
 }
 
 function wasteDragStepCircle(state) {
@@ -6500,7 +6521,7 @@ function wasteDragStepCircle(state) {
   const a = worldToScreen(target.turret.x, target.turret.y, state.camera);
   const b = worldToScreen(target.waste.x, target.waste.y, state.camera);
   const r = Math.hypot(a.x - b.x, a.y - b.y) / 2 + 40; // padding so both sit comfortably inside, not right at the edge
-  return { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, r };
+  return { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, r, ys: [a.y, b.y] };
 }
 
 // The first-time merge guided tutorial's "drag" step spotlight — a circle
@@ -6516,7 +6537,7 @@ function mergeFishStepCircle(state) {
   const a = worldToScreen(pair[0].x, pair[0].y, state.camera);
   const b = worldToScreen(pair[1].x, pair[1].y, state.camera);
   const r = Math.hypot(a.x - b.x, a.y - b.y) / 2 + 60;
-  return { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, r };
+  return { cx: (a.x + b.x) / 2, cy: (a.y + b.y) / 2, r, ys: [a.y, b.y] };
 }
 
 // The hungry fish the hunger tutorial points at: the hungriest fish that can
@@ -6547,6 +6568,7 @@ const TUTORIAL_FLOWS = {
   alienintro: [
     {
       id: 'click',
+      world: true,
       text: 'An alien! Click it to fight back.',
       getCircle: (state) => {
         const alien = state.level.entities.find((e) => e.id === state.level.firstAlienIntroTargetId && e.type === 'alien' && e.hp > 0);
@@ -6568,9 +6590,10 @@ const TUTORIAL_FLOWS = {
   // the following "place" step with no build tool armed).
   start: [
     { id: 'shop', text: 'Click the Shop to buy your first fish!', tool: 'food', getCircle: () => tutorialCircleForDom(els.shopCollapseBtn) },
-    { id: 'guppy', text: 'Pick a Guppy!', tool: 'food', getCircle: () => tutorialCircleForDom(els.shopGrid.querySelector('[data-tool="fish:guppy"]')) },
+    { id: 'guppy', text: 'Pick a Guppy!', tool: 'food', needsShop: true, domTarget: () => els.shopGrid.querySelector('[data-tool="fish:guppy"]'), getCircle: () => tutorialCircleForDom(els.shopGrid.querySelector('[data-tool="fish:guppy"]')) },
     {
       id: 'buyfish',
+      world: true,
       text: 'Click in the tank to place it!',
       tool: 'fish:guppy',
       getCircle: (state) => {
@@ -6582,14 +6605,15 @@ const TUTORIAL_FLOWS = {
   ],
   postalien: [
     { id: 'shop', text: 'Time to arm up — open the Shop!', tool: 'food', getCircle: () => tutorialCircleForDom(els.shopCollapseBtn) },
-    { id: 'turret', text: 'Grab the Waste Turret!', tool: 'food', getCircle: () => tutorialCircleForDom(familyButtons.turret?.btn) },
-    { id: 'scroll', text: 'Scroll all the way down to the bottom of the tank!', tool: `build:${TILE_TURRET_WASTE}`, noSpotlight: true },
+    { id: 'turret', text: 'Grab the Waste Turret!', tool: 'food', needsShop: true, domTarget: () => familyButtons.turret?.btn, getCircle: () => tutorialCircleForDom(familyButtons.turret?.btn) },
+    { id: 'scroll', text: 'Scroll all the way down to the bottom of the tank!', tool: `build:${TILE_TURRET_WASTE}`, noSpotlight: true, world: true },
     {
       id: 'place',
       text: 'Place the Waste Turret down here! (Here’s 25 gold to cover it.)',
       tool: `build:${TILE_TURRET_WASTE}`,
+      world: true,
       getCircle: (state) => {
-        const spot = getPostAlienTurretSpot(state);
+        const spot = tutorialPlaceSpotWorld(state, getPostAlienTurretSpot(state), TILE_TURRET_WASTE);
         const screen = worldToScreen(spot.x, spot.y, state.camera);
         return { cx: screen.x, cy: screen.y, r: 70 };
       },
@@ -6600,14 +6624,14 @@ const TUTORIAL_FLOWS = {
     // position to the Turret while this step is active (hidden the instant
     // the player actually grabs the real one — see its own render code) and
     // ends the step the moment any Waste Turret's ammo goes up.
-    { id: 'dragwaste', text: 'Drag the Waste into the Turret!', tool: 'food', getCircle: wasteDragStepCircle },
+    { id: 'dragwaste', text: 'Drag the Waste into the Turret!', tool: 'food', world: true, getCircle: wasteDragStepCircle },
   ],
   // Standalone one-step flow for the "already had a Turret" case (see
   // Systems.js's updatePostAlienTutorial) — same step shape/logic as
   // postalien's own final 'dragwaste' step above, just not preceded by the
   // Shop/turret-selection/scroll/place steps, since those are already done.
   wastedrag: [
-    { id: 'drag', text: 'Drag the Waste into the Turret!', tool: 'food', getCircle: wasteDragStepCircle },
+    { id: 'drag', text: 'Drag the Waste into the Turret!', tool: 'food', world: true, getCircle: wasteDragStepCircle },
   ],
   // Fires the first time two Adult, same-species-and-star-tier fish exist on
   // screen at once (Systems.js's updateMergeTutorialTrigger) — per direct
@@ -6616,7 +6640,7 @@ const TUTORIAL_FLOWS = {
   // anywhere (main.js's right-mouse-up handler). Right-click-and-drag needs the
   // plain cursor selected, hence tool 'cursor'.
   mergefish: [
-    { id: 'drag', text: 'Right-click and drag one fish onto the other to merge them!', tool: 'cursor', getCircle: mergeFishStepCircle },
+    { id: 'drag', text: 'Right-click and drag one fish onto the other to merge them!', tool: 'cursor', world: true, getCircle: mergeFishStepCircle },
   ],
   // Started by Systems.js's updateHungerTutorialTrigger the first time a fish
   // gets hungry — per direct request, 3 steps: select the Food tool, feed the
@@ -6627,8 +6651,8 @@ const TUTORIAL_FLOWS = {
   // right-click it is waiting for) and no spotlight, so the click reaches the canvas.
   hunger: [
     { id: 'food', text: 'A fish is getting hungry! Select the Food tool.', tool: 'cursor', getCircle: () => tutorialCircleForDom(els.toolFoodBtn) },
-    { id: 'feed', text: 'Click near the hungry fish to drop some Food!', tool: 'food', getCircle: hungerTutorialFishCircle },
-    { id: 'deselect', text: 'Now right-click to put the Food away.', noSpotlight: true },
+    { id: 'feed', text: 'Click near the hungry fish to drop some Food!', tool: 'food', world: true, getCircle: hungerTutorialFishCircle },
+    { id: 'deselect', text: 'Now right-click to put the Food away.', noSpotlight: true, world: true },
   ],
   // Started by Systems.js's updateChestTutorialTrigger — per direct request
   // ("have a chest tutorial start that's like the turret tutorial"), then
@@ -6642,21 +6666,24 @@ const TUTORIAL_FLOWS = {
   // this game already does) rather than through a cross-module flag.
   chest: [
     { id: 'shop', text: 'Time to store some supplies — open the Shop!', tool: 'food', getCircle: () => tutorialCircleForDom(els.shopCollapseBtn) },
-    { id: 'select', text: 'Grab the Storage Chest!', tool: 'food', getCircle: () => tutorialCircleForDom(familyButtons.chest?.btn) },
+    { id: 'select', text: 'Grab the Storage Chest!', tool: 'food', needsShop: true, domTarget: () => familyButtons.chest?.btn, getCircle: () => tutorialCircleForDom(familyButtons.chest?.btn) },
     {
       id: 'place',
       text: 'Place the Storage Chest down here! (Here’s 20 gold to cover it.)',
       tool: `build:${TILE_STORAGE_CHEST}`,
+      world: true,
       getCircle: (state) => {
-        const screen = worldToScreen(POST_MOUND_CHEST_SPOT.x, POST_MOUND_CHEST_SPOT.y, state.camera);
+        const spot = tutorialPlaceSpotWorld(state, POST_MOUND_CHEST_SPOT, TILE_STORAGE_CHEST);
+        const screen = worldToScreen(spot.x, spot.y, state.camera);
         return { cx: screen.x, cy: screen.y, r: 70 };
       },
     },
-    { id: 'feedwaste', text: 'Drag the Waste into the Chest!', tool: 'food', getCircle: chestDragStepCircle },
+    { id: 'feedwaste', text: 'Drag the Waste into the Chest!', tool: 'food', world: true, getCircle: chestDragStepCircle },
     {
       id: 'trickle',
       text: 'Drag away from the Chest to aim, then let go to start trickling it back out!',
       tool: 'food',
+      world: true,
       // A much wider click-through "hole" than every other spotlight circle
       // here (which are all a fixed 70 fixed-CSS-px) — per direct request
       // ("make the clickable area 8 full tiles around the placed chest"),
@@ -6773,20 +6800,79 @@ export function tutorialScrollDirectionNeeded(state) {
   const stepDef = TUTORIAL_FLOWS[flow.id]?.find((s) => s.id === flow.step);
   if (!stepDef || stepDef.noSpotlight || !stepDef.getCircle) return null;
   const circle = stepDef.getCircle(state);
-  if (!circle) return null;
-  // Checked against the circle's CENTER, not just whether any edge of it
-  // merely touches the viewport — a real bug caught during verification:
-  // requiring only `cy + r >= 0` let the target count as "found" the
-  // instant a sub-pixel sliver of it poked on screen, at which point this
-  // function (and the alienintro freeze-exemption reading it) immediately
-  // stops permitting further scrolling — leaving a target whose actual
-  // center, and therefore virtually all of its real clickable area, was
-  // still off-screen, genuinely unreachable by a real mouse position. Using
-  // the center means "no longer needs scrolling" only fires once there's a
-  // comfortably-sized, actually-clickable area on screen around it.
-  if (circle.cy < 0) return 'up';
-  if (circle.cy > window.innerHeight) return 'down';
-  return null;
+  if (!circle || circle.fixed) return null; // a screen-anchored button is always on screen
+  // Checked against the circle's CENTER(S) — and every endpoint of a two-point
+  // step (circle.ys: the Waste AND its Turret, both fish) — not whether any
+  // edge merely touches the viewport: a sub-pixel sliver on screen leaves
+  // virtually all of the clickable area unreachable (a real bug caught in
+  // verification). The "view band" also excludes the strip under the bottom
+  // tool-bar and the HUD strip at the top: per direct report a spotlight
+  // could sit entirely behind the toolbar and so be on screen yet unusable.
+  const { top, bottom } = tutorialViewBand();
+  let lo = Infinity;
+  let hi = -Infinity;
+  for (const y of circle.ys || [circle.cy]) {
+    if (y < lo) lo = y;
+    if (y > hi) hi = y;
+  }
+  const above = top - lo;
+  const below = hi - bottom;
+  if (above <= 0 && below <= 0) return null;
+  const dir = above > below ? 'up' : 'down';
+  // Only ask for a scroll the camera can actually perform — at the end of its
+  // range the target is as visible as it will ever get (a prompt that can't be
+  // satisfied would just be a soft lock of its own).
+  const maxY = Math.max(0, getUnlockedWorldH(state) + CAMERA_BOTTOM_BUFFER_PX - window.innerHeight / state.camera.zoom);
+  if (dir === 'up' && state.camera.y <= 0.5) return null;
+  if (dir === 'down' && state.camera.y >= maxY - 0.5) return null;
+  return dir;
+}
+
+// The vertical screen range a world-space tutorial target should sit inside to
+// be genuinely usable: below the HUD/instruction-pill strip and above the
+// bottom tool-bar. Cheap (one rect read), and only ever called while a guided
+// tutorial is on screen.
+function tutorialViewBand() {
+  const rect = els.bottomBarRow.getBoundingClientRect();
+  const barTop = rect.height > 0 ? rect.top : window.innerHeight;
+  return { top: TUTORIAL_VIEW_TOP_MARGIN_PX, bottom: Math.min(window.innerHeight, barTop) - TUTORIAL_VIEW_BOTTOM_MARGIN_PX };
+}
+
+// How far apart (world px) the two ends of a drag step may be and still fit in
+// view together — Systems.js's watchdog pulls a runaway tutorial item back
+// beside its destination past this. 80% of the usable band so there is slack.
+export function tutorialMaxSpanWorld(state) {
+  const { top, bottom } = tutorialViewBand();
+  return Math.max(120, ((bottom - top) / state.camera.zoom) * 0.8);
+}
+
+// True while the active step wants the player's clicks on the tank itself
+// (placing, dragging, feeding) rather than on a button. main.js ignores the
+// Shop hotkey and Base Stats toggle then — either window would cover the
+// spotlight — and style.css turns the rest of the UI click-through (body.
+// tutorial-world-step) so a toolbar/HUD element sitting over the spotlight
+// can't swallow the click the hole lets through.
+export function isTutorialWorldStep(state) {
+  const flow = state.level.tutorialFlow;
+  if (!flow) return false;
+  return !!TUTORIAL_FLOWS[flow.id]?.find((s) => s.id === flow.step)?.world;
+}
+
+let lastTutorialStepKey = null;
+let worldStepClassOn = false;
+
+// Runs once each time a step becomes active (including a flow's first step):
+// clears anything that could cover the spotlight or stall the step — every
+// open menu/pop-up (keeping the Shop for steps that point into it), Pause Time
+// (building intake and item physics, which the drag steps depend on, stop under
+// it), and Alt-mode (it hides the whole tutorial overlay). Nothing can open
+// again mid-step: the overlay blocks the buttons and main.js ignores hotkeys.
+function onTutorialStepEntered(state, stepDef) {
+  closeAllModals(state, !!stepDef.needsShop);
+  // The Shop's item lists scroll inside the window — bring the button the step points at into view, or the spotlight would sit over clipped-away space.
+  stepDef.domTarget?.()?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  if (state.ui.timePaused) { state.ui.timePaused = false; refreshTimeControlButtons(state); }
+  if (state.ui.altMode) toggleAltMode(state);
 }
 
 // Called every frame (from updateHUD) — positions/shows the spotlight for
@@ -6797,10 +6883,34 @@ function updateTutorialOverlay(state) {
   if (!flow) {
     setHidden(els.tutorialOverlay, true);
     setHidden(els.tutorialText, true);
+    lastTutorialStepKey = null;
+    tutorialPlaceTile = null;
+    if (worldStepClassOn) { worldStepClassOn = false; document.body.classList.remove('tutorial-world-step'); }
     return;
   }
   const stepDef = TUTORIAL_FLOWS[flow.id].find((s) => s.id === flow.step);
-  if (!stepDef) return; // defensive — shouldn't happen
+  if (!stepDef) {
+    // Defensive: an id with no step definition can never advance — end it
+    // rather than leave the game frozen behind an invisible tutorial.
+    state.level.tutorialFlow = null;
+    return;
+  }
+  // A step that points INTO the Shop is unusable while the Shop is closed (its
+  // spotlight target has no on-screen box) — e.g. the player toggled it shut
+  // with E. Send the flow back to its opening "open the Shop" step.
+  if (stepDef.needsShop && state.ui.shopCollapsed) {
+    const first = TUTORIAL_FLOWS[flow.id][0];
+    if (first && first.id === 'shop') { flow.step = 'shop'; return; }
+  }
+  const stepKey = `${flow.id}:${flow.step}`;
+  if (stepKey !== lastTutorialStepKey) {
+    lastTutorialStepKey = stepKey;
+    onTutorialStepEntered(state, stepDef);
+  }
+  if (!!stepDef.world !== worldStepClassOn) {
+    worldStepClassOn = !!stepDef.world;
+    document.body.classList.toggle('tutorial-world-step', worldStepClassOn);
+  }
   // Per direct request ("make sure the correct tool is selected at the
   // start of each step of the tutorial so it can't break where you are
   // stuck on the wrong tool") — re-asserted every frame this step is

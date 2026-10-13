@@ -3265,12 +3265,26 @@ export const TURRET_TUTORIAL_GOLD_GRANT_MESSAGE = "Here's 40 gold — go place t
 // real fish had already pooped one out somewhere nearby — the previous
 // "wait for organic Waste to exist" approach could leave the drag step with
 // nothing to drag (a degenerate, hole-less spotlight) if none ever
-// happened to be sitting in the city yet. A few tiles left of the city's
-// own horizontal center (POST_ALIEN_TURRET_SPOT sits exactly on it) and
-// comfortably above the very bottom row that spot's own Turret occupies, so
-// there's a real, visible drag distance to cover.
-export const TURRET_TUTORIAL_WASTE_X = WORLD_W / 2 - TILE_SIZE * 4;
-export const TURRET_TUTORIAL_WASTE_Y = WORLD_H - TILE_SIZE * 5;
+// happened to be sitting in the city yet. Per direct report ("I got to the
+// point where it demands I drag waste to the turret. I can't... soft locked"),
+// it now spawns BESIDE the actual turret (Grid.js's findChestTutorialWasteSpot,
+// the same helper the chest tutorial uses) instead of at a fixed world
+// coordinate: the old fixed Y was measured from WORLD_H, the fully-expanded
+// tank size, which on an unexpanded tank is BELOW the real floor (the camera
+// can't scroll there, so the Waste was invisible and un-grabbable), and a
+// fixed X could also land far from a turret the player had placed elsewhere.
+// ---- Tutorial view band / safety nets (UI.js, Systems.js) ----
+// A tutorial spotlight target is only "in view" if it sits between these
+// margins (screen px): below the top margin (HUD/chat plaque/instruction pill)
+// and this far above the bottom tool-bar's top edge. Scrolling prompts and the
+// scroll-direction arrows key off it, so a target hidden under the toolbar
+// asks the player to scroll just like one that is off-screen.
+export const TUTORIAL_VIEW_TOP_MARGIN_PX = 90;
+export const TUTORIAL_VIEW_BOTTOM_MARGIN_PX = 14;
+// On the house when a tutorial purchase can't be afforded (world-settings
+// price multipliers, a spent starting balance...) — otherwise the step would be
+// impossible to finish, which is a soft lock.
+export const TUTORIAL_TOPUP_MESSAGE = "A little something on the house so the lesson can carry on.";
 export const ALIEN_INTRO_DELAY_MS = 1000; // per direct request, the cinematic first-alien intro no longer triggers the instant the alien spawns — it has to actually be alive and visibly moving on screen for this long first (Entities.js's updateAlienPortals records when it appeared; Systems.js's updateStoryTriggers checks this delay before starting the 'alienintro' guided-tutorial flow)
 export const ALIEN_FOOD_BLOCK_DURATION_MS = 1000; // per direct request ("so you don't accidentally place 4 food after killing a fish") — Food can't be placed within a just-killed alien's old click radius for this long; see Entities.js's trySpawnFood/isInAlienFoodBlockZone
 export const WASTE_DRAG_TUTORIAL_WAIT_MS = 1000; // per direct request — if the player already placed a Waste Turret before the post-alien tutorial would fire, it waits this long after Waste first appears in the city before teaching just the "drag Waste into it" step — see Systems.js's updatePostAlienTutorial
@@ -3291,7 +3305,7 @@ export const CHEST_TUTORIAL_GOLD_GRANT = 20; // per direct request — matches t
 export const CHEST_TUTORIAL_GOLD_GRANT_MESSAGE = "Here's 20 gold — go place that chest.";
 // The "drag Waste into the Chest" step's Waste is deterministic too (spawned
 // beside the chest — Grid.js's findChestTutorialWasteSpot, same reasoning as
-// TURRET_TUTORIAL_WASTE_X/Y above), so it always has something real to grab
+// the turret tutorial's Waste above), so it always has something real to grab
 // regardless of whether organic Waste happens to be nearby.
 export const CHEST_TUTORIAL_MESSAGE = "Now you've got somewhere to stash the overflow — drag away from any chest and let go whenever you want it trickling back out.";
 // Per direct request ("make the clickable area 8 full tiles around the

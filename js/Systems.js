@@ -17,6 +17,9 @@ import {
   CHEST_TUTORIAL_ITEM_THRESHOLD,
   CHEST_TUTORIAL_CHECK_INTERVAL_MS,
   TILE_STORAGE_CHEST,
+  TILE_SIZE,
+  TILE_TURRET_WASTE,
+  TUTORIAL_TOPUP_MESSAGE,
   ALIEN_WAVE_INTERVAL_EARLY_MS,
   ALIEN_WAVE_INTERVAL_LATE_MS,
   ALIEN_WAVE_DIFFICULTY_RAMP_WAVES,
@@ -60,8 +63,8 @@ import {
 } from './Config.js';
 import { getAvailableSpecies, getAvailableBuildings } from './Levels.js';
 import { isWorldModified } from './WorldSettings.js';
-import { getFishPurchaseCost, findCombinablePair, spawnTurretTutorialWaste, spawnChestTutorialWaste } from './Entities.js';
-import { hasWasteTurretPlaced, countPlacedOfType, findPlacedChestKey } from './Grid.js';
+import { getFishPurchaseCost, findCombinablePair, resolveMergeTutorialPair, spawnTurretTutorialWaste, spawnChestTutorialWaste, relocateTutorialItemNear } from './Entities.js';
+import { hasWasteTurretPlaced, countPlacedOfType, findPlacedChestKey, findWasteTurretKey, getBuildingCost, getUnlockedWorldH, findNearestWasteTurretAndWaste } from './Grid.js';
 import { saveGame } from './Save.js';
 import { playWaveWarning } from './Sound.js';
 import { pushGameNotification } from './Notifications.js';
@@ -120,7 +123,7 @@ function updateBankruptcy(state) {
 // case below (which just lets the game continue normally with no intro at
 // all, rather than soft-locking waiting for a target that no longer exists).
 function updateAlienIntroTrigger(state) {
-  if (state.level.firstAlienIntroAppearedAtMs === null || state.level.tutorialFlow) return;
+  if (state.level.firstAlienIntroAppearedAtMs === null || state.level.tutorialFlow || state.level.bossPhase) return;
   if (state.level.elapsed - state.level.firstAlienIntroAppearedAtMs < ALIEN_INTRO_DELAY_MS) return;
   state.level.firstAlienIntroAppearedAtMs = null;
   const alien = state.level.entities.find((e) => e.id === state.level.firstAlienIntroTargetId && e.type === 'alien' && e.hp > 0);
@@ -135,7 +138,9 @@ function updateAlienIntroTrigger(state) {
 // (not consumed) while any OTHER tutorial flow is already active, same
 // "just check again next tick" pattern every other trigger here uses.
 function updateMergeTutorialTrigger(state) {
-  if (state.level.tutorialFlags.mergeTutorialShown || state.level.tutorialFlow) return;
+  if (state.level.tutorialFlags.mergeTutorialShown || state.level.tutorialFlow || state.level.bossPhase) return;
+  // Fish can't be moved/merged while a hostile alien is alive (main.js's right-drag gate), so the lesson would be impossible to finish — wait for a quiet tank.
+  if (hostileAlienAlive(state)) return;
   if (!findCombinablePair(state)) return;
   state.level.tutorialFlags.mergeTutorialShown = true;
   state.level.tutorialFlow = { id: 'mergefish', step: 'drag' };
@@ -148,7 +153,7 @@ function updateMergeTutorialTrigger(state) {
 // via tutorialFlags.hungerTutorialShown, deferred while another flow is active.
 // Skips straight to the feed step if the Food tool is already selected.
 function updateHungerTutorialTrigger(state) {
-  if (state.level.tutorialFlags.hungerTutorialShown || state.level.tutorialFlow) return;
+  if (state.level.tutorialFlags.hungerTutorialShown || state.level.tutorialFlow || state.level.bossPhase) return;
   const hungry = state.level.entities.some((e) => e.type === 'fish' && !e.dying && e.hunger >= HUNGER_SEEK_THRESHOLD && !SPECIES[e.speciesId].behavior.includes('SCAVENGER'));
   if (!hungry) return;
   state.level.tutorialFlags.hungerTutorialShown = true;
@@ -167,7 +172,7 @@ function updateHungerTutorialTrigger(state) {
 // (mirrors updateAlienIntroTrigger's own one-shot shape above), and deferred
 // while any OTHER tutorial flow is already active rather than stomping it.
 function updateTurretTutorialTrigger(state) {
-  if (state.level.turretTutorialAlienAppearedAtMs === null || state.level.tutorialFlow) return;
+  if (state.level.turretTutorialAlienAppearedAtMs === null || state.level.tutorialFlow || state.level.bossPhase) return;
   if (state.level.elapsed - state.level.turretTutorialAlienAppearedAtMs < TURRET_TUTORIAL_DELAY_MS) return;
   state.level.turretTutorialAlienAppearedAtMs = null;
   const flags = state.level.tutorialFlags;
@@ -202,7 +207,7 @@ function updateTurretTutorialTrigger(state) {
 // turret tutorial is skipped").
 function updatePostAlienTutorial(state) {
   const flags = state.level.tutorialFlags;
-  if (state.level.tutorialFlow) return;
+  if (state.level.tutorialFlow || state.level.bossPhase) return;
   if (!flags.postAlienTutorialShown) {
     // Per direct request — a Turret placed BEFORE the turret tutorial's own
     // first-alien trigger goes straight to this "drag Waste into the Turret"
@@ -212,7 +217,8 @@ function updatePostAlienTutorial(state) {
     flags.postAlienTutorialShown = true;
   }
   if (flags.wasteDragTutorialShown) return;
-  if (!hasWasteTurretPlaced(state)) return;
+  // A turret that is already at its ammo cap would never absorb the Waste, so the lesson would be unfinishable — wait for one with room.
+  if (!findWasteTurretKey(state)) return;
   // Per direct request, this no longer waits for a real fish to have
   // already pooped some Waste out nearby — it spawns its own deterministic
   // one (Entities.js's spawnTurretTutorialWaste) the instant this decision
@@ -238,11 +244,13 @@ function updatePostAlienTutorial(state) {
 // sitting in the tank. Throttled, since the item-count scan walks every item.
 function updateChestTutorialTrigger(state) {
   const flags = state.level.tutorialFlags;
-  if (flags.chestTutorialShown || state.level.tutorialFlow) return;
+  if (flags.chestTutorialShown || state.level.tutorialFlow || state.level.bossPhase) return;
   if (!state.meta.buildingsUnlocked.includes(TILE_STORAGE_CHEST)) return;
   if (state.level.elapsed < state.level.chestTutorialNextCheckMs) return;
   state.level.chestTutorialNextCheckMs = state.level.elapsed + CHEST_TUTORIAL_CHECK_INTERVAL_MS;
-  const chestKey = findPlacedChestKey(state);
+  // A chest the player already placed that can't take Waste (full, or locked to another item) can't finish the lesson, so wait instead of starting a flow that would be impossible.
+  if (findPlacedChestKey(state) && !findPlacedChestKey(state, true)) return;
+  const chestKey = findPlacedChestKey(state, true);
   if (chestKey) {
     flags.chestTutorialShown = true;
     spawnChestTutorialWaste(state, chestKey);
@@ -259,6 +267,142 @@ function updateChestTutorialTrigger(state) {
       state.level.tutorialFlow = { id: 'chest', step: state.ui.shopCollapsed ? 'shop' : 'select' };
       return;
     }
+  }
+}
+
+function hostileAlienAlive(state) {
+  return state.level.entities.some((e) => e.type === 'alien' && e.hp > 0);
+}
+
+// ---- Guided-tutorial safety nets ----
+// Per direct report ("I got to the point where it demands I drag waste to the
+// turret. I can't... I hit Esc to skip, it brought it back up and now I'm soft
+// locked"): every flow below must always be finishable, skippable for good,
+// and never left waiting on something that can no longer happen.
+
+// Ends the active flow without running its completion rewards and drops every
+// locked tutorial target. `skipped` (the player pressed Esc, or turned guided
+// tutorials off) additionally marks one-shot lessons as done so a trigger
+// can't immediately start them again — the "Esc brought it back" loop.
+export function clearTutorialFlow(state, skipped) {
+  const flow = state.level.tutorialFlow;
+  if (!flow) return;
+  const lvl = state.level;
+  lvl.tutorialFlow = null;
+  lvl.wasteDragTutorialTargetId = null;
+  lvl.mergeTutorialTargetIds = null;
+  lvl.chestDragTutorialTargetId = null;
+  state.ui.tutorialToolOverrideStep = null;
+  if (skipped && (flow.id === 'wastedrag' || (flow.id === 'postalien' && flow.step === 'dragwaste'))) {
+    lvl.tutorialFlags.wasteDragTutorialShown = true;
+  }
+}
+
+// Ends a flow whose target can no longer exist (turret demolished, fish gone,
+// a hostile alien appeared during the merge lesson...). Unlike a skip, lessons
+// that merely needed better circumstances are re-armed so they can start again
+// when those return.
+function abortTutorialFlow(state) {
+  const flow = state.level.tutorialFlow;
+  if (!flow) return;
+  const flags = state.level.tutorialFlags;
+  if (flow.id === 'mergefish') flags.mergeTutorialShown = false;
+  else if (flow.id === 'chest') flags.chestTutorialShown = false;
+  else if (flow.id === 'wastedrag' || flow.id === 'postalien') state.level.wasteDragTutorialWaitStartMs = null;
+  clearTutorialFlow(state, false);
+}
+
+// A tutorial purchase the player can't afford can never be completed — top the
+// balance up to the price (world-settings price multipliers or a spent
+// starting balance can cause it).
+function topUpForTutorial(state, cost) {
+  if (!(cost > 0) || state.level.money >= cost) return;
+  state.level.money = cost;
+  pushNotification(state, TUTORIAL_TOPUP_MESSAGE);
+}
+
+function buildingKeyCenter(key) {
+  const [row, col] = key.split(',').map(Number);
+  return { x: col * TILE_SIZE + TILE_SIZE / 2, y: row * TILE_SIZE + TILE_SIZE / 2 };
+}
+
+// The Waste a drag step needs must exist, sit inside the unlocked tank, and be
+// close enough to its destination that both fit on screen together; otherwise
+// it is respawned/moved back beside the destination. Never touches the item
+// while the player is holding it.
+function keepTutorialWasteReachable(state, waste, destKey, draggedItemId, maxSpanWorld) {
+  if (waste.id === draggedItemId || waste.heldByKey != null) return;
+  const dest = buildingKeyCenter(destKey);
+  const outOfTank = waste.y > getUnlockedWorldH(state) || waste.y < 0 || waste.x < 0;
+  if (outOfTank || Math.hypot(waste.x - dest.x, waste.y - dest.y) > maxSpanWorld) {
+    relocateTutorialItemNear(state, waste, destKey);
+  }
+}
+
+function watchTurretDragStep(state, draggedItemId, maxSpanWorld) {
+  const key = findWasteTurretKey(state);
+  if (!key) {
+    // Every turret is full of ammo: nothing more to teach, finish through the
+    // normal completion path (UI.js consumes this flag and advances the step).
+    if (hasWasteTurretPlaced(state)) state.ui.wasteTurretAmmoGainedPending = true;
+    else abortTutorialFlow(state); // the turret is gone
+    return;
+  }
+  const target = findNearestWasteTurretAndWaste(state);
+  if (!target || !target.waste) { spawnTurretTutorialWaste(state); return; }
+  keepTutorialWasteReachable(state, target.waste, key, draggedItemId, maxSpanWorld);
+}
+
+function watchChestFeedStep(state, draggedItemId, maxSpanWorld) {
+  const key = findPlacedChestKey(state, true);
+  if (!key) { abortTutorialFlow(state); return; } // chest demolished, or full / locked to another item
+  const waste = state.level.items.find((it) => it.id === state.level.chestDragTutorialTargetId && it.type === 'waste');
+  if (!waste) { spawnChestTutorialWaste(state, key); return; }
+  keepTutorialWasteReachable(state, waste, key, draggedItemId, maxSpanWorld);
+}
+
+// Runs every tick a flow is active (main.js, ahead of the tutorial freeze) and
+// repairs anything that would leave the current step unfinishable. Cheap: a few
+// array scans, only while a tutorial is on screen.
+export function updateTutorialWatchdog(state, draggedItemId, maxSpanWorld) {
+  const flow = state.level.tutorialFlow;
+  if (!flow) return;
+  switch (flow.id) {
+    case 'start':
+      if (flow.step === 'buyfish') topUpForTutorial(state, getFishPurchaseCost(state, 'guppy'));
+      break;
+    case 'postalien':
+      // A turret the player placed some other way (e.g. while the "scroll" step
+      // let them click) satisfies the placement half already.
+      if (flow.step !== 'dragwaste' && findWasteTurretKey(state)) flow.step = 'dragwaste';
+      if (flow.step === 'place') topUpForTutorial(state, getBuildingCost(state, TILE_TURRET_WASTE));
+      else if (flow.step === 'dragwaste') watchTurretDragStep(state, draggedItemId, maxSpanWorld);
+      break;
+    case 'wastedrag':
+      watchTurretDragStep(state, draggedItemId, maxSpanWorld);
+      break;
+    case 'chest': {
+      if (flow.step === 'shop' || flow.step === 'select' || flow.step === 'place') {
+        const placed = findPlacedChestKey(state, true);
+        if (placed) { spawnChestTutorialWaste(state, placed); flow.step = 'feedwaste'; break; }
+        if (flow.step === 'place') topUpForTutorial(state, getBuildingCost(state, TILE_STORAGE_CHEST));
+      } else if (flow.step === 'feedwaste') {
+        watchChestFeedStep(state, draggedItemId, maxSpanWorld);
+      } else if (flow.step === 'trickle' && !findPlacedChestKey(state)) {
+        abortTutorialFlow(state);
+      }
+      break;
+    }
+    case 'mergefish':
+      if (hostileAlienAlive(state) || !resolveMergeTutorialPair(state)) abortTutorialFlow(state);
+      break;
+    case 'hunger':
+      if (!state.level.entities.some((e) => e.type === 'fish' && !e.dying && !SPECIES[e.speciesId].behavior.includes('SCAVENGER'))) {
+        clearTutorialFlow(state, false); // nobody left to feed
+      } else if (flow.step === 'food' || flow.step === 'feed') {
+        topUpForTutorial(state, FOOD_COST);
+      }
+      break;
   }
 }
 

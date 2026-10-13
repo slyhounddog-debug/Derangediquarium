@@ -751,9 +751,51 @@ export function hasWasteTurretPlaced(state) {
 // flow's own target, since a player-placed chest (see Systems.js's
 // updateChestTutorialTrigger) can be anywhere, not just the fixed spot the
 // full walkthrough asks for.
-export function findPlacedChestKey(state) {
+// With `acceptsWaste`, only a chest that can actually take Waste right now
+// (empty or already locked to Waste, and not full) — the chest tutorial's
+// "drag Waste into the Chest" step can never finish otherwise, which was a
+// soft lock for a chest already full of / locked to something else.
+export function findPlacedChestKey(state, acceptsWaste = false) {
   for (const key in state.level.buildingData) {
-    if (STORAGE_CHEST_TILES.has(state.level.buildingData[key].type)) return key;
+    const data = state.level.buildingData[key];
+    if (!STORAGE_CHEST_TILES.has(data.type)) continue;
+    if (acceptsWaste && ((data.lockedItemType !== null && data.lockedItemType !== 'waste') || data.count >= STORAGE_CHEST_CAPACITY[data.type])) continue;
+    return key;
+  }
+  return null;
+}
+
+// The first base Waste Turret that can still take ammo (ammoWaste + ammoBiomass
+// under WASTE_TURRET_MAX_AMMO), as its "row,col" key, or null. The "drag Waste
+// into the Turret" tutorial needs one that will actually absorb the Waste — a
+// turret already at its ammo cap never fires the step's completion signal, so
+// pointing the lesson at it was a soft lock.
+export function findWasteTurretKey(state) {
+  for (const key in state.level.buildingData) {
+    const data = state.level.buildingData[key];
+    if (data.type === TILE_TURRET_WASTE && data.ammoWaste + data.ammoBiomass < WASTE_TURRET_MAX_AMMO) return key;
+  }
+  return null;
+}
+
+// The nearest placeable tile to (col, row) for `buildingId`, searching
+// outward in growing square rings, or null if there's none within maxRadius.
+// The tutorials' "place it here" steps use it so their spotlight never sits
+// on a tile the player has already built on (an unplaceable spot = soft lock).
+export function findFreeTileNear(state, col, row, buildingId, maxRadius = 14) {
+  if (canPlaceTile(state, col, row, buildingId, true).ok) return { col, row };
+  for (let r = 1; r <= maxRadius; r++) {
+    let best = null;
+    let bestD = Infinity;
+    for (let dr = -r; dr <= r; dr++) {
+      for (let dc = -r; dc <= r; dc++) {
+        if (Math.max(Math.abs(dr), Math.abs(dc)) !== r) continue; // ring only
+        if (!canPlaceTile(state, col + dc, row + dr, buildingId, true).ok) continue;
+        const d = dr * dr + dc * dc;
+        if (d < bestD) { bestD = d; best = { col: col + dc, row: row + dr }; }
+      }
+    }
+    if (best) return best;
   }
   return null;
 }
@@ -793,15 +835,11 @@ export function findChestTutorialWasteSpot(state, chestKey) {
 // whenever the drag step itself starts or ends (see UI.js's
 // startTutorialFlow/advanceTutorialFlow and main.js's Escape-skip handler).
 export function findNearestWasteTurretAndWaste(state) {
-  let turret = null;
-  for (const key in state.level.buildingData) {
-    const data = state.level.buildingData[key];
-    if (data.type !== TILE_TURRET_WASTE) continue;
-    const [row, col] = key.split(',').map(Number);
-    turret = { x: col * TILE_SIZE + TILE_SIZE / 2, y: row * TILE_SIZE + TILE_SIZE / 2 };
-    break;
-  }
-  if (!turret) return null;
+  // A turret that can still take ammo — see findWasteTurretKey for why a full one doesn't count.
+  const turretKey = findWasteTurretKey(state);
+  if (!turretKey) return null;
+  const [turretRow, turretCol] = turretKey.split(',').map(Number);
+  const turret = { x: turretCol * TILE_SIZE + TILE_SIZE / 2, y: turretRow * TILE_SIZE + TILE_SIZE / 2 };
 
   if (state.level.wasteDragTutorialTargetId !== null) {
     const locked = state.level.items.find(

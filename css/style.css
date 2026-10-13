@@ -499,6 +499,13 @@ body.alt-mode #production-info { display: none !important; }
   cursor: pointer;
 }
 #tutorial-overlay.hidden { display: none; }
+/* While a tutorial step wants clicks on the tank itself (UI.js's
+   isTutorialWorldStep), every other UI element is click-through: the overlay's
+   hole lets the click through to whatever is underneath, and a toolbar, HUD
+   pill or minimap sitting over the spotlight would otherwise swallow it (or
+   fire its own button) — per direct report that the circle can end up under
+   the toolbar. The overlay itself keeps blocking everything outside the hole. */
+body.tutorial-world-step :not(#game-canvas):not(#tutorial-overlay) { pointer-events: none !important; }
 
 /* Instruction text for whichever tutorial step is active — a separate fixed
    pill (not inside #tutorial-overlay) so it stays fully opaque/legible

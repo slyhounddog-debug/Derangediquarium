@@ -152,8 +152,6 @@ import {
   TURRET_PROJECTILE_HIT_RADIUS,
   PRODUCTION_BLOCKED_EFFECT_DURATION_MS,
   WASTE_MAX_ON_SCREEN,
-  TURRET_TUTORIAL_WASTE_X,
-  TURRET_TUTORIAL_WASTE_Y,
   ALIEN_RADIUS,
   ALIEN_CLICK_RADIUS_MULTIPLIER,
   ALIEN_FOOD_BLOCK_DURATION_MS,
@@ -210,7 +208,7 @@ import {
   BOSS_DEATH_SCIENCE_COUNT,
   BOSS_DEATH_SCIENCE_GREEN_COUNT,
 } from './Config.js';
-import { beginItemPhysicsStep, setExtraItemForce, stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemForces, updateBuildings, findChestTutorialWasteSpot } from './Grid.js';
+import { beginItemPhysicsStep, setExtraItemForce, stepItemOnGrid, resolveItemCollisions, computeFanForce, integrateItemForces, updateBuildings, findChestTutorialWasteSpot, findWasteTurretKey } from './Grid.js';
 import { spawnCoinPickupBubbles } from './Ambience.js';
 import { pushGameNotification } from './Notifications.js';
 // Sound is a fire-and-forget side effect at the moment something already
@@ -815,15 +813,34 @@ export function createWaste(x, y) {
 }
 
 // Spawns the turret guided-tutorial's own deterministic Waste item (see
-// Config.js's TURRET_TUTORIAL_WASTE_X/_Y comment) and immediately locks the
-// tutorial's drag target onto it — called from both entry points into the
-// "drag Waste into the Turret" step (main.js's 'place' -> 'dragwaste'
-// transition, and Systems.js's standalone 'wastedrag' trigger) so neither
-// one depends on a real fish having already pooped some out nearby.
+// Config.js's tutorial-Waste comment) BESIDE the turret it is teaching with,
+// and immediately locks the tutorial's drag target onto it — called from both
+// entry points into the "drag Waste into the Turret" step (main.js's 'place'
+// -> 'dragwaste' transition, and Systems.js's standalone 'wastedrag' trigger)
+// and again by Systems.js's tutorial watchdog if the item is ever lost, so
+// the step never depends on a real fish having pooped some out nearby (or on
+// a fixed world coordinate that can fall outside the unlocked tank — the old
+// soft lock). Returns false (spawns nothing) when no turret can take ammo.
 export function spawnTurretTutorialWaste(state) {
-  const item = createWaste(TURRET_TUTORIAL_WASTE_X, TURRET_TUTORIAL_WASTE_Y);
+  const key = findWasteTurretKey(state);
+  if (!key) return false;
+  const spot = findChestTutorialWasteSpot(state, key);
+  const item = createWaste(spot.x, spot.y);
   state.level.items.push(item);
   state.level.wasteDragTutorialTargetId = item.id;
+  return true;
+}
+
+// Moves an existing tutorial Waste item back beside `buildingKey` (zeroing
+// its motion) — the watchdog's fix for a target that has ended up out of
+// reach of the turret/chest it is meant to be dragged into.
+export function relocateTutorialItemNear(state, item, buildingKey) {
+  const spot = findChestTutorialWasteSpot(state, buildingKey);
+  item.x = spot.x;
+  item.y = spot.y;
+  item.vx = 0;
+  item.vy = 0;
+  item.resting = false;
 }
 
 // Same deterministic-spawn-plus-locked-target precedent as

@@ -163,7 +163,7 @@ import { worldToScreen, screenToWorld, createInput, updateCamera, createGameLoop
 import { pushGameNotification, flushPendingNotifications } from './Notifications.js';
 import { isGuidedTutorialsEnabled, noteTutorialFlowStarted, noteTutorialFlowEnded } from './Save.js';
 import { loadLevel, LEVELS } from './Levels.js';
-import { updateStoryTriggers, updateAutosave } from './Systems.js';
+import { updateStoryTriggers, updateAutosave, updateTutorialWatchdog, clearTutorialFlow } from './Systems.js';
 import { updateAmbience, renderAmbienceBehindLab, renderAmbienceFrontLab, spawnCursorBubbles, renderWaterSurface, spawnSeaTurtleBubble, renderBackgroundParallaxDecor, renderShadowFish, renderDecorMask, drawGlossyBubble } from './Ambience.js';
 import { resumeAudio, startGameMusic, startMenuMusic, playAlienHit, setBattleMusicActive, triggerBossMusic, playBuildPlace, playDemolish } from './Sound.js';
 import {
@@ -305,6 +305,8 @@ import {
   closeAllModals,
   closeFeedbackModalIfOpen,
   tutorialScrollDirectionNeeded,
+  tutorialMaxSpanWorld,
+  isTutorialWorldStep,
   updateBossHealthBar,
   showGameOverModal,
   cycleSelectedBuildingFamily,
@@ -1329,6 +1331,8 @@ function startTutorialAfterDelay() {
   setTimeout(() => {
     if (!state.level.tutorialFlags.startTutorialShown) {
       state.level.tutorialFlags.startTutorialShown = true;
+      // A level that already has fish (a loaded save from before this flag existed) has nothing left to teach about buying the first one.
+      if (state.level.entities.some((e) => e.type === 'fish')) return;
       // Per direct request ("if the shop is already open, skip that step of
       // the tutorial") — the 'shop' step's whole job is spotlighting the
       // Shop toggle button and waiting for a click that opens it (see
@@ -1644,6 +1648,12 @@ centerCameraOnMound(state.camera); // one-time — not inside resizeCanvas, so a
 
 // ---- Input wiring ----
 const input = createInput(canvas);
+// The tutorial overlay covers the whole screen outside its click-through hole, so the canvas' own wheel listener never saw a scroll made over the dark area — per direct report the player "can't scroll down outside the circle". Forward it to the same accumulator.
+document.getElementById('tutorial-overlay').addEventListener('wheel', (e) => {
+  e.preventDefault();
+  input.wheelDeltaX += e.deltaX;
+  input.wheelDeltaY += e.deltaY;
+}, { passive: false });
 // Previous tick's cursor world position, for the cursor-bubbles speed calc in
 // update() below — null whenever the cursor isn't over the canvas (or hasn't
 // moved yet this session) so the very first in-bounds tick after a re-entry
@@ -3035,6 +3045,31 @@ function cancelArmedFanPlacement() {
   fanAimingCell = null;
 }
 
+// A guided tutorial taking over must not inherit a half-finished gesture:
+// right-click (the normal way out of a carried group, a building mid-move or a
+// pending Blueprint stamp) is ignored during tutorials, so anything still in
+// flight when a flow starts would stay stuck to the cursor for its whole
+// length. Everything is put back exactly where it came from.
+function abortGesturesForTutorial() {
+  cancelGroupMove();
+  if (movingBuilding != null) {
+    putDownMovedBuilding(state, movingBuilding.fromCol, movingBuilding.fromRow, movingBuilding.buildingId, movingBuilding.data, false);
+    movingBuilding = null;
+  }
+  if (isFanAimingActive() && fanAimingMoveData != null) {
+    putDownMovedBuilding(state, fanAimingMoveOrigin.fromCol, fanAimingMoveOrigin.fromRow, fanAimingCell.buildingId, fanAimingMoveData, false);
+    fanAimingCell = null;
+    fanAimingMoveData = null;
+    fanAimingMoveOrigin = null;
+  } else {
+    cancelArmedFanPlacement();
+  }
+  blueprintClipboard = null;
+  blueprintDragStartCol = null;
+  blueprintDragStartRow = null;
+  prodSelect = null;
+}
+
 // Deletes a placed tile via a full refund, the same way removal always has,
 // but first snapshots it (type/instance-data/the exact refund actually
 // paid) so performUndo can restore it later, and posts a floating "+$xx"
@@ -3480,14 +3515,15 @@ input.clickHandlers.push((sx, sy) => {
   // (the universal item-drag mechanic) into a Collector by hand, or left to
   // drift into one on its own via a Fan.
   if (tryBankCoinAt(state, world.x, world.y)) return; // clicking a coin always banks it, regardless of selected tool
-  if (isPointOnMound(state, world.x, world.y)) { openMoundMenu(state); return; } // opens the "Throw money at it" popup — see UI.js
-  if (isPointOnScienceLab(state, world.x, world.y)) { openLabMenu(state); return; } // Phase 4 — the Mound's replacement once it's fully shattered
+  const inTutorial = !!state.level.tutorialFlow; // a pop-up opened mid-tutorial would cover the spotlight (and its backdrop is click-through then)
+  if (!inTutorial && isPointOnMound(state, world.x, world.y)) { openMoundMenu(state); return; } // opens the "Throw money at it" popup — see UI.js
+  if (!inTutorial && isPointOnScienceLab(state, world.x, world.y)) { openLabMenu(state); return; } // Phase 4 — the Mound's replacement once it's fully shattered
   // A placed Manufacturer/Power Plant opens its recipe pop-up menu on click
   // — per direct spec, works regardless of the currently selected tool
   // (same as the Mound/Lab above), except a genuine drag gesture (already
   // returned at the top of this handler).
   const recipeBuildingKey = getRecipeBuildingKeyAt(state, world.x, world.y);
-  if (recipeBuildingKey) { openRecipeMenu(state, recipeBuildingKey); return; }
+  if (recipeBuildingKey && !inTutorial) { openRecipeMenu(state, recipeBuildingKey); return; }
   // Every OTHER placed building opens a generic read-only info pop-up
   // instead — per direct request ("any building can be quickly clicked on
   // to see what it is and what it does"). Deliberately gated on NOT
@@ -3497,7 +3533,7 @@ input.clickHandlers.push((sx, sy) => {
   // before this click even runs, so without this guard, single-clicking an
   // EMPTY cell to place a fresh building would immediately pop this info-
   // modal open right over top of what you just built.
-  if (!effectiveTool.startsWith('build:')) {
+  if (!effectiveTool.startsWith('build:') && !inTutorial) {
     // A placed Platform (any of its 5 variants) opens its own item-filter
     // pop-up instead of the generic building-info one — per direct request
     // ("when you left click a platform, it opens the filter modal"), checked
@@ -3750,24 +3786,25 @@ input.keydownHandlers.push((e) => {
   // tutorial or the pause menu could swallow it while it's active).
   // preventDefault stops the browser's own Alt behavior (focusing/opening
   // its menu bar) from firing alongside this.
-  if (e.code === 'AltLeft' || e.code === 'AltRight') { e.preventDefault(); toggleAltMode(state); return; }
+  if (e.code === 'AltLeft' || e.code === 'AltRight') { e.preventDefault(); if (!state.level.tutorialFlow) toggleAltMode(state); return; } // Alt-mode hides the whole tutorial overlay, leaving a frozen game with no explanation
   // Base Stats panel, per direct request — same "always reachable" reasoning
   // as the debug overlay/Alt-mode above (a pure read-only info view, useful
   // in any state including paused, and there'd be no way to close it again
   // if a tutorial/pause menu could swallow the toggle while it's open).
   // preventDefault stops the browser's own Tab focus-cycling from also
   // firing alongside this.
-  if (e.code === 'Tab') { e.preventDefault(); toggleStatsPanel(state); return; }
+  if (e.code === 'Tab') { e.preventDefault(); if (!state.level.tutorialFlow) toggleStatsPanel(state); return; } // the panel slides over the left edge — a tutorial step must stay uncovered
   // Escape can always skip an active guided tutorial — per direct request
   // ("make sure escape can actually skip any tutorial"), checked here,
   // ahead of the general tutorial-flow hotkey block below, so it's the one
   // exception to "every hotkey is swallowed during a tutorial." Just clears
   // the flow outright — UI.js's updateTutorialOverlay reacts on the very
   // next frame (hides the overlay/text), same as a normal completion.
+  // Systems.js's clearTutorialFlow also marks a skipped one-shot lesson as done
+  // (the drag-Waste lesson used to restart a second after being skipped —
+  // per direct report, a soft lock) and drops every locked tutorial target.
   if (e.code === 'Escape' && state.level.tutorialFlow) {
-    state.level.tutorialFlow = null;
-    state.level.wasteDragTutorialTargetId = null; // clear any locked drag-Waste target — see Grid.js's findNearestWasteTurretAndWaste
-    state.level.mergeTutorialTargetIds = null; // clear any locked merge-tutorial target pair — see Entities.js's resolveMergeTutorialPair
+    clearTutorialFlow(state, true);
     return;
   }
   // Per direct request ("Allow the E Hotkey during tutorials to open/close
@@ -3778,6 +3815,7 @@ input.keydownHandlers.push((e) => {
   // and post-alien flows both do) still progresses whether the player used
   // the hotkey or clicked the real button.
   if (e.code === 'KeyE' && state.level.tutorialFlow) {
+    if (isTutorialWorldStep(state)) return; // the Shop window would cover the spotlight the click has to land in
     toggleShopCollapse(state);
     if (!state.ui.shopCollapsed) {
       advanceTutorialFlow(state, 'start', 'shop');
@@ -4758,6 +4796,14 @@ function update(dtMs) {
   // "scroll" and "place" steps need both to keep working while a flow is
   // active. The overlay's own clip-path "hole" is what restricts WHICH
   // clicks actually reach anything (see UI.js's updateTutorialOverlay).
+  // Repairs anything that would leave the current step unfinishable (a lost
+  // target, a full turret/chest, an unaffordable purchase...) before the
+  // freeze check below — see Systems.js's updateTutorialWatchdog. May end the
+  // flow outright, hence the second check.
+  if (state.level.tutorialFlow) {
+    const dragStep = isWasteDragTutorialStepActive(state) || isChestFeedWasteStepActive(state);
+    updateTutorialWatchdog(state, draggedItemId, dragStep ? tutorialMaxSpanWorld(state) : 0);
+  }
   if (state.level.tutorialFlow) {
     // The "scroll" step's advance condition isn't a click — there's nothing
     // to click for "pan the camera" — so it's checked here, every tick,
@@ -5680,14 +5726,13 @@ let lastTutorialFlow = null;
 function applyGuidedTutorialPreference(state) {
   let flow = state.level.tutorialFlow;
   if (flow && !isGuidedTutorialsEnabled()) {
-    state.level.tutorialFlow = null;
-    state.level.wasteDragTutorialTargetId = null;
-    state.level.mergeTutorialTargetIds = null;
+    clearTutorialFlow(state, true);
     flow = null;
   }
   if (flow === lastTutorialFlow) return;
   const ended = lastTutorialFlow;
   lastTutorialFlow = flow;
+  if (flow) abortGesturesForTutorial();
   if (flow) noteTutorialFlowStarted(flow.id);
   else if (ended) noteTutorialFlowEnded();
 }
