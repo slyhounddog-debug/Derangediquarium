@@ -125,7 +125,7 @@ import { centerCameraOnMound, canCrackMound, crackMound, getMoundNextCost, MOUND
 import { drawFish } from './FishRenderer.js';
 import { playUnlock, playChatMessage, setMusicVolume, setSfxVolume, setAmbienceVolume, getMusicVolume, getSfxVolume, getAmbienceVolume, playPanelOpen, playPanelClose, playInsufficientFunds, playUiHover, playUiSelect, playUiDeselect, setMusicUnderwaterMuffle, setMusicSpeedBoost, setMusicPaused } from './Sound.js';
 import { computeProductionInfo } from './ProductionInfo.js';
-import { hasSaveGame, saveGame, loadSaveGame, clearSaveGame, isGuidedTutorialsEnabled, setGuidedTutorialsEnabled, SAVE_SLOT_COUNT, getSaveSummary, setSaveWorldSettings, lastSaveSlot, setActiveSaveSlot } from './Save.js';
+import { hasSaveGame, saveGame, loadSaveGame, clearSaveGame, isGuidedTutorialsEnabled, setGuidedTutorialsEnabled, SAVE_SLOT_COUNT, getSaveSummary, setSaveWorldSettings, setActiveSaveSlot } from './Save.js';
 import { pushGameNotification } from './Notifications.js';
 import { setTitlePaused } from './TitleScreen.js';
 
@@ -455,6 +455,7 @@ const UI_HOVER_SELECTOR = [
   '#start-mode-overlay button',
   '#save-slots-overlay button',
   '#world-settings-overlay button',
+  '#feedback-overlay button',
   '#start-help-overlay button',
 ].join(',');
 
@@ -566,7 +567,13 @@ export function initUI(state) {
     pauseControlsBackBtn: document.getElementById('pause-controls-back-btn'),
     pauseResumeBtn: document.getElementById('pause-resume-btn'),
     pauseSaveBtn: document.getElementById('pause-save-btn'),
-    pauseLoadSaveBtn: document.getElementById('pause-load-save-btn'),
+    pauseFeedbackBtn: document.getElementById('pause-feedback-btn'),
+    feedbackOverlay: document.getElementById('feedback-overlay'),
+    feedbackComment: document.getElementById('feedback-comment'),
+    feedbackNotify: document.getElementById('feedback-notify'),
+    feedbackEmailWrap: document.getElementById('feedback-email-wrap'),
+    feedbackEmail: document.getElementById('feedback-email'),
+    feedbackError: document.getElementById('feedback-error'),
     pauseMainMenuBtn: document.getElementById('pause-main-menu-btn'),
     pauseSettingsBtn: document.getElementById('pause-settings-btn'),
     pauseSettingsBackBtn: document.getElementById('pause-settings-back-btn'),
@@ -900,7 +907,7 @@ export function initUI(state) {
   // handler, togglePauseMenu still does the actual work either way).
   els.pauseResumeBtn.addEventListener('click', () => closePauseMenu(state));
   els.pauseSaveBtn.addEventListener('click', () => saveGameFromPause(state));
-  els.pauseLoadSaveBtn.addEventListener('click', () => loadLastSaveFromPause(state));
+  initFeedbackModal(state);
   els.pauseMainMenuBtn.addEventListener('click', () => returnToMainMenuFromPause(state));
   // minimap-expand-btn is wired in main.js now, not here — per direct
   // report, the button was supposed to control the real tank-viewport zoom
@@ -2991,14 +2998,16 @@ function showPauseMain() {
 // mouse gesture (static markup in index.html). The card widens while it shows.
 function showPauseControls() {
   els.pauseMain.classList.add('hidden');
+  els.pauseSettings.classList.add('hidden'); // sub-views are mutually exclusive — a stale open Settings view must never render beside Controls, stretched to the widened card
   els.pauseControls.classList.remove('hidden');
   els.pauseMenu.classList.add('controls-open');
 }
 
 function showPauseSettings() {
   els.pauseMain.classList.add('hidden');
+  els.pauseControls.classList.add('hidden'); // see showPauseControls
+  els.pauseMenu.classList.remove('controls-open'); // Settings must never inherit the Controls card's widened, auto-height sizing
   els.pauseSettings.classList.remove('hidden');
-  els.pauseLoadSaveBtn.disabled = !lastSaveSlot(); // re-checked every open — a save could exist now that didn't the last time this was shown
   els.guidedTutorialToggle.checked = isGuidedTutorialsEnabled(); // re-synced every open — Save.js can switch it off by itself once every tutorial has been seen
 }
 
@@ -3012,12 +3021,6 @@ let settingsOpenedFromStartScreen = false;
 // Controls plank re-shows the pause menu's own Controls list rather than a
 // second copy of it.
 let controlsOpenedFromStartScreen = false;
-// Stashed once by initStartScreen — reused by loadLastSaveFromPause's own
-// "opened via the start screen" branch, since that's the one case where
-// loading a save also has to actually kick off gameplay (the game was never
-// running yet), and this function has no other way to reach main.js's
-// onStart callback.
-let startOnStartCallback = null;
 // True while the shared start-mode warning window is showing the pause menu's "Return to the main menu?" warning.
 let mainMenuWarningOpen = false;
 
@@ -3028,6 +3031,7 @@ let mainMenuWarningOpen = false;
 function returnFromPauseSettings(state) {
   if (settingsOpenedFromStartScreen) {
     settingsOpenedFromStartScreen = false;
+    showPauseMain(); // leaving Settings still showing made the next sub-view opened from the start screen (Controls) render beside it
     els.pauseOverlay.classList.add('hidden'); // #start-overlay was never hidden underneath it — nothing more to restore
     playPanelClose();
     return;
@@ -3072,7 +3076,6 @@ function drawStartModeArt() {
 }
 
 export function initStartScreen(state, onStart) {
-  startOnStartCallback = onStart;
   // Load Game stays visible but grayed out/disabled unless some slot actually holds a save — per direct request (was
   // fully hidden before) — re-checked whenever a save is deleted or a game starts.
   els.startContinueBtn.disabled = !hasSaveGame();
@@ -3380,37 +3383,60 @@ function saveGameFromPause(state) {
   state.ui.toastText = ok ? 'Game saved.' : "Couldn't save — your browser blocked it.";
 }
 
-// The Settings panel's "Load Last Save" button, per direct request — reverts
-// to whatever was last saved (manually, or by the autosave timer — see
-// Systems.js's updateAutosave), replacing state.meta/state.level wholesale
-// exactly the same way the start screen's own Continue button already does
-// (see initStartScreen below), just reachable mid-game too. Handles both
-// doors this shared Settings sub-view can be opened through: mid-game (just
-// resume with the loaded state) and via the start screen (mirrors Continue —
-// actually kick off onStart() (which also plays the title's exit animation),
-// since the game was never running yet).
-function loadLastSaveFromPause(state) {
-  const slot = lastSaveSlot(); // the slot this game saves to, or (from the start screen) the newest one
-  const saved = slot ? loadSaveGame(slot) : null;
-  if (!saved) {
-    pushUiNotification(state, "No save to load yet.");
-    return;
-  }
-  setActiveSaveSlot(slot);
-  state.meta = saved.meta;
-  state.level = saved.level;
-  applyWorldSettings(state.meta.worldSettings); // the loaded save's own World Settings (none = Normal)
-  reconcileIdsAfterLoad(state.level); // new items/fish must not reuse ids the saved level already holds — see Entities.js
-  centerCameraOnMound(state.camera); // same one-time re-center every other load-a-saved-level path already does
-  pushUiNotification(state, 'Loaded your last save.');
-  if (settingsOpenedFromStartScreen) {
-    settingsOpenedFromStartScreen = false;
-    els.pauseOverlay.classList.add('hidden');
-    playPanelClose();
-    if (startOnStartCallback) startOnStartCallback();
-  } else {
-    closePauseMenu(state);
-  }
+// The Settings panel's Feedback window, per direct request (it replaced the "Load Last Save" button — the Load Game
+// screen covers loading now). The comment is sent by opening the player's mail app with a message addressed to the
+// studio: there is no backend to relay it, so nothing is stored or sent without the player pressing Send in their mail
+// app. The email field only exists when the "be notified" box is ticked.
+const FEEDBACK_EMAIL_TO = 'pardonmygamesstudio@gmail.com';
+const FEEDBACK_EMAIL_PATTERN = /^[^ @]+@[^ @]+[.][^ @]+$/;
+
+function openFeedbackModal() {
+  els.feedbackOverlay.classList.remove('hidden');
+  els.feedbackComment.focus();
+  playPanelOpen();
+}
+function closeFeedbackModal() {
+  els.feedbackOverlay.classList.add('hidden');
+  els.feedbackError.classList.add('hidden');
+  playPanelClose();
+}
+// Escape (main.js) closes the Feedback window before anything else; true if it was open.
+export function closeFeedbackModalIfOpen() {
+  if (els.feedbackOverlay.classList.contains('hidden')) return false;
+  closeFeedbackModal();
+  return true;
+}
+function showFeedbackError(text) {
+  els.feedbackError.textContent = text;
+  els.feedbackError.classList.remove('hidden');
+}
+function sendFeedback(state) {
+  const comment = els.feedbackComment.value.trim();
+  if (!comment) { showFeedbackError('Please write a comment first.'); return; }
+  const notify = els.feedbackNotify.checked;
+  const email = els.feedbackEmail.value.trim();
+  if (notify && !FEEDBACK_EMAIL_PATTERN.test(email)) { showFeedbackError('Please enter a valid email so we can tell you when it is done.'); return; }
+  const body = comment + (notify ? '\n\n---\nPlease notify me when this is done: ' + email : '');
+  const link = document.createElement('a');
+  link.href = 'mailto:' + FEEDBACK_EMAIL_TO + '?subject=' + encodeURIComponent('Finsanity feedback') + '&body=' + encodeURIComponent(body);
+  link.click(); // an anchor click so the game page itself is never navigated away
+  els.feedbackComment.value = '';
+  els.feedbackNotify.checked = false;
+  els.feedbackEmail.value = '';
+  els.feedbackEmailWrap.classList.add('hidden');
+  closeFeedbackModal();
+  state.ui.toastText = 'Opening your email app — press Send there to deliver your feedback.';
+}
+function initFeedbackModal(state) {
+  els.pauseFeedbackBtn.addEventListener('click', openFeedbackModal);
+  document.getElementById('feedback-close-btn').addEventListener('click', closeFeedbackModal);
+  document.getElementById('feedback-cancel-btn').addEventListener('click', closeFeedbackModal);
+  document.getElementById('feedback-send-btn').addEventListener('click', () => sendFeedback(state));
+  els.feedbackOverlay.addEventListener('click', (e) => { if (e.target === els.feedbackOverlay) closeFeedbackModal(); });
+  els.feedbackNotify.addEventListener('change', () => {
+    els.feedbackEmailWrap.classList.toggle('hidden', !els.feedbackNotify.checked);
+    if (els.feedbackNotify.checked) els.feedbackEmail.focus();
+  });
 }
 
 // Rebuilds state.level from scratch via the real level-load path (same one

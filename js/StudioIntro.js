@@ -19,7 +19,7 @@
 // A click/tap or any key at any point skips straight to the menu.
 
 import {
-  STUDIO_INTRO_START_DELAY_S, STUDIO_INTRO_LETTER_STAGGER_S, STUDIO_INTRO_LETTER_FLY_S, STUDIO_INTRO_FLOAT_RAMP_S,
+  STUDIO_INTRO_START_DELAY_S, STUDIO_INTRO_LETTER_STAGGER_S, STUDIO_INTRO_BLIP_START_S, STUDIO_INTRO_BLIP_INTERVAL_S, STUDIO_INTRO_LETTER_FLY_S, STUDIO_INTRO_FLOAT_RAMP_S,
   STUDIO_INTRO_FLOAT_AMP_PX, STUDIO_INTRO_FLOAT_SPEED, STUDIO_INTRO_FLOAT_WORD_PHASE, STUDIO_INTRO_PRESENTS_DELAY_S,
   STUDIO_INTRO_PRESENTS_CHAR_STAGGER_S, STUDIO_INTRO_PRESENTS_CHAR_FADE_S, STUDIO_INTRO_HOLD_S,
   STUDIO_INTRO_BURST_COUNT, STUDIO_INTRO_AMBIENT_COUNT,
@@ -88,6 +88,7 @@ let t = 0; // seconds since the splash opened
 let lastNow = 0;
 let burstFired = false;
 let nextLanding = 0;
+let nextBlip = 0;
 let bakeCursor = 0;
 let timeline = null;
 let titleFs = 0;
@@ -643,8 +644,9 @@ function draw() {
 
 function update(dt) {
   if (bakeCursor < letters.length) { const L = letters[bakeCursor++]; if (!L.sprite) L.sprite = bakeLetter(L.ch, titleFs, L.fills); } // one letter per frame, well before its launch
+  // Blips run on their own clock (earlier and slower than the landings, per direct request); the landing sparks stay tied to the picture.
+  while (nextBlip < letters.length && t >= STUDIO_INTRO_BLIP_START_S + nextBlip * STUDIO_INTRO_BLIP_INTERVAL_S) playIntroLetterBump(nextBlip++);
   while (nextLanding < letters.length && t >= letters[nextLanding].land) {
-    playIntroLetterBump(nextLanding);
     spawnLandingSparks(letters[nextLanding]);
     nextLanding++;
   }
@@ -741,6 +743,7 @@ export function runStudioIntro(onDone) {
   timeline = buildTimeline();
   t = 0;
   nextLanding = 0;
+  nextBlip = 0;
   bakeCursor = 0;
   burstFired = false;
   ambientAlive = 0;

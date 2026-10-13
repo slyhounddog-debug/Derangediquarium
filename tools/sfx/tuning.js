@@ -448,7 +448,7 @@ const FORMULAS = [
     id: 'studioIntro', title: 'Studio intro timeline',
     formula: 'letter k (0-12) launches at start + k × stagger and lands one flight time later (PARDON = letters 0-5, MY = 6-7, GAMES = 8-12)\na word starts hovering once its last letter has landed\nSTUDIO PRESENTS... starts presents delay after the last landing; its 18 characters stagger in; then the screen holds and moves on by itself',
     note: 'The splash that plays before the start menu. A click, tap or key skips it at any point. The "intro background" sound plays once at 0 s and is cut with a quick fade on a skip, so a recording picked in the Audio tab should be about as long as the "moves on" time below.',
-    params: ['STUDIO_INTRO_START_DELAY_S', 'STUDIO_INTRO_LETTER_STAGGER_S', 'STUDIO_INTRO_LETTER_FLY_S', 'STUDIO_INTRO_FLOAT_RAMP_S', 'STUDIO_INTRO_PRESENTS_DELAY_S', 'STUDIO_INTRO_PRESENTS_CHAR_STAGGER_S', 'STUDIO_INTRO_PRESENTS_CHAR_FADE_S', 'STUDIO_INTRO_HOLD_S'],
+    params: ['STUDIO_INTRO_START_DELAY_S', 'STUDIO_INTRO_LETTER_STAGGER_S', 'STUDIO_INTRO_BLIP_START_S', 'STUDIO_INTRO_BLIP_INTERVAL_S', 'STUDIO_INTRO_LETTER_FLY_S', 'STUDIO_INTRO_FLOAT_RAMP_S', 'STUDIO_INTRO_PRESENTS_DELAY_S', 'STUDIO_INTRO_PRESENTS_CHAR_STAGGER_S', 'STUDIO_INTRO_PRESENTS_CHAR_FADE_S', 'STUDIO_INTRO_HOLD_S'],
     render() {
       const start = V('STUDIO_INTRO_START_DELAY_S'), stagger = V('STUDIO_INTRO_LETTER_STAGGER_S'), fly = V('STUDIO_INTRO_LETTER_FLY_S');
       const land = (k) => start + k * stagger + fly;
@@ -457,6 +457,8 @@ const FORMULAS = [
       const sec = (n) => fmtNum(n, 2) + ' s';
       return tbl('When things happen (seconds after the splash opens)', ['Event', 'Time'], [
         ['First letter (P) launches', sec(start)],
+        ['First of the 13 bubble-up blips (one per letter, each higher)', sec(V('STUDIO_INTRO_BLIP_START_S'))],
+        ['Last blip', sec(V('STUDIO_INTRO_BLIP_START_S') + 12 * V('STUDIO_INTRO_BLIP_INTERVAL_S'))],
         ['PARDON has landed, starts hovering', sec(land(5))],
         ['MY has landed, starts hovering', sec(land(7))],
         ['GAMES has landed, starts hovering', sec(land(12))],

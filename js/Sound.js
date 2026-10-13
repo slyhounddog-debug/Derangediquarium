@@ -923,8 +923,8 @@ export function playUiDeselect() {
 }
 
 // ---- Studio intro splash (StudioIntro.js) ----
-// A bubbly "bloop" as each title letter settles. Per direct request the 13 landings run ~90ms apart, so
-// the cooldown is shorter than the usual 50ms-per-sound default would allow a long cascade to breathe, and
+// A bubbly "bloop", one per title letter, on their own clock in StudioIntro.js (starting before the first
+// landing and ~150ms apart, per direct request). The cooldown is shorter than the usual 50ms default, and
 // each letter is a little higher than the last (the recording is pitched through playbackRate, the synth
 // fallback through its note) so the cascade climbs instead of repeating one blip.
 export function playIntroLetterBump(index = 0) {

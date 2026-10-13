@@ -151,6 +151,30 @@
   </div>
 </div>
 
+<!-- Per direct request, the Settings menu's Feedback window. Layers above the pause overlay (z 650) so it works from
+     both doors Settings can be opened through. Sending opens the player's mail app addressed to the studio
+     (UI.js's sendFeedback) — there is no server relay. -->
+<div id="feedback-overlay" class="hidden">
+  <div id="feedback-modal">
+    <div id="feedback-header-row">
+      <div id="feedback-title">💬 Feedback</div>
+      <button id="feedback-close-btn" class="lab-close-x-btn" title="Close">✕</button>
+    </div>
+    <label id="feedback-comment-label" for="feedback-comment">Tell us what you think, found, or want to see:</label>
+    <textarea id="feedback-comment" maxlength="1200" rows="6" placeholder="Your comment..."></textarea>
+    <label id="feedback-notify-row"><input type="checkbox" id="feedback-notify"> Be notified when the feature/feedback is done?</label>
+    <div id="feedback-email-wrap" class="hidden">
+      <label for="feedback-email">Your email</label>
+      <input type="email" id="feedback-email" placeholder="you@example.com" autocomplete="email">
+    </div>
+    <div id="feedback-error" class="hidden"></div>
+    <div id="feedback-footer">
+      <button id="feedback-cancel-btn" class="pause-btn sheen-target">Cancel</button>
+      <button id="feedback-send-btn" class="pause-btn sheen-target">Send</button>
+    </div>
+  </div>
+</div>
+
 <!-- Wavy, torn-paper edge for the Shop's detail parchment (nautical.css's
      #shop-preview::before applies it as a filter to the paper layer only, so
      the text on top is never distorted). -->
@@ -645,7 +669,7 @@
         <label for="guided-tutorial-toggle">🎓 Guided Tutorial</label>
         <input type="checkbox" id="guided-tutorial-toggle">
       </div>
-      <button id="pause-load-save-btn" class="pause-btn sheen-target">↩️ Load Last Save</button>
+      <button id="pause-feedback-btn" class="pause-btn sheen-target">💬 Feedback</button>
       <button id="pause-settings-back-btn" class="pause-btn sheen-target">← Back</button>
     </div>
   </div>

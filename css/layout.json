@@ -362,6 +362,179 @@
         "height": "65px",
         "translate": "0px -7px"
       }
+    },
+    {
+      "sel": "#tank-tab-achievements",
+      "css": {
+        "height": "50px"
+      }
+    },
+    {
+      "sel": "#tank-tab-customization",
+      "css": {
+        "height": "50px"
+      }
+    },
+    {
+      "sel": "#tank-tab-achievements > span.tank-tab-label",
+      "css": {
+        "font-size": "17px",
+        "translate": "-6px 0px"
+      }
+    },
+    {
+      "sel": "#tank-tab-customization > span.tank-tab-label",
+      "css": {
+        "font-size": "18px",
+        "translate": "-6px 0px"
+      }
+    },
+    {
+      "sel": "#tank-tab-achievements > span.tank-tab-icon",
+      "css": {
+        "font-size": "22px"
+      }
+    },
+    {
+      "sel": "#tank-tab-customization > span.tank-tab-icon",
+      "css": {
+        "font-size": "22px"
+      }
+    },
+    {
+      "sel": "#world-settings-banner",
+      "css": {
+        "height": "39px",
+        "width": "306px",
+        "translate": "306px -50px"
+      }
+    },
+    {
+      "sel": "#world-settings-banner-text",
+      "text": {
+        "3": " for this run."
+      }
+    },
+    {
+      "sel": "#world-settings-body",
+      "css": {
+        "height": "425px",
+        "translate": "0px -42px"
+      }
+    },
+    {
+      "sel": "#world-settings-title",
+      "css": {
+        "height": "41px",
+        "translate": "0px -17px"
+      }
+    },
+    {
+      "sel": "#world-settings-header-row",
+      "css": {
+        "height": "26px",
+        "translate": "0px 3px"
+      }
+    },
+    {
+      "sel": "section:nth-child(1) > div:nth-child(2)",
+      "css": {
+        "translate": "0px 3px",
+        "height": "72px"
+      }
+    },
+    {
+      "sel": "section:nth-child(1) > div:nth-child(3)",
+      "css": {
+        "height": "72px"
+      }
+    },
+    {
+      "sel": "section:nth-child(1) > div:nth-child(4)",
+      "css": {
+        "height": "72px"
+      }
+    },
+    {
+      "sel": "section:nth-child(1) > div:nth-child(5)",
+      "css": {
+        "height": "72px"
+      }
+    },
+    {
+      "sel": "section:nth-child(1) > div:nth-child(6)",
+      "css": {
+        "height": "70px"
+      }
+    },
+    {
+      "sel": "section:nth-child(1) > div:nth-child(7)",
+      "css": {
+        "height": "70px"
+      }
+    },
+    {
+      "sel": "section:nth-child(1) > div:nth-child(8)",
+      "css": {
+        "height": "72px"
+      }
+    },
+    {
+      "sel": "section:nth-child(1) > div:nth-child(9)",
+      "css": {
+        "height": "70px"
+      }
+    },
+    {
+      "sel": "section:nth-child(1) > div:nth-child(10)",
+      "css": {
+        "height": "70px"
+      }
+    },
+    {
+      "sel": "section:nth-child(1) > div:nth-child(11)",
+      "css": {
+        "height": "70px"
+      }
+    },
+    {
+      "sel": "div:nth-child(12) > div.ws-desc",
+      "text": {
+        "0": "What coins are worth when the tank is 0% clean (100% clean is always full value)."
+      }
+    },
+    {
+      "sel": "#world-settings-presets",
+      "css": {
+        "translate": "0px -40px"
+      }
+    },
+    {
+      "sel": "#world-settings-preset-desc",
+      "css": {
+        "translate": "0px -35px",
+        "height": "27px"
+      }
+    },
+    {
+      "sel": "section:nth-child(1) > h3:nth-child(1)",
+      "css": {
+        "height": "11px",
+        "translate": "0px -5px"
+      }
+    },
+    {
+      "sel": "section:nth-child(1)",
+      "css": {
+        "height": "854px",
+        "translate": "0px 5px"
+      }
+    },
+    {
+      "sel": "#world-settings-modal",
+      "css": {
+        "width": "700px"
+      }
     }
   ]
 }

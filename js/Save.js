@@ -384,16 +384,3 @@ export function setSaveWorldSettings(slot, worldSettings) {
   }
 }
 
-// The slot "Load Last Save" reads: the one the running game saves to, else (from the start screen's Settings) the most
-// recently written one. null when no slot has a save.
-export function lastSaveSlot() {
-  if (activeSaveSlot && hasSaveGame(activeSaveSlot)) return activeSaveSlot;
-  let best = null;
-  let bestMs = -1;
-  for (let slot = 1; slot <= SAVE_SLOT_COUNT; slot++) {
-    const summary = getSaveSummary(slot);
-    if (!summary) continue;
-    if ((summary.savedAtMs || 0) > bestMs) { best = slot; bestMs = summary.savedAtMs || 0; }
-  }
-  return best;
-}

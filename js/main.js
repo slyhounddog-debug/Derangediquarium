@@ -303,6 +303,7 @@ import {
   advanceTutorialFlow,
   closeSidePanels,
   closeAllModals,
+  closeFeedbackModalIfOpen,
   tutorialScrollDirectionNeeded,
   updateBossHealthBar,
   showGameOverModal,
@@ -3844,6 +3845,7 @@ input.keydownHandlers.push((e) => {
     // Per direct request one Escape closes every open menu and pop-up at once (shop, tank, lab, fish/building
     // modals, merge/splice/science-node popups, ...) and is then consumed — the pause menu only opens on the
     // next press, when nothing is left to close.
+    if (closeFeedbackModalIfOpen()) return; // the Feedback window sits above the pause menu — Escape closes just it, not the pause menu under it
     if (!state.ui.paused && closeAllModals(state)) return;
     togglePauseMenu(state);
     return;

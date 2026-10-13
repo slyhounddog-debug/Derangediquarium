@@ -3935,6 +3935,8 @@ export const ACHIEVEMENT_CLEANLINESS_COMPLETE_THRESHOLD = 99;
 // seconds from the moment the splash opens; every one is a plain literal so the dev tool's Variables tab can edit it.
 export const STUDIO_INTRO_START_DELAY_S = 0.25; // pause on the empty dark screen before the first letter launches
 export const STUDIO_INTRO_LETTER_STAGGER_S = 0.09; // gap between one letter launching and the next (PARDON -> MY -> GAMES run back to back)
+export const STUDIO_INTRO_BLIP_START_S = 0.3; // per direct request the 13 bubble-up blips start sooner than the first landing (0.87s) so the sound leads the picture
+export const STUDIO_INTRO_BLIP_INTERVAL_S = 0.15; // ...and play slower than the letters land (0.09s apart), one per letter, each a little higher
 export const STUDIO_INTRO_LETTER_FLY_S = 0.62; // one letter's flight from off-screen to its spot, ending in the bouncy overshoot
 export const STUDIO_INTRO_FLOAT_RAMP_S = 0.6; // how long a word takes to ease into its hover once its last letter lands
 export const STUDIO_INTRO_FLOAT_AMP_PX = 7; // hover height at a 1080px-tall screen (scales with the screen)
