@@ -101,22 +101,26 @@ div:nth-child(24) > div.achievement-desc {
 }
 
 #bottom-tool-bar {
-  height: 96px !important;
-  translate: 0px 10px !important;
+  translate: 0px 5px !important;
+  height: 83px !important;
 }
 
 #tool-food-btn {
-  height: 59px !important;
+  height: 53px !important;
   translate: 0px 0px !important;
-  width: 59px !important;
+  width: 53px !important;
 }
 
 #bottom-tool-bar > div:nth-child(4) {
   width: 13px !important;
+  height: 91px !important;
+  translate: 0px 3px !important;
 }
 
 #bottom-tool-bar > div:nth-child(6) {
   width: 13px !important;
+  height: 91px !important;
+  translate: 0px 3px !important;
 }
 
 #save-slots-modal {
@@ -242,18 +246,18 @@ div:nth-child(24) > div.achievement-desc {
 
 #world-settings-banner {
   height: 39px !important;
-  width: 306px !important;
-  translate: 306px -50px !important;
+  width: 262px !important;
+  translate: 306px -47px !important;
 }
 
 #world-settings-body {
-  height: 425px !important;
+  height: 445px !important;
   translate: 0px -42px !important;
 }
 
 #world-settings-title {
   height: 41px !important;
-  translate: 0px -17px !important;
+  translate: 0px -9px !important;
 }
 
 #world-settings-header-row {
@@ -323,4 +327,42 @@ section:nth-child(1) {
 
 #world-settings-modal {
   width: 700px !important;
+  height: 747px !important;
+}
+
+#shop-close-btn {
+  translate: 330px 0px !important;
+}
+
+#world-settings-reset-btn {
+  translate: 0px -30px !important;
+}
+
+#world-settings-done-btn {
+  translate: 0px -30px !important;
+}
+
+#shop-collapse-btn {
+  width: 67px !important;
+  height: 67px !important;
+}
+
+#tank-collapse-btn {
+  width: 67px !important;
+  height: 67px !important;
+}
+
+#tool-favorite-1-btn {
+  width: 53px !important;
+  height: 53px !important;
+}
+
+#tool-favorite-2-btn {
+  width: 53px !important;
+  height: 53px !important;
+}
+
+#tool-favorite-3-btn {
+  width: 53px !important;
+  height: 53px !important;
 }

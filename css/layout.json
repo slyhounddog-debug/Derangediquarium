@@ -155,28 +155,32 @@
     {
       "sel": "#bottom-tool-bar",
       "css": {
-        "height": "96px",
-        "translate": "0px 10px"
+        "translate": "0px 5px",
+        "height": "83px"
       }
     },
     {
       "sel": "#tool-food-btn",
       "css": {
-        "height": "59px",
+        "height": "53px",
         "translate": "0px 0px",
-        "width": "59px"
+        "width": "53px"
       }
     },
     {
       "sel": "#bottom-tool-bar > div:nth-child(4)",
       "css": {
-        "width": "13px"
+        "width": "13px",
+        "height": "91px",
+        "translate": "0px 3px"
       }
     },
     {
       "sel": "#bottom-tool-bar > div:nth-child(6)",
       "css": {
-        "width": "13px"
+        "width": "13px",
+        "height": "91px",
+        "translate": "0px 3px"
       }
     },
     {
@@ -405,8 +409,8 @@
       "sel": "#world-settings-banner",
       "css": {
         "height": "39px",
-        "width": "306px",
-        "translate": "306px -50px"
+        "width": "262px",
+        "translate": "306px -47px"
       }
     },
     {
@@ -418,7 +422,7 @@
     {
       "sel": "#world-settings-body",
       "css": {
-        "height": "425px",
+        "height": "445px",
         "translate": "0px -42px"
       }
     },
@@ -426,7 +430,7 @@
       "sel": "#world-settings-title",
       "css": {
         "height": "41px",
-        "translate": "0px -17px"
+        "translate": "0px -9px"
       }
     },
     {
@@ -533,7 +537,61 @@
     {
       "sel": "#world-settings-modal",
       "css": {
-        "width": "700px"
+        "width": "700px",
+        "height": "747px"
+      }
+    },
+    {
+      "sel": "#shop-close-btn",
+      "css": {
+        "translate": "330px 0px"
+      }
+    },
+    {
+      "sel": "#world-settings-reset-btn",
+      "css": {
+        "translate": "0px -30px"
+      }
+    },
+    {
+      "sel": "#world-settings-done-btn",
+      "css": {
+        "translate": "0px -30px"
+      }
+    },
+    {
+      "sel": "#shop-collapse-btn",
+      "css": {
+        "width": "67px",
+        "height": "67px"
+      }
+    },
+    {
+      "sel": "#tank-collapse-btn",
+      "css": {
+        "width": "67px",
+        "height": "67px"
+      }
+    },
+    {
+      "sel": "#tool-favorite-1-btn",
+      "css": {
+        "width": "53px",
+        "height": "53px"
+      }
+    },
+    {
+      "sel": "#tool-favorite-2-btn",
+      "css": {
+        "width": "53px",
+        "height": "53px"
+      }
+    },
+    {
+      "sel": "#tool-favorite-3-btn",
+      "css": {
+        "width": "53px",
+        "height": "53px"
       }
     }
   ]
