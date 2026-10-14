@@ -3811,8 +3811,11 @@ export const WASTE_FX_PARTICLE_COUNT = 2; // fewer than the coin's APPRECIATE_PA
 export const WASTE_FX_PARTICLE_CYCLE_MS = 1500; // how long one mote takes to drift from the waste out to the edge of its halo
 export const WASTE_FX_PARTICLE_HALO_PX = 16; // how far out a mote travels, past the waste's own edge
 export const WASTE_FX_PARTICLE_COLOR = '#d8bd86';
-export const WASTE_STALE_COLOR = '#6c7155'; // the dull gray-green a stale Waste item ends up
-export const WASTE_STALE_STEPS = 6; // pre-baked shades between fresh and stale (the last one is the speckled stale look)
+export const WASTE_STALE_COLOR = '#4f6428'; // the murky sickly green a stale Waste item ends up (more obviously "off" than the old gray-green, per direct request)
+export const WASTE_STALE_STEPS = 1; // the sprite step index of the baked stale look; fresh waste is step 0 and drains into it live (main.js drawDrainingWaste), so there are no in-between shades any more
+export const WASTE_STINK_COLOR = 'rgba(150, 190, 60, 0.75)'; // the little wisps that rise off a stale Waste item
+export const WASTE_STINK_CYCLE_MS = 2200; // how long one wisp takes to rise and vanish
+export const WASTE_STINK_RISE_PX = 20; // how far a wisp rises above the waste
 
 // A fish tints gray under two conditions — per direct request ("make fish
 // visually turn a gray color when they aren't producing coins, and make

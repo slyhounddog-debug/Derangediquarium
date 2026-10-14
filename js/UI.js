@@ -327,7 +327,7 @@ const HUD_INFO_DATA = {
   },
   cleanliness: {
     icon: '✨', title: 'Cleanliness',
-    desc: `Tank cleanliness — each STALE Waste item loose in the tank (waste older than ${WASTE_STALE_MS / 1000}s) costs 1%. A dirty tank's fish earn less, down to half at 0% clean, and at ${STALE_WASTE_CAP} stale waste they stop pooping. Refine it, burn it, shoot it, or stash fresh waste in a chest.`,
+    desc: `Tank cleanliness - each STALE Waste (waste older than ${WASTE_STALE_MS / 1000}s) costs 1%. A dirty tank's fish earn less, down to half at 0% clean, and at ${STALE_WASTE_CAP} stale waste they stop pooping. Refine it, burn it, shoot it, or stash fresh waste in a chest.`,
     statLabel: 'Stale waste',
     statFn: (state) => `${state.level.staleWasteCount || 0}/${STALE_WASTE_CAP}`,
   },

@@ -43,6 +43,9 @@ import {
   WASTE_FX_PARTICLE_CYCLE_MS,
   WASTE_FX_PARTICLE_HALO_PX,
   WASTE_FX_PARTICLE_COLOR,
+  WASTE_STINK_COLOR,
+  WASTE_STINK_CYCLE_MS,
+  WASTE_STINK_RISE_PX,
   TILE_EMPTY,
   TILE_SIZE,
   TILE_FAN_T2,
@@ -787,6 +790,50 @@ function drawWasteFreshFx(ctx) {
     }
   }
   ctx.fill();
+}
+
+// Stale Waste's stink wisps (per direct request, stale waste must be obvious): two tiny specks rise and shrink off each
+// stale item, a pure function of the level clock, all stale items in ONE path / ONE fill (wasteStinkBuf: x, y, radius, id).
+const wasteStinkBuf = [];
+function drawWasteStinkFx(ctx, elapsedMs) {
+  if (wasteStinkBuf.length === 0) return;
+  ctx.fillStyle = WASTE_STINK_COLOR;
+  ctx.beginPath();
+  const cycle = elapsedMs / WASTE_STINK_CYCLE_MS;
+  for (let n = 0; n < wasteStinkBuf.length; n += 4) {
+    const x = wasteStinkBuf[n], y = wasteStinkBuf[n + 1], r = wasteStinkBuf[n + 2] * WASTE_VISUAL_SCALE, id = wasteStinkBuf[n + 3];
+    for (let i = 0; i < 2; i++) {
+      const phase = cycle + i * 0.5 + id * 0.37;
+      const f = phase - Math.floor(phase);
+      const size = 2.2 * (1 - f) + 0.5;
+      ctx.rect(x + Math.sin(phase * 9 + i * 3) * r * 0.5 - size, y - r * 0.6 - f * WASTE_STINK_RISE_PX - size, size * 2, size * 2);
+    }
+  }
+  ctx.fill();
+}
+
+// A fresh Waste item's color drains away (the Blimpfish coin's fill in reverse, per direct request): the stale look is
+// drawn full, then the fresh sprite on top, clipped to the part of the blob BELOW a level that falls from the top to the
+// bottom as it ages. The level stays horizontal however the item is rolling. One axis-aligned rect clip and two blits.
+function drawDrainingWaste(ctx, x, y, r, fresh, stale, rollAngle, frac) {
+  const s = fresh.half * 2;
+  const rolled = rollAngle !== 0;
+  const cos = rolled ? Math.cos(rollAngle) : 1, sin = rolled ? Math.sin(rollAngle) : 0;
+  if (rolled) ctx.setTransform(cos, sin, -sin, cos, x, y); // stale full
+  if (rolled) ctx.drawImage(stale.canvas, -stale.half, -stale.half, s, s); else ctx.drawImage(stale.canvas, x - stale.half, y - stale.half, s, s);
+  if (rolled) ctx.setTransform(1, 0, 0, 1, 0, 0);
+  if (frac < 0.02) {
+    // brand new: all fresh, no clip needed
+    if (rolled) { ctx.setTransform(cos, sin, -sin, cos, x, y); ctx.drawImage(fresh.canvas, -fresh.half, -fresh.half, s, s); ctx.setTransform(1, 0, 0, 1, 0, 0); } else ctx.drawImage(fresh.canvas, x - fresh.half, y - fresh.half, s, s);
+    return;
+  }
+  const levelY = y - r * 1.15 + frac * r * 2.3;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(x - s, levelY, s * 2, s * 2);
+  ctx.clip();
+  if (rolled) { ctx.setTransform(cos, sin, -sin, cos, x, y); ctx.drawImage(fresh.canvas, -fresh.half, -fresh.half, s, s); } else ctx.drawImage(fresh.canvas, x - fresh.half, y - fresh.half, s, s);
+  ctx.restore(); // also drops the transform and clip
 }
 
 function drawAppreciationFx(ctx, item, x, y) {
@@ -6104,6 +6151,7 @@ function render() {
 
   perfMark('r: seabed + buildings + ghosts', ctx);
   wasteFxBuf.length = 0;
+  wasteStinkBuf.length = 0;
   for (const item of state.level.items) {
     const pos = worldToScreen(item.x, item.y, state.camera);
     if (pos.x < -20 || pos.x > canvas.width + 20 || pos.y < -20 || pos.y > canvas.height + 20) continue; // cull offscreen
@@ -6130,6 +6178,7 @@ function render() {
     // moment it's dragged/nudged falls out for free, with no extra state.
     // Quantized to FOOD_STALE_STEPS pre-baked shades (see getItemSprite).
     let foodStaleStep = 0;
+    let wasteFrac = 0;
     if (item.type === 'food') {
       const rawFrac = (item.stationaryTimer || 0) / FOOD_STATIONARY_TO_WASTE_MS;
       const staleT = Math.max(0, Math.min(1, (rawFrac - FOOD_STALE_FRACTION) / (1 - FOOD_STALE_FRACTION)));
@@ -6137,7 +6186,8 @@ function render() {
     } else if (item.type === 'waste') {
       // Per direct request, fresh Waste fades toward its stale shade as it ages (WASTE_STALE_STEPS pre-baked shades; the
       // last is the speckled stale look) — the same step slot Food's stale tint uses.
-      foodStaleStep = Math.min(WASTE_STALE_STEPS, Math.floor((wasteAgeMs(state, item) / WASTE_STALE_MS) * WASTE_STALE_STEPS));
+      wasteFrac = Math.min(1, wasteAgeMs(state, item) / WASTE_STALE_MS);
+      foodStaleStep = wasteFrac >= 1 ? WASTE_STALE_STEPS : 0;
     }
     const sprite = getItemSprite(item, foodStaleStep);
     // Idle spin — per direct request ("add a coin spinning animation if a
@@ -6157,6 +6207,12 @@ function render() {
     // never fight. Visual-only: nothing here touches item.x/y/radius or physics.
     const rollAngle = item.rollAngle || 0;
     const py = pos.y + sprite.dy;
+    if (item.type === 'waste' && foodStaleStep === 0) {
+      drawDrainingWaste(ctx, pos.x, py, item.radius * WASTE_VISUAL_SCALE, sprite, getItemSprite(item, WASTE_STALE_STEPS), rollAngle, wasteFrac);
+      wasteFxBuf.push(pos.x, py, item.radius, item.id, wasteFrac * WASTE_STALE_MS); // still fresh: its motes are batched below
+      continue;
+    }
+    if (item.type === 'waste') wasteStinkBuf.push(pos.x, py, item.radius, item.id); // stale: its stink wisps are batched below
     if (rollAngle !== 0) {
       const cos = Math.cos(rollAngle);
       const sin = Math.sin(rollAngle);
@@ -6173,7 +6229,6 @@ function render() {
       ctx.drawImage(sprite.canvas, pos.x - sprite.half, py - sprite.half, sprite.half * 2, sprite.half * 2);
     }
     if (sprite.hl) ctx.drawImage(sprite.hl, pos.x - sprite.half, py - sprite.half, sprite.half * 2, sprite.half * 2); // the fixed-light glint, deliberately not rotated
-    if (foodStaleStep < WASTE_STALE_STEPS && item.type === 'waste') wasteFxBuf.push(pos.x, py, item.radius, item.id, wasteAgeMs(state, item)); // still fresh: its motes are batched below
     if (item.type === 'alien_egg') {
       // A shrinking countdown ring around the shell (kept live and NOT
       // rotating, so the player can still read roughly how long until it
@@ -6188,6 +6243,7 @@ function render() {
   }
 
   drawWasteFreshFx(ctx);
+  drawWasteStinkFx(ctx, state.level.elapsed);
 
   // Ripening Blimpfish coins' particles and pulses, drawn from the short
   // registry Entities.js keeps (not by checking every item above), so a tank
