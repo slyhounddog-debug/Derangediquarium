@@ -200,7 +200,7 @@
       <div class="help-row"><div class="help-icon">💨</div><div class="help-text"><b>Fans</b> blow coins, Food, and Waste back up into the water column so your fish (and you) can reach them, instead of everything piling up out of sight.</div></div>
       <div class="help-row"><div class="help-icon">🧲</div><div class="help-text"><b>Collectors</b> automatically pull in and bank any coin or Science Flask touching them, from any side — no clicking required. Green Science only goes into the Advanced and Bio Collector.</div></div>
       <div class="help-row"><div class="help-icon">⚗️</div><div class="help-text"><b>Refineries</b> absorb Waste and dispense fresh Food (or Bio-Sludge into Biomass) — Electric, Advanced, and Bio tiers process faster.</div></div>
-      <div class="help-row"><div class="help-icon">💰</div><div class="help-text"><b>Click a coin to bank it</b> yourself any time — a Collector is a convenience for coins, not a requirement. Science Flasks are different: they can only be banked by a Collector, clicking does nothing. Waste can be left for a Suckerfish or a Refinery to clean up.</div></div>
+      <div class="help-row"><div class="help-icon">💰</div><div class="help-text"><b>Click a coin to bank it</b> yourself any time — a Collector is a convenience for coins, not a requirement. Science Flasks are different: they can only be banked by a Collector, clicking does nothing. Waste goes stale after 90 seconds, and the more stale waste there is, the less your fish earn — feed it to a Refinery, a turret or a Power Plant, or stash fresh waste in a Storage Chest.</div></div>
       <div class="help-row"><div class="help-icon">⛰️</div><div class="help-text"><b>The Mound</b> (seabed, early game) cracks open for gold, unlocking new buildings and fish as you feed it money. It eventually shatters into...</div></div>
       <div class="help-row"><div class="help-icon">🔬</div><div class="help-text"><b>...the Science Lab</b> — the long-term goal. Buy Suckerfish and Science Octopus with gold alone to get started, then spend Science Flasks (dropped by the Octopus) and gold on the rest of its branching tree to unlock Advanced/Bio buildings and every Gene-Spliced hybrid fish.</div></div>
       <div class="help-row"><div class="help-icon">🧤</div><div class="help-text"><b>Right-click and drag</b> any fish (with no tool or shop item selected) to move it around — drop it onto a matching Adult fish to combine them into a bigger, shinier fish, or drop an Adult Suckerfish/Eel/Octopus onto another Adult fish to splice a hybrid. Fish can't be moved or merged while hostile aliens are on screen.</div></div>
@@ -248,14 +248,12 @@
 <!-- Minimal minimap, per direct request — sits directly under #hud, same
      right-aligned corner. #minimap-canvas always renders the whole tank
      letterboxed to fit its own small fixed box (main.js's renderMinimap).
-     The 4 buttons directly beneath it — per direct request, tank-viewport
-     zoom expand/minimize (NOT the minimap's own size — that's a fixed
-     single size now), Pause Time, 2x Speed, and the pause-menu hamburger —
-     sit in one row. -->
+     The 3 buttons directly beneath it — Pause Time, 2x Speed, and the
+     pause-menu hamburger — fill one row (the zoom-to-fit button that used to
+     be a 4th was removed per direct request). -->
 <div id="minimap-wrap">
   <canvas id="minimap-canvas" title="Click to jump there"></canvas>
   <div id="minimap-controls">
-    <button id="minimap-expand-btn" class="minimap-ctrl-btn sheen-target" title="Zoom to fit the whole tank">⤢</button>
     <button id="time-pause-btn" class="minimap-ctrl-btn sheen-target" title="Pause Time (Space)">⏸️</button>
     <button id="time-speed-btn" class="minimap-ctrl-btn sheen-target" title="2x Speed (X)">⏩</button>
     <button id="pause-menu-btn" class="minimap-ctrl-btn sheen-target" title="Menu (Esc)">☰</button>
@@ -561,7 +559,7 @@
     <div id="lab-filter-row">
       <button class="lab-filter-btn selected" data-filter="all">No Filter</button>
       <button class="lab-filter-btn" data-filter="buildings">Buildings</button>
-      <button class="lab-filter-btn" data-filter="recipes">Recipes</button>
+      <button class="lab-filter-btn" data-filter="ingredients">Ingredients</button>
       <button class="lab-filter-btn" data-filter="fish">Fish</button>
       <button class="lab-filter-btn" data-filter="other">Other</button>
     </div>

@@ -196,9 +196,9 @@ export const TILE_STORAGE_CHEST_T3 = 'storage_chest_t3';
 // tile's own type for its intake cap; UI.js's chest popup reads it too, for
 // the live "N / Capacity" readout.
 export const STORAGE_CHEST_CAPACITY = {
-  [TILE_STORAGE_CHEST]: 30,
-  [TILE_STORAGE_CHEST_T2]: 60,
-  [TILE_STORAGE_CHEST_T3]: 100,
+  [TILE_STORAGE_CHEST]: 20,
+  [TILE_STORAGE_CHEST_T2]: 40,
+  [TILE_STORAGE_CHEST_T3]: 60,
 };
 
 // ---- Bio-Building production chain (Bio-Sludge -> Biomass -> Mutagen Paste / Blue Science) ----
@@ -231,11 +231,11 @@ export const TILE_REFINERY_ADVANCED = 'refinery_advanced';
 // in the form of recipes." Does nothing and draws no power until a recipe is
 // picked. See MANUFACTURER_RECIPES/MANUFACTURER_ITEM_PROCESS_MS below.
 export const TILE_MANUFACTURER = 'manufacturer';
-// Power Plant — renamed from Bio-Reactor, per direct request, and given the
-// same recipe-pop-up makeover as the Manufacturer. Consumes one fuel item
-// (Food/Biomass/Blue Science, whichever recipe is selected) for a flat power
-// dump into the grid — not an item router at all. See POWER_PLANT_RECIPES
-// below.
+// Power Plant — renamed from Bio-Reactor, per direct request. Consumes one
+// ingredient at a time (any unlocked one that touches it, rarest first —
+// Blue Science, Biomass, Food, Waste) and feeds power into the grid for as
+// long as it burns — not an item router at all. There is no recipe to pick any
+// more. See POWER_PLANT_RECIPES below.
 export const TILE_POWER_PLANT = 'power_plant';
 
 // Fish stay clear of the outer edges of the water column when spawning —
@@ -273,7 +273,6 @@ export const DEFAULT_TIME_SCALE_INDEX = 1; // starts at 1x
 
 // ---- Camera (§3.3) ----
 export const CAMERA_PAN_SPEED = 500; // world px/sec for arrow-key pan
-export const CAMERA_WATER_COLUMN_FIT_FRACTION = 0.85; // the default zoom fits the water column into this fraction of the viewport height (not all of it) — the remaining 15% shows a peek of the seabed city below, so resting items don't look like they float at the bottom edge and the player can see there's more to scroll to
 // Panning is deliberately never triggered by mouse position (edge-scroll)
 // — it kept firing by accident during normal play (moving toward the
 // bottom of the screen to click a coin, etc). The mouse wheel is the other
@@ -1018,21 +1017,24 @@ export const MUTAGEN_PASTE_COIN_MULTIPLIER = 2;
 // buff-clear check, right at the top of the function. Genuinely re-eating
 // Mutagen Paste before then still refreshes the buff exactly as before.
 
-// ---- Cleanliness (Phase 3) ----
-// state.level.cleanliness (0-100, clamped) is a real, live value now instead
-// of a static placeholder — every Waste item that spawns costs
-// CLEANLINESS_PER_WASTE_EVENT; every Waste item cleaned back up (a
-// Scavenger fish eating it, or an Auto-Feeder absorbing it) restores the
-// same amount, so cleanliness is effectively a running tally of
-// spawned-vs-cleaned waste, scaled into a 0-100 band. UI.js's updateHUD
-// detects which direction it just moved (the same lastValue-comparison
-// pattern already used for the money HUD) and flashes #hud-cleanliness red
-// (dropping) or green (rising) accordingly — see the shared .flash-spend/
-// .flash-pickup classes in style.css. No gameplay effect from a low value
-// yet (fish stress/toxicity is still unbuilt, later Phase 3+ scope) — this
-// is the visible-feedback half of the system.
+// ---- Cleanliness, now driven by STALE waste (per direct request) ----
+// state.level.cleanliness (0-100) used to be a running tally of waste
+// spawned-vs-cleaned events, which leaked: any sink that forgot to credit it
+// (turret ammo, chests, ...) pinned a well-automated tank at 1-7% forever,
+// punishing throughput instead of neglect. It is now simply
+// 100 - CLEANLINESS_PER_STALE_WASTE per STALE Waste item loose in the tank
+// (Entities.js's updateStaleWaste, recomputed every few ticks from a live
+// count, so there is no ledger to drift). A Waste item goes stale once it has
+// existed for WASTE_STALE_MS without being consumed; waste sealed inside a
+// Storage Chest, burning in a Power Plant or held by a building does not
+// count. Fish stop pooping while STALE_WASTE_CAP stale items exist (their
+// poop timer simply pauses), so the worst case is a fixed 0% / half-money
+// tank that cannot get any worse. UI.js's updateHUD still flashes
+// #hud-cleanliness whenever the value moves.
 export const CLEANLINESS_MAX = 100;
-export const CLEANLINESS_PER_WASTE_EVENT = 0.25; // was 0.5 (itself cut from an original 4) — halved again per direct request ("waste counts as .25% cleanliness instead of .5%")
+export const WASTE_STALE_MS = 90000; // how long a Waste item lives before it counts as stale
+export const STALE_WASTE_CAP = 100; // fish stop pooping at this many stale Waste items on screen
+export const CLEANLINESS_PER_STALE_WASTE = 1; // % of cleanliness each stale Waste item costs (100 stale = 0% clean)
 // A hard, silent safety cap on how many Waste items can exist in the world
 // at once — real bug fix, per direct report ("when the aliens have been on
 // screen for a while without being killed, the game gets super laggy and
@@ -1055,16 +1057,12 @@ export const CLEANLINESS_PER_WASTE_EVENT = 0.25; // was 0.5 (itself cut from an 
 export const WASTE_MAX_ON_SCREEN = 200;
 // The first time cleanliness crosses below this (a one-shot tutorial gate,
 // see state.level.tutorialFlags.cleanlinessWarningShown), Entities.js's
-// adjustCleanliness posts CLEANLINESS_WARNING_MESSAGE to the notification
-// ticker. The message itself hints that a dirty tank slows fish coin
-// production — that gameplay consequence isn't actually wired up yet (same
-// "value is live-tracked, downstream effect is still unbuilt" state
-// cleanliness has been in since Phase 3 — see that section in CLAUDE.md),
-// this is foreshadowing text only, per direct request for the message as
-// written.
+// updateStaleWaste posts CLEANLINESS_WARNING_MESSAGE to the notification
+// ticker (a dirty tank really does cut fish income — see
+// CLEANLINESS_MIN_MONEY_FRACTION).
 export const CLEANLINESS_WARNING_THRESHOLD = 90;
 export const CLEANLINESS_WARNING_MESSAGE =
-  'Looking a little dirty in there champ. The dirtier your tank is, the less money your fish produce. If only there was a way to clean it......';
+  'Looking a little dirty in there champ. Waste that sits around goes stale, and the more stale waste there is, the less your fish earn. Refine it, burn it, shoot it, or stash it in a chest before it turns......';
 // The first-ever Bio-Sludge (alien_dna) item, per direct request — worded
 // differently depending on whether the Refinery is already unlocked (it's
 // granted by the Mound's $75 purchase), since a player who hasn't
@@ -1801,7 +1799,7 @@ export const POWER_DEFICIT_PENALTY_MULTIPLIER = 2;
 // as their own lines in the stats box instead of inside the description.
 const PLATFORM_STAT_NOTES = ['Click to filter items.', 'Press R to cycle platforms.'];
 const FAN_STAT_NOTES = ['Click to filter what gets blown.', "Press G to hide/show every fan's cone."];
-const CHEST_STAT_NOTES = ['Drag away from it to aim, then release to trickle items out.'];
+const CHEST_STAT_NOTES = ['Drag away from it to aim, then release to trickle items out.', 'Only takes fresh Waste, and keeps it fresh inside.'];
 export const BUILDING_TYPES = {
   [TILE_PLATFORM]: {
     id: TILE_PLATFORM, name: 'Platform', icon: '🧱', cost: PLATFORM_FLAT_COST,
@@ -1932,7 +1930,7 @@ export const BUILDING_TYPES = {
   [TILE_POWER_PLANT]: {
     id: TILE_POWER_PLANT, name: 'Power Plant', icon: '☢️', cost: 350,
     description: 'Burns items to generate electricity.',
-    statNotes: ['Click to pick a fuel recipe once placed.'],
+    statNotes: ['Burns the rarest unlocked ingredient first.'],
     color: '#6fff8a', unlockedByDefault: false,
   },
   // Granted by the Mound's $75 tease (see Mound.js's crackMound) rather than
@@ -2395,20 +2393,23 @@ export const MANUFACTURER_STATS = {
   [TILE_MANUFACTURER]: {},
 };
 
-// ---- Power Plant recipes (renamed from Bio-Reactor) ----
-// A single-fuel-item recipe now, not a router — absorbs exactly one item of
-// `inputs[0]`'s type, then after `durationMs` credits `powerOutputMw` as one
-// lump sum into state.level.powerGenAccumMw (same non-battery accumulator
-// every Electric Eel feeds). `labNodeId: null` means "always available the
-// moment the building itself is unlocked" (the Food recipe, granted by the
-// same Lab node that grants the building) — Biomass/Blue Science each need
-// their OWN separate Lab node purchased first, per spec.
+// ---- Power Plant ingredients (renamed from Bio-Reactor "recipes") ----
+// Per direct request a Power Plant no longer has a chosen recipe: it simply
+// accepts any UNLOCKED ingredient that touches it, one item at a time, and
+// burns it for `powerOutputMw` for `durationMs` (credited continuously into
+// state.level.powerGenAccumMw, the same non-battery accumulator every
+// Electric Eel feeds). When several ingredients touch at once it takes the
+// rarest first — this object's key order IS that priority (Blue Science,
+// Biomass, Food, Waste), see Grid.js's updateBuildings. `labNodeId: null`
+// means "available the moment the building itself is unlocked" (Food and
+// Waste); Biomass/Blue Science each need their OWN Science Lab node first.
+// Any Waste is valid fuel, stale or fresh.
 export const POWER_PLANT_RECIPES = {
-  food: {
-    id: 'food', name: 'Food', icon: '🍖', color: '#ffb238',
-    inputs: ['food'], powerOutputMw: 20, durationMs: 15000, labNodeId: null,
-    description: 'Food -> 20mw for 15s',
-    effect: 'Burns one Food at a time for electricity, so a Feeder Fish or a Fan line of Food can keep the grid topped up. The cheapest and weakest fuel, and available as soon as the Power Plant is.',
+  science: {
+    id: 'science', name: 'Blue Science', icon: '🔬', color: '#5fb8ff',
+    inputs: ['science'], powerOutputMw: 100, durationMs: 30000, labNodeId: 'power_plant_science',
+    description: 'Blue Science -> 100mw for 30s',
+    effect: 'Burns one Blue Science at a time. The strongest fuel by far, but every flask burned is a flask you can no longer spend in the Science Lab.',
   },
   biomass: {
     id: 'biomass', name: 'Biomass', icon: '🟩', color: BIOMASS_COLOR,
@@ -2416,11 +2417,17 @@ export const POWER_PLANT_RECIPES = {
     description: 'Biomass -> 40mw for 20s',
     effect: 'Burns one Biomass at a time. More electricity per item than Food, and for longer, but Biomass is also Turret ammo and a Factory ingredient, so burning it is a trade-off.',
   },
-  science: {
-    id: 'science', name: 'Blue Science', icon: '🔬', color: '#5fb8ff',
-    inputs: ['science'], powerOutputMw: 100, durationMs: 30000, labNodeId: 'power_plant_science',
-    description: 'Blue Science -> 100mw for 30s',
-    effect: 'Burns one Blue Science at a time. The strongest fuel by far, but every flask burned is a flask you can no longer spend in the Science Lab.',
+  food: {
+    id: 'food', name: 'Food', icon: '🍖', color: '#ffb238',
+    inputs: ['food'], powerOutputMw: 20, durationMs: 15000, labNodeId: null,
+    description: 'Food -> 20mw for 15s',
+    effect: 'Burns one Food at a time for electricity, so a Feeder Fish or a Fan line of Food can keep the grid topped up. Available as soon as the Power Plant is.',
+  },
+  waste: {
+    id: 'waste', name: 'Waste', icon: '💩', color: WASTE_COLOR,
+    inputs: ['waste'], powerOutputMw: 15, durationMs: 15000, labNodeId: null,
+    description: 'Waste -> 15mw for 15s',
+    effect: "Burns one Waste at a time, fresh or stale. The weakest fuel, but it turns your tank's mess into electricity and clears stale waste off the screen. Available as soon as the Power Plant is.",
   },
 };
 export const POWER_PLANT_RECIPE_LIST = Object.values(POWER_PLANT_RECIPES);
@@ -2643,8 +2650,8 @@ export const SCIENCE_LAB_UPGRADES = {
   // ---- Manufacturer & Power Plant production chain ----
   // Per direct request, the old standalone Bio-Feeder/Bio-Combuster
   // buildings are gone, replaced by the Manufacturer (one building, 3
-  // selectable recipes) and the renamed Power Plant (one building, 3
-  // selectable fuel recipes). Both buildings now require Bubble Cap 20 only
+  // selectable recipes) and the renamed Power Plant (one building that burns
+  // every unlocked ingredient). Both buildings now require Bubble Cap 20 only
   // (see the tree-roots comment above for why) — Manufacturer no longer
   // separately requires Suckerfish, since reaching Bubble Cap 20 already
   // requires it transitively.
@@ -2722,11 +2729,13 @@ export const SCIENCE_LAB_UPGRADES = {
     id: 'recipe_alien_egg', name: 'Alien Egg Recipe', icon: '🥚', scienceCost: 110, goldCost: 10000,
     requires: ['manufacturer'], grants: {},
   },
-  // The Power Plant's Biomass recipe is locked behind the Manufacturer's
-  // Bio-Sludge recipe, per direct spec; its Blue Science recipe is locked
-  // behind Green Science Tech.
+  // The Power Plant's Biomass ingredient is locked behind the Manufacturer
+  // (it burns the Factory's Biomass), per direct spec; its Blue Science
+  // ingredient is locked behind Green Science Tech. Per direct request these
+  // are "ingredients" now, not recipes — the Power Plant just accepts every
+  // unlocked one (Food and Waste come with the building itself).
   power_plant_biomass: {
-    id: 'power_plant_biomass', name: 'Power Plant: Biomass', icon: '🟩', scienceCost: 100, goldCost: 10000,
+    id: 'power_plant_biomass', name: 'Biomass Ingredient', icon: '🟩', scienceCost: 100, goldCost: 10000,
     requires: ['power_plant', 'manufacturer'], grants: {},
   },
   // Requires Green Science Tech to be unlocked, so per direct request it
@@ -2734,7 +2743,7 @@ export const SCIENCE_LAB_UPGRADES = {
   // Blue amount — scienceGreenCost is additive, not exclusive, see
   // labNodeHasEnoughScience's comment in UI.js.
   power_plant_science: {
-    id: 'power_plant_science', name: 'Power Plant: Blue Science', icon: '🔬', scienceCost: 140, scienceGreenCost: 70, goldCost: 15000,
+    id: 'power_plant_science', name: 'Blue Science Ingredient', icon: '🔬', scienceCost: 140, scienceGreenCost: 70, goldCost: 15000,
     requires: ['green_science_tech'], grants: {}, // per direct request, no longer requires the Power Plant directly (Science Cap 60 -> 80 -> Green Science Tech already implies it)
   },
   // Bio Refinery — the top Refinery tier now that Ultra Refinery is gone
@@ -3299,7 +3308,7 @@ export const POST_ALIEN_TUTORIAL_MESSAGE = "Now that's I'm talking about. A litt
 // player places a chest before that, with just its second half ("drag Waste
 // into the Chest" -> "drag away to trickle"). See UI.js's POST_MOUND_CHEST_SPOT
 // for where the full walkthrough's own chest gets placed.
-export const CHEST_TUTORIAL_ITEM_THRESHOLD = 20;
+export const CHEST_TUTORIAL_ITEM_THRESHOLD = 25;
 export const CHEST_TUTORIAL_CHECK_INTERVAL_MS = 1000; // how often that item-count scan runs — it walks every item, so not every tick
 export const CHEST_TUTORIAL_GOLD_GRANT = 20; // per direct request — matches the Tier 1 chest's own $20 cost exactly, same "always affordable regardless of how the player already spent their starting money" reasoning TURRET_TUTORIAL_GOLD_GRANT uses
 export const CHEST_TUTORIAL_GOLD_GRANT_MESSAGE = "Here's 20 gold — go place that chest.";
@@ -3795,6 +3804,15 @@ export const APPRECIATE_FILL_COLOR = 'rgba(30, 18, 6, 0.45)'; // the darkened ca
 export const APPRECIATE_PARTICLE_CYCLE_MS = 1100; // how long one mote takes from the edge of the halo to the coin
 export const APPRECIATE_PARTICLE_HALO_PX = 24; // how far out a mote starts, past the coin's own edge
 export const APPRECIATE_PARTICLE_COLOR = '#ffe9a0';
+// Fresh Waste shows the Blimpfish coin's effect in reverse (per direct request): a couple of motes drift OUT of
+// it while it is still fresh and it slowly darkens toward the stale shade; once stale the motes stop and a
+// baked-in dull, speckled look takes over (main.js's drawWasteFreshFx / getItemSprite — both cost next to nothing).
+export const WASTE_FX_PARTICLE_COUNT = 2; // fewer than the coin's APPRECIATE_PARTICLE_COUNT, per direct request
+export const WASTE_FX_PARTICLE_CYCLE_MS = 1500; // how long one mote takes to drift from the waste out to the edge of its halo
+export const WASTE_FX_PARTICLE_HALO_PX = 16; // how far out a mote travels, past the waste's own edge
+export const WASTE_FX_PARTICLE_COLOR = '#d8bd86';
+export const WASTE_STALE_COLOR = '#6c7155'; // the dull gray-green a stale Waste item ends up
+export const WASTE_STALE_STEPS = 6; // pre-baked shades between fresh and stale (the last one is the speckled stale look)
 
 // A fish tints gray under two conditions — per direct request ("make fish
 // visually turn a gray color when they aren't producing coins, and make

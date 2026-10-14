@@ -485,23 +485,27 @@ const FORMULAS = [
     },
   },
   {
-    id: 'cleanliness', title: 'Tank cleanliness',
-    formula: 'coin value × ( min fraction + cleanliness% × (1 − min fraction) )\nevery Waste item that appears lowers cleanliness by a fixed amount; eating or processing it restores the same',
-    note: 'A dirty tank only cuts coin value (it never changes hunger or timing). Use the input to see how fast a given number of Waste-producing fish dirty the tank if nothing cleans it.',
-    params: ['CLEANLINESS_MIN_MONEY_FRACTION', 'CLEANLINESS_PER_WASTE_EVENT', 'CLEANLINESS_WARNING_THRESHOLD', 'WASTE_POOP_INTERVAL_MS'],
-    inputs: [{ key: 'fish', label: 'Waste-producing fish', value: 10, min: 1, max: 500, step: 1 }],
+    id: 'cleanliness', title: 'Tank cleanliness & stale waste',
+    formula: 'cleanliness% = max(0, 100 − stale waste × per-item %)   (stale = a loose Waste item older than the stale age)\ncoin value × ( min fraction + cleanliness% × (1 − min fraction) )\nfish stop pooping while stale waste ≥ the cap',
+    note: 'Waste goes stale a fixed time after it appears, whether or not anything has touched it. Waste inside a Storage Chest (which only takes fresh waste, and freezes its age), burning in a Power Plant, or being processed by a building does not count. A dirty tank only cuts coin value (never hunger or timing). Use the inputs to see how a tank of waste-producing fish dirties itself if nothing cleans the waste.',
+    params: ['CLEANLINESS_MIN_MONEY_FRACTION', 'WASTE_STALE_MS', 'STALE_WASTE_CAP', 'CLEANLINESS_PER_STALE_WASTE', 'CLEANLINESS_WARNING_THRESHOLD', 'WASTE_POOP_INTERVAL_MS'],
+    inputs: [{ key: 'fish', label: 'Waste-producing fish', value: 10, min: 1, max: 500, step: 1 }, { key: 'stale', label: 'Stale waste on screen', value: 30, min: 0, max: 300, step: 1 }],
     render(inp) {
-      const m = V('CLEANLINESS_MIN_MONEY_FRACTION');
-      const rows = [100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0].map((c) => [c + '%', '× ' + fmtNum(m + c / 100 * (1 - m), 3)]);
-      const per = V('CLEANLINESS_PER_WASTE_EVENT', 1), warn = V('CLEANLINESS_WARNING_THRESHOLD');
-      const rate = inp.fish * 60000 / V('WASTE_POOP_INTERVAL_MS', 1); // waste per minute
-      return tbl('Coin value multiplier', ['Clean', 'Multiplier'], rows) +
-        `<div>${tbl('Dirtying (nothing cleaning)', ['', ''], [
-          ['Waste items to reach the warning (' + warn + '%)', fmtNum((100 - warn) / per, 0)],
-          ['Waste items to hit 0%', fmtNum(100 / per, 0)],
-          [`Waste / min from ${inp.fish} fish`, fmtNum(rate, 1)],
-          ['Minutes until the warning', fmtNum((100 - warn) / per / rate, 1)],
-          ['Minutes until 0%', fmtNum(100 / per / rate, 1)],
+      const m = V('CLEANLINESS_MIN_MONEY_FRACTION'), per = V('CLEANLINESS_PER_STALE_WASTE', 1), cap = V('STALE_WASTE_CAP'), warn = V('CLEANLINESS_WARNING_THRESHOLD');
+      const staleMs = V('WASTE_STALE_MS');
+      const clean = (n) => Math.max(0, 100 - n * per);
+      const rows = [0, 5, 10, 20, 30, 40, 50, 60, 70, 80, 90, 100].map((n) => [n, fmtNum(clean(n), 0) + '%', '× ' + fmtNum(m + clean(n) / 100 * (1 - m), 3), n >= cap ? 'fish stop pooping' : '']);
+      const rate = inp.fish * 60000 / V('WASTE_POOP_INTERVAL_MS', 1); // waste per minute, nothing cleaning it
+      const here = clean(inp.stale);
+      return tbl('Stale waste on screen', ['Stale waste', 'Cleanliness', 'Coin value', ''], rows) +
+        `<div>${tbl(`${inp.stale} stale waste right now`, ['', ''], [
+          ['Cleanliness', fmtNum(here, 0) + '%'],
+          ['Coin value multiplier', '× ' + fmtNum(m + here / 100 * (1 - m), 3)],
+        ])}${tbl(`If nothing ever cleans the waste of ${inp.fish} fish`, ['', ''], [
+          [`Waste / min`, fmtNum(rate, 1)],
+          ['Minutes until the first waste goes stale', fmtNum(staleMs / 60000, 2)],
+          [`Minutes until the warning (${warn}%)`, fmtNum(staleMs / 60000 + (100 - warn) / per / rate, 1)],
+          [`Minutes until the stale cap (${cap})`, fmtNum(staleMs / 60000 + cap / rate, 1)],
         ])}</div>`;
     },
   },

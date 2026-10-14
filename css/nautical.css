@@ -117,13 +117,13 @@
 /* Carved wooden coins with the icon inset. */
 .minimap-ctrl-btn {
   flex: none;
-  width: 36px; height: 36px;
+  width: 46px; height: 46px; /* the 3 remaining buttons fill the row under the minimap (it was 4 buttons at 36px before the zoom-to-fit button went) */
   padding: 0;
   display: flex; align-items: center; justify-content: center;
   border-radius: 50%;
   border: 2px solid #3a2010;
   color: var(--cream);
-  font-size: 16px;
+  font-size: 20px;
   background: var(--coin);
   box-shadow: inset 0 0 0 3px #94602f, inset 0 0 0 4.5px rgba(40, 20, 8, 0.7), inset 0 3px 5px rgba(255, 235, 200, 0.3), 0 3px 0 #4a2a12, 0 6px 9px rgba(0, 0, 0, 0.45);
   text-shadow: 0 1px 0 rgba(255, 235, 200, 0.45), 0 -1px 0 rgba(40, 20, 8, 0.65);
@@ -818,6 +818,18 @@ body:has(#tank-overlay:not(.collapsed)) #bottom-bar-row, body:has(#lab-overlay:n
 /* The Shop's Factory / Power Plant recipe buttons sit in a row under the note, so they need a gap on the right instead of the lead-in text's margin-left. */
 .merge-node-btn.recipe-btn { margin: 0 4px 0 0; }
 .recipe-btn-section { padding-bottom: 6px; }
+/* A Power Plant's ingredients (Shop preview and its info pop-up): small flat pills, deliberately NOT button-like — they aren't clickable. Green = unlocked, grey + lock = still to unlock in the Science Lab. */
+.ingredient-row { display: flex; flex-wrap: wrap; gap: 4px; }
+.ingredient-chip {
+  display: inline-flex; align-items: center; gap: 3px;
+  font: 700 10.5px/1 var(--font-display); color: #1f3d17;
+  background: rgba(118, 178, 84, 0.3); border: 1.5px solid #4e7a3a; border-radius: 999px;
+  padding: 1px 6px 1px 4px; margin: 0 3px 2px 0; cursor: default; white-space: nowrap;
+}
+.ingredient-chip.locked { color: #4a463f; background: rgba(150, 146, 138, 0.28); border: 1.5px dashed #7d7870; }
+.ingredient-row .ingredient-chip { margin: 0; }
+.ingredient-chip .stat-item-icon { flex: none; }
+.stat-dual.ingredient-locked { opacity: 0.5; filter: grayscale(0.7); }
 .shop-merge-section { flex: 1 1 100%; margin-top: 4px; padding-top: 6px; border-top: 1px dashed rgba(122, 74, 34, 0.45); font: 600 14px/1.9 var(--font-display); color: var(--ink); }
 .shop-merge-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; opacity: 0.7; line-height: 1.4; }
 

@@ -106,8 +106,7 @@ import {
   BUILDING_COST_TIER2_MIN_BASE,
   BUILDING_COST_TIER3_MIN_BASE,
   POWER_DEFICIT_PENALTY_MULTIPLIER,
-  CLEANLINESS_MAX,
-  CLEANLINESS_PER_WASTE_EVENT,
+  WASTE_STALE_MS,
   CAMERA_BOTTOM_BUFFER_PX,
   BUILDING_FAMILIES,
 } from './Config.js';
@@ -151,6 +150,21 @@ const MANUFACTURER_TILES = new Set([TILE_MANUFACTURER]);
 // hold mechanism of its own.
 const HOLDABLE_ITEM_TILES = new Set([...COLLECTOR_TILES, ...REFINERY_TILES, ...MANUFACTURER_TILES]);
 const POWER_PLANT_TILES = new Set([TILE_POWER_PLANT]);
+// A Power Plant's ingredients, rarest first — POWER_PLANT_RECIPES' key order IS the priority (per direct request:
+// Blue Science, Biomass, Food, then Waste). powerFuelRankScratch maps an item type to its rank for the ingredients
+// the player has actually unlocked (undefined for everything else), refilled once per tick by refreshPowerFuelRanks
+// only when some Power Plant is idle and looking for fuel.
+const POWER_FUEL_ORDER = Object.keys(POWER_PLANT_RECIPES);
+const powerFuelRankScratch = {};
+function refreshPowerFuelRanks(state) {
+  const purchased = state.meta.labUpgradesPurchased;
+  for (let i = 0; i < POWER_FUEL_ORDER.length; i++) {
+    const id = POWER_FUEL_ORDER[i];
+    const nodeId = POWER_PLANT_RECIPES[id].labNodeId;
+    powerFuelRankScratch[id] = nodeId === null || purchased.includes(nodeId) ? i : undefined;
+  }
+  return powerFuelRankScratch;
+}
 // The 3 Storage Chest tiers — see this file's own "Storage Chest" section
 // further down (placeTile's buildingData branch, updateBuildings' intake/
 // trickle/clear scan) for the full mechanic.
@@ -583,15 +597,16 @@ export function worldToTile(x, y) {
   return { col: colAt(x), row: rowAt(y) };
 }
 
-// Returns the "row,col" buildingData key of a Manufacturer/Power Plant tile
-// at this world point, or null — used by main.js's click handler to open
-// UI.js's recipe pop-up menu (openRecipeMenu) whenever the player clicks
-// either of these two recipe-driven buildings.
+// Returns the "row,col" buildingData key of a Manufacturer tile at this
+// world point, or null — used by main.js's click handler to open UI.js's
+// recipe pop-up menu (openRecipeMenu). A Power Plant has no chosen recipe any
+// more (it burns whatever unlocked ingredient touches it), so a click on one
+// falls through to the generic building info pop-up instead.
 export function getRecipeBuildingKeyAt(state, worldX, worldY) {
   const { col, row } = worldToTile(worldX, worldY);
   if (row < SEABED_ROW_START || row >= WORLD_TILES_H || col < 0 || col >= WORLD_TILES_W) return null;
   const type = state.level.grid[row][col];
-  if (!MANUFACTURER_TILES.has(type) && !POWER_PLANT_TILES.has(type)) return null;
+  if (!MANUFACTURER_TILES.has(type)) return null;
   return buildingKey(col, row);
 }
 
@@ -712,14 +727,15 @@ export function clearChestContents(state, key, angle, distanceTiles) {
 }
 
 // Returns { key, type } for ANY placed building tile at this world point
-// (Manufacturer/Power Plant included), or null — used by main.js's click
-// handler to open UI.js's generic building-info pop-up (openBuildingInfoMenu)
-// per direct request ("any building can be quickly clicked on to see what it
-// is and what it does"). Manufacturer/Power Plant are still checked and
-// handled FIRST by getRecipeBuildingKeyAt above (their own recipe pop-up
-// already shows this same shop-style info, see UI.js's openRecipeMenu) — a
-// caller should only fall back to this one once that check has already come
-// back null, so the two pop-ups never both fire for the same click.
+// (Power Plant included — its pop-up shows its ingredients and live power),
+// or null — used by main.js's click handler to open UI.js's generic
+// building-info pop-up (openBuildingInfoMenu) per direct request ("any
+// building can be quickly clicked on to see what it is and what it does").
+// A Manufacturer is still checked and handled FIRST by getRecipeBuildingKeyAt
+// above (its own recipe pop-up already shows this same shop-style info, see
+// UI.js's openRecipeMenu) — a caller should only fall back to this one once
+// that check has already come back null, so the two pop-ups never both fire
+// for the same click.
 export function getBuildingInfoKeyAt(state, worldX, worldY) {
   const { col, row } = worldToTile(worldX, worldY);
   if (row < SEABED_ROW_START || row >= WORLD_TILES_H || col < 0 || col >= WORLD_TILES_W) return null;
@@ -1071,7 +1087,7 @@ function resetBuildingProcessingState(type, data) {
     };
   }
   if (POWER_PLANT_TILES.has(type)) {
-    return { type, recipeId: data.recipeId, fueled: false, progressMs: 0 };
+    return { type, fueled: false, fuelId: null, progressMs: 0 };
   }
   if (REFINERY_TILES.has(type)) {
     return { type, lockedRecipe: null, progressMs: 0, heldItemId: null };
@@ -1260,12 +1276,12 @@ function writeFreshBuildingData(state, col, row, buildingId, angle) {
       currentItemType: null, progressMs: 0, ghostFlashTimerMs: 0, heldItemId: null,
     };
   } else if (POWER_PLANT_TILES.has(buildingId)) {
-    // Same "does nothing until a recipe is picked" rule as the Manufacturer,
-    // but a single-fuel-item recipe, not a 2-ingredient one — fueled flips
-    // true the instant its one fuel item is absorbed, then progressMs counts
-    // up (unpowered — it's the thing GENERATING power) to the recipe's own
-    // durationMs before crediting powerOutputMw and resetting.
-    state.level.buildingData[buildingKey(col, row)] = { type: buildingId, recipeId: null, fueled: false, progressMs: 0 };
+    // No chosen recipe any more (per direct request): it accepts any unlocked
+    // ingredient that touches it — fueled flips true the instant one is
+    // absorbed (fuelId remembers which, so its output/duration are known),
+    // then progressMs counts up (unpowered — it's the thing GENERATING
+    // power) to that ingredient's durationMs and resets.
+    state.level.buildingData[buildingKey(col, row)] = { type: buildingId, fueled: false, fuelId: null, progressMs: 0 };
   } else if (PLATFORM_FLAT_COST_TILES.has(buildingId)) {
     // Every Platform variant (flat + all 4 ramps) can be turned into an item
     // filter — see platformIgnoresItem's own comment above. filterItems
@@ -1290,6 +1306,7 @@ function writeFreshBuildingData(state, col, row, buildingId, angle) {
     // see updateBuildings' own intake scan and ejectOneFromChest below.
     state.level.buildingData[buildingKey(col, row)] = {
       type: buildingId, lockedItemType: null, count: 0, coinQueue: [],
+      wasteAgeQueue: [], // FIFO of each stored Waste item's age — a chest freezes freshness, see ejectOneFromChest
       pourMode: true, // what releasing the aim-drag does: true = pour everything out (default), false = arm the auto-trickle — toggled in the chest popup, see setChestPourMode
       trickleActive: false, trickleAngle: null, trickleDistanceTiles: null,
       clearing: false, clearTimerMs: 0, clearAngle: null, clearDistanceTiles: null,
@@ -1594,9 +1611,6 @@ export function applyRecipeToBuilding(data, next) {
     data.currentItemType = null;
     data.progressMs = 0;
     data.ghostFlashTimerMs = 0;
-  } else {
-    data.fueled = false;
-    data.progressMs = 0;
   }
 }
 
@@ -1613,7 +1627,7 @@ export function applyRecipeToBuilding(data, next) {
 export function applyPipetteData(state, col, row, buildingId) {
   const data = state.level.buildingData[buildingKey(col, row)];
   if (!data) return;
-  if (state.ui.pipetteRecipeId && (data.type === TILE_MANUFACTURER || data.type === TILE_POWER_PLANT)) {
+  if (state.ui.pipetteRecipeId && data.type === TILE_MANUFACTURER) {
     applyRecipeToBuilding(data, state.ui.pipetteRecipeId);
   }
   if (state.ui.pipetteFilterItems && data.filterItems) {
@@ -1655,7 +1669,7 @@ export function captureBlueprint(state, colA, rowA, colB, rowB) {
       cells.push({
         dCol: col - minCol, dRow: row - minRow, buildingId: type,
         angle: (data && data.angle) || 0,
-        recipeId: (data && (MANUFACTURER_TILES.has(type) || POWER_PLANT_TILES.has(type))) ? data.recipeId : null,
+        recipeId: (data && MANUFACTURER_TILES.has(type)) ? data.recipeId : null,
         // Per direct request ("blueprint tool copies all recipes/filters
         // from copied buildings") — same idea as recipeId just above, for a
         // Platform/Fan's own item-filter array (see UI.js's copyPlatformFilter
@@ -1955,7 +1969,7 @@ export function cycleTileCheat(state, worldX, worldY) {
       currentItemType: null, progressMs: 0, ghostFlashTimerMs: 0, heldItemId: null,
     };
   } else if (POWER_PLANT_TILES.has(next)) {
-    state.level.buildingData[buildingKey(col, row)] = { type: next, recipeId: null, fueled: false, progressMs: 0 };
+    state.level.buildingData[buildingKey(col, row)] = { type: next, fueled: false, fuelId: null, progressMs: 0 };
   } else if (PLATFORM_FLAT_COST_TILES.has(next)) {
     state.level.buildingData[buildingKey(col, row)] = { type: next, filterItems: [] };
   }
@@ -2661,7 +2675,7 @@ export function getBuildingAlertKind(state, type, data) {
   if (!data) return null;
   if (tileHasAnyPowerCost(type) && state.level.powerEfficiency < POWER_SHORTAGE_STALLED_THRESHOLD) return 'powerless';
   if (REFINERY_TILES.has(type) && data.lockedRecipe === null) return 'idle';
-  if (POWER_PLANT_TILES.has(type) && data.recipeId === null) return 'idle';
+  if (POWER_PLANT_TILES.has(type) && !data.fueled) return 'idle';
   if (TURRET_AMMO_TILES.has(type) && data.ammoWaste + data.ammoBiomass <= 0) return 'idle';
   if (MANUFACTURER_TILES.has(type) && !data.processing) return 'idle';
   return null;
@@ -2730,6 +2744,7 @@ export function updateBuildings(state, dtMs) {
   const bioSpawnPoints = [];
   const chestSpawnPoints = [];
   const items = state.level.items;
+  let powerFuelRanks = null; // see POWER_FUEL_ORDER — filled lazily by the first idle Power Plant
   for (const key in state.level.buildingData) {
     const data = state.level.buildingData[key];
     const [row, col] = key.split(',').map(Number);
@@ -3029,13 +3044,6 @@ export function updateBuildings(state, dtMs) {
             it.heldOriginalMass = it.mass;
             it.mass = COLLECTOR_PROCESSING_MASS;
             data.heldItemId = it.id;
-            // "Buildings" pushing cleanliness back up (see CLAUDE.md's
-            // Cleanliness section) — the Refinery inherits this from the
-            // Auto-Feeder it replaced, mirroring Entities.js's identical
-            // Suckerfish-eating case. Credited on PICKUP, same as before —
-            // holding the item a while longer before actually removing it
-            // doesn't change when the tank gets credit for it.
-            state.level.cleanliness = Math.min(CLEANLINESS_MAX, state.level.cleanliness + CLEANLINESS_PER_WASTE_EVENT);
             data.lockedRecipe = 'waste_to_food';
             data.progressMs = 0;
             playIntake();
@@ -3162,49 +3170,49 @@ export function updateBuildings(state, dtMs) {
     }
 
     if (POWER_PLANT_TILES.has(data.type)) {
-      // Same "does nothing until a recipe is picked" rule as the
-      // Manufacturer — no fuel scan, no power draw, until then.
-      if (data.recipeId === null) continue;
-      const recipe = POWER_PLANT_RECIPES[data.recipeId];
       if (!data.fueled) {
-        // A single-fuel-item recipe now, not an "either/or" router — only
-        // the recipe's own inputs[0] type is accepted.
+        // Per direct request there is no chosen recipe: it takes whichever
+        // UNLOCKED ingredient is touching it, rarest first (Blue Science,
+        // Biomass, Food, Waste — POWER_FUEL_ORDER). Stale waste is fine fuel.
+        if (powerFuelRanks === null) powerFuelRanks = refreshPowerFuelRanks(state);
+        let bestIdx = -1;
+        let bestRank = POWER_FUEL_ORDER.length;
         for (let i = 0; i < items.length; i++) {
           const it = items[i];
-          if (it.type !== recipe.inputs[0]) continue;
-          if (isTouchingBuildingTile(centerX, centerY, it.x, it.y, it.radius)) {
-            items.splice(i, 1);
-            data.fueled = true;
-            data.progressMs = 0;
-            playIntake();
-            break;
-          }
+          const rank = powerFuelRanks[it.type];
+          if (rank === undefined || rank >= bestRank) continue;
+          if (it.collectorProgressMs != null || it.heldByKey != null) continue; // already claimed by another building's own hold
+          if (!isTouchingBuildingTile(centerX, centerY, it.x, it.y, it.radius)) continue;
+          bestIdx = i;
+          bestRank = rank;
+          if (rank === 0) break; // nothing rarer exists
+        }
+        if (bestIdx !== -1) {
+          data.fuelId = items[bestIdx].type; // an ingredient's id IS its item type, see POWER_PLANT_RECIPES
+          items.splice(bestIdx, 1);
+          data.fueled = true;
+          data.progressMs = 0;
+          playIntake();
         }
       } else {
+        const recipe = POWER_PLANT_RECIPES[data.fuelId];
+        if (!recipe) { data.fueled = false; data.fuelId = null; data.progressMs = 0; continue; } // defensive: an unknown fuel id from a hand-edited save
         // Never power-gated itself — it's the thing GENERATING power, not
         // drawing it.
         data.progressMs += dtMs;
         // Per direct request ("powerplants should produce the EXACT same
         // thing as electric eels — the same resource/utility pool should be
         // used for both"): credits state.level.powerGenAccumMw
-        // CONTINUOUSLY over the whole burn, at recipe.powerOutputMw's own
-        // rate, instead of dumping the entire cycle's worth as one lump sum
-        // only once progressMs finally crosses durationMs. A recipe's own
-        // description ("Biomass -> 40mw for 20s") already reads as a
-        // sustained 40mw output for 20 seconds, not a single 800 MW-second
-        // pulse after 20 silent seconds — and since main.js's own
-        // once-a-second power sampler reads + resets this same accumulator
-        // every real second (see its own comment), the old lump-sum version
-        // meant a Power Plant contributed ZERO measurable supply for
-        // literally every second of its cycle except the one it happened to
-        // finish in, reading to the player as "does nothing." This is the
+        // CONTINUOUSLY over the whole burn, at the ingredient's own
+        // powerOutputMw rate (main.js samples and resets this accumulator
+        // once a real second, so a lump sum at the end of a burn would read
+        // as the plant doing nothing for every other second of it) — the
         // exact same incremental-credit shape Entities.js's Electric Eel
-        // branch already uses (`powerGenAccumMw += 1` per distance step) —
-        // both sources now feed the identical shared accumulator the same
-        // continuous way.
+        // branch uses.
         state.level.powerGenAccumMw += recipe.powerOutputMw * (dtMs / 1000);
         if (data.progressMs >= recipe.durationMs) {
           data.fueled = false;
+          data.fuelId = null;
           data.progressMs = 0;
         }
       }
@@ -3239,6 +3247,8 @@ export function updateBuildings(state, dtMs) {
           const it = items[i];
           if (it.collectorProgressMs != null || it.heldByKey != null) continue; // already claimed by another building's own hold this tick
           if (data.lockedItemType !== null && it.type !== data.lockedItemType) continue;
+          const wasteBorn = it.type === 'waste' ? state.level.wasteBornAt[it.id] : undefined;
+          if (wasteBorn !== undefined && state.level.elapsed - wasteBorn >= WASTE_STALE_MS) continue; // per direct request a chest only takes fresh waste — stale waste has to be dealt with another way (and must not lock an empty chest onto Waste)
           if (!isTouchingBuildingTile(centerX, centerY, it.x, it.y, it.radius)) continue;
           if (data.recentEjections.some((e) => e.id === it.id)) continue; // still on its own regrab cooldown — see this section's own comment
           if (data.lockedItemType === null) data.lockedItemType = it.type;
@@ -3248,6 +3258,7 @@ export function updateBuildings(state, dtMs) {
           // put in"); ejectOneFromChest below shifts from the FRONT, so the
           // oldest deposited coin is always the next one out.
           if (it.type === 'coin') data.coinQueue.push(it.value);
+          else if (it.type === 'waste') data.wasteAgeQueue.push(wasteBorn === undefined ? 0 : state.level.elapsed - wasteBorn); // frozen in here: it comes back out exactly this old
           items.splice(i, 1);
           data.count += 1;
           playIntake();
@@ -3335,9 +3346,14 @@ function ejectOneFromChest(state, data, key, centerX, centerY, angle, distanceTi
     // queue somehow running dry before `count` does (shouldn't happen).
     coinValue = Math.max(1, data.coinQueue.shift() ?? 1);
   }
+  // Same FIFO idea for Waste (per direct request): the chest freezes each
+  // item's freshness, so the oldest stored waste comes out first with the
+  // age it went in with — storing it can't reset the clock, and it doesn't
+  // turn stale the instant it leaves either.
+  const wasteAge = data.lockedItemType === 'waste' && data.wasteAgeQueue ? (data.wasteAgeQueue.shift() ?? 0) : 0;
   data.count -= 1;
   return {
-    x: spawnX, y: spawnY, itemType: data.lockedItemType, coinValue,
+    x: spawnX, y: spawnY, itemType: data.lockedItemType, coinValue, wasteAge,
     angle: angle !== null ? resolvedAngle : null, distanceTiles, key, cooldownMs,
   };
 }
@@ -3366,7 +3382,10 @@ function isBuildingActiveForUptime(state, type, data, centerX, centerY, collecto
     return data.lockedRecipe !== null;
   }
   if (MANUFACTURER_TILES.has(type)) return !!data.processing;
-  if (POWER_PLANT_TILES.has(type)) return !!data.fueled && data.recipeId !== null;
+  if (POWER_PLANT_TILES.has(type)) {
+    if (data.fueled) data.lastFuelId = data.fuelId; // remembered for the production-info modal, same reason as lastActiveRecipe above
+    return !!data.fueled;
+  }
   if (TURRET_TILES.has(type)) {
     const hasAmmo = !TURRET_AMMO_TILES.has(type) || data.ammoWaste + data.ammoBiomass > 0;
     return data.cooldownMs <= 0 && hasAmmo;
@@ -4074,7 +4093,7 @@ export function renderSeabedGrid(ctx, state, canvasWidth, canvasHeight) {
         if (data && REFINERY_TILES.has(type) && data.lockedRecipe === null) {
           renderStalledBadge(ctx, screen.x, screen.y, size, camera.zoom, '⏳');
         }
-        if (data && POWER_PLANT_TILES.has(type) && data.recipeId === null) {
+        if (data && POWER_PLANT_TILES.has(type) && !data.fueled) {
           renderStalledBadge(ctx, screen.x, screen.y, size, camera.zoom, '⏳');
         }
         if (data && TURRET_AMMO_TILES.has(type) && data.ammoWaste + data.ammoBiomass <= 0) {
@@ -4937,10 +4956,10 @@ function drawWastePoopIcon(ctx, cx, cy, r, color = WASTE_COLOR) {
 // exact same convention the recipe pop-up's own real-item icons already
 // established (see UI.js's refreshRecipeMenu).
 function renderRecipeIcon(ctx, type, x, y, size, data) {
-  if (!data || data.recipeId == null) return;
-  const recipe = type === TILE_MANUFACTURER ? MANUFACTURER_RECIPES[data.recipeId]
-    : type === TILE_POWER_PLANT ? POWER_PLANT_RECIPES[data.recipeId]
-    : null;
+  if (!data) return;
+  // A Power Plant has no recipe to show any more — it shows the ingredient it is burning right now instead.
+  const recipe = type === TILE_MANUFACTURER ? (data.recipeId == null ? null : MANUFACTURER_RECIPES[data.recipeId])
+    : (data.fueled ? POWER_PLANT_RECIPES[data.fuelId] : null);
   if (!recipe) return;
   const itemType = type === TILE_MANUFACTURER ? recipe.output : recipe.inputs[0];
 
@@ -5580,8 +5599,8 @@ function computeProcessDotsInfo(state, type, data, centerX, centerY, collectorIt
     return { fraction: data.progressMs / MANUFACTURER_ITEM_PROCESS_MS[data.currentItemType], mode: 'fill' };
   }
   if (POWER_PLANT_TILES.has(type)) {
-    if (!data.fueled || data.recipeId === null) return null;
-    return { fraction: data.progressMs / POWER_PLANT_RECIPES[data.recipeId].durationMs, mode: 'drain' };
+    if (!data.fueled || !POWER_PLANT_RECIPES[data.fuelId]) return null;
+    return { fraction: data.progressMs / POWER_PLANT_RECIPES[data.fuelId].durationMs, mode: 'drain' };
   }
   return null;
 }
@@ -5848,8 +5867,8 @@ export function getBuildingCurrentPowerDraw(state, type, data, centerX, centerY)
     // distinct from 0 (idle/no recipe), so a caller that only cares about
     // consumption (e.g. the shortage overlay's own `> 0` check) naturally
     // ignores it.
-    if (!data || !data.fueled || data.recipeId === null) return 0;
-    return -(POWER_PLANT_RECIPES[data.recipeId].powerOutputMw);
+    if (!data || !data.fueled || !POWER_PLANT_RECIPES[data.fuelId]) return 0;
+    return -(POWER_PLANT_RECIPES[data.fuelId].powerOutputMw);
   }
   return 0;
 }

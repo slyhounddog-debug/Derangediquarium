@@ -23,6 +23,8 @@ import {
   BUILDING_TYPES,
   BUILDING_LIST,
   CLEANLINESS_MAX,
+  WASTE_STALE_MS,
+  STALE_WASTE_CAP,
   CLEANLINESS_COLOR_CLEAN,
   CLEANLINESS_COLOR_DIRTY,
   PROCESSOR_STATS,
@@ -237,6 +239,13 @@ function setDisabled(el, disabled) { if (el.disabled !== disabled) el.disabled =
 let els = null;
 let currentPreviewSpecies = null; // species currently shown in the in-panel preview, if any
 let currentPreviewBuilding = null; // building currently shown in the in-panel preview, if any — mutually exclusive with currentPreviewSpecies
+let previewPowerPlantLockKey = ''; // which Power Plant ingredients are locked in the preview now ('' when it isn't showing), so refreshPreviewInfo only rebuilds on a change
+function powerPlantLockKey(state) {
+  const purchased = state.meta.labUpgradesPurchased;
+  let key = '';
+  for (const r of POWER_PLANT_RECIPE_LIST) key += r.labNodeId !== null && !purchased.includes(r.labNodeId) ? '1' : '0';
+  return key;
+}
 let previewRecipesHtmlShown = ''; // the recipe-buttons markup currently in the preview, so refreshPreviewInfo only touches the DOM when it changes
 let previewBuildingStatsHtml = ''; // the selected building's stat lines, built once on selection (see refreshPreviewInfo)
 let lastMoney = null; // previous frame's money, to detect gain vs spend for the flash animation
@@ -274,7 +283,7 @@ let labMenuOpen = false;
 let labMenuClosing = false;
 let labMenuCloseTimer = null;
 let labZoom = 1; // current --lab-zoom scale factor — see openLabMenu/setLabZoom
-let labFilterCategory = 'all'; // 'all' | 'buildings' | 'recipes' | 'fish' | 'other' — see labNodeCategory/applyLabFilter
+let labFilterCategory = 'all'; // 'all' | 'buildings' | 'ingredients' | 'fish' | 'other' — see labNodeCategory/applyLabFilter
 // Per direct request, the Lab remembers exactly where you left it —
 // labTreeHasBeenOpened gates the one-time-only initial centering (see
 // openLabMenu), and the saved* trio is written by closeLabMenu and restored
@@ -318,9 +327,9 @@ const HUD_INFO_DATA = {
   },
   cleanliness: {
     icon: '✨', title: 'Cleanliness',
-    desc: "Tank cleanliness — a dirty tank's fish produce less money, down to half at 0% clean.",
-    statLabel: 'Waste/min',
-    statFn: (state) => computeTheoreticalWastePerMinute(state).toFixed(1),
+    desc: `Tank cleanliness — each STALE Waste item loose in the tank (waste older than ${WASTE_STALE_MS / 1000}s) costs 1%. A dirty tank's fish earn less, down to half at 0% clean, and at ${STALE_WASTE_CAP} stale waste they stop pooping. Refine it, burn it, shoot it, or stash fresh waste in a chest.`,
+    statLabel: 'Stale waste',
+    statFn: (state) => `${state.level.staleWasteCount || 0}/${STALE_WASTE_CAP}`,
   },
 };
 // familyId -> currently-selected tile id within that family (see Config.js's
@@ -540,7 +549,6 @@ export function initUI(state) {
     tutorialOverlay: document.getElementById('tutorial-overlay'),
     tutorialText: document.getElementById('tutorial-text'),
     powerGraphCanvas: document.getElementById('hud-power-graph-canvas'),
-    minimapExpandBtn: document.getElementById('minimap-expand-btn'),
     timePauseBtn: document.getElementById('time-pause-btn'),
     timeSpeedBtn: document.getElementById('time-speed-btn'),
     pauseMenuBtn: document.getElementById('pause-menu-btn'),
@@ -851,7 +859,7 @@ export function initUI(state) {
     if (!btn) return;
     const anchor = btn.closest('#fish-info-menu') ? btn : null; // from the fish modal the popup hangs under the button; from the shop it's centered
     if (btn.dataset.mergeTier) openMergeFishModal(state, btn.dataset.mergeSpecies, Number(btn.dataset.mergeTier), btn);
-    else if (btn.dataset.recipeKind) openRecipeInfoModal(state, btn.dataset.recipeKind, btn.dataset.recipeId);
+    else if (btn.dataset.recipeId) openRecipeInfoModal(state, btn.dataset.recipeId);
     else openLabPurchaseModal(state, btn.dataset.nodeId, true, anchor, btn.dataset.eternalLocked ? ETERNAL_TANK_FOOTNOTE : null);
   };
   els.fishInfoMergeLines.addEventListener('click', onMergeNodeClick);
@@ -913,11 +921,6 @@ export function initUI(state) {
   els.pauseSaveBtn.addEventListener('click', () => saveGameFromPause(state));
   initFeedbackModal(state);
   els.pauseMainMenuBtn.addEventListener('click', () => returnToMainMenuFromPause(state));
-  // minimap-expand-btn is wired in main.js now, not here — per direct
-  // report, the button was supposed to control the real tank-viewport zoom
-  // (camera.zoom, main.js's own domain), not the minimap's display size,
-  // which UI.js's toggleMinimapExpanded used to (wrongly) control. See
-  // main.js's toggleTankZoomMode.
   els.timePauseBtn.addEventListener('click', () => toggleTimePause(state));
   els.timeSpeedBtn.addEventListener('click', () => toggleSpeedX2(state));
   els.pauseMenuBtn.addEventListener('click', () => togglePauseMenu(state));
@@ -1322,6 +1325,7 @@ function updateBuildingInfoMenuPosition(state) {
 // completely static per building type anyway, so there's even less reason
 // to redo it every frame); the per-frame check in updateHUD just closes the
 // popup if the underlying tile gets demolished out from under it.
+let buildingInfoBottomStatsHtml = ''; // the Power Plant pop-up's meters, see refreshBuildingInfoMenu
 function refreshBuildingInfoMenu(state) {
   if (!buildingInfoTileKey) return;
   const data = state.level.buildingData[buildingInfoTileKey];
@@ -1335,7 +1339,10 @@ function refreshBuildingInfoMenu(state) {
   els.buildingInfoIcon.textContent = def.icon;
   els.buildingInfoName.textContent = def.name;
   els.buildingInfoDesc.textContent = def.description;
-  els.buildingInfoStats.innerHTML = buildingStatsHtml(type, state);
+  // A Power Plant's meters sit at the BOTTOM of its pop-up, under its ingredients and live power readout (per direct
+  // request), so they are appended by refreshBuildingInfoLiveStats instead of living in this static block.
+  buildingInfoBottomStatsHtml = type === TILE_POWER_PLANT ? buildingStatsHtml(type, state) : '';
+  els.buildingInfoStats.innerHTML = type === TILE_POWER_PLANT ? '' : buildingStatsHtml(type, state);
   refreshBuildingInfoLiveStats(state);
 }
 
@@ -1384,7 +1391,30 @@ function refreshBuildingInfoLiveStats(state) {
     const ammoLine = `${itemIconImgHtml('biomass')} <b>${ammoBiomassAdvanced}</b> (optional, +${ADVANCED_TURRET_BIOMASS_DAMAGE} dmg/shot)`;
     html += `<div class="building-stat">${ammoLine}</div>`;
   }
-  els.buildingInfoLiveStats.innerHTML = html;
+  if (data.type === TILE_POWER_PLANT) html = powerPlantInfoHtml(state, data, powerLine, uptimeLine) + buildingInfoBottomStatsHtml;
+  setHtml(els.buildingInfoLiveStats, html); // per direct request (frame rate): only touch the DOM when the text actually changed
+}
+
+// The Power Plant's pop-up, set up like the turret's: small non-clickable ingredient chips (which fuels it accepts —
+// grey with a lock until the Science Lab unlocks them), what it is generating right now, and (appended by the caller)
+// the fill meters at the bottom.
+function powerPlantInfoHtml(state, data, powerLine, uptimeLine) {
+  const burning = data.fueled ? POWER_PLANT_RECIPES[data.fuelId] : null;
+  const burningLine = burning
+    ? `${itemIconImgHtml(burning.inputs[0], 16)} Burning <b>${burning.name}</b> · ${Math.max(0, Math.ceil((burning.durationMs - data.progressMs) / 1000))}s left`
+    : 'Waiting for an ingredient to touch it…';
+  return `<div class="building-stat ingredient-row">${ingredientChipsHtml(state)}</div>` +
+    `<div class="building-stat">${powerLine}</div><div class="building-stat">${burningLine}</div><div class="building-stat">${uptimeLine}</div>`;
+}
+
+// Small, deliberately NOT button-like pills (per direct request the Power Plant's ingredients aren't clickable any more):
+// every ingredient the plant can burn, rarest first, grey with a lock until its Science Lab node is bought.
+function ingredientChipsHtml(state) {
+  const purchased = state.meta.labUpgradesPurchased;
+  return POWER_PLANT_RECIPE_LIST.map((r) => {
+    const locked = r.labNodeId !== null && !purchased.includes(r.labNodeId);
+    return `<span class="ingredient-chip${locked ? ' locked' : ''}" title="${locked ? 'Not unlocked yet — buy it in the Science Lab' : r.description}">${itemIconImgHtml(r.inputs[0], 14)}${locked ? '🔒 ' : ' '}${r.name}</span>`;
+  }).join('');
 }
 
 // ---- Fish info modal ----
@@ -1999,38 +2029,37 @@ function updateRecipeMenuPosition(state) {
   placeBuildingModal(state, els.recipeMenuAnchor, els.recipeMenu, col * TILE_SIZE + TILE_SIZE / 2, row * TILE_SIZE);
 }
 
-// Rebuilds the icon row for whichever building (Manufacturer or Power
-// Plant) sits at recipeMenuTileKey — called only on open and on a toggle
-// click (see openRecipeMenu/toggleBuildingRecipe), NOT every frame (a real
-// bug once had this rebuilding every frame the popup was open, which could
-// detach a real click's target element mid-click — see CLAUDE.md's own
-// changelog entry). The much lighter per-frame check elsewhere just closes
-// the popup outright if the underlying tile is gone (demolished
-// mid-decision), without touching this option DOM at all.
+// Rebuilds the icon row for the Factory (Manufacturer) at recipeMenuTileKey
+// — called only on open and on a toggle click (see openRecipeMenu/
+// toggleBuildingRecipe), NOT every frame (a real bug once had this rebuilding
+// every frame the popup was open, which could detach a real click's target
+// element mid-click — see CLAUDE.md's own changelog entry). The much lighter
+// per-frame check elsewhere just closes the popup outright if the underlying
+// tile is gone (demolished mid-decision), without touching this option DOM at
+// all. A Power Plant has no recipe pop-up any more (it burns every unlocked
+// ingredient, per direct request) — it opens the generic building info
+// pop-up instead.
 function refreshRecipeMenu(state) {
   if (!recipeMenuTileKey) return;
   const data = state.level.buildingData[recipeMenuTileKey];
   if (!data) { closeRecipeMenu(); return; }
-  const isManufacturer = data.type === TILE_MANUFACTURER;
-  const recipeList = isManufacturer ? MANUFACTURER_RECIPE_LIST : POWER_PLANT_RECIPE_LIST;
-  els.recipeMenuTitle.textContent = isManufacturer ? 'Factory Recipe' : 'Power Plant Fuel';
+  els.recipeMenuTitle.textContent = 'Factory Recipe';
   els.recipeMenuOptions.innerHTML = '';
-  for (const recipe of recipeList) {
+  for (const recipe of MANUFACTURER_RECIPE_LIST) {
     const unlocked = recipe.labNodeId === null || state.meta.labUpgradesPurchased.includes(recipe.labNodeId);
     const optionEl = document.createElement('div');
     optionEl.className = 'recipe-option' + (data.recipeId === recipe.id ? ' selected' : '') + (unlocked ? '' : ' locked');
     optionEl.style.setProperty('--recipe-color', recipe.color);
-    // A real drawn item icon (whatever the recipe actually produces — or,
-    // for a Power Plant, whatever fuel it burns) instead of a generic
-    // emoji, per direct request ("the recipe icon [should] match the actual
-    // object in the game") — reuses the exact same drawItemIconCanvas the
-    // Platform filter pop-up and the Science Lab tree already draw their
+    // A real drawn item icon (whatever the recipe produces) instead of a
+    // generic emoji, per direct request ("the recipe icon [should] match the
+    // actual object in the game") — reuses the exact same drawItemIconCanvas
+    // the Platform filter pop-up and the Science Lab tree already draw their
     // own real-item icons with.
     const icon = document.createElement('canvas');
     icon.className = 'recipe-option-icon';
     icon.width = RECIPE_OPTION_ICON_CANVAS_SIZE;
     icon.height = RECIPE_OPTION_ICON_CANVAS_SIZE;
-    drawItemIconCanvas(icon, isManufacturer ? recipe.output : recipe.inputs[0]);
+    drawItemIconCanvas(icon, recipe.output);
     // Name + description share a text column next to the icon now — per
     // direct request, each recipe row lays out horizontally (icon on the
     // left, text stacked to its right) instead of the old icon-on-top card.
@@ -2053,13 +2082,10 @@ function refreshRecipeMenu(state) {
   }
   // The building's own general stats (per-ingredient processing time, power
   // draw) — per direct request ("add in just the stats from the manufacturer
-  // into its recipe picker/fly out modal") — reusing buildingStatsHtml's
-  // exact output rather than a second copy of these numbers. The
-  // Manufacturer specifically ALSO gets the full per-item power breakdown
-  // here (and only here — the shop/Lab preview keeps the plain range) per a
-  // later direct request, since this is the one place ingredient choice
-  // actually matters.
-  els.recipeMenuStats.innerHTML = isManufacturer ? manufacturerRecipeMenuStatsHtml(state) : buildingStatsHtml(data.type, state);
+  // into its recipe picker/fly out modal"), with the full per-item power
+  // breakdown (and only here — the shop/Lab preview keeps the plain range)
+  // since this is the one place ingredient choice actually matters.
+  els.recipeMenuStats.innerHTML = manufacturerRecipeMenuStatsHtml(state);
 }
 
 // applyRecipeToBuilding moved to Grid.js (and exported from there) per
@@ -2566,10 +2592,15 @@ function openLabPurchaseModal(state, id, infoOnly = false, anchorBtn = null, foo
     // everything else that grants nothing by itself (e.g. green_science_tech,
     // a pure tech flag with no recipe of its own) keeps the old generic
     // "prerequisite" text plus a list of what it unlocks.
-    const recipe = MANUFACTURER_RECIPE_LIST.find((r) => r.labNodeId === id) || POWER_PLANT_RECIPE_LIST.find((r) => r.labNodeId === id);
+    const recipe = MANUFACTURER_RECIPE_LIST.find((r) => r.labNodeId === id);
+    const ingredient = POWER_PLANT_RECIPE_LIST.find((r) => r.labNodeId === id);
     if (recipe) {
       descLines.push(`Unlocks the <b>${recipe.name}</b> recipe: ${recipe.description}.`);
       statChips.push(`<div class="building-stat">${recipe.icon} <b>${recipe.description}</b></div>`);
+    } else if (ingredient) {
+      // Per direct request a Power Plant burns every unlocked ingredient (no recipe to pick), so this node is an "ingredient".
+      descLines.push(`Lets the Power Plant burn <b>${ingredient.name}</b>: ${ingredient.description}.`);
+      statChips.push(`<div class="building-stat">${itemIconImgHtml(ingredient.inputs[0], 16)} <b>${ingredient.description}</b></div>`);
     } else if (node.description) {
       // A plain node-level `description` string (e.g. the two Turret Fire
       // Rate nodes — see Config.js) — describes a real mechanical effect
@@ -2596,10 +2627,9 @@ function openLabPurchaseModal(state, id, infoOnly = false, anchorBtn = null, foo
 // what the output is for, what goes in, how long and how much power it takes, and what unlocks it. Every number
 // is read live from the recipe tables, so a dev-tool retune shows up here with no text to update.
 const LAB_FISH_FOOTNOTE = '* Locked — purchase this fish from the Science Lab.';
-function openRecipeInfoModal(state, kind, recipeId) {
+function openRecipeInfoModal(state, recipeId) {
   closeMergeFishModal();
-  const isFactory = kind === 'factory';
-  const recipe = (isFactory ? MANUFACTURER_RECIPES : POWER_PLANT_RECIPES)[recipeId];
+  const recipe = MANUFACTURER_RECIPES[recipeId];
   if (!recipe) return;
   const node = recipe.labNodeId ? SCIENCE_LAB_UPGRADES[recipe.labNodeId] : null;
   const locked = node != null && !state.meta.labUpgradesPurchased.includes(node.id);
@@ -2614,27 +2644,20 @@ function openRecipeInfoModal(state, kind, recipeId) {
   if (locked) els.labPurchaseFootnote.textContent = `* Locked — buy "${node.name}" in the Science Lab to use this recipe.`;
   const icon = document.createElement('canvas');
   icon.width = icon.height = LAB_PURCHASE_ICON_CANVAS_SIZE;
-  drawItemIconCanvas(icon, isFactory ? recipe.output : recipe.inputs[0]);
+  drawItemIconCanvas(icon, recipe.output);
   els.labPurchaseIcon.textContent = '';
   els.labPurchaseIcon.appendChild(icon);
-  els.labPurchaseName.textContent = `${locked ? '🔒 ' : ''}${recipe.name} ${isFactory ? 'Recipe' : 'Fuel'}`;
-  els.labPurchaseCost.textContent = locked ? `Requires: ${node.name} (Science Lab)` : node ? 'Unlocked ✓' : `Unlocked with the ${isFactory ? 'Factory' : 'Power Plant'} ✓`;
+  els.labPurchaseName.textContent = `${locked ? '🔒 ' : ''}${recipe.name} Recipe`;
+  els.labPurchaseCost.textContent = locked ? `Requires: ${node.name} (Science Lab)` : node ? 'Unlocked ✓' : 'Unlocked with the Factory ✓';
   const label = (id) => PLATFORM_FILTER_ITEM_TYPES.find((t) => t.id === id)?.label || id;
   const chip = (html) => `<div class="building-stat">${html}</div>`;
   const item = (id) => `${itemIconImgHtml(id, 16)} <b>${label(id)}</b>`;
-  let stats;
-  if (isFactory) {
-    const times = recipe.inputs.map((id) => MANUFACTURER_ITEM_PROCESS_MS[id] / 1000);
-    stats =
-      chip(`Needs: ${recipe.inputs.map(item).join(' + ')}`) +
-      chip(`Makes: ${item(recipe.output)}`) +
-      chip(`⏱️ One batch: <b>${times.reduce((a, b) => a + b, 0)}s</b> (${recipe.inputs.map((id, i) => `${label(id)} ${times[i]}s`).join(' + ')}, one at a time)`) +
-      chip(`⚡ Power, only while working: ${recipe.inputs.map((id) => `<b>${MANUFACTURER_ITEM_POWER_COST_MW[id]}mw</b> on ${label(id)}`).join(', ')}`);
-  } else {
-    stats =
-      chip(`Burns: ${item(recipe.inputs[0])}, one at a time`) +
-      chip(`⚡ Makes: <b>+${recipe.powerOutputMw}mw</b> for <b>${recipe.durationMs / 1000}s</b> per item`);
-  }
+  const times = recipe.inputs.map((id) => MANUFACTURER_ITEM_PROCESS_MS[id] / 1000);
+  const stats =
+    chip(`Needs: ${recipe.inputs.map(item).join(' + ')}`) +
+    chip(`Makes: ${item(recipe.output)}`) +
+    chip(`⏱️ One batch: <b>${times.reduce((a, b) => a + b, 0)}s</b> (${recipe.inputs.map((id, i) => `${label(id)} ${times[i]}s`).join(' + ')}, one at a time)`) +
+    chip(`⚡ Power, only while working: ${recipe.inputs.map((id) => `<b>${MANUFACTURER_ITEM_POWER_COST_MW[id]}mw</b> on ${label(id)}`).join(', ')}`);
   els.labPurchaseDesc.innerHTML = `<div>${recipe.effect}</div>`;
   els.labPurchaseStats.innerHTML = stats;
   els.labPurchaseOverlay.classList.remove('hidden');
@@ -4069,8 +4092,10 @@ function itemTypeForRecipeNode(nodeId) {
   return null;
 }
 
-// One of 'buildings' | 'recipes' | 'fish' | 'other' — per direct request
-// ("filter icon buttons... No filter, Buildings, Recipes, Fish, Other").
+// One of 'buildings' | 'ingredients' | 'fish' | 'other' — per direct request
+// ("filter icon buttons... No filter, Buildings, Recipes, Fish, Other"); the
+// recipe filter is labelled "Ingredients" now (Power Plant ingredient nodes
+// join the Factory recipe nodes there, per direct request).
 // Reuses the exact same grants/itemTypeForRecipeNode checks
 // buildingIconOrEmojiElement already resolves each node's real icon with,
 // so the filter categories can never disagree with what a node's own icon
@@ -4078,7 +4103,7 @@ function itemTypeForRecipeNode(nodeId) {
 function labNodeCategory(node) {
   if (node.grants && node.grants.buildings && node.grants.buildings.length) return 'buildings';
   if (node.grants && node.grants.species && node.grants.species.length) return 'fish';
-  if (itemTypeForRecipeNode(node.id)) return 'recipes';
+  if (itemTypeForRecipeNode(node.id)) return 'ingredients';
   return 'other'; // Turret Fire Rate, every Bubble Cap step, Fish Scaling, the end-game mystery node — nothing placeable/ownable to categorize as
 }
 
@@ -5224,7 +5249,7 @@ export function pipetteSelectBuilding(state, buildingId, tileKey = null) {
   }
   const data = tileKey ? state.level.buildingData[tileKey] : null;
   if (!data) return;
-  if (buildingId === TILE_MANUFACTURER || buildingId === TILE_POWER_PLANT) state.ui.pipetteRecipeId = data.recipeId || null;
+  if (buildingId === TILE_MANUFACTURER) state.ui.pipetteRecipeId = data.recipeId || null;
   if (data.filterItems) state.ui.pipetteFilterItems = [...data.filterItems];
   if (typeof data.pourMode === 'boolean') state.ui.pipetteChestPourMode = data.pourMode; // a chest's Pour/Trickle toggle
   if (typeof data.rangePct === 'number') state.ui.pipetteFanRangePct = data.rangePct; // a fan's range slider
@@ -5249,7 +5274,9 @@ function selectBuildingForPreview(state, building) {
   els.previewEmpty.classList.add('hidden');
   els.previewContent.classList.remove('hidden');
   els.previewDesc.textContent = building.description;
-  previewBuildingStatsHtml = buildingStatsHtml(building.id);
+  // The Power Plant's rows carry its ingredient lock state, so (unlike every other building) it is built with state.
+  previewBuildingStatsHtml = buildingStatsHtml(building.id, building.id === TILE_POWER_PLANT ? state : null);
+  previewPowerPlantLockKey = building.id === TILE_POWER_PLANT ? powerPlantLockKey(state) : '';
   previewRecipesHtmlShown = recipeButtonsHtml(state, building.id);
   setHtml(els.previewStats, previewBuildingStatsHtml + previewRecipesHtmlShown);
   refreshPreviewInfo(state);
@@ -5381,14 +5408,17 @@ function manufacturerRowsHtml(buildingId, items, placed) {
   }).join('');
 }
 
-// One row per fuel with two meters: power produced and how long it lasts.
-function powerPlantRowsHtml() {
+// One row per ingredient (rarest first) with two meters: power produced and how long it lasts. With `state`, an
+// ingredient the Science Lab hasn't unlocked yet is dimmed with a lock — that is how the Shop preview shows which
+// ingredients are unlocked (per direct request, "ingredients", not clickable recipes).
+function powerPlantRowsHtml(state = null) {
   const outputs = POWER_PLANT_RECIPE_LIST.map((r) => r.powerOutputMw);
   const durations = POWER_PLANT_RECIPE_LIST.map((r) => r.durationMs / 1000);
   return POWER_PLANT_RECIPE_LIST.map((r) => {
     const seconds = r.durationMs / 1000;
+    const locked = state !== null && r.labNodeId !== null && !state.meta.labUpgradesPurchased.includes(r.labNodeId);
     return (
-      `<div class="building-stat stat-dual"><span class="stat-dual-icon">${itemIconImgHtml(r.inputs[0], 20)}</span>` +
+      `<div class="building-stat stat-dual${locked ? ' ingredient-locked' : ''}"><span class="stat-dual-icon">${itemIconImgHtml(r.inputs[0], 20)}${locked ? '🔒' : ''}</span>` +
       `<span>⚡ <b>+${r.powerOutputMw}mw</b>${statBarForRange('power', r.powerOutputMw, Math.min(...outputs), Math.max(...outputs))}</span>` +
       `<span>⏱️ <b>${seconds}s</b>${statBarForRange('time', seconds, Math.min(...durations), Math.max(...durations))}</span></div>`
     );
@@ -5436,7 +5466,7 @@ function buildingStatsHtml(buildingId, state = null) {
     // (manufacturerRecipeMenuStatsHtml, below) adds Science.
     html = manufacturerRowsHtml(buildingId, ['waste', 'food', 'biomass'], placed);
   } else if (buildingId === TILE_POWER_PLANT) {
-    html = powerPlantRowsHtml();
+    html = powerPlantRowsHtml(state);
   }
   const notes = (BUILDING_TYPES[buildingId].statNotes || []).map((note) => `<div class="building-stat stat-note">${note}</div>`).join('');
   return html + notes;
@@ -5543,30 +5573,37 @@ function refreshPreviewInfo(state) {
   } else if (currentPreviewBuilding) {
     setText(els.previewName, currentPreviewBuilding.name);
     // The recipe buttons' lock icons follow the Science Lab live; the base stats were built once on selection.
-    if (currentPreviewBuilding.id === TILE_MANUFACTURER || currentPreviewBuilding.id === TILE_POWER_PLANT) {
+    if (currentPreviewBuilding.id === TILE_MANUFACTURER) {
       const recipesHtml = recipeButtonsHtml(state, currentPreviewBuilding.id); // memoized, so an unchanged lock state is the same string object
       if (recipesHtml !== previewRecipesHtmlShown) {
         previewRecipesHtmlShown = recipesHtml;
         setHtml(els.previewStats, previewBuildingStatsHtml + recipesHtml);
       }
+    } else if (currentPreviewBuilding.id === TILE_POWER_PLANT) {
+      const lockKey = powerPlantLockKey(state);
+      if (lockKey !== previewPowerPlantLockKey) {
+        previewPowerPlantLockKey = lockKey;
+        previewBuildingStatsHtml = buildingStatsHtml(TILE_POWER_PLANT, state);
+        setHtml(els.previewStats, previewBuildingStatsHtml);
+      }
     }
   }
 }
 
-// Per direct request, under the "Click to pick a recipe once placed." note the Factory and Power Plant list their
-// recipes as hybrid-style buttons (grey + lock until their Science Lab node is bought) that open openRecipeInfoModal.
+// Per direct request, under the "Click to pick a recipe once placed." note the Factory lists its recipes as
+// hybrid-style buttons (grey + lock until their Science Lab node is bought) that open openRecipeInfoModal. (The Power
+// Plant has no recipes any more — its ingredient rows show their own lock state, see powerPlantRowsHtml.)
 let recipeButtonsMemo = { key: '', html: '' };
 function recipeButtonsHtml(state, buildingId) {
-  const isFactory = buildingId === TILE_MANUFACTURER;
-  if (!isFactory && buildingId !== TILE_POWER_PLANT) return '';
-  const list = isFactory ? MANUFACTURER_RECIPE_LIST : POWER_PLANT_RECIPE_LIST;
+  if (buildingId !== TILE_MANUFACTURER) return '';
+  const list = MANUFACTURER_RECIPE_LIST;
   const purchased = state.meta.labUpgradesPurchased;
   let key = buildingId; // the only thing that can change the markup is which recipes are still locked
   for (const r of list) key += r.labNodeId !== null && !purchased.includes(r.labNodeId) ? '1' : '0';
   if (recipeButtonsMemo.key === key) return recipeButtonsMemo.html;
   const buttons = list.map((r) => {
     const locked = r.labNodeId !== null && !purchased.includes(r.labNodeId);
-    return `<button class="merge-node-btn recipe-btn${locked ? ' locked' : ''}" data-recipe-kind="${isFactory ? 'factory' : 'power'}" data-recipe-id="${r.id}" title="${locked ? 'Not unlocked yet — click to see what it does' : 'Click to see what it does'}">${locked ? '🔒 ' : ''}${r.name}</button>`;
+    return `<button class="merge-node-btn recipe-btn${locked ? ' locked' : ''}" data-recipe-id="${r.id}" title="${locked ? 'Not unlocked yet — click to see what it does' : 'Click to see what it does'}">${locked ? '🔒 ' : ''}${r.name}</button>`;
   }).join('');
   recipeButtonsMemo = { key, html: `<div class="shop-merge-section recipe-btn-section"><div class="shop-merge-title">Recipes</div>${buttons}</div>` };
   return recipeButtonsMemo.html;

@@ -47,7 +47,6 @@ import {
   SEABED_FLOOR_Y,
   ALIEN_FIRST_WAVE_SAFE_X_FRACTION,
   TILE_MANUFACTURER,
-  TILE_POWER_PLANT,
   AUTOSAVE_INTERVAL_MS,
   POWER_WARNING_CHECK_INTERVAL_MS,
   POWER_WARNING_CHANCE,
@@ -358,6 +357,7 @@ function watchChestFeedStep(state, draggedItemId, maxSpanWorld) {
   if (!key) { abortTutorialFlow(state); return; } // chest demolished, or full / locked to another item
   const waste = state.level.items.find((it) => it.id === state.level.chestDragTutorialTargetId && it.type === 'waste');
   if (!waste) { spawnChestTutorialWaste(state, key); return; }
+  state.level.wasteBornAt[waste.id] = state.level.elapsed; // a chest only takes fresh waste, so the lesson's one piece must never be allowed to go stale while the player reads
   keepTutorialWasteReachable(state, waste, key, draggedItemId, maxSpanWorld);
 }
 
@@ -639,15 +639,15 @@ function updateAlienWaves(state, dtMs) {
 const RECIPE_COPY_TIP_MESSAGE =
   "Psst — drag one of those onto another of the same kind and it'll copy its recipe over. Beats picking it twice.";
 
-// One-time tip the moment the player has 2+ placed Manufacturers OR 2+
-// placed Power Plants at once — per direct request ("add in a chat message
-// that will trigger letting them know about this mechanic when they have
-// two of either"). See main.js's updateRecipeDrag for the drag-to-copy
+// One-time tip the moment the player has 2+ placed Manufacturers at once —
+// per direct request ("add in a chat message that will trigger letting them
+// know about this mechanic when they have two of either"); a Power Plant has
+// no recipe to copy any more, so only Factories count. See main.js's updateRecipeDrag for the drag-to-copy
 // mechanic itself.
 function updateRecipeCopyTip(state) {
   if (state.level.tutorialFlags.recipeCopyTipShown) return;
   const grid = state.level.grid;
-  if (countPlacedOfType(grid, TILE_MANUFACTURER) >= 2 || countPlacedOfType(grid, TILE_POWER_PLANT) >= 2) {
+  if (countPlacedOfType(grid, TILE_MANUFACTURER) >= 2) {
     state.level.tutorialFlags.recipeCopyTipShown = true;
     pushNotification(state, RECIPE_COPY_TIP_MESSAGE);
   }

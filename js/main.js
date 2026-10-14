@@ -33,10 +33,16 @@ import {
   SIM_DT_MS,
   MAX_FRAME_SKIP,
   SEABED_FLOOR_Y,
-  CAMERA_WATER_COLUMN_FIT_FRACTION,
   PICKUP_TEXT_LIFETIME_MS,
   FOOD_COLOR,
   WASTE_COLOR,
+  WASTE_STALE_MS,
+  WASTE_STALE_COLOR,
+  WASTE_STALE_STEPS,
+  WASTE_FX_PARTICLE_COUNT,
+  WASTE_FX_PARTICLE_CYCLE_MS,
+  WASTE_FX_PARTICLE_HALO_PX,
+  WASTE_FX_PARTICLE_COLOR,
   TILE_EMPTY,
   TILE_SIZE,
   TILE_FAN_T2,
@@ -176,6 +182,7 @@ import {
   getCoinTier,
   createCoin,
   getRipeningCoins,
+  wasteAgeMs,
   createPickupText,
   updatePickupText,
   getFishPurchaseCost,
@@ -534,12 +541,9 @@ function compositeCausticForeground() {
 }
 
 // ---- Minimap ----
-// Per direct report ("the expand/minimize button doesn't work. It's
-// supposed to be for the whole tank viewport, not the minimap") — the
-// minimap itself is a single fixed size now: the whole tank (water column +
-// seabed city + the scrollable bottom buffer) letterboxed to fit within this
-// one bounding box. The expand/minimize button moved to controlling the
-// real camera zoom instead — see toggleTankZoomMode below.
+// The minimap is a single fixed size: the whole tank (water column + seabed
+// city + the scrollable bottom buffer) letterboxed to fit within this one
+// bounding box.
 const MINIMAP_BOX_W = 170;
 const MINIMAP_BOX_H = 110;
 const minimapCanvas = document.getElementById('minimap-canvas');
@@ -563,48 +567,6 @@ minimapCanvas.addEventListener('click', (e) => {
   const maxY = Math.max(0, getUnlockedWorldH(state) + CAMERA_BOTTOM_BUFFER_PX - viewH);
   state.camera.y = Math.max(0, Math.min(clickY / scale - viewH / 2, maxY));
 });
-
-// ---- Tank-viewport zoom (the minimap's own expand/minimize button) ----
-// Per direct request: "zoom to fit" computes a zoom that fits the ENTIRE
-// tank (world width AND total height, whichever is the tighter constraint)
-// within the viewport at once, so nothing needs scrolling; toggling back to
-// "fit to width" instead zooms so the tank's full WIDTH exactly fills the
-// viewport, ignoring height (the normal "scroll to see more" zoom).
-// Defaults to 'width' per a later direct request ("start the game in fit to
-// width mode") — index.html's own #minimap-expand-btn already ships with
-// the '⤢'/"Zoom to fit the whole tank" label that matches this being the
-// STARTING mode (that label describes what clicking it next would do), so
-// no DOM change was needed alongside this. Still overridden the instant the
-// player clicks that button (toggleTankZoomMode below), same as before.
-let tankZoomMode = 'width'; // null | 'whole' | 'width'
-// Per direct report ("the zoom to fit isn't completely zoom to fit, I can
-// still scroll... zoom out enough that you can't scroll up or down at
-// all") — the real scrollable range Engine.js's updateCamera clamps against
-// is getUnlockedWorldH(state) + CAMERA_BOTTOM_BUFFER_PX (the extra buffer
-// strip reserved for the fixed bottom tool-bar — see that constant's own
-// comment), NOT just the tank's real bottom on its own. Fitting zoom to
-// that bottom alone left viewH just short of the buffer's own height, so
-// maxY (bottom + buffer - viewH) stayed slightly positive — a small but
-// real amount of scroll was still possible. Using the full scrollable
-// height here instead makes viewH >= that whole range, which drives maxY
-// to (clamped) exactly 0. (getUnlockedWorldH replaced a fixed WORLD_H
-// constant here once Tank Expansion made the tank's real bottom vary with
-// the player's purchased tier — see Grid.js's own comment on it.)
-function computeFitWholeTankZoom() {
-  return Math.min(canvas.width / WORLD_W, canvas.height / (getUnlockedWorldH(state) + CAMERA_BOTTOM_BUFFER_PX));
-}
-function computeFitWidthZoom() {
-  return canvas.width / WORLD_W;
-}
-const minimapExpandBtnEl = document.getElementById('minimap-expand-btn');
-function toggleTankZoomMode() {
-  tankZoomMode = tankZoomMode === 'whole' ? 'width' : 'whole';
-  fitCameraZoom();
-  if (tankZoomMode === 'whole') state.camera.y = 0; // guarantee the top of the tank is actually in view, not just theoretically fittable
-  minimapExpandBtnEl.textContent = tankZoomMode === 'whole' ? '⤡' : '⤢';
-  minimapExpandBtnEl.title = tankZoomMode === 'whole' ? 'Fit tank to width' : 'Zoom to fit the whole tank';
-}
-minimapExpandBtnEl.addEventListener('click', toggleTankZoomMode);
 
 // Per direct request ("a minimal minimap under the HUD") — a plain two-tone
 // water/city silhouette, the live camera viewport as an outlined rect, and a
@@ -802,6 +764,31 @@ function coinSpinScaleX(item) {
 // nothing: the caller only gets here when one of the fields is set. The motes'
 // sizes shrink as they arrive instead of fading, which keeps a single fill
 // style for the whole path. The cap ignores the coin's brief spin squash.
+// Fresh Waste's motes — the Blimpfish coin's effect in reverse (per direct request): a couple of tiny specks drift OUT
+// of each still-fresh Waste item and shrink as they go, fading away entirely as the item approaches stale. Like the
+// coin's, each mote is a pure function of the item's own age (no particle objects), and every fresh item on screen
+// goes into ONE path / ONE fill (wasteFxBuf holds x, y, radius, id, age per item, filled by the item loop).
+const wasteFxBuf = [];
+function drawWasteFreshFx(ctx) {
+  if (wasteFxBuf.length === 0) return;
+  ctx.fillStyle = WASTE_FX_PARTICLE_COLOR;
+  ctx.beginPath();
+  for (let n = 0; n < wasteFxBuf.length; n += 5) {
+    const x = wasteFxBuf[n], y = wasteFxBuf[n + 1], r = wasteFxBuf[n + 2] * WASTE_VISUAL_SCALE, id = wasteFxBuf[n + 3], age = wasteFxBuf[n + 4];
+    const ageFrac = age / WASTE_STALE_MS;
+    const cycle = age / WASTE_FX_PARTICLE_CYCLE_MS;
+    for (let i = 0; i < WASTE_FX_PARTICLE_COUNT; i++) {
+      const phase = cycle + i / WASTE_FX_PARTICLE_COUNT;
+      const f = phase - Math.floor(phase); // 0 at the item's edge -> 1 at the edge of the halo
+      const dist = r * 0.8 + WASTE_FX_PARTICLE_HALO_PX * f;
+      const angle = id * 1.7 + i * 2.399963 + Math.floor(phase) * 2.7 - f * 0.9; // a fresh direction each loop, drifting slightly as it goes
+      const size = (0.7 + 1.5 * (1 - f)) * (1 - 0.75 * ageFrac); // shrinks as it leaves, and the whole stream dries up as the waste ages
+      ctx.rect(x + Math.cos(angle) * dist - size, y + Math.sin(angle) * dist - size, size * 2, size * 2);
+    }
+  }
+  ctx.fill();
+}
+
 function drawAppreciationFx(ctx, item, x, y) {
   if (item.eternalFx) {
     // An Eternal Fish's coin (per direct request, visibly not a plain diamond coin): a slowly turning dashed
@@ -1253,7 +1240,7 @@ function drawItemShape(ctx, item, x, y, itemColor, layer = 'all') {
   }
 
   if (item.type === 'waste') {
-    drawWastePoop(ctx, x, y, item.radius);
+    drawWastePoop(ctx, x, y, item.radius, itemColor); // itemColor is its fresh -> stale shade, see getItemSprite
     return;
   }
   if (item.type === 'alien_dna') {
@@ -1279,6 +1266,21 @@ function drawItemShape(ctx, item, x, y, itemColor, layer = 'all') {
   ctx.fill();
 }
 
+// The fully stale Waste look, baked into its sprite (so it costs nothing at draw time, per direct request for "a very
+// cheap and subtle visual effect"): a few pale mold specks on the dull gray-green blob, plus a faint dark rim.
+function drawStaleWasteSpecks(sctx, cx, cy, r) {
+  sctx.fillStyle = 'rgba(205, 220, 150, 0.75)';
+  for (const [dx, dy, s] of [[-0.34, -0.1, 0.13], [0.26, 0.2, 0.11], [0.02, -0.42, 0.09]]) {
+    sctx.beginPath();
+    sctx.arc(cx + dx * r, cy + dy * r, s * r, 0, Math.PI * 2);
+    sctx.fill();
+  }
+  sctx.strokeStyle = 'rgba(30, 36, 18, 0.35)';
+  sctx.lineWidth = Math.max(1, r * 0.1);
+  tracePoopBlobPath(sctx, cx, cy, r);
+  sctx.stroke();
+}
+
 function getItemSprite(item, foodStaleStep) {
   const isCoin = item.type === 'coin';
   const isDiamond = isCoin && getCoinTier(item.value).maxValue === Infinity;
@@ -1293,6 +1295,8 @@ function getItemSprite(item, foodStaleStep) {
   sctx.scale(ITEM_SPRITE_SCALE, ITEM_SPRITE_SCALE);
   let itemColor = ITEM_FLAT_COLOR_BY_TYPE[item.type];
   if (item.type === 'food' && foodStaleStep > 0) itemColor = lerpRgbToString(hexToRgb(FOOD_COLOR), hexToRgb(FOOD_STALE_COLOR), foodStaleStep / FOOD_STALE_STEPS);
+  // Waste reuses the same step slot for its own fresh -> stale shade (the last step IS the stale look, speckled below).
+  if (item.type === 'waste' && foodStaleStep > 0) itemColor = lerpRgbToString(hexToRgb(WASTE_COLOR), hexToRgb(WASTE_STALE_COLOR), foodStaleStep / WASTE_STALE_STEPS);
   // Rolling (see the item render loop): flasks bake their glint into a
   // SECOND, unrotated sprite so the light stays fixed while the body turns;
   // waste/sludge have theirs baked in (it rolls with them, per direct
@@ -1300,6 +1304,7 @@ function getItemSprite(item, foodStaleStep) {
   // to the pivot, so the blob turns about its own center).
   const splitHighlight = item.type === 'science' || item.type === 'science_green';
   drawItemShape(sctx, item, half, half, itemColor, splitHighlight ? 'body' : 'all');
+  if (item.type === 'waste' && foodStaleStep >= WASTE_STALE_STEPS) drawStaleWasteSpecks(sctx, half, half, item.radius * WASTE_VISUAL_SCALE);
   let hl = null;
   if (splitHighlight) {
     hl = document.createElement('canvas');
@@ -1617,21 +1622,11 @@ const state = {
 
 loadLevel(state, LEVELS[0].id);
 
-// The game now STARTS in 'width' mode (tankZoomMode's own default, above),
-// so this function's own water-column-height fraction formula only ever
-// actually applies once the player has toggled tankZoomMode back to null...
-// which never happens any more (toggleTankZoomMode only ever switches
-// between 'whole' and 'width') — kept as the fallback formula regardless,
-// both for that plain "not set yet" case and as a documented reference for
-// what the OLD default used to be: zooms out so the water column
-// (y=0..SEABED_FLOOR_Y) fits within CAMERA_WATER_COLUMN_FIT_FRACTION of the
-// viewport height, deliberately a bit less than 100%, so a sliver of the
-// seabed city is always visible below it. Never zooms in past 1x on a tall
-// window. Recomputed on every resize either way.
+// The tank's full width always exactly fills the viewport (the camera only
+// scrolls vertically); recomputed on every resize. The optional "zoom to fit
+// the whole tank" mode and its minimap button were removed per direct request.
 function fitCameraZoom() {
-  if (tankZoomMode === 'whole') state.camera.zoom = computeFitWholeTankZoom();
-  else if (tankZoomMode === 'width') state.camera.zoom = computeFitWidthZoom();
-  else state.camera.zoom = Math.min(1, (canvas.height * CAMERA_WATER_COLUMN_FIT_FRACTION) / SEABED_FLOOR_Y);
+  state.camera.zoom = canvas.width / WORLD_W;
   state.camera.viewWidth = canvas.width / state.camera.zoom;
   state.camera.viewHeight = canvas.height / state.camera.zoom;
 }
@@ -4317,7 +4312,7 @@ function updateBuildDrag() {
       showPurchaseCostText(col * TILE_SIZE + TILE_SIZE / 2, row * TILE_SIZE, buildResult.info.netCost);
     }
   }
-  if (placed && (buildingId === TILE_MANUFACTURER || buildingId === TILE_POWER_PLANT)) {
+  if (placed && buildingId === TILE_MANUFACTURER) {
     suppressRecipeMenuAfterPlacementClick = true;
   }
   // Post-alien guided tutorial's final step — any successful Turret
@@ -6108,6 +6103,7 @@ function render() {
   renderSeaTurtle(ctx, state, canvas.width, canvas.height);
 
   perfMark('r: seabed + buildings + ghosts', ctx);
+  wasteFxBuf.length = 0;
   for (const item of state.level.items) {
     const pos = worldToScreen(item.x, item.y, state.camera);
     if (pos.x < -20 || pos.x > canvas.width + 20 || pos.y < -20 || pos.y > canvas.height + 20) continue; // cull offscreen
@@ -6138,6 +6134,10 @@ function render() {
       const rawFrac = (item.stationaryTimer || 0) / FOOD_STATIONARY_TO_WASTE_MS;
       const staleT = Math.max(0, Math.min(1, (rawFrac - FOOD_STALE_FRACTION) / (1 - FOOD_STALE_FRACTION)));
       foodStaleStep = Math.round(staleT * FOOD_STALE_STEPS);
+    } else if (item.type === 'waste') {
+      // Per direct request, fresh Waste fades toward its stale shade as it ages (WASTE_STALE_STEPS pre-baked shades; the
+      // last is the speckled stale look) — the same step slot Food's stale tint uses.
+      foodStaleStep = Math.min(WASTE_STALE_STEPS, Math.floor((wasteAgeMs(state, item) / WASTE_STALE_MS) * WASTE_STALE_STEPS));
     }
     const sprite = getItemSprite(item, foodStaleStep);
     // Idle spin — per direct request ("add a coin spinning animation if a
@@ -6173,6 +6173,7 @@ function render() {
       ctx.drawImage(sprite.canvas, pos.x - sprite.half, py - sprite.half, sprite.half * 2, sprite.half * 2);
     }
     if (sprite.hl) ctx.drawImage(sprite.hl, pos.x - sprite.half, py - sprite.half, sprite.half * 2, sprite.half * 2); // the fixed-light glint, deliberately not rotated
+    if (foodStaleStep < WASTE_STALE_STEPS && item.type === 'waste') wasteFxBuf.push(pos.x, py, item.radius, item.id, wasteAgeMs(state, item)); // still fresh: its motes are batched below
     if (item.type === 'alien_egg') {
       // A shrinking countdown ring around the shell (kept live and NOT
       // rotating, so the player can still read roughly how long until it
@@ -6185,6 +6186,8 @@ function render() {
       ctx.stroke();
     }
   }
+
+  drawWasteFreshFx(ctx);
 
   // Ripening Blimpfish coins' particles and pulses, drawn from the short
   // registry Entities.js keeps (not by checking every item above), so a tank

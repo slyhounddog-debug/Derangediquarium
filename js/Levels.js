@@ -54,7 +54,9 @@ export function loadLevel(state, levelId) {
     science: 0, // Science Flasks (blue) banked so far — level-scoped like money now that Science is a real collected resource (see Entities.js's createScience/bankScience), not a permanent meta counter
     scienceGreen: 0, // Green Science's own separate reserve — the Bio-Combuster's upgraded output, banked via Entities.js's bankScienceGreen (click or Collector-routed, same as blue Science). Never mixed with `science` above — the Bio-Reactor's scienceGreenCost purchases and the Bio-Combuster's upgraded recipe both read/spend this one specifically.
 
-    cleanliness: 100, // 0-100, clamped — real now (Phase 3): Entities.js/Grid.js adjust it whenever Waste spawns or gets cleaned up, see Config.js's CLEANLINESS_* comment. No gameplay effect from a low value yet (fish stress/toxicity is still unbuilt) — this is the live-tracked value + HUD feedback half of the system
+    cleanliness: 100, // 0-100 — recomputed every tick from the stale Waste count by Entities.js's updateStaleWaste (see Config.js's "Cleanliness, now driven by STALE waste" block); scales every coin's value
+    wasteBornAt: {}, // Waste item id -> level-clock time it was first seen (its age is elapsed minus this), see Entities.js's updateStaleWaste
+    staleWasteCount: 0, // Waste items loose in the tank that have aged past WASTE_STALE_MS; fish stop pooping at STALE_WASTE_CAP
     // Power is still NOT a battery by default — Eels (and the Power Plant
     // building) generate MW that has to be used the instant it's generated
     // or it's gone forever, recalculated fresh every real second rather than

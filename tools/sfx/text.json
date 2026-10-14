@@ -15,7 +15,7 @@
       "any": [ { "decl": "_MESSAGES?(_[A-Z0-9]+)*$" }, { "ctx": "^push\\w*Notification\\(\\)$" } ] },
     { "id": "fish", "label": "Shop: fish", "any": [ { "file": ["Config"], "decl": "^SPECIES$" } ] },
     { "id": "buildings", "label": "Shop: buildings", "any": [ { "file": ["Config"], "decl": "^(BUILDING_TYPES|PLATFORM_FILTER_ITEM_TYPES|\\w+_STAT_NOTES)$" } ] },
-    { "id": "recipes", "label": "Factory and Power Plant recipes", "any": [ { "file": ["Config"], "decl": "^(MANUFACTURER_RECIPES|POWER_PLANT_RECIPES)$" } ] },
+    { "id": "recipes", "label": "Factory recipes and Power Plant ingredients", "any": [ { "file": ["Config"], "decl": "^(MANUFACTURER_RECIPES|POWER_PLANT_RECIPES)$" } ] },
     { "id": "lab", "label": "Science Lab nodes", "any": [ { "file": ["Config"], "decl": "^SCIENCE_LAB_UPGRADES$" } ] },
     { "id": "aliens", "label": "Aliens", "any": [ { "file": ["Config"], "decl": "^ALIEN_ARCHETYPES$" } ] },
     { "id": "achievements", "label": "Achievements", "any": [ { "file": ["Config"], "decl": "^ACHIEVEMENTS$" } ] },

@@ -134,6 +134,9 @@ export function loadSaveGame(slot) {
     migrateTurretAmmoFields(parsed.level);
     migrateChestCoinFields(parsed.level);
     migrateChestPourMode(parsed.level);
+    migrateChestWasteAges(parsed.level);
+    if (parsed.level && !parsed.level.wasteBornAt) parsed.level.wasteBornAt = {}; // a save from before stale waste: every waste item starts fresh
+    migratePowerPlantFuel(parsed.level);
     migrateGridSize(parsed.level);
     // The Solar Refinery moved from the Mound's $500 crack to its $75 purchase — a save that already made the $75 purchase (but not the $500 one) never received it.
     if (parsed.level.moundTeased && Array.isArray(parsed.meta.buildingsUnlocked) && !parsed.meta.buildingsUnlocked.includes(TILE_REFINERY)) {
@@ -299,6 +302,33 @@ function migrateChestCoinFields(level) {
       }
       delete data.coinValueSum;
     }
+  }
+}
+
+// Chests now freeze the freshness of stored Waste (wasteAgeQueue, one age per
+// stored item). A chest saved before that holds Waste with no ages: treat it
+// as fresh, so nothing in it turns stale the moment the save loads.
+function migrateChestWasteAges(level) {
+  if (!level || !level.buildingData) return;
+  for (const key in level.buildingData) {
+    const data = level.buildingData[key];
+    if (!data || data.lockedItemType === undefined || data.wasteAgeQueue !== undefined) continue;
+    data.wasteAgeQueue = data.lockedItemType === 'waste' ? new Array(data.count || 0).fill(0) : [];
+  }
+}
+
+// A Power Plant used to have a chosen recipe (recipeId); it now burns any
+// unlocked ingredient (fuelId = the one currently burning). A plant saved
+// mid-burn keeps burning the same ingredient — the old recipe ids (food/
+// biomass/science) are the same strings as the new ingredient ids.
+function migratePowerPlantFuel(level) {
+  if (!level || !level.buildingData) return;
+  for (const key in level.buildingData) {
+    const data = level.buildingData[key];
+    if (!data || data.type !== 'power_plant' || data.fuelId !== undefined) continue;
+    data.fuelId = data.fueled && data.recipeId ? data.recipeId : null;
+    if (!data.fuelId) data.fueled = false;
+    delete data.recipeId;
   }
 }
 

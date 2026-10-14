@@ -101,7 +101,9 @@ import {
   WASTE_HUNGER_RELIEF,
   WASTE_POOP_INTERVAL_MS,
   CLEANLINESS_MAX,
-  CLEANLINESS_PER_WASTE_EVENT,
+  WASTE_STALE_MS,
+  STALE_WASTE_CAP,
+  CLEANLINESS_PER_STALE_WASTE,
   CLEANLINESS_WARNING_THRESHOLD,
   CLEANLINESS_WARNING_MESSAGE,
   TILE_REFINERY,
@@ -270,23 +272,64 @@ const pendingBossMinionSpawns = [];
 // entities.filter completes.
 const pendingTurretTutorialAlienSpawns = [];
 
-// state.level.cleanliness (0-100) — every Waste item that spawns costs
-// CLEANLINESS_PER_WASTE_EVENT, every one cleaned back up (a Scavenger fish
-// eating it here, or an Auto-Feeder absorbing it in Grid.js's
-// updateBuildings) restores the same amount. UI.js's updateHUD detects
-// which direction the value just moved (same pattern already used for the
-// money HUD) and flashes #hud-cleanliness accordingly — no explicit
-// "trigger the flash" call needed here, just changing the value.
-function adjustCleanliness(state, delta) {
+// state.level.cleanliness (0-100) — per direct request it is now computed
+// from the number of STALE Waste items loose in the tank (see Config.js's
+// "Cleanliness, now driven by STALE waste" block), not tallied from
+// spawn/cleanup events. A Waste item's age is never ticked, and is not stored
+// on the item either: a side table, state.level.wasteBornAt (item id -> the
+// level-clock time it was first seen), holds it. Both were measured: ticking an
+// age on hundreds of waste items cost ~4% of the whole simulation step, and even
+// just adding one extra property to the item objects cost ~3% (it changes their
+// shape for every hot loop that touches items). updateStaleWaste — run every
+// STALE_WASTE_RECOUNT_TICKS ticks, not every tick — stamps any item that has no
+// entry yet (so a fresh item is at most a few ticks "younger" than it should
+// be), counts the stale ones, and turns that into state.level.staleWasteCount
+// and cleanliness. UI.js's updateHUD detects which direction the value just moved
+// (same pattern already used for the money HUD) and flashes #hud-cleanliness
+// accordingly.
+const STALE_WASTE_RECOUNT_TICKS = 15; // ~4 times a second — nothing about stale waste needs 60Hz precision
+const STALE_WASTE_PRUNE_EVERY = 20; // every 20th recount (~5s) the table is rebuilt without the ids of waste that no longer exists
+let staleRecountIn = 0;
+let staleRecountsSincePrune = 0;
+// Age in ms of a Waste item (0 until updateStaleWaste has stamped it). Frozen by a Storage Chest, which stores the age
+// and writes a fresh entry derived from it on the way out.
+export function wasteAgeMs(state, item) {
+  const born = state.level.wasteBornAt[item.id];
+  return born === undefined ? 0 : state.level.elapsed - born;
+}
+function updateStaleWaste(state) {
+  if (--staleRecountIn > 0) return;
+  staleRecountIn = STALE_WASTE_RECOUNT_TICKS;
+  const elapsed = state.level.elapsed;
+  const items = state.level.items;
+  if (!state.level.wasteBornAt) state.level.wasteBornAt = {}; // a level that predates stale waste (the save migration covers real loads; this keeps hand-built fixtures working too)
+  let born = state.level.wasteBornAt;
+  let count = 0;
+  for (let i = 0; i < items.length; i++) {
+    const it = items[i];
+    if (it.type !== 'waste') continue;
+    const b = born[it.id];
+    if (b === undefined) { born[it.id] = elapsed; continue; }
+    if (elapsed - b >= WASTE_STALE_MS && it.heldByKey == null) count++; // a building mid-way through consuming it no longer counts
+  }
+  if (++staleRecountsSincePrune >= STALE_WASTE_PRUNE_EVERY) {
+    staleRecountsSincePrune = 0;
+    const next = {};
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (it.type === 'waste' && born[it.id] !== undefined) next[it.id] = born[it.id];
+    }
+    state.level.wasteBornAt = born = next;
+  }
+  state.level.staleWasteCount = count;
   const before = state.level.cleanliness;
-  state.level.cleanliness = Math.max(0, Math.min(CLEANLINESS_MAX, before + delta));
+  const after = Math.max(0, CLEANLINESS_MAX - count * CLEANLINESS_PER_STALE_WASTE);
+  state.level.cleanliness = after;
   // One-shot warning the first time cleanliness actually crosses below the
-  // threshold (not just "is currently below it") — a plain `< THRESHOLD`
-  // check without the `before >=` guard would also fire on every subsequent
-  // waste event while already dirty, not just the first crossing.
+  // threshold (not just "is currently below it").
   if (
     before >= CLEANLINESS_WARNING_THRESHOLD &&
-    state.level.cleanliness < CLEANLINESS_WARNING_THRESHOLD &&
+    after < CLEANLINESS_WARNING_THRESHOLD &&
     !state.level.tutorialFlags.cleanlinessWarningShown
   ) {
     state.level.tutorialFlags.cleanlinessWarningShown = true;
@@ -3557,7 +3600,6 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
           // and Suckerfish push cleanliness back up" pairing with the
           // per-Waste-spawn penalty above.
           fish.hunger -= WASTE_HUNGER_RELIEF;
-          adjustCleanliness(state, CLEANLINESS_PER_WASTE_EVENT);
           // Buffer Fish's own bespoke twist on ordinary Scavenger eating —
           // per direct spec ("still eats waste like a normal suckerfish, but
           // turns it into food instead") — a real Food item spawns at the
@@ -3937,13 +3979,17 @@ function updateFish(fish, state, dtMs, anyAlienAlive) {
   // defaults to 1 (Guppy's own baseline, and every species without an
   // explicit override) via the `|| 1` fallback.
   if (!isScavenger && !def.eternal) { // an Eternal Fish never eats, so it never poops either
-    fish.poopTimer += dtMs;
     const wastePoopInterval = fishPoopIntervalMs(state, def);
-    if (fish.poopTimer >= wastePoopInterval) {
-      fish.poopTimer = 0;
-      if (canSpawnMoreWaste(state)) { // see Config.js's WASTE_MAX_ON_SCREEN
-        state.level.items.push(createWaste(fish.x, fish.y));
-        adjustCleanliness(state, -CLEANLINESS_PER_WASTE_EVENT);
+    if (state.level.staleWasteCount >= STALE_WASTE_CAP) {
+      // Per direct request, fish stop producing waste while STALE_WASTE_CAP stale items are on screen. The timer
+      // pauses (and a feed bonus can't bank more than one full interval), so clearing the pile doesn't make every
+      // fish dump its stored poop at once.
+      if (fish.poopTimer > wastePoopInterval) fish.poopTimer = wastePoopInterval;
+    } else {
+      fish.poopTimer += dtMs;
+      if (fish.poopTimer >= wastePoopInterval) {
+        fish.poopTimer = 0;
+        if (canSpawnMoreWaste(state)) state.level.items.push(createWaste(fish.x, fish.y)); // see Config.js's WASTE_MAX_ON_SCREEN
       }
     }
   }
@@ -4238,7 +4284,7 @@ export function materializeChestSpawnPoints(state, points) {
     let item = null;
     if (point.itemType === 'coin') item = createCoin(point.x, point.y, point.coinValue);
     else if (point.itemType === 'food') item = createFood(point.x, point.y);
-    else if (point.itemType === 'waste') { if (canSpawnMoreWaste(state)) item = createWaste(point.x, point.y); }
+    else if (point.itemType === 'waste') { if (canSpawnMoreWaste(state)) { item = createWaste(point.x, point.y); state.level.wasteBornAt[item.id] = state.level.elapsed - (point.wasteAge || 0); } } // a chest froze its freshness — it leaves exactly as old as it went in
     else if (point.itemType === 'science') { if (countScienceCapacityUsed(state) < effectiveScienceCapacity(state)) item = createScience(point.x, point.y); }
     else if (point.itemType === 'science_green') { if (countScienceCapacityUsed(state) < effectiveScienceCapacity(state)) item = createScienceGreen(point.x, point.y); }
     else if (point.itemType === 'biomass') { if (canSpawnMoreBiomass(state)) item = createBiomass(point.x, point.y); }
@@ -4296,6 +4342,7 @@ export function updateEntities(state, dtMs) {
   pendingFoodToWasteSpawns.length = 0; // updateFood (below) fills this — see its own comment for why it can't push into state.level.items directly
   const itemCamera = state.camera;
   stepRipeningCoins(state, dtMs); // Blimpfish coins gaining value — see createAppreciatingCoin
+  updateStaleWaste(state); // every few ticks, not every one — see its own comment
   state.level.items = state.level.items.filter((item) => {
     // Load mode: a far-from-view item (not one a building is mid-processing)
     // skips every other tick and takes a doubled step on the ticks it runs —

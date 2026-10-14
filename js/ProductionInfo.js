@@ -139,7 +139,7 @@ export function computeProductionInfo(state, rect) {
         powerDraw += avgMw * (recipe.powerCostMultiplier || 1) * uptime;
       }
     } else if (type === TILE_POWER_PLANT) {
-      const recipe = POWER_PLANT_RECIPES[data.recipeId];
+      const recipe = POWER_PLANT_RECIPES[data.fuelId || data.lastFuelId]; // lastFuelId: what it was burning before it finished (Grid.js's isBuildingActiveForUptime)
       if (recipe) {
         add(consumed, recipe.inputs[0], (60000 / recipe.durationMs) * uptime);
         powerProduced += recipe.powerOutputMw * uptime;
