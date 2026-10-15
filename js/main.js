@@ -792,24 +792,32 @@ function drawWasteFreshFx(ctx) {
   ctx.fill();
 }
 
-// Stale Waste's stink wisps (per direct request, stale waste must be obvious): two tiny specks rise and shrink off each
-// stale item, a pure function of the level clock, all stale items in ONE path / ONE fill (wasteStinkBuf: x, y, radius, id).
+// Stale Waste's stink wisps (per direct request, stale waste must be obvious): two wavy stench squiggles rise off each
+// stale item, a pure function of the level clock, all stale items in ONE path / ONE stroke (wasteStinkBuf: x, y, radius, id).
 const wasteStinkBuf = [];
 function drawWasteStinkFx(ctx, elapsedMs) {
   if (wasteStinkBuf.length === 0) return;
-  ctx.fillStyle = WASTE_STINK_COLOR;
+  // Per direct request these must not read like fresh waste's round motes drifting out: they are wavy 'stench' squiggle
+  // lines that rise straight up from the top of the item, swaying side to side, in a sickly green.
+  ctx.strokeStyle = WASTE_STINK_COLOR;
+  ctx.lineWidth = 1.8;
+  ctx.lineCap = 'round';
   ctx.beginPath();
   const cycle = elapsedMs / WASTE_STINK_CYCLE_MS;
   for (let n = 0; n < wasteStinkBuf.length; n += 4) {
     const x = wasteStinkBuf[n], y = wasteStinkBuf[n + 1], r = wasteStinkBuf[n + 2] * WASTE_VISUAL_SCALE, id = wasteStinkBuf[n + 3];
-    for (let i = 0; i < 2; i++) {
-      const phase = cycle + i * 0.5 + id * 0.37;
+    for (let i = -1; i <= 1; i += 2) {
+      const phase = cycle + (i < 0 ? 0 : 0.5) + id * 0.37;
       const f = phase - Math.floor(phase);
-      const size = 2.2 * (1 - f) + 0.5;
-      ctx.rect(x + Math.sin(phase * 9 + i * 3) * r * 0.5 - size, y - r * 0.6 - f * WASTE_STINK_RISE_PX - size, size * 2, size * 2);
+      const baseY = y - r * 0.8 - f * WASTE_STINK_RISE_PX * 0.6;
+      const bx = x + i * r * 0.45;
+      const sway = elapsedMs / 260 + id;
+      ctx.moveTo(bx, baseY);
+      ctx.quadraticCurveTo(bx + 3.2 * Math.sin(sway), baseY - 4.5, bx, baseY - 8);
+      ctx.quadraticCurveTo(bx - 3.2 * Math.sin(sway), baseY - 11.5, bx, baseY - 15 * (1 - 0.5 * f));
     }
   }
-  ctx.fill();
+  ctx.stroke();
 }
 
 // A fresh Waste item's color drains away (the Blimpfish coin's fill in reverse, per direct request): the stale look is
