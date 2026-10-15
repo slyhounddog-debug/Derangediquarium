@@ -797,24 +797,25 @@ function drawWasteFreshFx(ctx) {
 const wasteStinkBuf = [];
 function drawWasteStinkFx(ctx, elapsedMs) {
   if (wasteStinkBuf.length === 0) return;
-  // Per direct request these must not read like fresh waste's round motes drifting out: they are wavy 'stench' squiggle
-  // lines that rise straight up from the top of the item, swaying side to side, in a sickly green.
+  // Per direct request these must not read like fresh waste's round motes, must stay short, and must loop seamlessly:
+  // two short wavy stench squiggles that sit above the item and sway/bob on pure sines (no rise-and-restart cycle, so
+  // nothing ever jumps). WASTE_STINK_CYCLE_MS is the sway period, WASTE_STINK_RISE_PX the squiggle height.
   ctx.strokeStyle = WASTE_STINK_COLOR;
-  ctx.lineWidth = 1.8;
+  ctx.lineWidth = 1.6;
   ctx.lineCap = 'round';
   ctx.beginPath();
-  const cycle = elapsedMs / WASTE_STINK_CYCLE_MS;
+  const w = (elapsedMs / WASTE_STINK_CYCLE_MS) * Math.PI * 2;
+  const h = WASTE_STINK_RISE_PX;
   for (let n = 0; n < wasteStinkBuf.length; n += 4) {
     const x = wasteStinkBuf[n], y = wasteStinkBuf[n + 1], r = wasteStinkBuf[n + 2] * WASTE_VISUAL_SCALE, id = wasteStinkBuf[n + 3];
     for (let i = -1; i <= 1; i += 2) {
-      const phase = cycle + (i < 0 ? 0 : 0.5) + id * 0.37;
-      const f = phase - Math.floor(phase);
-      const baseY = y - r * 0.8 - f * WASTE_STINK_RISE_PX * 0.6;
-      const bx = x + i * r * 0.45;
-      const sway = elapsedMs / 260 + id;
+      const p = w + id * 1.3 + (i < 0 ? 0 : Math.PI);
+      const bx = x + i * r * 0.4;
+      const baseY = y - r * 0.85 - h * 0.1 * Math.sin(p * 1.0);
+      const sw = 2.2 * Math.sin(p);
       ctx.moveTo(bx, baseY);
-      ctx.quadraticCurveTo(bx + 3.2 * Math.sin(sway), baseY - 4.5, bx, baseY - 8);
-      ctx.quadraticCurveTo(bx - 3.2 * Math.sin(sway), baseY - 11.5, bx, baseY - 15 * (1 - 0.5 * f));
+      ctx.quadraticCurveTo(bx + sw, baseY - h * 0.3, bx, baseY - h * 0.55);
+      ctx.quadraticCurveTo(bx - sw, baseY - h * 0.8, bx, baseY - h);
     }
   }
   ctx.stroke();
