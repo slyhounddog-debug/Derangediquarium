@@ -3813,10 +3813,10 @@ export const WASTE_FX_PARTICLE_HALO_PX = 16; // how far out a mote travels, past
 export const WASTE_FX_PARTICLE_COLOR = '#d8bd86';
 export const WASTE_STALE_COLOR = '#4f6428'; // the murky sickly green a stale Waste item ends up (more obviously "off" than the old gray-green, per direct request)
 export const WASTE_STALE_STEPS = 1; // the sprite step index of the baked stale look; fresh waste is step 0 and drains into it live (main.js drawDrainingWaste), so there are no in-between shades any more
-export const WASTE_AURA_COLOR_INNER = 'rgba(120, 225, 40, 0.9)'; // the sickly green glow under a stale Waste item (centre)
-export const WASTE_AURA_COLOR_OUTER = 'rgba(120, 225, 40, 0)'; // ...fading to nothing at its edge
+export const WASTE_AURA_COLOR_INNER = 'rgba(130, 205, 55, 0.5)'; // the sickly green glow under a stale Waste item (centre)
+export const WASTE_AURA_COLOR_OUTER = 'rgba(130, 205, 55, 0)'; // ...fading to nothing at its edge
 export const WASTE_AURA_PULSE_MS = 2400; // one slow pulse of the aura (a pure sine, so the loop is seamless)
-export const WASTE_AURA_RADIUS_MULT = 2.4; // aura radius as a multiple of the waste's own radius
+export const WASTE_AURA_RADIUS_MULT = 1.6; // aura radius as a multiple of the waste's own radius
 
 // A fish tints gray under two conditions — per direct request ("make fish
 // visually turn a gray color when they aren't producing coins, and make

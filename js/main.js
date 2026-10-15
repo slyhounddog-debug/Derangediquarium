@@ -813,7 +813,7 @@ function getWasteAuraSprite() {
 }
 function drawWasteAura(ctx, x, y, r, id, elapsedMs) {
   const d = r * WASTE_AURA_RADIUS_MULT * 2;
-  ctx.globalAlpha = 0.65 + 0.35 * Math.sin((elapsedMs / WASTE_AURA_PULSE_MS) * Math.PI * 2 + id * 1.7);
+  ctx.globalAlpha = 0.8 + 0.2 * Math.sin((elapsedMs / WASTE_AURA_PULSE_MS) * Math.PI * 2 + id * 1.7);
   ctx.drawImage(getWasteAuraSprite(), x - d / 2, y - d / 2, d, d);
   ctx.globalAlpha = 1;
 }
