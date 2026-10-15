@@ -70,8 +70,8 @@
         { "name": "WASTE_FX_PARTICLE_COUNT", "label": "Fresh waste: motes", "desc": "How many tiny motes drift OUT of each still-fresh Waste item (the ripening coin effect in reverse). They shrink and dry up as it nears stale.", "min": 0, "max": 8, "step": 1 },
         { "name": "WASTE_FX_PARTICLE_CYCLE_MS", "label": "Fresh waste: mote travel time", "desc": "How long one mote takes to drift from a fresh Waste item out to the edge of its halo.", "min": 300, "max": 4000, "step": 50, "unit": "ms" },
         { "name": "WASTE_FX_PARTICLE_HALO_PX", "label": "Fresh waste: halo size", "desc": "How far past a fresh Waste item's edge its motes travel.", "min": 4, "max": 60, "step": 1, "unit": "px" },
-        { "name": "WASTE_STINK_CYCLE_MS", "label": "Stale waste: squiggle sway period", "desc": "How long one sway of the stench squiggles above a stale Waste item takes.", "min": 500, "max": 6000, "step": 100, "unit": "ms" },
-        { "name": "WASTE_STINK_RISE_PX", "label": "Stale waste: squiggle height", "desc": "How tall the stench squiggles above a stale Waste item are.", "min": 4, "max": 60, "step": 1, "unit": "px" }
+        { "name": "WASTE_AURA_PULSE_MS", "label": "Stale waste: aura pulse period", "desc": "How long one slow pulse of the green aura under a stale Waste item takes.", "min": 500, "max": 8000, "step": 100, "unit": "ms" },
+        { "name": "WASTE_AURA_RADIUS_MULT", "label": "Stale waste: aura size", "desc": "Radius of the green aura under a stale Waste item, as a multiple of the waste's own radius.", "min": 1, "max": 5, "step": 0.1 }
       ]
     },
     {

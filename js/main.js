@@ -43,9 +43,10 @@ import {
   WASTE_FX_PARTICLE_CYCLE_MS,
   WASTE_FX_PARTICLE_HALO_PX,
   WASTE_FX_PARTICLE_COLOR,
-  WASTE_STINK_COLOR,
-  WASTE_STINK_CYCLE_MS,
-  WASTE_STINK_RISE_PX,
+  WASTE_AURA_COLOR_INNER,
+  WASTE_AURA_COLOR_OUTER,
+  WASTE_AURA_PULSE_MS,
+  WASTE_AURA_RADIUS_MULT,
   TILE_EMPTY,
   TILE_SIZE,
   TILE_FAN_T2,
@@ -792,33 +793,29 @@ function drawWasteFreshFx(ctx) {
   ctx.fill();
 }
 
-// Stale Waste's stink wisps (per direct request, stale waste must be obvious): two wavy stench squiggles rise off each
-// stale item, a pure function of the level clock, all stale items in ONE path / ONE stroke (wasteStinkBuf: x, y, radius, id).
-const wasteStinkBuf = [];
-function drawWasteStinkFx(ctx, elapsedMs) {
-  if (wasteStinkBuf.length === 0) return;
-  // Per direct request these must not read like fresh waste's round motes, must stay short, and must loop seamlessly:
-  // two short wavy stench squiggles that sit above the item and sway/bob on pure sines (no rise-and-restart cycle, so
-  // nothing ever jumps). WASTE_STINK_CYCLE_MS is the sway period, WASTE_STINK_RISE_PX the squiggle height.
-  ctx.strokeStyle = WASTE_STINK_COLOR;
-  ctx.lineWidth = 1.6;
-  ctx.lineCap = 'round';
-  ctx.beginPath();
-  const w = (elapsedMs / WASTE_STINK_CYCLE_MS) * Math.PI * 2;
-  const h = WASTE_STINK_RISE_PX;
-  for (let n = 0; n < wasteStinkBuf.length; n += 4) {
-    const x = wasteStinkBuf[n], y = wasteStinkBuf[n + 1], r = wasteStinkBuf[n + 2] * WASTE_VISUAL_SCALE, id = wasteStinkBuf[n + 3];
-    for (let i = -1; i <= 1; i += 2) {
-      const p = w + id * 1.3 + (i < 0 ? 0 : Math.PI);
-      const bx = x + i * r * 0.4;
-      const baseY = y - r * 0.85 - h * 0.1 * Math.sin(p * 1.0);
-      const sw = 2.2 * Math.sin(p);
-      ctx.moveTo(bx, baseY);
-      ctx.quadraticCurveTo(bx + sw, baseY - h * 0.3, bx, baseY - h * 0.55);
-      ctx.quadraticCurveTo(bx - sw, baseY - h * 0.8, bx, baseY - h);
-    }
-  }
-  ctx.stroke();
+// Stale Waste's sickly green aura (per direct request, replacing the stink squiggles, which looked wrong once an item
+// was thrown or rolling): ONE soft radial-gradient sprite baked once, drawn under each stale item at its center so it
+// always travels with it, with a slow alpha pulse (a pure function of the level clock, phase-offset per item by id).
+let wasteAuraSprite = null;
+function getWasteAuraSprite() {
+  if (wasteAuraSprite) return wasteAuraSprite;
+  const size = 64;
+  const c = document.createElement('canvas');
+  c.width = c.height = size;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(size / 2, size / 2, 0, size / 2, size / 2, size / 2);
+  grad.addColorStop(0, WASTE_AURA_COLOR_INNER);
+  grad.addColorStop(1, WASTE_AURA_COLOR_OUTER);
+  g.fillStyle = grad;
+  g.fillRect(0, 0, size, size);
+  wasteAuraSprite = c;
+  return c;
+}
+function drawWasteAura(ctx, x, y, r, id, elapsedMs) {
+  const d = r * WASTE_AURA_RADIUS_MULT * 2;
+  ctx.globalAlpha = 0.65 + 0.35 * Math.sin((elapsedMs / WASTE_AURA_PULSE_MS) * Math.PI * 2 + id * 1.7);
+  ctx.drawImage(getWasteAuraSprite(), x - d / 2, y - d / 2, d, d);
+  ctx.globalAlpha = 1;
 }
 
 // A fresh Waste item's color drains away (the Blimpfish coin's fill in reverse, per direct request): the stale look is
@@ -6160,7 +6157,6 @@ function render() {
 
   perfMark('r: seabed + buildings + ghosts', ctx);
   wasteFxBuf.length = 0;
-  wasteStinkBuf.length = 0;
   for (const item of state.level.items) {
     const pos = worldToScreen(item.x, item.y, state.camera);
     if (pos.x < -20 || pos.x > canvas.width + 20 || pos.y < -20 || pos.y > canvas.height + 20) continue; // cull offscreen
@@ -6221,7 +6217,7 @@ function render() {
       wasteFxBuf.push(pos.x, py, item.radius, item.id, wasteFrac * WASTE_STALE_MS); // still fresh: its motes are batched below
       continue;
     }
-    if (item.type === 'waste') wasteStinkBuf.push(pos.x, py, item.radius, item.id); // stale: its stink wisps are batched below
+    if (item.type === 'waste') drawWasteAura(ctx, pos.x, py, item.radius * WASTE_VISUAL_SCALE, item.id, state.level.elapsed); // stale: green aura under it
     if (rollAngle !== 0) {
       const cos = Math.cos(rollAngle);
       const sin = Math.sin(rollAngle);
@@ -6252,7 +6248,6 @@ function render() {
   }
 
   drawWasteFreshFx(ctx);
-  drawWasteStinkFx(ctx, state.level.elapsed);
 
   // Ripening Blimpfish coins' particles and pulses, drawn from the short
   // registry Entities.js keeps (not by checking every item above), so a tank
